@@ -1,0 +1,287 @@
+"""The plugin's settings, and the provisioning file that fills them in.
+
+Settings live in `config.plugins.mqttbridge.*`, which enigma2 persists in its own
+`/etc/enigma2/settings`. There is no second configuration file to keep in step
+and settings survive a plugin upgrade, because the package does not own them.
+
+Every key the contract names exists here from the first release, including the
+ones the current milestone does not read yet: the setup screen and the
+provisioning file are how a box is configured, and a key that appears later
+would be a key an installer could not have written.
+"""
+
+import json
+import os
+
+from Components.config import (
+    ConfigInteger,
+    ConfigPassword,
+    ConfigSelection,
+    ConfigSubsection,
+    ConfigText,
+    ConfigYesNo,
+    config,
+    configfile,
+)
+
+from .i18n import _
+from .log import get_logger
+
+LOG = get_logger("config")
+
+PROVISIONING_PATH = "/etc/enigma2/mqttbridge.json"
+
+HA_MODES = ("discovery", "integration", "off")
+LOG_LEVELS = ("error", "warning", "info", "debug")
+SCREENSHOT_MODES = ("off", "on_zap", "interval")
+
+DEFAULT_BASE_TOPIC = "enigma2"
+DEFAULT_DISCOVERY_PREFIX = "homeassistant"
+
+# The order is the order of the setup screen, so a reader of either sees the
+# same shape: identity, broker, topics, behaviour, diagnostics.
+SETTING_NAMES = (
+    "enabled",
+    "host",
+    "port",
+    "tls",
+    "ca_file",
+    "username",
+    "password",
+    "node_id",
+    "friendly_name",
+    "base_topic",
+    "ha_discovery_prefix",
+    "ha_mode",
+    "publish_keys",
+    "screenshot",
+    "screenshot_interval",
+    "bouquets_for_select",
+    "deep_standby_allowed",
+    "log_level",
+    "epg_grid_events",
+)
+
+# How a provisioning file's JSON is coerced onto each setting. Keyed explicitly
+# rather than derived from the element's class, because the enigma2 config
+# classes inherit from each other differently on different images.
+SETTING_KINDS = {
+    "enabled": "bool",
+    "host": "text",
+    "port": "int",
+    "tls": "bool",
+    "ca_file": "text",
+    "username": "text",
+    "password": "text",
+    "node_id": "text",
+    "friendly_name": "text",
+    "base_topic": "text",
+    "ha_discovery_prefix": "text",
+    "ha_mode": "choice",
+    "publish_keys": "bool",
+    "screenshot": "choice",
+    "screenshot_interval": "int",
+    "bouquets_for_select": "text",
+    "deep_standby_allowed": "bool",
+    "log_level": "choice",
+    "epg_grid_events": "int",
+}
+
+CHOICES = {
+    "ha_mode": HA_MODES,
+    "screenshot": SCREENSHOT_MODES,
+    "log_level": LOG_LEVELS,
+}
+
+SECRET_NAMES = ("password",)
+
+_TRUE = ("1", "on", "true", "yes")
+_FALSE = ("0", "off", "false", "no")
+
+
+def _build():
+    """Create the subsection once. Importing this module twice must not duplicate it."""
+    plugins = getattr(config, "plugins", None)
+    if plugins is None:
+        config.plugins = ConfigSubsection()
+        plugins = config.plugins
+
+    existing = getattr(plugins, "mqttbridge", None)
+    if existing is not None:
+        return existing
+
+    section = ConfigSubsection()
+    section.enabled = ConfigYesNo(default=True)
+    section.host = ConfigText(default="", fixed_size=False)
+    section.port = ConfigInteger(default=1883, limits=(1, 65535))
+    section.tls = ConfigYesNo(default=False)
+    section.ca_file = ConfigText(default="", fixed_size=False)
+    section.username = ConfigText(default="", fixed_size=False)
+    section.password = ConfigPassword(default="", fixed_size=False)
+    section.node_id = ConfigText(default="", fixed_size=False)
+    section.friendly_name = ConfigText(default="", fixed_size=False)
+    section.base_topic = ConfigText(default=DEFAULT_BASE_TOPIC, fixed_size=False)
+    section.ha_discovery_prefix = ConfigText(default=DEFAULT_DISCOVERY_PREFIX, fixed_size=False)
+    section.ha_mode = ConfigSelection(
+        default="discovery", choices=[(mode, mode) for mode in HA_MODES]
+    )
+    section.publish_keys = ConfigYesNo(default=True)
+    section.screenshot = ConfigSelection(
+        default="on_zap",
+        choices=[("off", _("off")), ("on_zap", _("on zap")), ("interval", _("at an interval"))],
+    )
+    section.screenshot_interval = ConfigInteger(default=60, limits=(5, 3600))
+    section.bouquets_for_select = ConfigText(default="", fixed_size=False)
+    section.deep_standby_allowed = ConfigYesNo(default=False)
+    section.log_level = ConfigSelection(
+        default="info", choices=[(level, level) for level in LOG_LEVELS]
+    )
+    section.epg_grid_events = ConfigInteger(default=4, limits=(0, 20))
+
+    plugins.mqttbridge = section
+    return section
+
+
+settings = _build()
+
+
+def element(name, section=None):
+    return getattr(section if section is not None else settings, name, None)
+
+
+def value(name, section=None):
+    found = element(name, section)
+    return None if found is None else found.value
+
+
+def save(section=None):
+    """Persist every setting through enigma2's own settings file."""
+    target = section if section is not None else settings
+    for name in SETTING_NAMES:
+        found = getattr(target, name, None)
+        if found is not None:
+            found.save()
+    try:
+        configfile.save()
+    except Exception:
+        LOG.exception("could not write enigma2's settings file")
+        return False
+    return True
+
+
+# ------------------------------------------------------------------ coercion --
+
+
+def _coerce_bool(raw):
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, int):
+        return bool(raw)
+    if isinstance(raw, str):
+        text = raw.strip().lower()
+        if text in _TRUE:
+            return True
+        if text in _FALSE:
+            return False
+    raise ValueError("expected true or false")
+
+
+def _coerce_int(raw):
+    if isinstance(raw, bool):
+        raise ValueError("expected a number")
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str) and raw.strip().lstrip("-").isdigit():
+        return int(raw.strip())
+    raise ValueError("expected a number")
+
+
+def _coerce_text(raw):
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return str(raw)
+    raise ValueError("expected a string")
+
+
+def _coerce_choice(name, raw):
+    if not isinstance(raw, str):
+        raise ValueError("expected a string")
+    text = raw.strip().lower().replace(" ", "_").replace("-", "_")
+    allowed = CHOICES.get(name, ())
+    if text not in allowed:
+        raise ValueError("expected one of " + ", ".join(allowed))
+    return text
+
+
+def coerce(name, raw):
+    kind = SETTING_KINDS.get(name)
+    if kind == "bool":
+        return _coerce_bool(raw)
+    if kind == "int":
+        return _coerce_int(raw)
+    if kind == "choice":
+        return _coerce_choice(name, raw)
+    return _coerce_text(raw)
+
+
+# -------------------------------------------------------------- provisioning --
+
+
+def import_provisioning(path=None, section=None):
+    """Apply `/etc/enigma2/mqttbridge.json`, then delete it.
+
+    The file carries a broker password in clear, so it does not survive its own
+    import. A file that cannot be parsed is left where it is — deleting it would
+    destroy the only copy of what somebody meant to configure — and logged once.
+
+    Returns the list of setting names that were imported.
+    """
+    target_path = path or PROVISIONING_PATH
+    target = section if section is not None else settings
+
+    if not os.path.exists(target_path):
+        return []
+
+    try:
+        with open(target_path, encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except (OSError, ValueError) as error:
+        LOG.error("%s could not be read (%s); leaving it in place", target_path, error)
+        return []
+
+    if not isinstance(raw, dict):
+        LOG.error("%s is not a JSON object; leaving it in place", target_path)
+        return []
+
+    imported = []
+    for key in sorted(raw):
+        if key not in SETTING_NAMES:
+            LOG.warning("%s: ignoring unknown key %s", target_path, key)
+            continue
+        found = getattr(target, key, None)
+        if found is None:
+            LOG.warning("%s: no such setting %s", target_path, key)
+            continue
+        try:
+            found.value = coerce(key, raw[key])
+        except ValueError as error:
+            LOG.warning("%s: skipping %s (%s)", target_path, key, error)
+            continue
+        imported.append(key)
+
+    if imported:
+        save(target)
+        # Names only. One of these keys is the broker password.
+        LOG.info("imported %d setting(s) from %s: %s",
+                 len(imported), target_path, ", ".join(imported))
+    else:
+        LOG.info("%s held nothing to import", target_path)
+
+    try:
+        os.remove(target_path)
+        LOG.info("removed %s (it held a password in clear)", target_path)
+    except OSError as error:
+        LOG.error("could not remove %s (%s) — it still holds a password", target_path, error)
+
+    return imported

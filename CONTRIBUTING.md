@@ -25,15 +25,28 @@ tools/build-ipk.sh --allow-unreleased
 real hardware:
 
 ```sh
-tools/deploy-to-box.sh <box-ip>          # scp -O, opkg install, guarded GUI restart
+BOX_PASSWORD=... tools/deploy-to-box.sh <box-ip> --restart
 ssh root@<box-ip> 'tail -f /home/root/mqttbridge.log'
 mosquitto_sub -h <broker> -v -t 'enigma2/#'
 ```
 
+The password comes from `BOX_PASSWORD` or from `--password-file <path>`; it is never echoed and
+never put on a command line. `--no-build` reuses the IPK already in `dist/`, and
+`--provision <file>` installs a JSON configuration as `/etc/enigma2/mqttbridge.json` so a fresh
+box comes up already talking to your broker.
+
 `deploy-to-box.sh` refuses to restart the GUI while a recording runs or a timer is due, for the
-same reason the plugin refuses `cmd/restart_gui`. Two terminals — the log and the subscription —
-are the whole debugging apparatus; a change that cannot be demonstrated as a topic that moves is
-not demonstrated.
+same reason the plugin refuses `cmd/restart_gui` — and it refuses just as firmly when it cannot
+read the receiver's timer list at all, because not knowing is not the same as knowing it is
+safe. Two terminals — the log and the subscription — are the whole debugging apparatus; a change
+that cannot be demonstrated as a topic that moves is not demonstrated.
+
+### Translations
+
+`src/MQTTBridge/locale/MQTTBridge.pot` is the template and `pl` and `de` are the catalogues;
+`tools/build-ipk.sh` compiles the `.mo` files into the package, so only the `.po` files are
+committed. A new household-visible string goes through `_()`, into the template, and into both
+catalogues — there is a test that fails if it does not.
 
 Verify by effect, never by a return code. `opkg install` reporting success says the files landed,
 not that the plugin loaded; a publish that an ACL denies looks identical to one that succeeded.
