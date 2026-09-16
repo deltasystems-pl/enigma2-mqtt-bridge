@@ -1,0 +1,141 @@
+# Translation template for the Enigma2 MQTT Bridge plugin.
+# Copyright (C) the Enigma2 MQTT Bridge contributors.
+# This file is distributed under the same licence as the plugin (GPL-2.0-or-later).
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: enigma2-mqtt-bridge\n"
+"Report-Msgid-Bugs-To: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/issues\n"
+"POT-Creation-Date: 2026-09-16 00:00+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: src/MQTTBridge/config.py:131
+msgid "off"
+msgstr ""
+
+#: src/MQTTBridge/config.py:131
+msgid "on zap"
+msgstr ""
+
+#: src/MQTTBridge/config.py:131
+msgid "at an interval"
+msgstr ""
+
+#: src/MQTTBridge/plugin.py:86 src/MQTTBridge/plugin.py:93 src/MQTTBridge/plugin.py:100
+msgid "Publish receiver state to MQTT and take commands back."
+msgstr ""
+
+#: src/MQTTBridge/setup.py:28
+msgid "Enabled"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:29
+msgid "Broker address"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:30
+msgid "Broker port"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:31
+msgid "Use TLS"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:32
+msgid "CA certificate file"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:33
+msgid "Broker username"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:34
+msgid "Broker password"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:35
+msgid "Node id"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:36
+msgid "Device name"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:37
+msgid "Base topic"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:38
+msgid "Home Assistant discovery prefix"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:39
+msgid "Home Assistant mode"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:40
+msgid "Publish remote key presses"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:41
+msgid "Screenshots"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:42
+msgid "Screenshot interval (seconds)"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:43
+msgid "Bouquets for the channel list"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:44
+msgid "Allow deep standby and reboot"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:45
+msgid "Log level"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:46
+msgid "EPG grid events per channel"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:64
+msgid "Disabled"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:66 src/MQTTBridge/setup.py:72
+msgid "Disconnected"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:68
+msgid "Idle"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:70
+msgid "Connected"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:73
+#, python-format
+msgid "Node: %s"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:97
+msgid "Cancel"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:98
+msgid "Save"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:111
+msgid "MQTT Bridge"
+msgstr ""

@@ -1,0 +1,141 @@
+# Polish translation for the Enigma2 MQTT Bridge plugin.
+# Reviewed by a native speaker.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: enigma2-mqtt-bridge\n"
+"Report-Msgid-Bugs-To: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/issues\n"
+"POT-Creation-Date: 2026-09-16 00:00+0000\n"
+"PO-Revision-Date: 2026-09-16 00:00+0000\n"
+"Last-Translator: deltasystems-pl\n"
+"Language-Team: Polish <none>\n"
+"Language: pl\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+#: src/MQTTBridge/config.py:131
+msgid "off"
+msgstr "wyłączone"
+
+#: src/MQTTBridge/config.py:131
+msgid "on zap"
+msgstr "przy zmianie kanału"
+
+#: src/MQTTBridge/config.py:131
+msgid "at an interval"
+msgstr "co określony czas"
+
+#: src/MQTTBridge/plugin.py:86 src/MQTTBridge/plugin.py:93 src/MQTTBridge/plugin.py:100
+msgid "Publish receiver state to MQTT and take commands back."
+msgstr "Publikuje stan dekodera przez MQTT i przyjmuje polecenia."
+
+#: src/MQTTBridge/setup.py:28
+msgid "Enabled"
+msgstr "Włączona"
+
+#: src/MQTTBridge/setup.py:29
+msgid "Broker address"
+msgstr "Adres brokera"
+
+#: src/MQTTBridge/setup.py:30
+msgid "Broker port"
+msgstr "Port brokera"
+
+#: src/MQTTBridge/setup.py:31
+msgid "Use TLS"
+msgstr "Szyfrowanie TLS"
+
+#: src/MQTTBridge/setup.py:32
+msgid "CA certificate file"
+msgstr "Plik certyfikatu CA"
+
+#: src/MQTTBridge/setup.py:33
+msgid "Broker username"
+msgstr "Użytkownik brokera"
+
+#: src/MQTTBridge/setup.py:34
+msgid "Broker password"
+msgstr "Hasło brokera"
+
+#: src/MQTTBridge/setup.py:35
+msgid "Node id"
+msgstr "Identyfikator urządzenia"
+
+#: src/MQTTBridge/setup.py:36
+msgid "Device name"
+msgstr "Nazwa urządzenia"
+
+#: src/MQTTBridge/setup.py:37
+msgid "Base topic"
+msgstr "Temat bazowy"
+
+#: src/MQTTBridge/setup.py:38
+msgid "Home Assistant discovery prefix"
+msgstr "Prefiks wykrywania Home Assistant"
+
+#: src/MQTTBridge/setup.py:39
+msgid "Home Assistant mode"
+msgstr "Tryb Home Assistant"
+
+#: src/MQTTBridge/setup.py:40
+msgid "Publish remote key presses"
+msgstr "Publikuj naciśnięcia klawiszy pilota"
+
+#: src/MQTTBridge/setup.py:41
+msgid "Screenshots"
+msgstr "Zrzuty ekranu"
+
+#: src/MQTTBridge/setup.py:42
+msgid "Screenshot interval (seconds)"
+msgstr "Odstęp między zrzutami (sekundy)"
+
+#: src/MQTTBridge/setup.py:43
+msgid "Bouquets for the channel list"
+msgstr "Bukiety na liście kanałów"
+
+#: src/MQTTBridge/setup.py:44
+msgid "Allow deep standby and reboot"
+msgstr "Zezwalaj na głębokie uśpienie i restart"
+
+#: src/MQTTBridge/setup.py:45
+msgid "Log level"
+msgstr "Poziom logowania"
+
+#: src/MQTTBridge/setup.py:46
+msgid "EPG grid events per channel"
+msgstr "Liczba audycji na kanał w siatce EPG"
+
+#: src/MQTTBridge/setup.py:64
+msgid "Disabled"
+msgstr "Wyłączona"
+
+#: src/MQTTBridge/setup.py:66 src/MQTTBridge/setup.py:72
+msgid "Disconnected"
+msgstr "Rozłączono"
+
+#: src/MQTTBridge/setup.py:68
+msgid "Idle"
+msgstr "Bezczynna"
+
+#: src/MQTTBridge/setup.py:70
+msgid "Connected"
+msgstr "Połączono"
+
+#: src/MQTTBridge/setup.py:73
+#, python-format
+msgid "Node: %s"
+msgstr "Urządzenie: %s"
+
+#: src/MQTTBridge/setup.py:97
+msgid "Cancel"
+msgstr "Anuluj"
+
+#: src/MQTTBridge/setup.py:98
+msgid "Save"
+msgstr "Zapisz"
+
+#: src/MQTTBridge/setup.py:111
+msgid "MQTT Bridge"
+msgstr "MQTT Bridge"
