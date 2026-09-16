@@ -14,6 +14,7 @@ from Components.ActionMap import ActionMap
 from Components.config import config, configfile, getConfigListEntry
 from Components.ConfigList import ConfigListScreen
 from Components.Label import Label
+from Screens.MessageBox import MessageBox
 from Screens.Screen import Screen
 
 from .i18n import _
@@ -91,7 +92,16 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
         self._bridge = bridge
 
         self.entries = build_entries(self.settings)
-        ConfigListScreen.__init__(self, self.entries, session=session)
+        try:
+            ConfigListScreen.__init__(
+                self, self.entries, session=session, on_change=self._entry_changed
+            )
+        except TypeError:
+            # Older images' ConfigListScreen takes no `on_change`. The screen
+            # still works; its status line simply stops refreshing as fields are
+            # edited, which is cosmetic.
+            LOG.debug("this image's ConfigListScreen has no on_change")
+            ConfigListScreen.__init__(self, self.entries, session=session)
 
         self["status"] = Label(status_text(self._bridge_or_running(), self.settings))
         self["key_red"] = Label(_("Cancel"))
@@ -122,6 +132,32 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
         except Exception:
             return None
 
+    def _entry_changed(self):
+        """Keep the status line honest while the fields are being edited."""
+        try:
+            self["status"].setText(status_text(self._bridge_or_running(), self.settings))
+        except Exception:
+            # Called once before the label exists on some images, and a status
+            # line is never worth an exception in front of a user.
+            LOG.debug("the status line could not be refreshed")
+
+    def _anything_changed(self):
+        for entry in self.entries:
+            element = entry[1]
+            checker = getattr(element, "isChanged", None)
+            try:
+                # enigma2 keeps `saved_value` as a string, so only the element
+                # itself can answer this; the comparison is the fallback for a
+                # stub or an image that does not offer `isChanged`.
+                changed = bool(checker()) if checker is not None else (
+                    element.value != element.saved_value
+                )
+            except Exception:
+                changed = element.value != element.saved_value
+            if changed:
+                return True
+        return False
+
     def keySave(self):
         for entry in self.entries:
             element = entry[1]
@@ -143,6 +179,34 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
         self.close(True)
 
     def keyCancel(self):
+        """Red or Exit. Ask first when there is something to lose.
+
+        A broker password typed on a remote control with the on-screen keyboard
+        is minutes of somebody's evening, and Exit is next to the arrow keys.
+        The question is the image's own standard one, so it reads like the rest
+        of the receiver.
+        """
+        if not self._anything_changed():
+            self._discard()
+            return
+        try:
+            self.session.openWithCallback(
+                self._cancel_answered,
+                MessageBox,
+                _("Really close without saving settings?"),
+                getattr(MessageBox, "TYPE_YESNO", 0),
+            )
+        except Exception:
+            # No dialog on this image is not a reason to trap the user in the
+            # screen: fall back to the old behaviour.
+            LOG.exception("could not ask about the unsaved settings")
+            self._discard()
+
+    def _cancel_answered(self, confirmed):
+        if confirmed:
+            self._discard()
+
+    def _discard(self):
         for entry in self.entries:
             element = entry[1]
             try:

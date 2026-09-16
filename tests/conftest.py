@@ -80,7 +80,8 @@ class ePythonMessagePump:
 
 enigma.eTimer = eTimer
 enigma.ePythonMessagePump = ePythonMessagePump
-enigma.getEnigmaVersionString = lambda: "5.4"
+# What OE-Alliance images actually return: a build date, not a version number.
+enigma.getEnigmaVersionString = lambda: "2024-09-11-Release"
 
 
 # -------------------------------------------------------------- boxbranding --
@@ -330,6 +331,8 @@ message_box_module = _module("Screens.MessageBox")
 
 
 class MessageBox:
+    # enigma2's own numbering: the yes/no dialog is 0.
+    TYPE_YESNO = 0
     TYPE_INFO = 1
     TYPE_WARNING = 2
     TYPE_ERROR = 3
@@ -429,8 +432,9 @@ class Published:
 
 
 class FakeMessageInfo:
-    def __init__(self):
+    def __init__(self, rc=0):
         self.waited = None
+        self.rc = rc
 
     def wait_for_publish(self, timeout=None):
         self.waited = timeout
@@ -459,6 +463,10 @@ class FakeMQTTClient:
         self.published = []
         self.loop_started = False
         self.disconnect_calls = 0
+        self.max_queued = None
+        self.max_inflight = None
+        # Set to a paho error code to make every later publish come back rejected.
+        self.publish_rc = 0
         self.on_connect = None
         self.on_message = None
         self.on_disconnect = None
@@ -476,6 +484,13 @@ class FakeMQTTClient:
 
     def reconnect_delay_set(self, min_delay=1, max_delay=120):
         self.reconnect_delay = (min_delay, max_delay)
+
+    def max_queued_messages_set(self, queue_size):
+        self.max_queued = queue_size
+        return self
+
+    def max_inflight_messages_set(self, inflight):
+        self.max_inflight = inflight
 
     def connect_async(self, host, port=1883, keepalive=60):
         self.connect_calls.append((host, port, keepalive))
@@ -495,7 +510,7 @@ class FakeMQTTClient:
 
     def publish(self, topic, payload=None, qos=0, retain=False):
         self.published.append(Published(topic, payload, qos, retain))
-        return FakeMessageInfo()
+        return FakeMessageInfo(rc=self.publish_rc)
 
     # --- what paho's network thread would do --------------------------------
 
@@ -603,6 +618,26 @@ def settings():
     from MQTTBridge import config as settings_module
 
     return settings_module.settings
+
+
+@pytest.fixture
+def wait_until():
+    """Wait for something a background thread does, without sleeping blindly.
+
+    The shutdown path hands paho's thread join to a thread of its own, so what
+    used to be true the instant `stop()` returned is now true shortly after.
+    """
+    import time
+
+    def wait(predicate, timeout=5.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.005)
+        return bool(predicate())
+
+    return wait
 
 
 @pytest.fixture

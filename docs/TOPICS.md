@@ -45,7 +45,7 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
 ```json
 {
   "image": "OpenViX 6.6.007",
-  "enigma": "5.4",
+  "enigma": "2024-09-11-Release",
   "plugin": "0.1.0",
   "boxtype": "vuuno4kse",
   "mac": "00:00:5e:00:53:01",
@@ -60,7 +60,7 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
 | Field | Type | Meaning |
 |---|---|---|
 | `image` | string | Image name and version as the box reports it |
-| `enigma` | string | enigma2 / OE flavour version |
+| `enigma` | string | enigma2's own version string, as `getEnigmaVersionString()` reports it — on OE-Alliance images a build date such as `2024-09-11-Release`, not a number |
 | `plugin` | string | This plugin's version — what an `update` entity compares against |
 | `boxtype` | string | Machine name, lowercase |
 | `mac` | string | Lowercase, colon-separated; the Wake-on-LAN target |
@@ -71,9 +71,11 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
 
 **`capabilities` is the honest part of the contract.** Hook names differ between images, so the
 plugin detects what it managed to attach and names it here rather than assuming. A consumer
-hides what is missing instead of showing a dead entity. The names are the feature areas:
-`power`, `service`, `epg`, `epg_grid`, `tuner`, `recording`, `timers`, `volume`, `keys`,
-`screenshot`, `message`, `hdd`.
+hides what is missing instead of showing a dead entity. The names are the feature areas, and
+nothing else is ever in the list: `power`, `service`, `epg`, `epg_grid`, `tuner`, `recording`,
+`timers`, `volume`, `keys`, `screenshot`, `message`, `hdd`. A build that has bound no feature
+area publishes `[]` — the connection, `info` and the commands are the plugin itself and are not
+capabilities.
 
 ### `<base>/<node>/power`
 
@@ -348,7 +350,7 @@ Two halves, in this order, on the one session that is already open:
 
 1. **Retract.** An empty retained payload to every retained topic this node owns — all the state
    topics, every `epg_grid/<bouquet_slug>`, the announcement, and every Home Assistant discovery
-   payload named in `components.json` — and then the plugin forgets what it had announced.
+   payload named in the state file — and then the plugin forgets what it had announced.
 2. **Republish, immediately.** `availability: online`, the full state snapshot, the announcement
    and, in `discovery` mode, the discovery payloads — **the same sequence as `on_connect`**, run
    straight away rather than waited for. The state file is written again with what was just
@@ -379,7 +381,7 @@ It is a cleanup, not a factory reset: settings are untouched.
   "name": "Dekoder salon",
   "base_topic": "enigma2",
   "image": "OpenViX 6.6.007",
-  "enigma": "5.4",
+  "enigma": "2024-09-11-Release",
   "plugin": "0.1.0",
   "boxtype": "vuuno4kse",
   "mac": "00:00:5e:00:53:01",
@@ -430,16 +432,26 @@ The types are the ones the `service` and `epg` topics define; an attribute whose
 `null` is published as `null`, not dropped. `next_*` is flattened rather than nested because Home
 Assistant templates read a flat attribute far more comfortably than a nested object.
 
-### `components.json`
+### The state file
 
-The plugin keeps `components.json` beside its configuration on the box, listing what it last
-announced — the discovery components and the `epg_grid` bouquet slugs it published. On start-up it
-compares that list with what it is about to announce and **retracts the difference first**.
+The plugin keeps `/etc/enigma2/mqttbridge-state.json` — beside enigma2's own settings, or beside
+the plugin itself when `/etc/enigma2` will not take a write — and it records **every topic this
+node has published retained**: the state topics, every `epg_grid/<bouquet_slug>`, the
+announcement, and every Home Assistant discovery payload. It is written atomically, through a
+temporary file in the same directory and a rename, so an interrupted write leaves the previous
+list rather than half of a new one; it survives reboots and plugin upgrades, and `cmd/reset`
+empties it and then fills it again with exactly what the reset republished. Nothing secret is in
+it — it is a list of topic names.
 
 That file is the whole answer to MQTT's oldest trap: a retained payload outlives the configuration
 that created it. Rename a component, drop a feature, drop or rename a bouquet, change the node id,
 and without the list the old retained topic stays on the broker and Home Assistant keeps an entity
-that nothing will ever update again. It is also why `cmd/reset` exists.
+that nothing will ever update again. So on every connect the plugin compares the list with what it
+is about to publish and **retracts the difference first** — a rename made while the box was
+switched off is caught the moment it comes back. It is also why `cmd/reset` exists.
+
+Delete the file and the plugin still works, but every topic published before that point becomes a
+retained ghost nobody can find: the list is the only record that they exist.
 
 ---
 

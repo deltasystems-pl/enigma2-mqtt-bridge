@@ -63,8 +63,39 @@ version that has no section here.
 - A weekly, non-blocking CI job that compares the vendored paho-mqtt against the latest 2.x on
   PyPI, so a copied-in dependency still gets told when upstream moves.
 
+### Fixed
+
+- Saving the setup screen, and shutting the receiver down, no longer wait for the MQTT session to
+  close. A broker whose address answers nothing held the user interface for several seconds.
+- Topics published under a previous node id or base topic are now retracted on the next connect,
+  not only when the name is changed with a session open. Renaming a box that was switched off
+  used to leave its old topics on the broker forever.
+- A provisioning file from which nothing could be imported — every key misspelt — is kept and
+  reported instead of being deleted with the settings it was meant to carry.
+- On an image that offers no way to reach the main loop from a background thread, the plugin now
+  says so and stays idle rather than running MQTT callbacks on the network thread.
+- Starting the bridge twice leaves the session that is already open alone.
+- The vendored MQTT client moved into its own `_vendor` directory, so the plugin's `config`,
+  `log`, `setup` and `keys` modules no longer sit ahead of the standard library for every plugin
+  in the enigma2 process.
+- The outgoing MQTT queues are bounded, and a publish dropped because they are full is logged.
+- The setup screen's status line refreshes as the fields are edited, and leaving it with unsaved
+  changes now asks first.
+- `last_error` caps the command name it echoes, so an absurd command topic cannot be stored
+  whole on a retained topic.
+- The translation template is no longer packaged into the IPK.
+- `tools/deploy-to-box.sh` keeps the three most recent backups instead of every one ever made,
+  never lets the provisioning file exist outside a 0700 directory, prints its last help line, and
+  accepts a password file written on Windows.
+
 ### Changed
 
+- Capabilities are the feature-area names from the topic contract and nothing else; a build with
+  no feature area bound publishes an empty list.
+- `info.enigma` is documented as enigma2's build-date string rather than a version number, which
+  is what `getEnigmaVersionString()` returns on OE-Alliance images.
+- The documentation names the retained-topic record correctly — `/etc/enigma2/mqttbridge-state.json`
+  — and describes what it holds and what a reset does with it.
 - The EPG grid is published as one retained topic per configured bouquet,
   `epg_grid/<bouquet_slug>`, and a bouquet that stops being configured has its topic retracted.
 - `cmd/reset` republishes everything immediately after retracting it — availability, the state

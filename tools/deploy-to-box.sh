@@ -46,7 +46,7 @@ BUILD=1
 PROVISION=""
 PASSWORD_FILE=""
 
-usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -70,7 +70,9 @@ fi
 PASSWORD=""
 if [ -n "$PASSWORD_FILE" ]; then
     [ -r "$PASSWORD_FILE" ] || { echo "deploy-to-box.sh: cannot read $PASSWORD_FILE" >&2; exit 2; }
-    PASSWORD=$(head -n 1 "$PASSWORD_FILE")
+    # A password file written on Windows ends its line with CR, and a CR in the
+    # password is an authentication failure with nothing in it to see.
+    PASSWORD=$(head -n 1 "$PASSWORD_FILE" | tr -d '\r')
 else
     PASSWORD="${BOX_PASSWORD:-}"
 fi
@@ -175,11 +177,18 @@ say "backing up the installed plugin"
 STAMP=$(date +%Y%m%d-%H%M%S)
 # Outside Extensions/ on purpose: enigma2 walks that directory at start-up and
 # tries to import every subdirectory in it as a plugin.
+# Three kept, older ones removed: a receiver's flash is small and a backup of a
+# build from six deploys ago is not something anyone will roll back to. The
+# stamp sorts chronologically, so `sort -r | tail -n +4` is everything but the
+# three newest — and `tail -n +N` is the form busybox has.
 box_ssh "set -e
          if [ -d '$PLUGIN_DIR' ]; then
              mkdir -p '$BACKUP_DIR'
              cp -a '$PLUGIN_DIR' '$BACKUP_DIR/MQTTBridge.bak-$STAMP'
-             ls -1 '$BACKUP_DIR' | tail -n 3
+             cd '$BACKUP_DIR'
+             ls -1d MQTTBridge.bak-* 2>/dev/null | sort -r | tail -n +4 |
+                 while read -r old; do rm -rf \"\$old\"; done
+             ls -1d MQTTBridge.bak-*
          else
              echo '   nothing installed yet'
          fi"
@@ -193,13 +202,18 @@ box_ssh "opkg install --force-reinstall '/tmp/$IPK_NAME' && rm -f '/tmp/$IPK_NAM
 if [ -n "$PROVISION" ]; then
     [ -r "$PROVISION" ] || { echo "deploy-to-box.sh: cannot read $PROVISION" >&2; exit 2; }
     say "installing the provisioning file"
-    # It holds a broker password: 0600 from the moment it lands, and the plugin
-    # deletes it as soon as it has read it.
-    box_scp "$PROVISION" "/tmp/mqttbridge-provision.json"
+    # It holds a broker password, so it is never readable by anyone else — not
+    # even for the moment it spends in /tmp. scp applies the box's umask to what
+    # it creates, and a `chmod` in the *next* ssh call is a window, so the
+    # directory it lands in is made 0700 before the copy. The plugin deletes the
+    # file as soon as it has read it.
+    box_ssh "rm -rf /tmp/mqttbridge-provision && mkdir -m 700 /tmp/mqttbridge-provision"
+    box_scp "$PROVISION" "/tmp/mqttbridge-provision/mqttbridge.json"
     box_ssh "set -e
-             chmod 600 /tmp/mqttbridge-provision.json
-             mv /tmp/mqttbridge-provision.json '$PROVISION_TARGET'
+             umask 077
+             cp /tmp/mqttbridge-provision/mqttbridge.json '$PROVISION_TARGET'
              chmod 600 '$PROVISION_TARGET'
+             rm -rf /tmp/mqttbridge-provision
              ls -l '$PROVISION_TARGET'"
 fi
 

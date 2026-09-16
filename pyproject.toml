@@ -7,7 +7,7 @@ target-version = "py39"
 line-length = 100
 extend-exclude = [
     # Vendored verbatim from upstream; see NOTICE. Never linted, never modified.
-    "src/MQTTBridge/paho",
+    "src/MQTTBridge/_vendor",
 ]
 
 [tool.ruff.lint]

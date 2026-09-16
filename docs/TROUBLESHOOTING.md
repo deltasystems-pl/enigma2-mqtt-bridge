@@ -42,9 +42,11 @@ grep -i 'mqttbridge' /home/root/mqttbridge.log | head
 grep 'config.plugins.mqttbridge' /etc/enigma2/settings
 ```
 
-**The provisioning file was ignored.** It is read once at start-up and then deleted. If
-`/etc/enigma2/mqttbridge.json` is still there, the plugin has not started since you wrote it. If
-it is gone but nothing changed, the log says which keys it rejected.
+**The provisioning file was ignored.** It is read once at start-up and then deleted — but only
+once at least one setting in it has been applied. If `/etc/enigma2/mqttbridge.json` is still
+there, either the plugin has not started since you wrote it, or it could not use a single key in
+it and left it for you to correct; the log says which. If it is gone but nothing looks different,
+the log names the keys it rejected.
 
 ## The broker refuses the connection
 
@@ -102,7 +104,8 @@ mosquitto_pub -h <broker> -u <user> -P <password> -t 'enigma2/<node_id>/cmd/rese
 ```
 
 which retracts every retained topic the node owns, including the discovery payloads and EPG-grid
-bouquets it remembers in `components.json` — and then **immediately republishes**: availability,
+bouquets it remembers in `/etc/enigma2/mqttbridge-state.json` — and then **immediately
+republishes**: availability,
 the whole state snapshot, the announcement and, in `discovery` mode, the discovery payloads, in
 the same order as on a fresh connect. That is what makes a reset safe to run at any time: the
 node's topics are gone for the width of one publish burst, not until the box next reconnects.

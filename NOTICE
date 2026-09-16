@@ -31,14 +31,19 @@ paho-mqtt
   The package is vendored verbatim from the source archive above, with no
   modifications to its code. It lives in the tree at:
 
-    src/MQTTBridge/paho/                 the package, as shipped upstream
-    src/MQTTBridge/paho/LICENSE.txt      upstream's licence pointer
-    src/MQTTBridge/paho/edl-v10          Eclipse Distribution License 1.0
-    src/MQTTBridge/paho/epl-v20          Eclipse Public License 2.0
+    src/MQTTBridge/_vendor/paho/              the package, as shipped upstream
+    src/MQTTBridge/_vendor/paho/LICENSE.txt   upstream's licence pointer
+    src/MQTTBridge/_vendor/paho/edl-v10       Eclipse Distribution License 1.0
+    src/MQTTBridge/_vendor/paho/epl-v20       Eclipse Public License 2.0
 
   Installed on the receiver at:
 
-    /usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge/paho/
+    /usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge/_vendor/paho/
+
+  It sits under `_vendor/` rather than directly in the plugin directory because
+  that directory is what goes on `sys.path` to make `import paho` work, and
+  `sys.path[0]` is searched before the standard library for the whole enigma2
+  process. Only vendored third-party packages belong there.
 
   It is vendored rather than declared as a dependency because Enigma2 images
   ship no pip and carry no paho package in their feeds.
@@ -49,7 +54,7 @@ paho-mqtt
 
   Nobody has to remember to look. The `vendored-paho` job in the CI workflow
   runs weekly, and on demand from the Actions tab, and compares the version
-  recorded here and in src/MQTTBridge/paho against the latest 2.x on PyPI. It is
+  recorded here and in src/MQTTBridge/_vendor/paho against the latest 2.x on PyPI. It is
   a soft job — `continue-on-error`, so it never blocks a merge or a release —
   and its only output is a warning on the run when this file has fallen behind.
   A vendored dependency has no package manager to nag you; this is the nag.

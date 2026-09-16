@@ -34,6 +34,15 @@ from .version import __version__
 
 LOG = get_logger("bridge")
 
+
+def _capped(text, limit):
+    """`text` in at most `limit` characters, visibly cut when it was too long."""
+    text = str(text or "")
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
 ONLINE = "online"
 OFFLINE = "offline"
 
@@ -44,11 +53,17 @@ COMMAND_QOS = 1
 # The will is the one publish nobody gets to retry, so it is asked for at QoS 1.
 WILL_QOS = 1
 
-# What this build actually publishes. Hook-backed capabilities are added by the
-# publishers that bind them, so the list stays true for the image it is on.
-CORE_CAPABILITIES = ("info", "reset")
+# Capabilities are the feature-area names in docs/TOPICS.md and nothing else —
+# `power`, `service`, `epg`, `tuner`, … — each added by the publisher that binds
+# its hooks. This build binds none, so it publishes an empty list rather than
+# inventing names outside the contract's vocabulary.
+CORE_CAPABILITIES = ()
 
 SHUTDOWN_FLUSH_SECONDS = 1.0
+
+# A command name comes off the topic, so its length is the publisher's choice.
+# The retained `last_error` is not the place to store somebody's 4 KB topic.
+LAST_ERROR_CMD_LIMIT = 64
 
 
 class Publisher:
@@ -151,6 +166,13 @@ class Bridge:
         return self
 
     def _start(self):
+        if self.client is not None:
+            # enigma2 can hand a plugin its session start more than once. The
+            # session that is already open is the healthy one; opening a second
+            # would strand the first one's network thread and its will.
+            LOG.info("the bridge is already running; leaving the open session alone")
+            return
+
         configure_logging(self.value("log_level"), self._log_path)
 
         # Before anything connects: an installer may have written the broker in.
@@ -188,6 +210,13 @@ class Bridge:
             dispatcher=self._dispatcher,
             client_factory=self._client_factory,
         )
+        if not self.client.usable:
+            # No Twisted and no usable ePythonMessagePump. Running paho's
+            # callbacks on its network thread would touch enigma2 from off the
+            # main loop, so this image gets a plugin that loads and does nothing.
+            self.client = None
+            self._idle("this image offers no way to reach the main loop from a thread")
+            return
         self.client.set_will(self.topic("availability"), OFFLINE, qos=WILL_QOS, retain=True)
 
         self._last_error_published = self.state.knows(self.topic("last_error"))
@@ -227,6 +256,7 @@ class Bridge:
                 except Exception:
                     LOG.exception("stopping the %s publisher raised", publisher.name)
             self.client.stop()
+            self.client = None
             self.state.save()
         except Exception:
             LOG.exception("shutting the bridge down raised; the receiver is unaffected")
@@ -234,15 +264,8 @@ class Bridge:
     def reload(self):
         """Apply changed settings. Called by the setup screen after a save."""
         try:
-            stale = self._stale_topics()
-            if stale and self.connected:
-                LOG.info(
-                    "settings changed the topic root; retracting %d stale topic(s)", len(stale)
-                )
-                for topic in stale:
-                    self.client.publish(topic, "", qos=STATE_QOS, retain=True)
-                    self.state.forget(topic)
-                self.state.save()
+            if self.connected:
+                self.retract_stale()
             if self.client is not None:
                 self.client.stop()
                 self.client = None
@@ -259,6 +282,27 @@ class Bridge:
             for topic in self.state.retained_topics
             if not topic.startswith(root) and topic != announcement
         ]
+
+    def retract_stale(self):
+        """Retract retained topics this node published under a name it no longer has.
+
+        Renaming the node or the base topic orphans everything published under
+        the old one: retained payloads nothing will ever update, and in Home
+        Assistant a device that looks alive. The state file is what makes them
+        findable at all, and it survives a restart — which is why this runs on
+        every connect and not only from `reload`. The rename is just as likely
+        to happen while the box is disconnected, or while the plugin is not even
+        running, as it is to happen with a session open.
+        """
+        stale = self._stale_topics()
+        if not stale or self.client is None:
+            return 0
+        LOG.info("retracting %d retained topic(s) this node no longer owns", len(stale))
+        for topic in stale:
+            self.client.publish(topic, "", qos=STATE_QOS, retain=True)
+            self.state.forget(topic)
+        self.state.save()
+        return len(stale)
 
     # ------------------------------------------------------------------ identity --
 
@@ -302,6 +346,10 @@ class Bridge:
     # -------------------------------------------------------------------- events --
 
     def on_connect(self):
+        # First, before a single new payload: whatever this node published under
+        # an older name is still on the broker and this is the first chance to
+        # take it back.
+        self.retract_stale()
         info = self.build_info()
         self.publish_raw(self.topic("availability"), ONLINE)
         self.publish_snapshot(info)
@@ -407,8 +455,12 @@ class Bridge:
     # ------------------------------------------------------------------ commands --
 
     def publish_last_error(self, command, message):
-        payload = {"cmd": command, "error": message, "ts": int(time.time())}
-        LOG.warning("cmd/%s refused: %s", command, message)
+        payload = {
+            "cmd": _capped(command, LAST_ERROR_CMD_LIMIT),
+            "error": message,
+            "ts": int(time.time()),
+        }
+        LOG.warning("cmd/%s refused: %s", payload["cmd"], message)
         self.publish_json(self.topic("last_error"), payload)
         self._last_error_published = True
 

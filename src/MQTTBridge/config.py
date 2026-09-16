@@ -232,8 +232,9 @@ def import_provisioning(path=None, section=None):
     """Apply `/etc/enigma2/mqttbridge.json`, then delete it.
 
     The file carries a broker password in clear, so it does not survive its own
-    import. A file that cannot be parsed is left where it is — deleting it would
-    destroy the only copy of what somebody meant to configure — and logged once.
+    import. Two files do survive it, for the same reason: one that cannot be
+    parsed, and one that imported nothing at all. Deleting either would destroy
+    the only copy of what somebody meant to configure, and both are logged.
 
     Returns the list of setting names that were imported.
     """
@@ -270,13 +271,22 @@ def import_provisioning(path=None, section=None):
             continue
         imported.append(key)
 
-    if imported:
-        save(target)
-        # Names only. One of these keys is the broker password.
-        LOG.info("imported %d setting(s) from %s: %s",
-                 len(imported), target_path, ", ".join(imported))
-    else:
-        LOG.info("%s held nothing to import", target_path)
+    if not imported:
+        # Every key was unknown, or every value was rejected — a typo in the
+        # file, not an instruction to configure nothing. Deleting it here would
+        # throw away the only copy of what somebody meant to write, and they
+        # would find an unchanged plugin and no file to correct.
+        LOG.error(
+            "%s imported nothing: no key in it is a setting this plugin has. "
+            "Leaving it in place — correct the key names, or delete it.",
+            target_path,
+        )
+        return []
+
+    save(target)
+    # Names only. One of these keys is the broker password.
+    LOG.info("imported %d setting(s) from %s: %s",
+             len(imported), target_path, ", ".join(imported))
 
     try:
         os.remove(target_path)
