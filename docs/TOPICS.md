@@ -9,13 +9,14 @@ Two names appear throughout:
 
 - **`<base>`** — the `base_topic` setting, `enigma2` by default.
 - **`<node>`** — the `node_id` setting, `<boxtype>_<last six MAC digits>` by default, lowercase
-  ASCII, for example `vuuno4kse_1775fc`. It is stable across reinstalls and is the unique id the
+  ASCII, for example `vuuno4kse_005301`. It is stable across reinstalls and is the unique id the
   integration keys on.
 
 Conventions that hold everywhere:
 
 | | |
 |---|---|
+| Protocol | **MQTT 3.1.1**. No MQTT 5 feature is used or required — no user properties, no response topics, no subscription identifiers, no shared subscriptions — so the contract holds on every broker a receiver can be pointed at, including the old ones. A broker running MQTT 5 serves it unchanged. |
 | Encoding | UTF-8. Every payload is JSON unless the table says otherwise. |
 | **State topics** | QoS **0**, **retained** (the exceptions are marked). A fresh subscriber gets the current state immediately, without asking the box for it. |
 | **Command topics** | QoS **1**, **never retained**. A retained command would re-fire on every reconnect; the plugin refuses to publish one and you should not either. |
@@ -47,7 +48,7 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
   "enigma": "5.4",
   "plugin": "0.1.0",
   "boxtype": "vuuno4kse",
-  "mac": "00:1d:ec:17:75:fc",
+  "mac": "00:00:5e:00:53:01",
   "ip": "192.0.2.12",
   "uptime": 384210,
   "ha_mode": "discovery",
@@ -119,14 +120,25 @@ zap, and again when the resolution becomes known.
 `event_id` int (what `cmd/timer` wants for `action: add`), `short` and `long` strings, possibly
 empty.
 
-### `<base>/<node>/epg_grid` — since M2
+### `<base>/<node>/epg_grid/<bouquet_slug>` — since M2
 
-A compact grid for the configured bouquets: the next few events on every channel, enough to draw
-a „what's on" list without a single OpenWebif request.
+A compact grid, **one retained topic per configured bouquet**: the next few events on every
+channel of that bouquet, enough to draw a „what's on" list without a single OpenWebif request.
+
+The grid is per bouquet because a bouquet is what a household actually browses, and because one
+combined topic would make every consumer re-read every bouquet whenever any one of them moved on.
+A consumer that cares about a single bouquet subscribes to a single topic; one that wants them all
+subscribes to `<base>/<node>/epg_grid/+`.
+
+**`<bouquet_slug>`** is derived from the bouquet's name: lower-cased, transliterated to ASCII, and
+every run of characters that is not a letter or a digit collapsed to one `_`, with leading and
+trailing `_` trimmed. „Ulubione TV" becomes `ulubione_tv`; „Favourites (TV)" becomes
+`favourites_tv`. The slug is only an addressable, MQTT-safe name — **the payload carries the
+original**, and the payload is what a user should be shown.
 
 ```json
 {
-  "bouquet": "Favourites (TV)",
+  "bouquet": "Ulubione TV",
   "generated": 1789459200,
   "channels": [
     {"sref": "1:0:19:283D:3FB:1:C00000:0:0:", "name": "TVP 1 HD",
@@ -137,8 +149,8 @@ a „what's on" list without a single OpenWebif request.
 
 | Field | Type | Notes |
 |---|---|---|
-| `bouquet` | string | Which bouquet this grid covers |
-| `generated` | int | Epoch seconds, when the grid was built |
+| `bouquet` | string | The bouquet's name as enigma2 spells it — not the slug |
+| `generated` | int | Epoch seconds, when this bouquet's grid was built |
 | `channels[].sref` | string | |
 | `channels[].name` | string | |
 | `channels[].events[]` | list | Up to `epg_grid_events` entries per channel, chronological |
@@ -146,12 +158,20 @@ a „what's on" list without a single OpenWebif request.
 | `events[].begin`, `events[].end` | int | Epoch seconds |
 | `events[].event_id` | int | |
 
-Refreshed when a bouquet changes, every 15 minutes, and on `cmd/epg_grid`. `epg_grid_events` is
-a setting; `0` turns the topic off entirely and drops `epg_grid` from `capabilities`.
+Refreshed when a bouquet changes, every 15 minutes, and on `cmd/epg_grid` — which regenerates and
+republishes **every** configured bouquet, not just one. `epg_grid_events` is a setting, default
+**4**; `0` turns the topics off entirely and drops `epg_grid` from `capabilities`.
 
-This payload can reach tens of kilobytes. It is **not** meant to become a state attribute of an
-entity — a consumer that stores it per update will bloat its recorder database. The companion
-integration exposes it through an action that returns a response instead.
+**Slugs that stop being configured are retracted.** The plugin remembers the slugs it has
+published in its state file on the box, the same file that carries the discovery component list.
+Drop a bouquet from `bouquets_for_select`, or rename one — which changes its slug — and the topic
+it used to own gets an empty retained payload on the next start. Without that the broker would go
+on serving the grid of a bouquet nobody has configured for as long as the broker lives, which is
+the same trap retained discovery payloads set and is answered the same way.
+
+A grid payload can reach tens of kilobytes *per bouquet*. It is **not** meant to become a state
+attribute of an entity — a consumer that stores it per update will bloat its recorder database.
+The companion integration exposes it through an action that returns a response instead.
 
 Full EPG search, and browsing timers that the plugin did not create, stay on OpenWebif. This is
 a grid, not a database.
@@ -264,6 +284,14 @@ enigma2 event, and publishes the new state on the matching state topic. A failur
 goes to `last_error`. There is no acknowledgement topic and no correlation id in v1 — the state
 topic is the answer.
 
+🔴 **A command that arrives with the retain flag set is logged and discarded, never executed.**
+This is a guard on every command in the table below, not a property of any one of them. A retained
+command is delivered again the instant the plugin subscribes, so the box would obey it on every
+reconnect and after every reboot — a retained `deep_standby` is a receiver that will not stay on.
+The plugin publishes no command retained and refuses to act on one that is, so a mistake made with
+`mosquitto_pub -r` costs a log line rather than the evening. Clear it by publishing an empty
+retained payload to that topic; until you do, the broker keeps handing it out.
+
 | Command | Payload | Effect | Guard |
 |---|---|---|---|
 | `power` | `on` \| `standby` \| `toggle` | Leaves or enters standby | — |
@@ -278,10 +306,12 @@ topic is the answer.
 | `timer` | see below | Adds or deletes a recording timer | An add that overlaps an existing timer, or refers to an unknown event, is refused |
 | `record` | `start` \| `stop` | Starts or stops an instant recording of the current service | `stop` with nothing recording is a no-op with a note in `last_error` |
 | `screenshot` | any | Captures `screen` now | Rate-limited to one per five seconds |
-| `epg_grid` | any | Rebuilds and republishes `epg_grid` | Ignored when `epg_grid_events` is `0` |
+| `epg_grid` | any | Rebuilds and republishes **every** `epg_grid/<bouquet_slug>` topic | Ignored when `epg_grid_events` is `0` |
 | `discovery` | any | Republishes the announcement, and the discovery payloads in discovery mode | — |
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
-| `reset` | any | Retracts every retained topic this node owns | See below |
+| `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
+
+Every one of them is refused when it arrives retained, as above.
 
 ### `cmd/timer` payload forms
 
@@ -314,15 +344,27 @@ waits for when it takes a box over.
 
 ### `cmd/reset` semantics
 
-Retracts every retained topic this node owns — all the state topics, the announcement, and every
-Home Assistant discovery payload named in `components.json` — by publishing an empty retained
-payload to each, then forgets what it had announced.
+Two halves, in this order, on the one session that is already open:
 
-It is the documented step **before uninstalling**, because retained topics outlive the plugin
+1. **Retract.** An empty retained payload to every retained topic this node owns — all the state
+   topics, every `epg_grid/<bouquet_slug>`, the announcement, and every Home Assistant discovery
+   payload named in `components.json` — and then the plugin forgets what it had announced.
+2. **Republish, immediately.** `availability: online`, the full state snapshot, the announcement
+   and, in `discovery` mode, the discovery payloads — **the same sequence as `on_connect`**, run
+   straight away rather than waited for. The state file is written again with what was just
+   published.
+
+That second half is why a reset is **safe to run at any time**: the broker is empty of this node's
+topics for the width of one publish burst, not until the box next reconnects, and a subscriber
+that was listening throughout ends up exactly where it started. Home Assistant sees the entities
+go unavailable and come back, which is the same thing it sees when the box reboots.
+
+It is also the documented step **before uninstalling**, because retained topics outlive the plugin
 that created them: remove the package without it and the broker keeps serving a snapshot of a box
-that is gone, forever, while Home Assistant keeps showing entities nothing will ever update.
-After a reset the plugin republishes everything on its next connect, so it is safe to run at any
-time; it is a cleanup, not a factory reset — settings are untouched.
+that is gone, forever, while Home Assistant keeps showing entities nothing will ever update. Do it
+while the plugin is still running and connected — after `opkg remove` there is nothing left to ask.
+
+It is a cleanup, not a factory reset: settings are untouched.
 
 ---
 
@@ -333,14 +375,14 @@ time; it is a cleanup, not a factory reset — settings are untouched.
 
 ```json
 {
-  "node_id": "vuuno4kse_1775fc",
+  "node_id": "vuuno4kse_005301",
   "name": "Dekoder salon",
   "base_topic": "enigma2",
   "image": "OpenViX 6.6.007",
   "enigma": "5.4",
   "plugin": "0.1.0",
   "boxtype": "vuuno4kse",
-  "mac": "00:1d:ec:17:75:fc",
+  "mac": "00:00:5e:00:53:01",
   "ip": "192.0.2.12",
   "capabilities": ["power", "service", "epg", "tuner", "recording", "timers",
                    "volume", "keys", "screenshot", "message", "hdd", "epg_grid"],
@@ -372,15 +414,31 @@ Device-based discovery (one payload, many components) is used rather than a payl
 it is a single retained topic to retract, and the device identity cannot drift between
 components.
 
+### The attributes the sensors carry
+
+Two of those components carry JSON attributes rather than only a state, because the state is a
+name and the useful identifier is not. They are part of this contract — SETUP.md's `universal`
+media_player recipe reads `sensor.<box>_channel|sref`, and that only works because the attribute
+is promised here.
+
+| Component | State | JSON attributes |
+|---|---|---|
+| Channel sensor | the channel name | `sref`, `bouquet`, `provider`, `width`, `height` — the `service` payload minus the name |
+| Programme sensor | the title of `now` | `begin`, `end`, `event_id`, `short`, `long`, and `next_title`, `next_begin`, `next_end` for the following programme |
+
+The types are the ones the `service` and `epg` topics define; an attribute whose source field is
+`null` is published as `null`, not dropped. `next_*` is flattened rather than nested because Home
+Assistant templates read a flat attribute far more comfortably than a nested object.
+
 ### `components.json`
 
 The plugin keeps `components.json` beside its configuration on the box, listing what it last
-announced. On start-up it compares that list with what it is about to announce and **retracts
-the difference first**.
+announced — the discovery components and the `epg_grid` bouquet slugs it published. On start-up it
+compares that list with what it is about to announce and **retracts the difference first**.
 
-That file is the whole answer to MQTT's oldest trap: a retained discovery payload outlives the
-configuration that created it. Rename a component, drop a feature, change the node id, and
-without the list the old retained topic stays on the broker and Home Assistant keeps an entity
+That file is the whole answer to MQTT's oldest trap: a retained payload outlives the configuration
+that created it. Rename a component, drop a feature, drop or rename a bouquet, change the node id,
+and without the list the old retained topic stays on the broker and Home Assistant keeps an entity
 that nothing will ever update again. It is also why `cmd/reset` exists.
 
 ---

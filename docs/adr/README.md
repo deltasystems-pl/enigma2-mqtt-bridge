@@ -21,6 +21,11 @@ Every record carries one, in its header:
 - **superseded by ADR-NNNN** — replaced. **The record stays**, with the pointer added; it is not
   edited to say something else and it is never deleted. Reading why a decision was reversed is
   usually more useful than the decision itself.
+- **partly superseded by ADR-NNNN** — still in force except where the later record says
+  otherwise. The index says so, because a reader who takes such a record at face value will be
+  wrong about exactly the part somebody already argued over.
+- **amended `<date>`** — a later paragraph appended to a record that is otherwise unchanged, for
+  an ambiguity rather than a reversal. Same rule as above: nothing already agreed is rewritten.
 
 A record also names what it supersedes, so the chain reads in both directions.
 
@@ -47,5 +52,5 @@ What this costs, what it rules out, and what has to change if it is ever reverse
 
 | # | Title | Status |
 |---|---|---|
-| [0000](0000-prd.md) | Product requirements (PRD) | accepted 2026-09-16 |
-| [0001](0001-m0-decisions.md) | M0 sign-off — the three open questions | accepted 2026-09-16 |
+| [0000](0000-prd.md) | Product requirements (PRD) | accepted 2026-09-16, partly superseded by [ADR-0001](0001-m0-decisions.md) |
+| [0001](0001-m0-decisions.md) | M0 sign-off — the three open questions | accepted 2026-09-16, amended 2026-09-16 |

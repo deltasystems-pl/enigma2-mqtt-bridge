@@ -1,6 +1,6 @@
 # ADR-0001: M0 sign-off — the three open questions
 
-**Status:** accepted 2026-09-16
+**Status:** accepted 2026-09-16, amended 2026-09-16 (see [the amendment](#amendment-2026-09-16--one-epg-grid-topic-per-bouquet))
 **Date:** 2026-09-16
 **Supersedes:** the proposed answers in [ADR-0000](0000-prd.md) §12
 
@@ -71,3 +71,37 @@ installer is real enough to have a transport worth adding one to.
   the cross-links in both documents keep working unchanged.
 - Telnet-only users are turned away at the install step in v1. That is a real gap; it is written
   down as one rather than discovered by somebody whose box cannot run the installer.
+
+## Amendment 2026-09-16 — one EPG grid topic per bouquet
+
+*Written the same day, while the contract above was being set out in full in
+[TOPICS.md](../TOPICS.md). The decision stands as taken; what follows resolves an ambiguity in how
+it is published. The text above is left exactly as it was agreed.*
+
+§1 says „retained JSON on `enigma2/<node>/epg_grid`" and, a line earlier, „a compact grid for the
+**configured bouquets**" — plural. One topic and several bouquets cannot both be true unless the
+bouquets are nested inside the payload or the last one written wins, and neither was intended. The
+published contract is therefore:
+
+- **One retained topic per configured bouquet**: `enigma2/<node>/epg_grid/<bouquet_slug>`.
+- **`<bouquet_slug>`** is the bouquet's name lower-cased, transliterated to ASCII, with every run
+  of non-alphanumeric characters collapsed to a single `_` and leading and trailing `_` trimmed —
+  „Ulubione TV" becomes `ulubione_tv`. A slug is an address, never a label.
+- **The payload keeps the shape §1 gave it**, `{bouquet, generated, channels: […]}`, and `bouquet`
+  is the bouquet's original name rather than the slug. Nothing a consumer parses changes.
+- **`cmd/epg_grid` regenerates every configured bouquet**, not one of them. There is no
+  per-bouquet command.
+- **The plugin remembers the slugs it has published** in its state file, beside the discovery
+  component list, and **retracts** — an empty retained payload — every slug that is no longer
+  configured. A renamed bouquet is a new slug plus an old one to retract.
+
+Why this rather than one combined topic: a bouquet is the unit a household browses and the unit
+that changes, so it is the unit to publish, subscribe to and retract. Combining them would make
+every consumer re-read every bouquet because one of them moved on, and would multiply the size of
+the project's only payload that can reach tens of kilobytes. Splitting them also lets a dropped
+bouquet be answered exactly the way a dropped discovery component already is, instead of inventing
+a second mechanism for the same problem.
+
+The cost is that the retained-ghost trap now has a second shape — a slug nobody configures any
+more. That is why remembering the published slugs is part of this decision and not left as an
+implementation detail.

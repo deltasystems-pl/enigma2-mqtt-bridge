@@ -101,9 +101,13 @@ The cure while the plugin is still installed:
 mosquitto_pub -h <broker> -u <user> -P <password> -t 'enigma2/<node_id>/cmd/reset' -m PRESS -q 1
 ```
 
-which retracts every retained topic the node owns, including the discovery payloads it remembers
-in `components.json`. The plugin republishes everything on its next connect, so a reset is safe
-at any time.
+which retracts every retained topic the node owns, including the discovery payloads and EPG-grid
+bouquets it remembers in `components.json` — and then **immediately republishes**: availability,
+the whole state snapshot, the announcement and, in `discovery` mode, the discovery payloads, in
+the same order as on a fresh connect. That is what makes a reset safe to run at any time: the
+node's topics are gone for the width of one publish burst, not until the box next reconnects.
+Home Assistant shows the entities go unavailable and come back, exactly as it does across a
+reboot. Settings are untouched.
 
 If the plugin is already gone, retract by hand: publish an **empty** retained message
 (`mosquitto_pub -r -n -t …`) to each leftover topic. There is no other way — a broker will not
@@ -139,9 +143,11 @@ There is no acknowledgement topic. A command's answer is the state topic changin
    unknown key name.
 3. Check `info.capabilities`. If the hook a command needs is not in that list, this image did not
    give it to the plugin and the command cannot work — say so in an issue with your image name.
-4. Make sure you are not publishing the command **retained**. A retained command re-fires on
-   every reconnect and is a genuinely bad time; if you have done it, publish an empty retained
-   payload to that topic to clear it.
+4. Make sure you are not publishing the command **retained**. The plugin logs a retained command
+   and discards it without executing it — which is the right answer, because the broker would
+   hand it back on every reconnect — so a retained command looks exactly like a command that did
+   nothing. The log line names it. Clear it by publishing an empty retained payload to that
+   topic, then send it again without `-r`.
 
 ## Reporting a problem
 
