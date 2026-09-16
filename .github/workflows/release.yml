@@ -7,6 +7,13 @@ on:
 permissions:
   contents: write
 
+# One release at a time per tag. Never cancel one in flight: half of this job
+# publishes a GitHub release and the other half pushes the opkg feed, and a run
+# killed between the two leaves a release nobody can install from the feed.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     name: Build, publish and refresh the feed
@@ -42,6 +49,29 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      # A tag can be pushed at any commit, including one whose CI run was red or
+      # never ran at all. The checks below are the same ones ci.yml runs, on the
+      # same Python, so nothing can be released that CI would have rejected. A
+      # red check here aborts the release before anything is published.
+      - name: Install the tooling
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: ruff
+        run: ruff check .
+
+      - name: pyflakes
+        run: |
+          files=$(git ls-files '*.py' | grep -v '^src/MQTTBridge/paho/')
+          echo "$files"
+          pyflakes $files
+
+      - name: pytest
+        run: pytest -q
+
+      - name: Install gettext
+        # msgfmt compiles the .po files into the package.
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends gettext
+
       - name: Build the IPK
         run: ./tools/build-ipk.sh
 
@@ -53,8 +83,12 @@ jobs:
 
           version = sys.argv[1]
           text = open("CHANGELOG.md", encoding="utf-8").read()
+          # The section ends at the next heading, at the link-reference block
+          # Keep a Changelog puts at the foot of the file, or at EOF. Without
+          # that middle case the oldest release's notes end with a paragraph of
+          # "[1.2.0]: https://github.com/..." lines nobody wants in a release.
           pattern = re.compile(
-              r"^## \[" + re.escape(version) + r"\][^\n]*\n(.*?)(?=^## |\Z)",
+              r"^## \[" + re.escape(version) + r"\][^\n]*\n(.*?)(?=^## |^\[[^\]]+\]:|\Z)",
               re.S | re.M,
           )
           match = pattern.search(text)
@@ -79,8 +113,11 @@ jobs:
           mkdir -p /tmp/release
           cp dist/*.ipk dist/*.ipk.sha256 /tmp/release/
           cp tools/make-feed.py /tmp/make-feed.py
-          git config user.name "deltasystems-pl"
-          git config user.email "it-poland@hengst.com"
+          # The feed commit is the workflow's, not a person's: it is generated
+          # output, and attributing it to a maintainer puts their address in the
+          # public history of a branch they never touched.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin gh-pages
           git checkout gh-pages
           mkdir -p feed
