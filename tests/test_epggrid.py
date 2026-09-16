@@ -15,8 +15,8 @@ def generate(bridge):
     """Run a whole pass: the grid is built one bouquet per turn of the main loop."""
     publisher = bridge.publisher("epg_grid")
     publisher.regenerate()
-    for _ in range(10):
-        if not publisher._queue:
+    for _ in range(100):
+        if not publisher._queue and publisher._current is None:
             break
         publisher._step.timer.fire()
     return publisher
@@ -100,13 +100,18 @@ def test_zero_events_turns_the_feature_off(make_bridge, factory, settings, recei
     assert factory.client.last(ULUBIONE) is None
 
 
-def test_one_bouquet_is_built_per_turn_of_the_main_loop(live_bridge, factory):
+def test_one_channel_batch_is_built_per_turn_of_the_main_loop(live_bridge, factory, receiver):
     """A hundred channels of lookups in one call is a frozen television."""
     publisher = live_bridge.publisher("epg_grid")
+    publisher._channels().bouquets[0]["channels"] *= 3
+    receiver.epg.queries = []
     factory.client.clear()
     live_bridge.forget_published()
     publisher.regenerate()
     assert factory.client.all_for(ULUBIONE) == []
+    publisher._step.timer.fire()
+    assert factory.client.all_for(ULUBIONE) == []
+    assert len(receiver.epg.queries[-1]) - 1 == epggrid.CHANNELS_PER_STEP
     publisher._step.timer.fire()
     assert factory.client.all_for(ULUBIONE) != []
     assert factory.client.all_for(SPORT) == []

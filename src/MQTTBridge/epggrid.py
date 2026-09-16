@@ -30,6 +30,7 @@ REFRESH_MILLISECONDS = 15 * 60 * 1000
 # One bouquet per tick, with a gap long enough for the user interface to draw a
 # frame in between.
 STEP_MILLISECONDS = 20
+CHANNELS_PER_STEP = 4
 
 # How far ahead to ask for. Enough that a channel showing long films still fills
 # its quota, bounded so that a query cannot come back with a week of television.
@@ -150,6 +151,51 @@ def build(bouquet, count):
     return payload
 
 
+def _build_state(bouquet, count):
+    """A complete payload shell and the cursor used by the live, yielding build."""
+    channels = bouquet.get("channels") or []
+    payload = {
+        "bouquet": bouquet.get("name"),
+        "generated": int(time.time()),
+        "channels": [
+            {"sref": channel["sref"], "name": channel.get("name"), "events": []}
+            for channel in channels
+        ],
+    }
+    by_sref = {}
+    by_identity = {}
+    for entry in payload["channels"]:
+        # Preserve build()'s first-match behaviour for duplicate bouquet rows.
+        by_sref.setdefault(entry["sref"], entry)
+        by_identity.setdefault(identity(entry["sref"]), entry)
+    return {
+        "bouquet": bouquet,
+        "count": count,
+        "payload": payload,
+        "by_sref": by_sref,
+        "by_identity": by_identity,
+        "cursor": 0,
+        "began": time.time(),
+    }
+
+
+def _add_rows(state, rows):
+    for row in rows or []:
+        sref, event = _event(row)
+        if event is None:
+            continue
+        entry = state["by_sref"].get(sref) or state["by_identity"].get(identity(sref))
+        if entry is None or len(entry["events"]) >= state["count"]:
+            continue
+        entry["events"].append(event)
+
+
+def _finish_state(state):
+    for entry in state["payload"]["channels"]:
+        entry["events"].sort(key=lambda event: event["begin"])
+    return state["payload"]
+
+
 class EpgGridPublisher(Publisher):
     """`epg_grid/<bouquet_slug>` — one topic for each configured bouquet."""
 
@@ -160,6 +206,10 @@ class EpgGridPublisher(Publisher):
         self._slugs = []
         self._payloads = {}
         self._queue = []
+        self._current = None
+        self._generation = 0
+        self._completed_slugs = []
+        self._active = False
         self._started_at = 0.0
         self._refresh = Ticker(self.regenerate, "epg grid refresh")
         self._step = Ticker(self._next_bouquet, "epg grid step")
@@ -175,12 +225,17 @@ class EpgGridPublisher(Publisher):
         if self._channels() is None:
             LOG.info("the EPG grid needs the channel list, which did not start")
             return False
+        self._active = True
         self._channels().when_changed(self.regenerate)
         self.regenerate()
         self._refresh.start(REFRESH_MILLISECONDS)
         return True
 
     def stop(self):
+        self._active = False
+        self._generation += 1
+        self._queue = []
+        self._current = None
         self._refresh.stop()
         self._step.stop()
 
@@ -203,13 +258,14 @@ class EpgGridPublisher(Publisher):
     # ------------------------------------------------------------- generation --
 
     def regenerate(self):
-        """Rebuild every configured bouquet, one per tick of the main loop."""
+        """Rebuild every configured bouquet in small, yielding channel batches."""
         channels = self._channels()
         if channels is None:
             return 0
+        self._generation += 1
         self._queue = list(channels.bouquets)
-        self._payloads = {}
-        self._slugs = []
+        self._current = None
+        self._completed_slugs = []
         self._started_at = time.time()
         if not self._queue:
             self._finished()
@@ -218,39 +274,63 @@ class EpgGridPublisher(Publisher):
         return len(self._queue)
 
     def _next_bouquet(self):
-        if not self._queue:
+        if not self._active:
+            return
+        generation = self._generation
+        if self._current is None and not self._queue:
             self._finished()
             return
-        bouquet = self._queue.pop(0)
-        began = time.time()
-        try:
-            payload = build(bouquet, self.events_per_channel)
-        except Exception:
-            LOG.exception("could not build the grid for %s", bouquet.get("name"))
-            payload = None
-        elapsed = int((time.time() - began) * 1000)
-        if payload is not None:
-            slug = slugify(bouquet.get("name"))
-            if slug:
-                self._payloads[slug] = payload
-                if slug not in self._slugs:
-                    self._slugs.append(slug)
-                self.publish("epg_grid/" + slug, payload)
-            events = sum(len(entry["events"]) for entry in payload["channels"])
-            line = LOG.warning if elapsed >= SLOW_MILLISECONDS else LOG.info
-            line(
-                "epg grid: %s took %d ms for %d channel(s), %d event(s)",
-                bouquet.get("name"),
-                elapsed,
-                len(payload["channels"]),
-                events,
-            )
+        if self._current is None:
+            self._current = _build_state(self._queue.pop(0), self.events_per_channel)
+        state = self._current
+        payload_channels = state["payload"]["channels"]
+        start = state["cursor"]
+        stop = min(start + CHANNELS_PER_STEP, len(payload_channels))
+        if start < stop and state["count"] > 0:
+            srefs = [entry["sref"] for entry in payload_channels[start:stop]]
+            minutes = state["count"] * MINUTES_PER_EVENT + EXTRA_MINUTES
+            try:
+                rows = _rows(epg_cache(), srefs, minutes)
+            except Exception:
+                LOG.exception("could not build an EPG grid batch")
+                rows = []
+            if generation != self._generation or state is not self._current:
+                return
+            _add_rows(state, rows)
+        state["cursor"] = stop
+        if stop < len(payload_channels):
+            self._step.start(STEP_MILLISECONDS, True)
+            return
+
+        payload = _finish_state(state)
+        self._current = None
+        bouquet = state["bouquet"]
+        elapsed = int((time.time() - state["began"]) * 1000)
+        slug = slugify(bouquet.get("name"))
+        if slug:
+            self._payloads[slug] = payload
+            if slug not in self._completed_slugs:
+                self._completed_slugs.append(slug)
+            self.publish("epg_grid/" + slug, payload)
+        events = sum(len(entry["events"]) for entry in payload["channels"])
+        line = LOG.warning if elapsed >= SLOW_MILLISECONDS else LOG.info
+        line(
+            "epg grid: %s took %d ms for %d channel(s), %d event(s)",
+            bouquet.get("name"), elapsed, len(payload["channels"]), events,
+        )
         if self._queue:
             self._step.start(STEP_MILLISECONDS, True)
-        else:
-            self._finished()
+            return
+        self._finished()
 
     def _finished(self):
+        if self._current is not None or self._queue:
+            return
+        completed = set(self._completed_slugs)
+        self._payloads = {
+            slug: payload for slug, payload in self._payloads.items() if slug in completed
+        }
+        self._slugs = list(self._completed_slugs)
         total = int((time.time() - self._started_at) * 1000)
         LOG.info("epg grid: %d bouquet(s) in %d ms", len(self._slugs), total)
         if self.bridge is not None:

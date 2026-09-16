@@ -28,6 +28,7 @@ class LoopMonitor:
         self._heartbeat = None
         self._ui_thread = None
         self._last_report = None
+        self._last_gap_report = None
         self._stalled = False
         self._run = 0
         self._stop_event = None
@@ -42,6 +43,7 @@ class LoopMonitor:
             self._heartbeat = now
             self._ui_thread = threading.get_ident()
             self._last_report = None
+            self._last_gap_report = None
             self._stalled = False
             stop_event = threading.Event()
             self._stop_event = stop_event
@@ -78,9 +80,26 @@ class LoopMonitor:
             stop_event.set()
 
     def _beat(self):
+        now = self._clock()
         with self._lock:
-            self._heartbeat = self._clock()
+            if self._stop_event is None:
+                return
+            gap = 0.0 if self._heartbeat is None else max(0.0, now - self._heartbeat)
+            report_gap = gap > STALL_SECONDS and (
+                self._stalled
+                or self._last_gap_report is None
+                or now - self._last_gap_report >= REPORT_SECONDS
+            )
+            self._heartbeat = now
             self._ui_thread = threading.get_ident()
+            if report_gap:
+                self._last_gap_report = now
+                self._stalled = False
+                self._last_report = None
+        if report_gap:
+            # The loop is running again, so its current stack is not evidence
+            # of what held it. Preserve the measured gap without guessing.
+            LOG.warning("event loop resumed; heartbeat gap %.1fs", gap)
 
     def _watch(self, run, stop_event):
         while not stop_event.wait(HEARTBEAT_MILLISECONDS / 1000.0):
