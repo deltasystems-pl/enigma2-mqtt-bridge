@@ -22,6 +22,8 @@ from .publisher import Publisher
 LOG = get_logger("volume")
 
 RECONCILE_MILLISECONDS = 5000
+BIND_RETRY_MILLISECONDS = 250
+BIND_RETRY_LIMIT = 20
 
 MINIMUM = 0
 MAXIMUM = 100
@@ -168,27 +170,49 @@ class VolumePublisher(Publisher):
     def __init__(self, bridge=None):
         Publisher.__init__(self, bridge)
         self._ticker = Ticker(self._reconcile, "volume")
-        self._deferred_wrap = Ticker(self._wrap, "volume binding")
+        self._deferred_wrap = Ticker(self._retry_wrap, "volume binding")
         self._originals = {}
         self._control = None
+        self._bind_attempts = 0
+        self._stopped = False
+        self._fallback_logged = False
 
     def start(self):
         if read() is None:
             return False
+        self._stopped = False
+        self._bind_attempts = 0
+        self._fallback_logged = False
         if not self._wrap():
             # WHERE_SESSIONSTART runs from Session.__init__, before OpenViX
-            # constructs VolumeControl. One turn of the main loop is late enough
-            # to see it, without turning a missing singleton into a retry loop.
-            self._deferred_wrap.start(0, True)
+            # constructs VolumeControl. Its exact delay is image-dependent, so
+            # retry for a bounded five seconds rather than guessing one turn.
+            self._schedule_wrap()
         self._ticker.start(RECONCILE_MILLISECONDS)
         return True
 
     def stop(self):
+        self._stopped = True
         self._deferred_wrap.stop()
         self._ticker.stop()
         self._unwrap()
 
     # -------------------------------------------------------------- wrapping --
+
+    def _schedule_wrap(self):
+        if self._stopped or self._bind_attempts >= BIND_RETRY_LIMIT:
+            return
+        self._bind_attempts += 1
+        self._deferred_wrap.start(BIND_RETRY_MILLISECONDS, True)
+
+    def _retry_wrap(self):
+        if not self._wrap():
+            self._schedule_wrap()
+            if self._bind_attempts >= BIND_RETRY_LIMIT and not self._fallback_logged:
+                LOG.info(
+                    "no VolumeControl instance after startup; retrying on the 5 s tick"
+                )
+                self._fallback_logged = True
 
     def _wrap(self):
         if self._control is not None:
@@ -197,7 +221,6 @@ class VolumePublisher(Publisher):
         if control is None:
             # The reconciliation alone still publishes every change within five
             # seconds, so this is a slower feature area, not a missing one.
-            LOG.info("no VolumeControl instance; volume changes arrive on the 5 s tick")
             return False
         self._control = control
         for name in WRAPPED:
@@ -251,6 +274,8 @@ class VolumePublisher(Publisher):
             self.publish("volume", payload)
 
     def _reconcile(self):
+        if self._control is None:
+            self._wrap()
         self._publish_now()
 
     def snapshot(self):

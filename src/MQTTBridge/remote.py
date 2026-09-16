@@ -7,11 +7,11 @@ holding the remote finds that their television has stopped responding. This
 plugin observes; it never consumes, and it never *acts* on a key either.
 `KEY_POWER` is published like any other and interpreted by nobody here.
 
-The press model is deliberately not the flag model. enigma2 reports a make, then
-repeats while the button is held, then a long marker, then a break. A household
-automation wants one event per press with „was it held?" attached, so the repeats
-are dropped and the press is published at the break, as `long` if the long marker
-was seen and `short` otherwise.
+The press model is deliberately not the flag model. Physical OpenViX input reports
+a make, repeats while the button is held, then a break; synthetic input can also
+report a long marker. A household automation wants one event per press with „was
+it held?" attached, so the press is published once at the terminal marker or
+break. Repeated input held for at least a second is the conservative fallback.
 
 The publish rate is capped. A remote whose button is stuck, or a child leaning on
 the handset, would otherwise turn into a hundred retained-free publishes a second
@@ -37,6 +37,11 @@ FLAG_LONG = 3
 # The contract's cap, counted over a sliding second.
 MAX_PUBLISHES_PER_SECOND = 20
 RATE_WINDOW_SECONDS = 1.0
+
+# OpenViX starts repeats after 500 ms by default. One repeat can therefore still
+# be an ordinary tap; require twice that interval before using repeats as the
+# fallback for a missing long marker.
+LONG_PRESS_FALLBACK_SECONDS = 1.0
 
 # A priority low enough that every other handler in the receiver is offered the
 # key first. `-maxsize - 1` is the most negative integer this Python has, which
@@ -166,6 +171,7 @@ class KeyPublisher(Publisher):
     def __init__(self, bridge=None):
         Publisher.__init__(self, bridge)
         self._held = {}
+        self._finished = set()
         self._limiter = RateLimiter(MAX_PUBLISHES_PER_SECOND, "key presses")
         # 🔴 One object, kept for the life of the publisher. `self._on_key` is a
         # *new* bound method every time it is read, and the action map holds the
@@ -195,6 +201,8 @@ class KeyPublisher(Publisher):
         return True
 
     def stop(self):
+        self._held.clear()
+        self._finished.clear()
         if not self._bound:
             return
         self._bound = False
@@ -226,19 +234,36 @@ class KeyPublisher(Publisher):
         code = int(key)
         flag = int(flag)
         if flag == FLAG_MAKE:
-            self._held[code] = False
+            self._finished.discard(code)
+            self._held[code] = {
+                "started": time.monotonic(),
+                "repeated": False,
+            }
             return
         if flag == FLAG_LONG:
-            if code in self._held:
-                self._held[code] = True
+            if self._held.pop(code, None) is not None:
+                # OpenViX's action map does not offer BREAK to this binding
+                # after it has offered LONG, so LONG is itself terminal.
+                self._finished.add(code)
+                self._emit(code, PRESS_LONG)
             return
         if flag == FLAG_REPEAT:
             # A held button, reported many times a second. The press is
             # published once, at the break.
+            if code in self._held:
+                self._held[code]["repeated"] = True
             return
         if flag != FLAG_BREAK:
             return
-        was_long = self._held.pop(code, False)
+        if code in self._finished:
+            # Some forks and the test action map do still deliver the break.
+            self._finished.remove(code)
+            return
+        held = self._held.pop(code, None)
+        was_long = False
+        if held is not None:
+            elapsed = time.monotonic() - held["started"]
+            was_long = held["repeated"] and elapsed >= LONG_PRESS_FALLBACK_SECONDS
         self._emit(code, PRESS_LONG if was_long else PRESS_SHORT)
 
     # --------------------------------------------------------------- publishing --

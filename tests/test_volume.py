@@ -161,7 +161,7 @@ def test_the_publisher_still_starts_without_a_volume_control(make_bridge, factor
     assert "volume" in bridge.capabilities()
 
 
-def test_volume_control_created_after_session_start_is_wrapped_on_the_next_turn(
+def test_volume_control_created_after_session_start_is_wrapped_after_delayed_turns(
     make_bridge, factory, settings, receiver
 ):
     """OpenViX creates VolumeControl after it runs WHERE_SESSIONSTART plugins."""
@@ -176,8 +176,14 @@ def test_volume_control_created_after_session_start_is_wrapped_on_the_next_turn(
     publisher = bridge.publisher("volume")
 
     assert publisher._control is None
-    assert publisher._deferred_wrap.timer.started == (0, True)
+    assert publisher._deferred_wrap.timer.started == (
+        volume.BIND_RETRY_MILLISECONDS,
+        True,
+    )
 
+    # More than one main-loop turn can pass before the image constructs it.
+    publisher._deferred_wrap.timer.fire()
+    assert publisher._control is None
     VolumeControl.instance = control
     publisher._deferred_wrap.timer.fire()
     publisher._deferred_wrap.timer.fire()
@@ -192,3 +198,43 @@ def test_volume_control_created_after_session_start_is_wrapped_on_the_next_turn(
     publisher.stop()
     assert publisher._deferred_wrap.timer.stopped is True
     assert control.volUp is not wrapped
+
+
+def test_volume_binding_retry_is_bounded(make_bridge, settings, receiver, monkeypatch):
+    """An image without the singleton does not retry forever."""
+    from Components.VolumeControl import VolumeControl
+
+    monkeypatch.setattr(VolumeControl, "instance", None)
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+    publisher = bridge.publisher("volume")
+
+    for _ in range(volume.BIND_RETRY_LIMIT + 3):
+        publisher._deferred_wrap.timer.fire()
+
+    assert publisher._control is None
+    assert publisher._bind_attempts == volume.BIND_RETRY_LIMIT
+
+
+def test_reconciliation_eventually_binds_a_late_volume_control(
+    make_bridge, settings, receiver
+):
+    """An image slower than the startup window does not lose hooks forever."""
+    from Components.VolumeControl import VolumeControl
+
+    control = receiver.volume_control
+    VolumeControl.instance = None
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+    publisher = bridge.publisher("volume")
+
+    for _ in range(volume.BIND_RETRY_LIMIT):
+        publisher._deferred_wrap.timer.fire()
+    VolumeControl.instance = control
+    publisher._ticker.timer.fire()
+
+    assert publisher._control is control

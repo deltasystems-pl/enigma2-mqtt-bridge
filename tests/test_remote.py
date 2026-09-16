@@ -41,6 +41,55 @@ def test_a_long_press_is_published_once_as_long(live_bridge, factory):
     assert entries[0].json()["press"] == "long"
 
 
+def test_a_long_marker_is_terminal_because_openvix_suppresses_its_break(live_bridge,
+                                                                        factory):
+    press(live_bridge, RED, MAKE, LONG)
+    assert factory.client.last(KEY).json()["press"] == "long"
+    press(live_bridge, RED, BREAK)
+    assert len(factory.client.all_for(KEY)) == 1
+
+
+def test_a_fresh_make_clears_a_long_markers_tombstone(live_bridge, factory):
+    press(live_bridge, RED, MAKE, LONG)
+    press(live_bridge, RED, MAKE, BREAK)
+    entries = factory.client.all_for(KEY)
+    assert [entry.json()["press"] for entry in entries] == ["long", "short"]
+
+
+def test_repeats_and_duration_recover_a_missing_long_marker(live_bridge, factory,
+                                                            monkeypatch):
+    """Some physical input drivers deliver repeats and break, but no flag 3."""
+    now = [1000.0]
+    monkeypatch.setattr(remote.time, "monotonic", lambda: now[0])
+    press(live_bridge, RED, MAKE, REPEAT, REPEAT)
+    now[0] += 2.0
+    press(live_bridge, RED, BREAK)
+    entries = factory.client.all_for(KEY)
+    assert len(entries) == 1
+    assert entries[0].json()["press"] == "long"
+
+
+def test_an_early_repeat_does_not_turn_a_tap_into_a_long_press(live_bridge, factory,
+                                                               monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(remote.time, "monotonic", lambda: now[0])
+    press(live_bridge, RED, MAKE, REPEAT)
+    now[0] += remote.LONG_PRESS_FALLBACK_SECONDS - 0.01
+    press(live_bridge, RED, BREAK)
+    assert factory.client.last(KEY).json()["press"] == "short"
+
+
+def test_duration_without_a_repeat_is_still_a_short_press(live_bridge, factory,
+                                                           monkeypatch):
+    """Elapsed time alone is not enough evidence to invent a long press."""
+    now = [1000.0]
+    monkeypatch.setattr(remote.time, "monotonic", lambda: now[0])
+    press(live_bridge, RED, MAKE)
+    now[0] += 2.0
+    press(live_bridge, RED, BREAK)
+    assert factory.client.last(KEY).json()["press"] == "short"
+
+
 def test_repeats_alone_publish_nothing(live_bridge, factory):
     press(live_bridge, RED, MAKE, REPEAT, REPEAT, REPEAT)
     assert factory.client.all_for(KEY) == []
@@ -136,6 +185,14 @@ def test_the_binding_is_at_the_lowest_possible_priority(live_bridge, receiver):
 def test_stopping_unbinds(live_bridge, receiver):
     live_bridge.publisher("keys").stop()
     assert receiver.actions.bound == []
+
+
+def test_stopping_forgets_an_in_progress_key(live_bridge, factory):
+    publisher = live_bridge.publisher("keys")
+    press(live_bridge, RED, MAKE, REPEAT)
+    publisher.stop()
+    assert publisher._held == {}
+    assert publisher._finished == set()
 
 
 def test_a_key_is_injected_as_a_make_and_a_break(live_bridge, receiver):

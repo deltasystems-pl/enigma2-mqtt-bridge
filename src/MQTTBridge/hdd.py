@@ -11,6 +11,7 @@ missing mount is the failure this topic exists to catch.
 """
 
 import os
+import threading
 
 from .enigma2 import Ticker
 from .log import get_logger
@@ -58,19 +59,88 @@ class HddPublisher(Publisher):
         Publisher.__init__(self, bridge)
         self.path = path
         self._ticker = Ticker(self._poll, "hdd")
+        self._cached = None
+        self._worker_running = False
+        self._worker_lock = threading.Lock()
+        self._generation = 0
+        self._latest_started_generation = None
+        self._probe_serial = 0
+        self._latest_probe_serial = 0
+        self._stopped = True
 
     def start(self):
+        self._generation += 1
+        self._stopped = False
+        self._start_probe()
         self._ticker.start(POLL_MILLISECONDS)
         return True
 
     def stop(self):
+        self._generation += 1
+        self._stopped = True
         self._ticker.stop()
 
     def _poll(self):
-        payload = read(self.path)
+        self._start_probe()
+
+    def _start_probe(self):
+        if self._stopped:
+            return False
+        with self._worker_lock:
+            if self._worker_running:
+                return False
+            self._worker_running = True
+            self._probe_serial += 1
+            serial = self._probe_serial
+            self._latest_probe_serial = serial
+        generation = self._generation
+        self._latest_started_generation = generation
+        try:
+            threading.Thread(
+                target=self._probe,
+                args=(generation, serial),
+                name="mqttbridge-hdd",
+                daemon=True,
+            ).start()
+        except Exception:
+            with self._worker_lock:
+                self._worker_running = False
+            LOG.exception("could not start the recording disk probe")
+            return False
+        return True
+
+    def _probe(self, generation, serial):
+        try:
+            payload = read(self.path)
+        except Exception:
+            LOG.exception("the recording disk probe raised")
+            payload = {"mounted": False, "path": self.path, "free_mb": None}
+        with self._worker_lock:
+            self._worker_running = False
+        client = getattr(self.bridge, "client", None) if self.bridge is not None else None
+        dispatch = getattr(client, "_dispatch", None)
+        if dispatch is None:
+            LOG.debug("the recording disk probe has no main-loop dispatcher; dropping its result")
+            return
+        try:
+            dispatch(self._finish_probe, generation, serial, payload)
+        except Exception:
+            LOG.exception("could not return the recording disk probe to the main loop")
+
+    def _finish_probe(self, generation, serial, payload):
+        if serial != self._latest_probe_serial:
+            return
+        if self._stopped or generation != self._generation:
+            if (
+                not self._stopped
+                and self._latest_started_generation != self._generation
+            ):
+                self._start_probe()
+            return
+        self._cached = payload
         if payload["mounted"] is False:
             LOG.debug("%s is not mounted", self.path)
         self.publish("hdd", payload)
 
     def snapshot(self):
-        return {"hdd": read(self.path)}
+        return {"hdd": self._cached} if self._cached is not None else {}

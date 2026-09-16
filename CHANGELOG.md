@@ -43,9 +43,13 @@ version that has no section here.
 - Every successful `cmd/screenshot` now publishes a fresh `screen` event even when its JPEG is
   byte-identical to the previous capture. Asynchronous capture failures report `last_error` for
   commanded screenshots, while automatic captures only log their failure.
-- Volume hooks now bind on the first main-loop turn, after images such as OpenViX create their
-  `VolumeControl` singleton, so remote and OpenWebif button changes publish immediately instead of
-  waiting for the five-second reconciliation.
+- Volume hooks now retry for a bounded five-second startup window while images such as OpenViX
+  create their `VolumeControl` singleton, so remote and OpenWebif button changes publish
+  immediately instead of waiting for the five-second reconciliation.
+- Remote-key events classify a physical hold as `long` from its repeat duration when an image
+  omits the synthetic long marker, while still emitting one event and never swallowing the key.
+- Recording-disk probes now run outside the receiver's main loop, so an unavailable network mount
+  cannot freeze the user interface; unresolved startup probes no longer report a false disk loss.
 - `docs/TOPICS.md` gained the `channels` topic, the capability vocabulary's thirteenth name, the
   discovery entity table, and the four things about Home Assistant 2026.9 that were measured
   rather than assumed — `default_entity_id` in place of `object_id`, removal by platform key,
