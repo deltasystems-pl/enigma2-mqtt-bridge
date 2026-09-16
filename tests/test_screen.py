@@ -49,6 +49,27 @@ def test_the_picture_is_published_when_grab_finishes(live_bridge, factory, tmp_p
     assert entry.retain is True
 
 
+def test_an_identical_commanded_picture_is_still_a_fresh_state_event(
+    live_bridge, factory, tmp_path, monkeypatch
+):
+    """The screen topic acknowledges each command, even when the pixels did not move."""
+    found = publisher(live_bridge, tmp_path)
+    now = [1000.0]
+    monkeypatch.setattr(screen_module.time, "time", lambda: now[0])
+
+    found.capture(commanded=True)
+    write_a_picture(found.path)
+    ConsoleAppContainer.instances[-1].finish(0)
+
+    now[0] += 6
+    factory.client.clear()
+    found.capture(commanded=True)
+    write_a_picture(found.path)
+    ConsoleAppContainer.instances[-1].finish(0)
+
+    assert factory.client.last(SCREEN).payload == JPEG
+
+
 def test_the_file_is_removed_after_it_is_published(live_bridge, tmp_path):
     import os
 
@@ -66,6 +87,29 @@ def test_a_grab_that_wrote_nothing_publishes_nothing(live_bridge, factory, tmp_p
     ConsoleAppContainer.instances[-1].finish(0)
     assert factory.client.all_for(SCREEN) == []
     assert "grab wrote nothing" in plugin_log()
+    assert factory.client.last(LAST_ERROR).json()["cmd"] == "screenshot"
+    assert "no image" in factory.client.last(LAST_ERROR).json()["error"]
+
+
+def test_an_automatic_grab_failure_does_not_fail_an_unrelated_command(
+    live_bridge, factory, tmp_path
+):
+    found = publisher(live_bridge, tmp_path)
+    found.capture(commanded=False)
+    factory.client.clear()
+    ConsoleAppContainer.instances[-1].finish(1)
+    assert factory.client.last(LAST_ERROR) is None
+
+
+def test_a_commanded_grab_failure_is_reported_asynchronously(
+    live_bridge, factory, tmp_path
+):
+    found = publisher(live_bridge, tmp_path)
+    found.capture(commanded=True)
+    factory.client.clear()
+    ConsoleAppContainer.instances[-1].finish(1)
+    assert factory.client.last(LAST_ERROR).json()["cmd"] == "screenshot"
+    assert "exited with code 1" in factory.client.last(LAST_ERROR).json()["error"]
 
 
 def test_an_empty_file_publishes_nothing(live_bridge, factory, tmp_path):

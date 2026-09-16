@@ -40,6 +40,12 @@ version that has no section here.
 
 - A state topic is published **only when it has changed**. The snapshot on every connect is the
   deliberate exception, because a broker that lost its retained store has to be told everything.
+- Every successful `cmd/screenshot` now publishes a fresh `screen` event even when its JPEG is
+  byte-identical to the previous capture. Asynchronous capture failures report `last_error` for
+  commanded screenshots, while automatic captures only log their failure.
+- Volume hooks now bind on the first main-loop turn, after images such as OpenViX create their
+  `VolumeControl` singleton, so remote and OpenWebif button changes publish immediately instead of
+  waiting for the five-second reconciliation.
 - `docs/TOPICS.md` gained the `channels` topic, the capability vocabulary's thirteenth name, the
   discovery entity table, and the four things about Home Assistant 2026.9 that were measured
   rather than assumed — `default_entity_id` in place of `object_id`, removal by platform key,

@@ -490,7 +490,7 @@ It is a cleanup, not a factory reset: settings are untouched.
 ```json
 {
   "node_id": "vuuno4kse_005301",
-  "name": "Dekoder salon",
+  "name": "Living room receiver",
   "base_topic": "enigma2",
   "image": "OpenViX 6.6.007",
   "enigma": "2024-09-11-Release",

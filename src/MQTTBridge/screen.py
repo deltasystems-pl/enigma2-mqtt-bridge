@@ -68,6 +68,7 @@ class ScreenPublisher(Publisher):
         self.path = path
         self._container = None
         self._busy = False
+        self._commanded = False
         self._last_capture = 0.0
         self._last_image = None
         self._debounce = Ticker(self._debounced, "screenshot debounce")
@@ -192,6 +193,7 @@ class ScreenPublisher(Publisher):
             # produced nothing.
             return "grab could not be started"
         self._busy = True
+        self._commanded = bool(commanded)
         self._last_capture = time.time()
         return None
 
@@ -223,21 +225,36 @@ class ScreenPublisher(Publisher):
         """`grab` is done — read the file, publish it, and delete it."""
         self._busy = False
         self._container = None
+        commanded, self._commanded = self._commanded, False
         try:
             if retval:
                 LOG.warning("grab exited with %s", retval)
+                self._remove_output()
+                if commanded:
+                    self.report("screenshot", "grab exited with code " + str(retval))
+                return
             data = self._read_and_remove()
             if data is None:
+                if commanded:
+                    self.report("screenshot", "grab produced no image")
                 return
             if len(data) > MAX_BYTES:
-                self.report(
-                    "screenshot",
+                message = (
                     "the capture was " + str(len(data)) + " bytes, over the "
-                    + str(MAX_BYTES) + " byte limit",
+                    + str(MAX_BYTES) + " byte limit"
                 )
+                if commanded:
+                    self.report("screenshot", message)
+                else:
+                    LOG.warning(message)
                 return
             self._last_image = data
-            self.publish("screen", data)
+            # A screenshot is also the acknowledgement of cmd/screenshot. Even
+            # two byte-identical captures are two completed commands, so this
+            # topic deliberately bypasses the state de-duplication used by the
+            # periodic publishers.
+            if self.bridge is not None:
+                self.bridge.publish_raw(self.bridge.topic("screen"), data)
             LOG.info("published a %d byte screenshot", len(data))
         except Exception:
             LOG.exception("handling a finished screenshot raised")
@@ -257,6 +274,12 @@ class ScreenPublisher(Publisher):
             LOG.warning("grab wrote an empty file")
             return None
         return data
+
+    def _remove_output(self):
+        try:
+            os.remove(self.path)
+        except OSError:
+            pass
 
     def snapshot(self):
         # The last picture, so a broker that lost its retained store gets it

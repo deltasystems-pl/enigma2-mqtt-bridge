@@ -168,29 +168,37 @@ class VolumePublisher(Publisher):
     def __init__(self, bridge=None):
         Publisher.__init__(self, bridge)
         self._ticker = Ticker(self._reconcile, "volume")
+        self._deferred_wrap = Ticker(self._wrap, "volume binding")
         self._originals = {}
         self._control = None
 
     def start(self):
         if read() is None:
             return False
-        self._wrap()
+        if not self._wrap():
+            # WHERE_SESSIONSTART runs from Session.__init__, before OpenViX
+            # constructs VolumeControl. One turn of the main loop is late enough
+            # to see it, without turning a missing singleton into a retry loop.
+            self._deferred_wrap.start(0, True)
         self._ticker.start(RECONCILE_MILLISECONDS)
         return True
 
     def stop(self):
+        self._deferred_wrap.stop()
         self._ticker.stop()
         self._unwrap()
 
     # -------------------------------------------------------------- wrapping --
 
     def _wrap(self):
+        if self._control is not None:
+            return True
         control = _control()
         if control is None:
             # The reconciliation alone still publishes every change within five
             # seconds, so this is a slower feature area, not a missing one.
             LOG.info("no VolumeControl instance; volume changes arrive on the 5 s tick")
-            return
+            return False
         self._control = control
         for name in WRAPPED:
             original = getattr(control, name, None)
@@ -203,6 +211,7 @@ class VolumePublisher(Publisher):
                 LOG.exception("could not wrap VolumeControl.%s", name)
                 continue
             self._originals[name] = original
+        return True
 
     def _make_wrapper(self, original):
         publisher = self

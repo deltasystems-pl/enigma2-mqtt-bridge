@@ -159,3 +159,36 @@ def test_the_publisher_still_starts_without_a_volume_control(make_bridge, factor
     bridge.start()
     factory.client.fire_connect()
     assert "volume" in bridge.capabilities()
+
+
+def test_volume_control_created_after_session_start_is_wrapped_on_the_next_turn(
+    make_bridge, factory, settings, receiver
+):
+    """OpenViX creates VolumeControl after it runs WHERE_SESSIONSTART plugins."""
+    from Components.VolumeControl import VolumeControl
+
+    control = receiver.volume_control
+    VolumeControl.instance = None
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+    publisher = bridge.publisher("volume")
+
+    assert publisher._control is None
+    assert publisher._deferred_wrap.timer.started == (0, True)
+
+    VolumeControl.instance = control
+    publisher._deferred_wrap.timer.fire()
+    publisher._deferred_wrap.timer.fire()
+    factory.client.fire_connect()
+    factory.client.clear()
+    control.volUp()
+
+    assert factory.client.last(VOLUME).json()["level"] == 36
+    assert len(factory.client.all_for(VOLUME)) == 1
+
+    wrapped = control.volUp
+    publisher.stop()
+    assert publisher._deferred_wrap.timer.stopped is True
+    assert control.volUp is not wrapped
