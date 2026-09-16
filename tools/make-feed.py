@@ -114,7 +114,9 @@ def stanza(ipk: Path, prefix: str) -> str:
     lines.append(f"Filename: {filename}")
     lines.append(f"Size: {len(blob)}")
     lines.append(f"SHA256sum: {hashlib.sha256(blob).hexdigest()}")
-    lines.append(f"MD5Sum: {hashlib.md5(blob).hexdigest()}")  # noqa: S324 - opkg index format
+    # MD5 is not a security choice here: opkg's index format specifies this field
+    # and older clients read it. SHA256sum above is the one that is checked.
+    lines.append(f"MD5Sum: {hashlib.md5(blob).hexdigest()}")
     return "\n".join(lines) + "\n"
 
 
