@@ -40,7 +40,9 @@ version that has no section here.
   deleted, because it holds a broker password in clear. A file that cannot be parsed is left
   alone and logged. Only the key names are ever logged, never the values.
 - The node id is derived once from the box type and the last six digits of the MAC and then
-  kept, so it survives a reinstall.
+  kept, so it survives a reinstall. The box type is taken from `boxbranding`, then
+  `/proc/stb/info/boxtype`, then `/etc/image-version` — deliberately ahead of
+  `/proc/stb/info/model`, which on a Vu+ Uno 4K SE running OpenViX 6.6 reads `dm8000`.
 - `cmd/ha_mode` and `cmd/reset`, with `cmd/discovery` to republish the announcement. A command
   that arrives retained is discarded and logged; so is one over 4 KB. A refusal goes to
   `last_error`, which is cleared when a command next succeeds.

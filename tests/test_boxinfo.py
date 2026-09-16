@@ -99,6 +99,63 @@ def test_image_version_from_boxbranding():
     assert boxinfo.image_version() == "openvix 6.6.007"
 
 
+# What /etc/image-version actually looks like on the operator's Vu+ Uno 4K SE.
+OPENVIX_IMAGE_VERSION = """Creator = OpenViX
+Version = 6.6
+Build = 007
+Dev = 009
+Type = release
+Machine = vuuno4kse
+URL = http://www.world-of-satellite.com
+distro=openvix
+compile-date=20240910
+"""
+
+
+def test_model_in_proc_is_not_trusted_over_the_image_file(monkeypatch):
+    """This box reports `/proc/stb/info/model` = dm8000. It is not a Dreambox."""
+    monkeypatch.setattr(boxinfo, "_boxbranding", lambda: None)
+
+    def read(path):
+        if path == "/etc/image-version":
+            return OPENVIX_IMAGE_VERSION
+        if path == "/proc/stb/info/model":
+            return "dm8000"
+        return ""
+
+    monkeypatch.setattr(boxinfo, "_read_text", read)
+    monkeypatch.setattr(boxinfo, "mac_address", lambda: DOC_MAC)
+    assert boxinfo.box_type() == "vuuno4kse"
+    assert boxinfo.derive_node_id() == "vuuno4kse_005301"
+
+
+def test_the_stub_model_is_still_better_than_nothing(monkeypatch):
+    monkeypatch.setattr(boxinfo, "_boxbranding", lambda: None)
+    monkeypatch.setattr(
+        boxinfo, "_read_text",
+        lambda path: "dm8000" if path == "/proc/stb/info/model" else "",
+    )
+    assert boxinfo.box_type() == "dm8000"
+
+
+def test_the_image_name_is_spelled_the_way_a_person_would(monkeypatch):
+    """boxbranding says `openvix`; the image file says `OpenViX`. Show the latter."""
+    monkeypatch.setattr(
+        boxinfo, "_read_text",
+        lambda path: OPENVIX_IMAGE_VERSION if path == "/etc/image-version" else "",
+    )
+    assert boxinfo.image_version() == "OpenViX 6.6.007"
+
+
+def test_the_image_file_alone_carries_the_build(monkeypatch):
+    monkeypatch.setattr(boxinfo, "_boxbranding", lambda: None)
+    monkeypatch.setattr(
+        boxinfo, "_read_text",
+        lambda path: OPENVIX_IMAGE_VERSION if path == "/etc/image-version" else "",
+    )
+    assert boxinfo.image_version() == "OpenViX 6.6.007"
+
+
 def test_image_version_falls_back_to_etc(monkeypatch):
     monkeypatch.setattr(boxinfo, "_boxbranding", lambda: None)
     monkeypatch.setattr(

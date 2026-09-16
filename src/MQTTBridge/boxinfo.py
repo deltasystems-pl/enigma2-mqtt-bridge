@@ -78,10 +78,21 @@ def _key_values(path):
 
 
 def box_type():
-    """The machine name, lowercase — `vuuno4kse` and friends."""
+    """The machine name, lowercase — `vuuno4kse` and friends.
+
+    The order matters and was learned from a real box. `/proc/stb/info/model` on
+    a Vu+ Uno 4K SE running OpenViX 6.6 reads **`dm8000`** — a Dreambox
+    compatibility stub, not this receiver — while `/proc/stb/info/boxtype` is not
+    there at all. `/etc/image-version` names the machine honestly on every OE
+    image, so it is asked before `model` rather than after it. Getting this wrong
+    means a node id that identifies the wrong hardware, and the node id is what
+    every retained topic and every Home Assistant entity hangs off.
+    """
     value = _branding_call("getBoxType")
     if not value:
         value = _read_text("/proc/stb/info/boxtype")
+    if not value:
+        value = _key_values("/etc/image-version").get("machine", "")
     if not value:
         value = _read_text("/proc/stb/info/model")
     if not value:
@@ -127,21 +138,32 @@ def derive_node_id():
 
 
 def image_version():
-    """Image name and version, as the box reports it."""
-    distro = _branding_call("getImageDistro")
-    version = _branding_call("getImageVersion")
-    build = _branding_call("getImageBuild")
-    if distro and version:
-        if build:
-            return distro + " " + version + "." + build
-        return distro + " " + version
+    """Image name and version, as the box reports it — `OpenViX 6.6.007`.
 
+    `/etc/image-version` is read first for the *name* only, because it is the one
+    source that spells it the way a person would: `Creator = OpenViX` against
+    `boxbranding.getImageDistro()`'s `openvix`. The numbers come from
+    `boxbranding` when it is there, since an image can be updated without that
+    file being rewritten.
+    """
     values = _key_values("/etc/image-version")
-    distro = distro or values.get("distro", "") or values.get("creator", "")
-    version = version or values.get("imageversion", "") or values.get("version", "")
-    if distro and version:
-        return distro + " " + version
-    return distro or version or UNKNOWN
+    name = (
+        values.get("creator", "")
+        or _branding_call("getImageDistro")
+        or values.get("distro", "")
+    )
+    version = (
+        _branding_call("getImageVersion")
+        or values.get("imageversion", "")
+        or values.get("version", "")
+    )
+    build = _branding_call("getImageBuild") or values.get("build", "")
+
+    if name and version:
+        if build:
+            return name + " " + version + "." + build
+        return name + " " + version
+    return name or version or UNKNOWN
 
 
 def enigma_version():
