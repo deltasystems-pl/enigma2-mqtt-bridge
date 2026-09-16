@@ -1,0 +1,48 @@
+Enigma2 MQTT Bridge
+Copyright (C) 2026 Damian Wilczek (deltasystems-pl)
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation; either version 2 of the License, or (at your option) any later
+version. The full text is in LICENSE.
+
+The plugin imports enigma2's own Python modules, which are GPL-2.0; that is why
+the plugin itself is GPL-2.0-or-later.
+
+
+Third-party components
+======================
+
+paho-mqtt
+---------
+
+  Vendored version   2.1.0
+  Upstream project   https://github.com/eclipse-paho/paho.mqtt.python
+  Upstream package   https://pypi.org/project/paho-mqtt/2.1.0/
+  Source archive     paho_mqtt-2.1.0.tar.gz
+  Archive SHA-256    12d6e7511d4137555a3f6ea167ae846af2c7357b10bc6fa4f7c3968fc1723834
+  License            EDL-1.0 (BSD 3-Clause)
+
+  paho-mqtt is dual-licensed under the Eclipse Public License 2.0 and the
+  Eclipse Distribution License 1.0. This project takes it under the
+  **Eclipse Distribution License 1.0**, which is a BSD 3-Clause licence and is
+  compatible with the GPL.
+
+  The package is vendored verbatim from the source archive above, with no
+  modifications to its code. It lives in the tree at:
+
+    src/MQTTBridge/paho/                 the package, as shipped upstream
+    src/MQTTBridge/paho/LICENSE.txt      upstream's licence pointer
+    src/MQTTBridge/paho/edl-v10          Eclipse Distribution License 1.0
+    src/MQTTBridge/paho/epl-v20          Eclipse Public License 2.0
+
+  Installed on the receiver at:
+
+    /usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge/paho/
+
+  It is vendored rather than declared as a dependency because Enigma2 images
+  ship no pip and carry no paho package in their feeds.
+
+  Bumping the vendored version means: re-download the archive, verify its
+  SHA-256 against the PyPI JSON API, replace the package verbatim, update the
+  version and hash above, and add a CHANGELOG entry.

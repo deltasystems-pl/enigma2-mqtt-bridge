@@ -1,0 +1,151 @@
+# Troubleshooting
+
+Two windows solve almost everything: the plugin's log on the box, and a subscription to the
+broker.
+
+```sh
+ssh root@<box-ip> 'tail -f /home/root/mqttbridge.log'
+mosquitto_sub -h <broker> -u <user> -P <password> -v -t 'enigma2/#'
+```
+
+If the log says the plugin is doing something and the subscription disagrees, the problem is
+between the plugin and the broker — credentials, ACL, or the network. If the log is silent, the
+plugin is not running.
+
+## The log
+
+`/home/root/mqttbridge.log`, capped at 1 MB with two rotations (`mqttbridge.log.1`, `.2`), so
+leaving `debug` on cannot fill the flash. Levels are `error`, `warning`, `info` (default) and
+`debug`; set it on the setup screen.
+
+- **`info`** logs the lifecycle: start, connect, disconnect and reconnect, mode changes,
+  refused commands.
+- **`debug`** adds every publish and every command received, with its payload. Use it while you
+  are getting something working, then turn it back down — it is also a log of what is watched.
+
+The password is never written at any level. If you see it there, that is a bug worth a security
+report.
+
+## Nothing happens at all
+
+**The plugin never loaded.** `opkg install` reporting success only means the files landed;
+enigma2 looks for plugins at start-up. Restart the GUI (`init 4 && sleep 3 && init 3`) and check
+that *Menu → Plugins* lists **MQTT Bridge**.
+
+**The plugin is idle because the configuration is invalid.** A missing broker host, an
+unparseable port, an empty node id — the plugin writes one line saying so and then does nothing
+for the rest of the session. This is deliberate: **the GUI must never fail to start because of
+the bridge**, so there is no retry storm and no dialog. Fix the setting and restart the GUI.
+
+```sh
+grep -i 'mqttbridge' /home/root/mqttbridge.log | head
+grep 'config.plugins.mqttbridge' /etc/enigma2/settings
+```
+
+**The provisioning file was ignored.** It is read once at start-up and then deleted. If
+`/etc/enigma2/mqttbridge.json` is still there, the plugin has not started since you wrote it. If
+it is gone but nothing changed, the log says which keys it rejected.
+
+## The broker refuses the connection
+
+The log names the reason paho gives back. The three common ones:
+
+- **Connection refused, not authorised** — wrong username or password, or the broker has no such
+  user. Test the same credentials from your PC with `mosquitto_sub -u … -P …`.
+- **Connection refused, protocol** — something that is not an MQTT broker on that port, or TLS
+  expected and not configured. Check `port` and `tls`.
+- **Connection timed out / no route** — the box cannot reach the broker. `ping` it from the box;
+  receivers on a separate VLAN are the usual cause.
+
+A reconnect is attempted with a 1 → 60 second backoff, forever. A box that comes back after an
+outage republishes its whole state on connect, so nothing needs to be prodded.
+
+## The box connects but no topics appear
+
+This is almost always the **ACL**, and it is the nastiest failure in this document because
+nothing anywhere reports an error: **Mosquitto drops an ACL-denied publish silently** and the
+publishing client sees success. The plugin thinks it published, the log says it published, and
+the topic never exists.
+
+Diagnose it from outside, as a privileged user:
+
+```sh
+mosquitto_sub -h <broker> -u <admin-user> -P <password> -v -t '#' | grep -i mqttbridge
+mosquitto_pub -h <broker> -u <the-box-user> -P <box-password> -t 'enigma2/<node_id>/test' -m hi
+```
+
+If the box's own user cannot publish to its own topic tree, the ACL is wrong. Compare it with
+the snippet in [SETUP.md](SETUP.md#broker-access), and remember the four entries: the node's own
+tree, the announcement, and the two Home Assistant discovery prefixes. An ACL that covers
+`enigma2/<node>/#` but not `homeassistant/device/<node>/#` produces exactly the symptom „the
+sensors work but Home Assistant never discovers the device".
+
+`availability` is the canary: it is published first and by the last will, so if even that is
+missing the login or the ACL is the problem, not the plugin's hooks.
+
+## Entities Home Assistant will never update again
+
+**Retained ghosts.** A retained topic belongs to the broker, and it outlives whatever created it.
+Change the node id, rename the box, uninstall the plugin without resetting first — and the old
+retained payloads sit there forever. Home Assistant keeps the entities, permanently stale, and
+nothing will ever correct them.
+
+```sh
+mosquitto_sub -h <broker> -u <admin-user> -v -t 'enigma2/#' --retained-only
+mosquitto_sub -h <broker> -u <admin-user> -v -t 'homeassistant/device/#' --retained-only
+```
+
+The cure while the plugin is still installed:
+
+```sh
+mosquitto_pub -h <broker> -u <user> -P <password> -t 'enigma2/<node_id>/cmd/reset' -m PRESS -q 1
+```
+
+which retracts every retained topic the node owns, including the discovery payloads it remembers
+in `components.json`. The plugin republishes everything on its next connect, so a reset is safe
+at any time.
+
+If the plugin is already gone, retract by hand: publish an **empty** retained message
+(`mosquitto_pub -r -n -t …`) to each leftover topic. There is no other way — a broker will not
+forget a retained topic on its own.
+
+## Duplicated entities
+
+You are in `discovery` mode and running the companion integration at the same time. The
+integration switches the box to `integration` mode itself and the plugin retracts its discovery
+payloads first, so this should not happen — but it does if the mode was changed by hand, or if
+the retraction did not reach the broker (see the ACL section). Check `info.ha_mode`, then
+publish to `cmd/ha_mode` with the mode you want; the switch always retracts before it announces.
+
+## A restart lost a recording
+
+`cmd/restart_gui`, `cmd/reboot` and `cmd/deep_standby` are all refused while a recording is
+running or a timer is due within ten minutes, and `last_error` says so. But **a GUI restart from
+anywhere else — the receiver's menu, `init 4`, `opkg`, your own script — kills a running
+recording**, and nothing in the plugin can prevent it.
+
+So: check the `recording` topic before restarting anything, and never let a package script or a
+cron job restart enigma2 unconditionally. This is why `postinst` only prints a message.
+
+## Commands appear to do nothing
+
+There is no acknowledgement topic. A command's answer is the state topic changing; a refusal is
+`last_error`. In order:
+
+1. Subscribe to `enigma2/<node_id>/last_error` — a guard that refused the command says so there,
+   with the reason.
+2. Check the payload form in [TOPICS.md](TOPICS.md#2-commands). `cmd/zap` by name is refused
+   unless exactly one service matches within the configured bouquets; `cmd/key` is refused for an
+   unknown key name.
+3. Check `info.capabilities`. If the hook a command needs is not in that list, this image did not
+   give it to the plugin and the command cannot work — say so in an issue with your image name.
+4. Make sure you are not publishing the command **retained**. A retained command re-fires on
+   every reconnect and is a genuinely bad time; if you have done it, publish an empty retained
+   payload to that topic to clear it.
+
+## Reporting a problem
+
+Open an issue with: the image and its version, the plugin version, the `info` payload (its
+`capabilities` list is the interesting part), the relevant part of the log at `debug`, and what
+you expected instead. For anything with security implications, use a private advisory instead —
+see [SECURITY.md](../SECURITY.md).

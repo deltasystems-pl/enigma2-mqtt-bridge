@@ -1,0 +1,10 @@
+#!/bin/sh
+# Never restart the GUI from a package script: a restart during a recording
+# loses the recording, and opkg has no idea what the box is doing.
+echo ""
+echo "MQTT Bridge installed."
+echo "Restart enigma2 to activate it, then configure it under"
+echo "  Menu -> Plugins -> MQTT Bridge"
+echo "or drop a provisioning file at /etc/enigma2/mqttbridge.json before the restart."
+echo ""
+exit 0

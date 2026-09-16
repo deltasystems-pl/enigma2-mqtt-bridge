@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tooling
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: ruff
+        run: ruff check .
+
+      - name: pyflakes
+        # Belt and braces: pyflakes has caught an unexercised NameError that ruff's
+        # default rules let through. The vendored MQTT client is upstream's code and
+        # is never linted here.
+        run: |
+          files=$(git ls-files '*.py' | grep -v '^src/MQTTBridge/paho/')
+          echo "$files"
+          pyflakes $files
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 is the floor (OpenPLi 9), 3.12 is what OpenViX and OpenATV run,
+        # 3.14 is OpenBH 6.
+        python-version: ["3.9", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install tooling
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: pytest
+        run: pytest -q
+
+  build-ipk:
+    name: Build IPK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build
+        run: ./tools/build-ipk.sh --allow-unreleased
+
+      - name: Check the archive members
+        run: |
+          ipk=$(ls dist/*.ipk)
+          members=$(ar t "$ipk" | tr '\n' ' ')
+          echo "members: $members"
+          test "$members" = "debian-binary control.tar.gz data.tar.gz "
+          cd dist && sha256sum -c ./*.sha256
+
+      - name: Show what is inside
+        run: |
+          ipk=$(ls dist/*.ipk)
+          mkdir -p /tmp/ipk && cd /tmp/ipk && ar x "$GITHUB_WORKSPACE/$ipk"
+          echo "--- control ---"
+          tar tzf control.tar.gz
+          tar xzf control.tar.gz -O ./control
+          echo "--- data ---"
+          tar tzf data.tar.gz | head -40
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ipk
+          path: dist/
+          if-no-files-found: error

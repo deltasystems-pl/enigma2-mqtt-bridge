@@ -1,0 +1,5 @@
+# Development and CI tooling. The plugin itself has no runtime dependency that is
+# not vendored — see NOTICE.
+ruff>=0.6
+pyflakes>=3.2
+pytest>=8.0

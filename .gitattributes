@@ -1,0 +1,9 @@
+# The repository is edited on Windows and deployed to a busybox receiver.
+# Everything is LF in the tree and in the checkout, so shebangs survive the trip.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ipk binary
+*.gz binary
+*.mo binary

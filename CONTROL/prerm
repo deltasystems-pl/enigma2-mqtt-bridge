@@ -1,0 +1,10 @@
+#!/bin/sh
+# Nothing destructive happens here on purpose.
+#
+# Retained topics are the plugin's, not opkg's: publish to
+# enigma2/<node_id>/cmd/reset while the plugin is still running to retract them,
+# and only then remove the package. Settings in /etc/enigma2/settings are left
+# alone so that a reinstall finds its configuration.
+echo "MQTT Bridge: retained topics are not retracted by uninstalling."
+echo "Publish to enigma2/<node_id>/cmd/reset first if you want them gone."
+exit 0

@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, publish and refresh the feed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check the tag against version.py and the changelog
+        id: check
+        run: |
+          version=$(python - <<'PY'
+          import re
+          src = open("src/MQTTBridge/version.py", encoding="utf-8").read()
+          print(re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', src, re.M).group(1))
+          PY
+          )
+          tag="${GITHUB_REF_NAME}"
+          echo "version.py: $version"
+          echo "tag:        $tag"
+          if [ "$tag" != "v$version" ]; then
+            echo "::error::tag $tag does not match version.py ($version)"
+            exit 1
+          fi
+          if ! grep -qF "## [$version]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$version]' section"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build the IPK
+        run: ./tools/build-ipk.sh
+
+      - name: Extract the release notes
+        run: |
+          python - "${{ steps.check.outputs.version }}" <<'PY' > release-notes.md
+          import re
+          import sys
+
+          version = sys.argv[1]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          pattern = re.compile(
+              r"^## \[" + re.escape(version) + r"\][^\n]*\n(.*?)(?=^## |\Z)",
+              re.S | re.M,
+          )
+          match = pattern.search(text)
+          sys.stdout.write(match.group(1).strip() + "\n" if match else "")
+          PY
+          cat release-notes.md
+
+      - name: Publish the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: |
+            dist/*.ipk
+            dist/*.ipk.sha256
+          fail_on_unmatched_files: true
+
+      - name: Put the package into the opkg feed
+        run: |
+          version="${{ steps.check.outputs.version }}"
+          # Stage everything the gh-pages checkout will need before switching
+          # branches: gh-pages carries the feed, not the sources.
+          mkdir -p /tmp/release
+          cp dist/*.ipk dist/*.ipk.sha256 /tmp/release/
+          cp tools/make-feed.py /tmp/make-feed.py
+          git config user.name "deltasystems-pl"
+          git config user.email "it-poland@hengst.com"
+          git fetch origin gh-pages
+          git checkout gh-pages
+          mkdir -p feed
+          cp /tmp/release/*.ipk /tmp/release/*.ipk.sha256 feed/
+          python3 /tmp/make-feed.py feed/
+          git add feed
+          if git diff --cached --quiet; then
+            echo "feed unchanged"
+          else
+            git commit -m "Publish $version to the opkg feed"
+            git push origin gh-pages
+          fi

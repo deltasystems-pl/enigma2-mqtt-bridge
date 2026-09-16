@@ -1,0 +1,19 @@
+# Tooling configuration only. The plugin is not a pip-installable package: it is
+# packaged as an IPK by tools/build-ipk.sh and installed into enigma2's plugin
+# directory. Nothing here is published to PyPI.
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+extend-exclude = [
+    # Vendored verbatim from upstream; see NOTICE. Never linted, never modified.
+    "src/MQTTBridge/paho",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
