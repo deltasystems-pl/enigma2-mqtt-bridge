@@ -10,7 +10,10 @@
 # builds that happen on every push.
 #
 # The output is reproducible: the same commit produces byte-identical IPKs, so
-# the SHA-256 published next to a release can be checked by rebuilding.
+# the SHA-256 published next to a release can be checked by rebuilding. That now
+# holds across filesystems too - the tree is staged on a native one and every
+# mode is written into the archive explicitly, so a build from a Windows
+# checkout and a build from an ext4 one agree byte for byte.
 #
 set -euo pipefail
 
@@ -18,7 +21,7 @@ ALLOW_UNRELEASED=0
 for arg in "$@"; do
     case "$arg" in
         --allow-unreleased) ALLOW_UNRELEASED=1 ;;
-        -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "build-ipk.sh: unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
@@ -64,49 +67,71 @@ if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
 fi
 export SOURCE_DATE_EPOCH
 
+# Permissions are written into the archive by tar rather than read off the
+# staging directory, because the staging directory cannot be trusted to have
+# any. A checkout on a Windows drive - /mnt/c under WSL, or any DrvFs/NTFS
+# mount - reports every file as 0777 and accepts chmod without doing anything,
+# so an archive built from one would ship world-writable code into the plugin
+# directory, and its SHA-256 would differ from the same tree built on ext4. Both
+# halves of that are fixed here: --mode below, and a native staging tree further
+# down. Either alone would do; together the modes are a property of the build
+# instead of a property of whoever ran it.
+#
+#   u=rwX,go=rX  ->  0755 for directories and for anything already executable,
+#                    0644 for everything else.
 TAR_FLAGS=(--sort=name --owner=0 --group=0 --numeric-owner --mtime="@$SOURCE_DATE_EPOCH"
+           --mode='u=rwX,go=rX'
            --format=gnu --exclude=__pycache__ --exclude='*.pyc' --exclude='*.po')
 
 # ---------------------------------------------------------------- staging ----
-BUILD=$REPO_ROOT/build/ipk
-DIST=$REPO_ROOT/dist
-rm -rf "$BUILD"
-mkdir -p "$BUILD/data/$PLUGIN_DIR" "$BUILD/control" "$DIST"
+# Deliberately not under $REPO_ROOT: see above. mktemp gives us a directory on
+# a real filesystem, where chmod means something and the X in --mode has a
+# truthful executable bit to read.
+STAGE=$(mktemp -d "/tmp/$PACKAGE.XXXXXXXXXX")
+trap 'rm -rf "$STAGE"' EXIT
 
-cp -r src/MQTTBridge/. "$BUILD/data/$PLUGIN_DIR/"
-find "$BUILD/data" -name '__pycache__' -type d -prune -exec rm -rf {} +
-find "$BUILD/data" -name '*.pyc' -delete
+DIST=$REPO_ROOT/dist
+rm -rf "$REPO_ROOT/build"          # where the tree used to be staged
+mkdir -p "$STAGE/data/$PLUGIN_DIR" "$STAGE/control" "$DIST"
+
+cp -r src/MQTTBridge/. "$STAGE/data/$PLUGIN_DIR/"
+find "$STAGE/data" -name '__pycache__' -type d -prune -exec rm -rf {} +
+find "$STAGE/data" -name '*.pyc' -delete
 
 # Translations: .po lives in git, .mo is built here and never committed.
-if compgen -G "$BUILD/data/$PLUGIN_DIR/locale/*/LC_MESSAGES/*.po" > /dev/null; then
-    for po in "$BUILD/data/$PLUGIN_DIR"/locale/*/LC_MESSAGES/*.po; do
+if compgen -G "$STAGE/data/$PLUGIN_DIR/locale/*/LC_MESSAGES/*.po" > /dev/null; then
+    command -v msgfmt > /dev/null || {
+        echo "build-ipk.sh: msgfmt not found - install gettext to compile the translations" >&2
+        exit 1
+    }
+    for po in "$STAGE/data/$PLUGIN_DIR"/locale/*/LC_MESSAGES/*.po; do
         mo="${po%.po}.mo"
         msgfmt -o "$mo" "$po"
         echo "build-ipk.sh: compiled $(basename "$(dirname "$(dirname "$po")")")/$(basename "$mo")"
     done
 fi
-find "$BUILD/data" -name '*.po' -delete
+find "$STAGE/data" -name '*.po' -delete
 
-sed "s/@VERSION@/$VERSION/" CONTROL/control > "$BUILD/control/control"
-cp CONTROL/postinst CONTROL/prerm "$BUILD/control/"
+sed "s/@VERSION@/$VERSION/" CONTROL/control > "$STAGE/control/control"
+cp CONTROL/postinst CONTROL/prerm "$STAGE/control/"
 
-# Normalise modes so the archive does not inherit whatever filesystem it was
-# staged on (a Windows drive reports everything as 0777).
-find "$BUILD" -type d -exec chmod 755 {} +
-find "$BUILD" -type f -exec chmod 644 {} +
-chmod 755 "$BUILD/control/postinst" "$BUILD/control/prerm"
+# Belt to the --mode braces: normalise the staging tree as well, so what tar is
+# told and what tar reads agree and a future flag change cannot quietly matter.
+find "$STAGE" -type d -exec chmod 755 {} +
+find "$STAGE" -type f -exec chmod 644 {} +
+chmod 755 "$STAGE/control/postinst" "$STAGE/control/prerm"
 
 # ------------------------------------------------------------------ build ----
 IPK=$DIST/${PACKAGE}_${VERSION}_all.ipk
 rm -f "$IPK" "$IPK.sha256"
 
-printf '2.0\n' > "$BUILD/debian-binary"
+printf '2.0\n' > "$STAGE/debian-binary"
 
-tar "${TAR_FLAGS[@]}" -cf "$BUILD/control.tar" -C "$BUILD/control" .
-tar "${TAR_FLAGS[@]}" -cf "$BUILD/data.tar" -C "$BUILD/data" .
-gzip -n -9 "$BUILD/control.tar" "$BUILD/data.tar"
+tar "${TAR_FLAGS[@]}" -cf "$STAGE/control.tar" -C "$STAGE/control" .
+tar "${TAR_FLAGS[@]}" -cf "$STAGE/data.tar" -C "$STAGE/data" .
+gzip -n -9 "$STAGE/control.tar" "$STAGE/data.tar"
 
-( cd "$BUILD" && ar rcD "$IPK" debian-binary control.tar.gz data.tar.gz )
+( cd "$STAGE" && ar rcD "$IPK" debian-binary control.tar.gz data.tar.gz )
 
 # ----------------------------------------------------------------- verify ----
 MEMBERS=$(ar t "$IPK" | tr '\n' ' ')
@@ -114,6 +139,27 @@ case "$MEMBERS" in
     "debian-binary control.tar.gz data.tar.gz "*) ;;
     *) echo "build-ipk.sh: unexpected archive members: $MEMBERS" >&2; exit 1 ;;
 esac
+
+# Modes, asserted from the archive itself. Reading them back is the only check
+# that survives a change of staging filesystem, tar version or flag.
+check_modes() {
+    local archive=$1 allowed=$2 bad
+    bad=$(tar tzvf "$archive" | awk '{print $1, $NF}' | grep -vE "^($allowed) " || true)
+    if [ -n "$bad" ]; then
+        echo "build-ipk.sh: unexpected modes in $(basename "$archive"):" >&2
+        echo "$bad" >&2
+        exit 1
+    fi
+}
+check_modes "$STAGE/data.tar.gz" 'drwxr-xr-x|-rw-r--r--'
+check_modes "$STAGE/control.tar.gz" 'drwxr-xr-x|-rw-r--r--|-rwxr-xr-x'
+
+for script in ./postinst ./prerm; do
+    mode=$(tar tzvf "$STAGE/control.tar.gz" | awk -v f="$script" '$NF == f {print $1}')
+    [ "$mode" = "-rwxr-xr-x" ] || {
+        echo "build-ipk.sh: $script is $mode, expected -rwxr-xr-x" >&2; exit 1
+    }
+done
 
 ( cd "$DIST" && sha256sum "$(basename "$IPK")" > "$(basename "$IPK").sha256" )
 
