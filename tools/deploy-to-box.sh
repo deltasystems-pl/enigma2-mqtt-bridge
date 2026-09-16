@@ -169,12 +169,16 @@ esac
 # ------------------------------------------------------------------ install ----
 
 say "backing up the installed plugin"
+# The stamp is expanded here, not on the box: a `$(date)` inside the single
+# quotes of the remote command is a literal, and the first version of this script
+# produced a directory called exactly `MQTTBridge.bak-$(date +%Y%m%d-%H%M%S)`.
+STAMP=$(date +%Y%m%d-%H%M%S)
 # Outside Extensions/ on purpose: enigma2 walks that directory at start-up and
 # tries to import every subdirectory in it as a plugin.
 box_ssh "set -e
          if [ -d '$PLUGIN_DIR' ]; then
              mkdir -p '$BACKUP_DIR'
-             cp -a '$PLUGIN_DIR' '$BACKUP_DIR/MQTTBridge.bak-\$(date +%Y%m%d-%H%M%S)'
+             cp -a '$PLUGIN_DIR' '$BACKUP_DIR/MQTTBridge.bak-$STAMP'
              ls -1 '$BACKUP_DIR' | tail -n 3
          else
              echo '   nothing installed yet'
