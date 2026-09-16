@@ -6,6 +6,8 @@ is missing from the screen — invisible, and therefore unreachable on a box wit
 no SSH — and a save that does not reach enigma2's settings file.
 """
 
+from Components.ConfigList import ConfigListScreen as REAL_CONFIG_LIST_SCREEN
+
 from MQTTBridge import config as settings_module
 from MQTTBridge import setup as setup_screen
 
@@ -13,13 +15,27 @@ from MQTTBridge import setup as setup_screen
 class FakeSession:
     def __init__(self):
         self.opened = []
+        self.callbacks = []
 
     def open(self, what, *args, **kwargs):
         self.opened.append(what)
 
+    def openWithCallback(self, callback, what, *args, **kwargs):
+        self.opened.append(what)
+        self.callbacks.append(callback)
+        self.last_args = args
+
+    def answer(self, value):
+        """Give the dialog the answer the user would have given."""
+        self.callbacks.pop()(value)
+
 
 def build(settings, bridge=None):
     return setup_screen.MQTTBridgeSetup(FakeSession(), settings=settings, bridge=bridge)
+
+
+def session_of(screen):
+    return screen.session
 
 
 def test_every_setting_appears_exactly_once(settings):
@@ -88,13 +104,45 @@ def test_a_bridge_that_cannot_reload_does_not_break_the_screen(settings):
     assert screen.closed_with == (True,)
 
 
-def test_cancelling_restores_every_element(settings):
+def test_cancelling_an_untouched_screen_closes_it_straight_away(settings):
+    screen = build(settings)
+    screen.keyCancel()
+
+    assert session_of(screen).opened == []
+    assert screen.closed_with == (False,)
+
+
+def test_cancelling_after_an_edit_asks_first(settings):
+    """Exit is next to the arrow keys, and a broker password is minutes of typing."""
+    from Screens.MessageBox import MessageBox
+
     screen = build(settings)
     settings.host.value = "10.0.0.5"
     screen.keyCancel()
 
+    assert session_of(screen).opened == [MessageBox]
+    assert screen.closed_with is None
+    assert settings.host.value == "10.0.0.5"
+
+
+def test_answering_yes_restores_every_element_and_closes(settings):
+    screen = build(settings)
+    settings.host.value = "10.0.0.5"
+    screen.keyCancel()
+    session_of(screen).answer(True)
+
     assert settings.host.value == ""
     assert screen.closed_with == (False,)
+
+
+def test_answering_no_leaves_the_screen_and_the_edits_alone(settings):
+    screen = build(settings)
+    settings.host.value = "10.0.0.5"
+    screen.keyCancel()
+    session_of(screen).answer(False)
+
+    assert settings.host.value == "10.0.0.5"
+    assert screen.closed_with is None
 
 
 def test_the_status_line_names_the_state_and_the_node(settings):
@@ -138,3 +186,47 @@ def test_the_screen_carries_its_own_skin(settings):
     skin = setup_screen.MQTTBridgeSetup.skin
     for widget in ("config", "status", "key_red", "key_green"):
         assert 'name="' + widget + '"' in skin
+
+
+# --------------------------------------------------------------- the status line --
+
+
+def test_the_status_line_is_refreshed_while_the_fields_are_edited(settings):
+    """`on_change` is why the line is worth having: it answers the question
+    „did that help?" without closing and reopening the screen."""
+    screen = build(settings)
+    settings.enabled.value = False
+    screen._entry_changed()
+
+    assert "Disabled" in screen["status"].text
+
+
+def test_the_config_list_is_given_the_on_change_hook(settings, monkeypatch):
+    seen = {}
+
+    class Recording(REAL_CONFIG_LIST_SCREEN):
+        def __init__(self, entries, session=None, on_change=None):
+            seen["on_change"] = on_change
+            REAL_CONFIG_LIST_SCREEN.__init__(self, entries, session=session)
+
+    monkeypatch.setattr(setup_screen, "ConfigListScreen", Recording)
+    build(settings)
+    assert callable(seen["on_change"])
+
+
+def test_an_image_whose_config_list_takes_no_on_change_still_works(settings, monkeypatch):
+    """Older images' ConfigListScreen has a narrower signature; the screen is
+    not worth losing over a refreshing label."""
+    calls = []
+
+    class Legacy(REAL_CONFIG_LIST_SCREEN):
+        def __init__(self, entries, session=None):
+            calls.append(entries)
+            REAL_CONFIG_LIST_SCREEN.__init__(self, entries, session=session)
+
+    monkeypatch.setattr(setup_screen, "ConfigListScreen", Legacy)
+    screen = build(settings)
+
+    assert len(calls) == 1
+    assert screen["config"].list == screen.entries
+    assert screen["status"].text

@@ -79,9 +79,12 @@ export SOURCE_DATE_EPOCH
 #
 #   u=rwX,go=rX  ->  0755 for directories and for anything already executable,
 #                    0644 for everything else.
+# `*.pot` as well as `*.po`: the template is a translator's file and `*.po` does
+# not match it, so it used to ship to receivers that can do nothing with it.
 TAR_FLAGS=(--sort=name --owner=0 --group=0 --numeric-owner --mtime="@$SOURCE_DATE_EPOCH"
            --mode='u=rwX,go=rX'
-           --format=gnu --exclude=__pycache__ --exclude='*.pyc' --exclude='*.po')
+           --format=gnu --exclude=__pycache__ --exclude='*.pyc'
+           --exclude='*.po' --exclude='*.pot')
 
 # ---------------------------------------------------------------- staging ----
 # Deliberately not under $REPO_ROOT: see above. mktemp gives us a directory on
@@ -111,6 +114,7 @@ if compgen -G "$STAGE/data/$PLUGIN_DIR/locale/*/LC_MESSAGES/*.po" > /dev/null; t
     done
 fi
 find "$STAGE/data" -name '*.po' -delete
+find "$STAGE/data" -name '*.pot' -delete
 
 sed "s/@VERSION@/$VERSION/" CONTROL/control > "$STAGE/control/control"
 cp CONTROL/postinst CONTROL/prerm "$STAGE/control/"

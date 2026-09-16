@@ -55,6 +55,9 @@ Only the keys you include are written; the rest keep their defaults. At start-up
 imports them into its configuration and then **deletes the file**, because it holds a password in
 clear. The setup screen shows the same values afterwards and is the way to change them later.
 
+A file it could not use at all — every key misspelt, say — is **kept**, with one line in the log
+saying so: a typo should cost you a correction, not the only copy of what you wrote.
+
 Write it with `0600` permissions, and be aware it is on flash between the write and the next
 start of enigma2:
 

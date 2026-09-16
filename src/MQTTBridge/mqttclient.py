@@ -8,32 +8,54 @@ runs on the main thread is wrapped so that a bad payload cannot raise into the
 user interface.
 
 The vendored paho package imports itself as the top-level name `paho`, so the
-plugin directory goes on `sys.path` before it is imported. That is the whole
-trick: no install step, no pip, no dependency on an image feed.
+directory that contains it goes on `sys.path` before it is imported. That is the
+whole trick: no install step, no pip, no dependency on an image feed.
 """
 
 import os
 import sys
+import threading
 
 from .log import get_logger, redact
 
 LOG = get_logger("mqtt")
 
 PLUGIN_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
+# The vendored packages live one directory down, and it is that directory — not
+# the plugin's own — that goes on sys.path. See `ensure_paho_on_path`.
+VENDOR_DIRECTORY = os.path.join(PLUGIN_DIRECTORY, "_vendor")
 
 KEEPALIVE = 30
 RECONNECT_MIN = 1
 RECONNECT_MAX = 60
+
+# Bounds on paho's own outgoing queues. A broker that stops reading must cost a
+# dropped publish and a log line, not unbounded growth inside the process that
+# draws the television.
+MAX_QUEUED_MESSAGES = 200
+MAX_INFLIGHT_MESSAGES = 20
+
+# paho's MQTTErrorCode.MQTT_ERR_QUEUE_SIZE, spelled out so that reading a publish
+# result needs no import of the vendored package.
+MQTT_ERR_QUEUE_SIZE = 15
 
 # How much of a payload a debug line is allowed to carry.
 LOG_PAYLOAD_LIMIT = 500
 
 
 def ensure_paho_on_path():
-    """Make the vendored copy importable as `paho`, exactly once."""
-    if PLUGIN_DIRECTORY not in sys.path:
-        sys.path.insert(0, PLUGIN_DIRECTORY)
-    return PLUGIN_DIRECTORY
+    """Make the vendored copy importable as `paho`, exactly once.
+
+    The directory inserted here is searched **before the standard library**, for
+    the whole enigma2 process and every other plugin in it. So it is the
+    `_vendor` directory and never the plugin's own: this package ships `config`,
+    `setup`, `log`, `keys`, `plugin`, `commands` and `version`, and putting that
+    directory at `sys.path[0]` would make `import config` anywhere in enigma2
+    resolve to ours.
+    """
+    if VENDOR_DIRECTORY not in sys.path:
+        sys.path.insert(0, VENDOR_DIRECTORY)
+    return VENDOR_DIRECTORY
 
 
 def import_paho():
@@ -85,14 +107,42 @@ class MessagePumpDispatcher:
         signal = getattr(self._pump, "recv_msg", None)
         if signal is None:
             raise AttributeError("ePythonMessagePump has no recv_msg")
+        self._signal = signal
         if hasattr(signal, "get"):
             signal.get().append(self._drain)
         else:
             self._connection = signal.connect(self._drain)
 
     def __call__(self, function, *args, **kwargs):
+        pump = self._pump
+        if pump is None:
+            LOG.debug("the message pump is closed; dropping a queued handler")
+            return
         self._queue.put((function, args, kwargs))
-        self._pump.send(0)
+        pump.send(0)
+
+    def stop(self):
+        """Detach from the pump.
+
+        A session is replaced whenever the settings change, and a listener left
+        attached is one more `_drain` on the pump for every reload the box ever
+        does — each holding the dead session's queue alive.
+        """
+        signal, self._signal = self._signal, None
+        self._pump = None
+        if signal is None:
+            return
+        try:
+            if self._connection is not None:
+                # enigma2's own signal connection: dropping the object is the
+                # documented way to disconnect it.
+                self._connection = None
+            elif hasattr(signal, "get"):
+                listeners = signal.get()
+                if self._drain in listeners:
+                    listeners.remove(self._drain)
+        except Exception:
+            LOG.exception("could not detach from the message pump")
 
     def _drain(self, *_ignored):
         while True:
@@ -106,20 +156,22 @@ class MessagePumpDispatcher:
                 LOG.exception("a queued handler raised")
 
 
-def _run_here(function, *args, **kwargs):
-    function(*args, **kwargs)
-
-
 def make_dispatcher():
-    """However this image lets a background thread reach the main loop."""
+    """However this image lets a background thread reach the main loop.
+
+    None when there is no way at all. Running a callback on paho's network
+    thread is not a fallback — it would touch enigma2 from off the main loop,
+    which is how a receiver loses its user interface — so a bridge with no
+    dispatcher stays idle instead.
+    """
     reactor = _twisted_reactor()
     if reactor is not None:
         return reactor.callFromThread
     try:
         return MessagePumpDispatcher()
     except Exception:
-        LOG.warning("no thread bridge available; MQTT callbacks will run on the network thread")
-        return _run_here
+        LOG.error("unsupported image: no main-loop bridge")
+        return None
 
 
 # -------------------------------------------------------------------- client --
@@ -163,10 +215,20 @@ class MqttClient:
         self._on_connect = on_connect
         self._on_message = on_message
         self._on_disconnect = on_disconnect
-        self._dispatch = dispatcher if dispatcher is not None else make_dispatcher()
+        if dispatcher is not None:
+            self._dispatch = dispatcher
+            self._owns_dispatcher = False
+        else:
+            self._dispatch = make_dispatcher()
+            self._owns_dispatcher = True
         self._factory = client_factory if client_factory is not None else default_client_factory
         self._client = None
         self._will = None
+
+    @property
+    def usable(self):
+        """False on an image that offers no way to reach the main loop."""
+        return self._dispatch is not None
 
     # --------------------------------------------------------------- lifecycle --
 
@@ -175,6 +237,18 @@ class MqttClient:
         self._will = (topic, payload, qos, retain)
 
     def start(self):
+        if not self.usable:
+            LOG.error("no main-loop bridge on this image; not connecting")
+            return None
+        if self._client is not None:
+            # Never reuse a client object: paho's network thread is tied to it,
+            # and a second loop_start on the same one is a stranded thread. The
+            # thread bridge is left alone — this session is about to need it.
+            LOG.warning("a session was already open; closing it before opening another")
+            previous, self._client = self._client, None
+            self.connected = False
+            self._close_client(previous)
+
         client = self._factory(self.settings.client_id)
         client.on_connect = self._paho_on_connect
         client.on_message = self._paho_on_message
@@ -194,6 +268,7 @@ class MqttClient:
             client.will_set(topic, payload, qos=qos, retain=retain)
 
         client.reconnect_delay_set(min_delay=RECONNECT_MIN, max_delay=RECONNECT_MAX)
+        _bound_queues(client)
 
         self._client = client
         client.connect_async(
@@ -213,17 +288,44 @@ class MqttClient:
         client = self._client
         self.connected = False
         self._client = None
-        if client is None:
-            return
+        self._close_dispatcher()
+        if client is not None:
+            self._close_client(client)
+
+    def _close_client(self, client):
         try:
             client.disconnect()
         except Exception:
             LOG.exception("disconnect failed")
+        # `loop_stop()` joins paho's network thread, and that thread may be
+        # inside a connect attempt to an address that black-holes packets:
+        # 2–5 seconds of a blocked caller, measured. Both callers of `stop` are
+        # on enigma2's main thread — the setup screen's Save, and the shutdown
+        # hook — so the join gets a thread of its own and the user interface
+        # never waits for a broker to time out.
         try:
-            client.loop_stop()
+            threading.Thread(
+                target=_join_network_thread,
+                args=(client,),
+                name="mqttbridge-stop",
+                daemon=True,
+            ).start()
         except Exception:
-            LOG.exception("stopping the network loop failed")
+            LOG.exception("could not hand the network loop's shutdown to a thread")
         LOG.info("disconnected")
+
+    def _close_dispatcher(self):
+        """Only the one this client made: a dispatcher that was handed in belongs
+        to whoever handed it in."""
+        if not self._owns_dispatcher:
+            return
+        closer = getattr(self._dispatch, "stop", None)
+        if closer is None:
+            return
+        try:
+            closer()
+        except Exception:
+            LOG.exception("closing the thread bridge failed")
 
     # ------------------------------------------------------------------- publish --
 
@@ -243,6 +345,15 @@ class MqttClient:
         except Exception:
             LOG.exception("publishing to %s failed", topic)
             return None
+        if getattr(info, "rc", None) == MQTT_ERR_QUEUE_SIZE:
+            # paho took nothing: the outgoing queue is at its bound, which means
+            # the broker has not been reading for a while. Say so once per
+            # publish rather than let the message vanish silently.
+            LOG.warning(
+                "the outgoing queue is full (%d messages); %s was not queued",
+                MAX_QUEUED_MESSAGES,
+                topic,
+            )
         if LOG.isEnabledFor(10):  # DEBUG
             LOG.debug(
                 "publish %s qos=%d retain=%s %s",
@@ -329,6 +440,29 @@ class MqttClient:
                 self._on_disconnect(reason_code)
         except Exception:
             LOG.exception("the disconnect handler raised; the receiver is unaffected")
+
+
+def _join_network_thread(client):
+    """`loop_stop()`, off the main thread. Never raises into the thread runner."""
+    try:
+        client.loop_stop()
+    except Exception:
+        LOG.exception("stopping the network loop failed")
+
+
+def _bound_queues(client):
+    """Cap what paho will hold for a broker that has stopped reading."""
+    for name, size in (
+        ("max_queued_messages_set", MAX_QUEUED_MESSAGES),
+        ("max_inflight_messages_set", MAX_INFLIGHT_MESSAGES),
+    ):
+        setter = getattr(client, name, None)
+        if setter is None:
+            continue
+        try:
+            setter(size)
+        except Exception:
+            LOG.exception("%s(%d) was refused", name, size)
 
 
 def _describe(data):

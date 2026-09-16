@@ -60,6 +60,40 @@ def test_values_are_saved_through_enigma2(tmp_path, settings):
     assert configfile.save_calls == 1
 
 
+def test_a_file_that_imported_nothing_is_kept(tmp_path, settings, plugin_log):
+    """Every key misspelt is a typo, not an instruction to configure nothing.
+
+    Deleting it would leave somebody with an unchanged plugin and no file to
+    correct — and the file is the only copy of what they meant to write.
+    """
+    target = tmp_path / "mqttbridge.json"
+    write(target, {"mqtt_host": "10.0.0.5", "broker_port": 1883})
+
+    assert settings_module.import_provisioning(str(target), settings) == []
+
+    assert target.exists()
+    assert settings.host.value == ""
+    written = plugin_log()
+    assert "imported nothing" in written
+    assert "mqtt_host" in written
+
+
+def test_a_file_whose_every_value_was_rejected_is_kept(tmp_path, settings):
+    target = tmp_path / "mqttbridge.json"
+    write(target, {"port": "eighteen-eighty-three", "ha_mode": "whatever"})
+
+    assert settings_module.import_provisioning(str(target), settings) == []
+    assert target.exists()
+
+
+def test_one_good_key_is_enough_for_the_file_to_go(tmp_path, settings):
+    target = tmp_path / "mqttbridge.json"
+    write(target, {"host": "10.0.0.5", "nonsense": True})
+
+    assert settings_module.import_provisioning(str(target), settings) == ["host"]
+    assert not target.exists()
+
+
 def test_unknown_keys_are_ignored_and_the_rest_still_applies(tmp_path, settings, plugin_log):
     target = tmp_path / "mqttbridge.json"
     write(target, {"host": "10.0.0.5", "mqtt_host": "wrong", "colour": "blue"})
@@ -91,6 +125,7 @@ def test_an_unknown_choice_is_skipped(tmp_path, settings):
     write(target, {"ha_mode": "whatever"})
     assert settings_module.import_provisioning(str(target), settings) == []
     assert settings.ha_mode.value == "discovery"
+    assert target.exists()
 
 
 def test_friendly_spellings_of_yes_and_no_are_accepted(tmp_path, settings):

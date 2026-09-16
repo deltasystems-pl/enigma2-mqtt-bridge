@@ -31,111 +31,115 @@ msgstr ""
 msgid "Publish receiver state to MQTT and take commands back."
 msgstr ""
 
-#: src/MQTTBridge/setup.py:28
+#: src/MQTTBridge/setup.py:29
 msgid "Enabled"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:29
+#: src/MQTTBridge/setup.py:30
 msgid "Broker address"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:30
+#: src/MQTTBridge/setup.py:31
 msgid "Broker port"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:31
+#: src/MQTTBridge/setup.py:32
 msgid "Use TLS"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:32
+#: src/MQTTBridge/setup.py:33
 msgid "CA certificate file"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:33
+#: src/MQTTBridge/setup.py:34
 msgid "Broker username"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:34
+#: src/MQTTBridge/setup.py:35
 msgid "Broker password"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:35
+#: src/MQTTBridge/setup.py:36
 msgid "Node id"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:36
+#: src/MQTTBridge/setup.py:37
 msgid "Device name"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:37
+#: src/MQTTBridge/setup.py:38
 msgid "Base topic"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:38
+#: src/MQTTBridge/setup.py:39
 msgid "Home Assistant discovery prefix"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:39
+#: src/MQTTBridge/setup.py:40
 msgid "Home Assistant mode"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:40
+#: src/MQTTBridge/setup.py:41
 msgid "Publish remote key presses"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:41
+#: src/MQTTBridge/setup.py:42
 msgid "Screenshots"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:42
+#: src/MQTTBridge/setup.py:43
 msgid "Screenshot interval (seconds)"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:43
+#: src/MQTTBridge/setup.py:44
 msgid "Bouquets for the channel list"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:44
+#: src/MQTTBridge/setup.py:45
 msgid "Allow deep standby and reboot"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:45
+#: src/MQTTBridge/setup.py:46
 msgid "Log level"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:46
+#: src/MQTTBridge/setup.py:47
 msgid "EPG grid events per channel"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:64
+#: src/MQTTBridge/setup.py:65
 msgid "Disabled"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:66 src/MQTTBridge/setup.py:72
+#: src/MQTTBridge/setup.py:67 src/MQTTBridge/setup.py:73
 msgid "Disconnected"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:68
+#: src/MQTTBridge/setup.py:69
 msgid "Idle"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:70
+#: src/MQTTBridge/setup.py:71
 msgid "Connected"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:73
+#: src/MQTTBridge/setup.py:74
 #, python-format
 msgid "Node: %s"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:97
+#: src/MQTTBridge/setup.py:196
+msgid "Really close without saving settings?"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:107
 msgid "Cancel"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:98
+#: src/MQTTBridge/setup.py:108
 msgid "Save"
 msgstr ""
 
-#: src/MQTTBridge/setup.py:111
+#: src/MQTTBridge/setup.py:121
 msgid "MQTT Bridge"
 msgstr ""

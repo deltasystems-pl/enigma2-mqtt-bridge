@@ -32,7 +32,7 @@ def test_info_carries_every_documented_field(connected_bridge, factory):
     }
     assert payload["plugin"] == __version__
     assert payload["boxtype"] == "vuuno4kse"
-    assert payload["enigma"] == "5.4"
+    assert payload["enigma"] == "2024-09-11-Release"
     assert payload["image"] == "openvix 6.6.007"
     assert payload["ha_mode"] == "discovery"
     assert isinstance(payload["uptime"], int)
@@ -43,8 +43,9 @@ def test_info_is_retained(connected_bridge, factory):
     assert factory.client.last(INFO).retain is True
 
 
-def test_capabilities_name_only_what_this_build_publishes(connected_bridge, factory):
-    assert factory.client.last(INFO).json()["capabilities"] == ["info", "reset"]
+def test_capabilities_are_empty_until_a_feature_area_is_bound(connected_bridge, factory):
+    """The contract's vocabulary is the feature areas; this build binds none."""
+    assert factory.client.last(INFO).json()["capabilities"] == []
 
 
 def test_a_publisher_adds_its_name_and_its_snapshot(make_bridge, factory, settings):
@@ -63,7 +64,7 @@ def test_a_publisher_adds_its_name_and_its_snapshot(make_bridge, factory, settin
     bridge.start()
     factory.client.fire_connect()
 
-    assert factory.client.last(INFO).json()["capabilities"] == ["info", "reset", "power"]
+    assert factory.client.last(INFO).json()["capabilities"] == ["power"]
     assert factory.client.last("enigma2/" + NODE + "/power").text == "on"
     assert factory.client.last("enigma2/" + NODE + "/volume").json() == {
         "level": 35, "muted": False
@@ -76,7 +77,7 @@ def test_the_announcement_is_where_the_integration_looks(connected_bridge, facto
     assert payload["name"] == "Living room receiver"
     assert payload["base_topic"] == "enigma2"
     assert payload["ha_mode"] == "discovery"
-    assert payload["capabilities"] == ["info", "reset"]
+    assert payload["capabilities"] == []
     assert set(payload) == {
         "node_id", "name", "base_topic", "image", "enigma", "plugin", "boxtype", "mac", "ip",
         "capabilities", "ha_mode",
@@ -196,15 +197,17 @@ def test_the_node_id_is_derived_and_kept(make_bridge, settings, monkeypatch):
     assert configfile.save_calls == 1
 
 
-def test_shutdown_says_goodbye_and_disconnects(connected_bridge, factory):
-    factory.client.clear()
+def test_shutdown_says_goodbye_and_disconnects(connected_bridge, factory, wait_until):
+    client = factory.client
+    client.clear()
     connected_bridge.stop()
 
-    entry = factory.client.last(AVAILABILITY)
+    entry = client.last(AVAILABILITY)
     assert entry.text == "offline"
     assert entry.retain is True
-    assert factory.client.disconnect_calls == 1
-    assert factory.client.loop_started is False
+    assert client.disconnect_calls == 1
+    # The network loop is stopped off the main thread, so it ends shortly after.
+    assert wait_until(lambda: client.loop_started is False)
 
 
 def test_shutdown_without_a_session_is_harmless(make_bridge):
@@ -288,7 +291,7 @@ def test_a_publisher_that_cannot_bind_is_dropped(make_bridge, factory, settings,
     bridge.start()
     factory.client.fire_connect()
 
-    assert factory.client.last(INFO).json()["capabilities"] == ["info", "reset"]
+    assert factory.client.last(INFO).json()["capabilities"] == []
     assert "does not provide the tuner hooks" in plugin_log()
 
 
@@ -318,6 +321,125 @@ def test_the_default_state_path_sits_beside_enigma2s_settings(monkeypatch):
 def test_the_state_path_falls_back_when_etc_is_read_only(monkeypatch):
     monkeypatch.setattr(discovery.os.path, "isdir", lambda path: False)
     assert discovery.default_state_path("/opt/plugin").endswith("/opt/plugin/mqttbridge-state.json")
+
+
+def test_a_rename_while_disconnected_is_retracted_on_the_next_connect(
+    make_bridge, factory, settings, state_path
+):
+    """The rename that matters happens while nothing is connected.
+
+    `reload` only sees the case where a session was open at the time. A node id
+    edited on a box with no network — or between two runs of the plugin — leaves
+    the old tree retained on the broker with nobody to take it back, and the
+    state file is the only record it ever existed.
+    """
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = "box_a"
+    first = make_bridge()
+    first.start()
+    factory.client.fire_connect()
+    assert "enigma2/box_a/availability" in factory.client.topics()
+
+    # Down, and only then renamed: no session is open to retract anything.
+    factory.client.fire_disconnect()
+    first.stop()
+
+    settings.node_id.value = "box_b"
+    make_bridge().start()
+    fresh = factory.client
+    fresh.fire_connect()
+
+    retracted = [e.topic for e in fresh.published if e.text == "" and e.retain]
+    assert "enigma2/box_a/availability" in retracted
+    assert "enigma2/box_a/info" in retracted
+    assert "enigma2mqtt/discovery/box_a/config" in retracted
+
+    # And before the new node says a word, so nothing is retracted after the
+    # payload that replaced it.
+    topics = fresh.topics()
+    assert topics.index("enigma2/box_a/availability") < topics.index("enigma2/box_b/availability")
+
+
+def test_the_retracted_topics_are_forgotten(make_bridge, factory, settings):
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = "box_a"
+    bridge = make_bridge()
+    bridge.start()
+    factory.client.fire_connect()
+    factory.client.fire_disconnect()
+    bridge.stop()
+
+    settings.node_id.value = "box_b"
+    second = make_bridge()
+    second.start()
+    factory.client.fire_connect()
+    factory.client.clear()
+    factory.client.fire_connect()
+
+    # Nothing of box_a is left to retract a second time.
+    assert not [e for e in factory.client.published if "box_a" in e.topic]
+
+
+def test_a_second_start_leaves_the_open_session_alone(make_bridge, factory, settings, plugin_log):
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    bridge = make_bridge()
+    bridge.start()
+    bridge.start()
+
+    assert len(factory.clients) == 1
+    assert [client for client in factory.clients if client.loop_started] == [factory.client]
+    assert factory.client.disconnect_calls == 0
+    assert "already running" in plugin_log()
+
+
+def test_a_bridge_that_went_idle_can_still_be_started(make_bridge, factory, settings):
+    """The guard is about a live session, not about having tried once."""
+    bridge = make_bridge()
+    bridge.start()
+    assert factory.clients == []
+
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    bridge.start()
+    assert len(factory.clients) == 1
+
+
+def test_an_image_with_no_thread_bridge_stays_idle(make_bridge, factory, monkeypatch, settings,
+                                                   plugin_log):
+    """Running paho's callbacks on its own thread is not an acceptable fallback."""
+    import sys
+
+    from MQTTBridge import mqttclient
+
+    monkeypatch.setattr(mqttclient, "_twisted_reactor", lambda: None)
+    monkeypatch.delitem(sys.modules, "enigma")
+
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    bridge = make_bridge(dispatcher=None)
+    bridge.start()
+
+    assert bridge.running is False
+    assert bridge.client is None
+    assert "no way to reach the main loop" in bridge.idle_reason
+    assert factory.clients == []
+    assert "unsupported image: no main-loop bridge" in plugin_log()
+
+
+def test_a_preposterous_command_name_is_capped_in_last_error(connected_bridge, factory):
+    """The name comes off the topic, so its length is somebody else's choice."""
+    connected_bridge.on_message("enigma2/" + NODE + "/cmd/" + "z" * 4000, b"", False)
+
+    payload = factory.client.last("enigma2/" + NODE + "/last_error").json()
+    assert len(payload["cmd"]) == 64
+    assert payload["cmd"].startswith("zzz")
+    assert payload["error"] == "unknown command"
+
+
+def test_a_short_command_name_is_left_alone(connected_bridge, factory):
+    connected_bridge.on_message("enigma2/" + NODE + "/cmd/nonsense", b"", False)
+    assert factory.client.last("enigma2/" + NODE + "/last_error").json()["cmd"] == "nonsense"
 
 
 def test_a_bridge_built_with_no_arguments_uses_the_real_settings():

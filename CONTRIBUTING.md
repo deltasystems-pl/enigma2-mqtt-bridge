@@ -16,7 +16,7 @@ plain CPython:
 ```sh
 python3 -m pip install -r requirements-dev.txt
 ruff check .
-pyflakes src tools tests        # skip src/MQTTBridge/paho — it is vendored
+pyflakes src tools tests        # skip src/MQTTBridge/_vendor — it is vendored
 pytest -q
 tools/build-ipk.sh --allow-unreleased
 ```
