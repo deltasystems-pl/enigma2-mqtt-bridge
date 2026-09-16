@@ -79,9 +79,8 @@ The plugin has no telemetry, no cloud component and no update check that phones 
 
 ## Install
 
-**From a GitHub release** (any image, one line on the box) — **available from v0.1.0, which is not
-yet released**; the [releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases)
-is empty until it is, and the URL below 404s until then:
+**From a GitHub release** (any image, one line on the box). Every release carries the IPK and its
+SHA-256 on the [releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases):
 
 ```sh
 opkg install https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/download/v0.1.0/enigma2-plugin-extensions-mqttbridge_0.1.0_all.ipk
@@ -171,7 +170,7 @@ in Home Assistant's recorder database by default. If that matters in your househ
 
 | Plugin | Integration |
 |---|---|
-| 0.1.0 | 0.1.0 |
+| 0.1.0 (current) | 0.1.0 |
 
 The integration warns on its `update` entity when the box runs a plugin older than the one it
 bundles.

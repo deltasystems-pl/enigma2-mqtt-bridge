@@ -61,7 +61,7 @@ jobs:
 
       - name: pyflakes
         run: |
-          files=$(git ls-files '*.py' | grep -v '^src/MQTTBridge/paho/')
+          files=$(git ls-files '*.py' | grep -v '^src/MQTTBridge/_vendor/')
           echo "$files"
           pyflakes $files
 
