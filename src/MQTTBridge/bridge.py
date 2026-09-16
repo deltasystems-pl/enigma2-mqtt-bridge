@@ -34,6 +34,7 @@ import time
 from . import boxinfo, discovery
 from . import config as settings_module
 from .commands import CommandDispatcher
+from .diagnostics import LoopMonitor
 from .log import configure as configure_logging
 from .log import get_logger, register_secret
 from .mqttclient import BrokerSettings, MqttClient
@@ -81,11 +82,16 @@ SHUTDOWN_FLUSH_SECONDS = 1.0
 # A command name comes off the topic, so its length is the publisher's choice.
 # The retained `last_error` is not the place to store somebody's 4 KB topic.
 LAST_ERROR_CMD_LIMIT = 64
+SLOW_SNAPSHOT_PUBLISHER_SECONDS = 0.25
+SLOW_SNAPSHOT_TOTAL_SECONDS = 1.0
+
+_DEFAULT_MONITOR = object()
 
 
 class Bridge:
     def __init__(self, session=None, settings=None, client_factory=None, dispatcher=None,
-                 state_store=None, provisioning_path=None, log_path=None):
+                 state_store=None, provisioning_path=None, log_path=None,
+                 loop_monitor=_DEFAULT_MONITOR):
         self.session = session
         self.settings = settings if settings is not None else settings_module.settings
         self.client = None
@@ -96,6 +102,7 @@ class Bridge:
         self._state_store = state_store
         self._provisioning_path = provisioning_path
         self._log_path = log_path
+        self._loop_monitor = LoopMonitor() if loop_monitor is _DEFAULT_MONITOR else loop_monitor
         self._publishers = []
         self._commands = CommandDispatcher(self)
         self._last_error_published = False
@@ -158,6 +165,7 @@ class Bridge:
         try:
             self._start()
         except Exception:
+            self._stop_loop_monitor()
             LOG.exception("the bridge failed to start; the receiver is unaffected")
             self.idle_reason = "the bridge failed to start"
         return self
@@ -214,6 +222,8 @@ class Bridge:
             self.client = None
             self._idle("this image offers no way to reach the main loop from a thread")
             return
+        if self._loop_monitor is not None:
+            self._loop_monitor.start()
         self.client.set_will(self.topic("availability"), OFFLINE, qos=WILL_QOS, retain=True)
 
         self._last_error_published = self.state.knows(self.topic("last_error"))
@@ -223,16 +233,15 @@ class Bridge:
         self.idle_reason = None
         self.running = True
         LOG.info(
-            "starting: node %s, broker %s:%s, ha_mode %s, plugin %s",
-            self.node_id,
-            broker.host,
-            broker.port,
+            "starting: ha_mode=%s plugin=%s capabilities=%d",
             self.value("ha_mode"),
             __version__,
+            len(self.capabilities()),
         )
         self.client.start()
 
     def _idle(self, reason):
+        self._stop_loop_monitor()
         self.running = False
         self.idle_reason = reason
         LOG.warning("idle: %s", reason)
@@ -241,6 +250,7 @@ class Bridge:
         """Say goodbye properly: a clean disconnect suppresses the will."""
         try:
             self.running = False
+            self._stop_loop_monitor()
             if self.client is None:
                 self._stop_publishers()
                 return
@@ -274,9 +284,14 @@ class Bridge:
                 LOG.exception("stopping the %s publisher raised", publisher.name)
         self._publishers = []
 
+    def _stop_loop_monitor(self):
+        if self._loop_monitor is not None:
+            self._loop_monitor.stop()
+
     def reload(self):
         """Apply changed settings. Called by the setup screen after a save."""
         try:
+            self._stop_loop_monitor()
             if self.connected:
                 self.retract_stale()
             if self.client is not None:
@@ -491,8 +506,12 @@ class Bridge:
 
     def publish_snapshot(self, info=None):
         """Everything this node knows, as a consumer would want it on subscribe."""
+        snapshot_started = time.monotonic()
+        topic_count = 1
         self.publish_json(self.topic("info"), info if info is not None else self.build_info())
         for publisher in self._publishers:
+            publisher_started = time.monotonic()
+            published = 0
             try:
                 raw = getattr(publisher, "raw", ())
                 for suffix, payload in publisher.snapshot().items():
@@ -500,8 +519,20 @@ class Bridge:
                         self.publish_raw(self.topic(suffix), payload)
                     else:
                         self.publish_json(self.topic(suffix), payload)
+                    published += 1
+                    topic_count += 1
             except Exception:
                 LOG.exception("the %s publisher could not produce a snapshot", publisher.name)
+            finally:
+                elapsed = time.monotonic() - publisher_started
+                if elapsed >= SLOW_SNAPSHOT_PUBLISHER_SECONDS:
+                    LOG.warning("slow snapshot publisher=%s elapsed_ms=%d topics=%d",
+                                publisher.name, int(elapsed * 1000), published)
+        elapsed = time.monotonic() - snapshot_started
+        LOG.info("snapshot complete elapsed_ms=%d topics=%d", int(elapsed * 1000), topic_count)
+        if elapsed >= SLOW_SNAPSHOT_TOTAL_SECONDS:
+            LOG.warning("slow snapshot total elapsed_ms=%d topics=%d",
+                        int(elapsed * 1000), topic_count)
 
     def publish_announcement(self, info=None):
         topic = discovery.announcement_topic(self.node_id)

@@ -28,6 +28,13 @@ def test_a_short_press_is_published_once(live_bridge, factory):
     assert entries[0].json() == {"key": "KEY_RED", "press": "short"}
 
 
+def test_debug_log_records_raw_flags_and_one_classification(live_bridge, plugin_log):
+    press(live_bridge, RED, MAKE, REPEAT, REPEAT, REPEAT, BREAK)
+    output = plugin_log()
+    assert output.count("key input code=398") == 3
+    assert output.count("key classified code=398 press=short") == 1
+
+
 def test_a_key_press_is_never_retained(live_bridge, factory):
     """A retained press re-fires every automation bound to it on every connect."""
     press(live_bridge, RED, MAKE, BREAK)

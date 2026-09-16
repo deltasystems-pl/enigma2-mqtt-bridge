@@ -12,6 +12,7 @@ missing mount is the failure this topic exists to catch.
 
 import os
 import threading
+import time
 
 from .enigma2 import Ticker
 from .log import get_logger
@@ -21,6 +22,7 @@ LOG = get_logger("hdd")
 
 RECORDING_PATH = "/media/hdd"
 POLL_MILLISECONDS = 60000
+SLOW_PROBE_SECONDS = 1.0
 
 BYTES_PER_MEGABYTE = 1024 * 1024
 
@@ -110,11 +112,13 @@ class HddPublisher(Publisher):
         return True
 
     def _probe(self, generation, serial):
+        started = time.monotonic()
         try:
             payload = read(self.path)
         except Exception:
             LOG.exception("the recording disk probe raised")
             payload = {"mounted": False, "path": self.path, "free_mb": None}
+        read_seconds = max(0.0, time.monotonic() - started)
         with self._worker_lock:
             self._worker_running = False
         client = getattr(self.bridge, "client", None) if self.bridge is not None else None
@@ -123,11 +127,31 @@ class HddPublisher(Publisher):
             LOG.debug("the recording disk probe has no main-loop dispatcher; dropping its result")
             return
         try:
-            dispatch(self._finish_probe, generation, serial, payload)
+            dispatch(
+                self._finish_probe,
+                generation,
+                serial,
+                payload,
+                read_seconds,
+                time.monotonic(),
+            )
         except Exception:
             LOG.exception("could not return the recording disk probe to the main loop")
 
-    def _finish_probe(self, generation, serial, payload):
+    def _finish_probe(self, generation, serial, payload, read_seconds=0.0, dispatched_at=None):
+        dispatch_seconds = (
+            0.0 if dispatched_at is None else max(0.0, time.monotonic() - dispatched_at)
+        )
+        logger = (
+            LOG.warning
+            if max(read_seconds, dispatch_seconds) >= SLOW_PROBE_SECONDS
+            else LOG.info
+        )
+        logger(
+            "recording disk probe timing: read %.3fs, main-loop dispatch %.3fs",
+            read_seconds,
+            dispatch_seconds,
+        )
         if serial != self._latest_probe_serial:
             return
         if self._stopped or generation != self._generation:

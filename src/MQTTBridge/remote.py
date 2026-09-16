@@ -234,6 +234,7 @@ class KeyPublisher(Publisher):
         code = int(key)
         flag = int(flag)
         if flag == FLAG_MAKE:
+            LOG.debug("key input code=%d flag=%d", code, flag)
             self._finished.discard(code)
             self._held[code] = {
                 "started": time.monotonic(),
@@ -241,6 +242,7 @@ class KeyPublisher(Publisher):
             }
             return
         if flag == FLAG_LONG:
+            LOG.debug("key input code=%d flag=%d", code, flag)
             if self._held.pop(code, None) is not None:
                 # OpenViX's action map does not offer BREAK to this binding
                 # after it has offered LONG, so LONG is itself terminal.
@@ -251,10 +253,13 @@ class KeyPublisher(Publisher):
             # A held button, reported many times a second. The press is
             # published once, at the break.
             if code in self._held:
+                if not self._held[code]["repeated"]:
+                    LOG.debug("key input code=%d flag=%d", code, flag)
                 self._held[code]["repeated"] = True
             return
         if flag != FLAG_BREAK:
             return
+        LOG.debug("key input code=%d flag=%d", code, flag)
         if code in self._finished:
             # Some forks and the test action map do still deliver the break.
             self._finished.remove(code)
@@ -269,6 +274,7 @@ class KeyPublisher(Publisher):
     # --------------------------------------------------------------- publishing --
 
     def _emit(self, code, press_kind):
+        LOG.debug("key classified code=%d press=%s", code, press_kind)
         if not self._limiter.allowed():
             return
         payload = {"key": name_for(code) or ("KEY_" + str(code)), "press": press_kind}

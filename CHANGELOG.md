@@ -50,6 +50,8 @@ version that has no section here.
   omits the synthetic long marker, while still emitting one event and never swallowing the key.
 - Recording-disk probes now run outside the receiver's main loop, so an unavailable network mount
   cannot freeze the user interface; unresolved startup probes no longer report a false disk loss.
+- MQTT reconnects now log privacy-safe epochs, main-loop dispatch delay and backlog aggregates,
+  plus per-publisher and total snapshot timings for diagnosing receiver stalls.
 - `docs/TOPICS.md` gained the `channels` topic, the capability vocabulary's thirteenth name, the
   discovery entity table, and the four things about Home Assistant 2026.9 that were measured
   rather than assumed — `default_entity_id` in place of `object_id`, removal by platform key,

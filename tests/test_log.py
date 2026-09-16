@@ -36,8 +36,8 @@ def test_the_password_never_reaches_the_log(make_bridge, factory, settings, isol
     assert PASSWORD not in written
     assert "***" in written
     # And it did log the session, so the absence above is not an empty file.
-    assert "connected to 10.0.0.5" in written
-    assert "subscribed to" in written
+    assert "mqtt epoch 1: connected" in written
+    assert "subscribed (qos 1)" in written
 
 
 def test_redact_replaces_every_occurrence():
@@ -49,6 +49,44 @@ def test_redact_replaces_every_occurrence():
 def test_redact_survives_a_non_string():
     log_module.register_secret("s3cret")
     assert log_module.redact(1883) == "1883"
+
+
+def test_exception_and_stack_text_are_redacted(isolated_log):
+    log_module.configure("info")
+    log_module.register_secret(PASSWORD)
+    logger = log_module.get_logger("test")
+
+    try:
+        raise RuntimeError("failed with " + PASSWORD)
+    except RuntimeError:
+        logger.exception("exception path")
+
+    record = logging.LogRecord(
+        logger.name,
+        logging.ERROR,
+        __file__,
+        1,
+        "stack path",
+        (),
+        None,
+    )
+    record.stack_info = "stack contains " + PASSWORD
+    logger.handle(record)
+
+    written = isolated_log.read_text(encoding="utf-8")
+    assert PASSWORD not in written
+    assert written.count("***") >= 2
+
+
+def test_a_formatting_failure_never_prints_raw_arguments(isolated_log):
+    log_module.configure("info")
+    log_module.register_secret(PASSWORD)
+
+    log_module.get_logger("test").error("two values: %s %s", PASSWORD)
+
+    written = isolated_log.read_text(encoding="utf-8")
+    assert PASSWORD not in written
+    assert "<unformattable log record>" in written
 
 
 def test_an_empty_password_is_not_registered():

@@ -15,6 +15,7 @@ whole trick: no install step, no pip, no dependency on an image feed.
 import os
 import sys
 import threading
+import time
 
 from .log import get_logger, redact
 
@@ -41,6 +42,7 @@ MQTT_ERR_QUEUE_SIZE = 15
 
 # How much of a payload a debug line is allowed to carry.
 LOG_PAYLOAD_LIMIT = 500
+SLOW_DISPATCH_SECONDS = 0.25
 
 
 def ensure_paho_on_path():
@@ -224,6 +226,15 @@ class MqttClient:
         self._factory = client_factory if client_factory is not None else default_client_factory
         self._client = None
         self._will = None
+        self._epoch = 0
+        self._epoch_started = None
+        self._disconnect_callbacks = 0
+        self._dispatch_lock = threading.Lock()
+        self._dispatch_pending = 0
+        self._dispatch_peak = 0
+        self._dispatch_count = 0
+        self._dispatch_delay_total = 0.0
+        self._dispatch_delay_max = 0.0
 
     @property
     def usable(self):
@@ -271,17 +282,15 @@ class MqttClient:
         _bound_queues(client)
 
         self._client = client
+        self._epoch += 1
+        self._epoch_started = time.monotonic()
+        self._disconnect_callbacks = 0
         client.connect_async(
             self.settings.host, self.settings.port, keepalive=self.settings.keepalive
         )
         client.loop_start()
-        LOG.info(
-            "connecting to %s:%s as %s (tls=%s)",
-            self.settings.host,
-            self.settings.port,
-            self.settings.client_id,
-            "on" if self.settings.tls else "off",
-        )
+        LOG.info("mqtt epoch %d: connection attempt started (tls=%s)",
+                 self._epoch, "on" if self.settings.tls else "off")
         return client
 
     def stop(self):
@@ -332,7 +341,7 @@ class MqttClient:
     def publish(self, topic, payload=None, qos=0, retain=False):
         client = self._client
         if client is None:
-            LOG.debug("no session; dropping a publish to %s", topic)
+            LOG.debug("no session; dropping a publish")
             return None
         if payload is None:
             data = b""
@@ -343,38 +352,36 @@ class MqttClient:
         try:
             info = client.publish(topic, data, qos=qos, retain=retain)
         except Exception:
-            LOG.exception("publishing to %s failed", topic)
+            LOG.exception("publishing failed")
             return None
         if getattr(info, "rc", None) == MQTT_ERR_QUEUE_SIZE:
             # paho took nothing: the outgoing queue is at its bound, which means
             # the broker has not been reading for a while. Say so once per
             # publish rather than let the message vanish silently.
             LOG.warning(
-                "the outgoing queue is full (%d messages); %s was not queued",
+                "the outgoing queue is full (%d messages); publish was not queued",
                 MAX_QUEUED_MESSAGES,
-                topic,
             )
         if LOG.isEnabledFor(10):  # DEBUG
             LOG.debug(
-                "publish %s qos=%d retain=%s %s",
-                topic,
+                "publish qos=%d retain=%s bytes=%d",
                 qos,
                 retain,
-                _describe(data),
+                len(data),
             )
         return info
 
     def subscribe(self, topic, qos=1):
         client = self._client
         if client is None:
-            LOG.debug("no session; not subscribing to %s", topic)
+            LOG.debug("no session; not subscribing")
             return None
         try:
             result = client.subscribe(topic, qos=qos)
         except Exception:
-            LOG.exception("subscribing to %s failed", topic)
+            LOG.exception("subscribing failed")
             return None
-        LOG.info("subscribed to %s (qos %d)", topic, qos)
+        LOG.info("subscribed (qos %d)", qos)
         return result
 
     @staticmethod
@@ -395,7 +402,7 @@ class MqttClient:
     # These four run on paho's network thread. They hand over and return.
 
     def _paho_on_connect(self, client, userdata, flags, reason_code, properties=None):
-        self._dispatch(self._handle_connect, reason_code)
+        self._queue_dispatch("connect", self._handle_connect, reason_code)
 
     def _paho_on_message(self, client, userdata, message):
         try:
@@ -405,10 +412,37 @@ class MqttClient:
         except Exception:
             LOG.exception("an incoming message could not be read")
             return
-        self._dispatch(self._handle_message, topic, payload, retain)
+        self._queue_dispatch("message", self._handle_message, topic, payload, retain)
 
     def _paho_on_disconnect(self, client, userdata, flags=None, reason_code=None, properties=None):
-        self._dispatch(self._handle_disconnect, reason_code)
+        self._queue_dispatch("disconnect", self._handle_disconnect, reason_code)
+
+    def _queue_dispatch(self, kind, function, *args):
+        queued_at = time.monotonic()
+        with self._dispatch_lock:
+            self._dispatch_pending += 1
+            self._dispatch_peak = max(self._dispatch_peak, self._dispatch_pending)
+        self._dispatch(self._run_dispatched, kind, queued_at, function, args)
+
+    def _run_dispatched(self, kind, queued_at, function, args):
+        delay = max(0.0, time.monotonic() - queued_at)
+        with self._dispatch_lock:
+            self._dispatch_pending = max(0, self._dispatch_pending - 1)
+            self._dispatch_count += 1
+            self._dispatch_delay_total += delay
+            self._dispatch_delay_max = max(self._dispatch_delay_max, delay)
+            pending = self._dispatch_pending
+            peak = self._dispatch_peak
+        if delay >= SLOW_DISPATCH_SECONDS:
+            LOG.warning("slow main-loop dispatch kind=%s delay_ms=%d pending=%d peak=%d",
+                        kind, int(delay * 1000), pending, peak)
+        function(*args)
+
+    def _dispatch_summary(self):
+        with self._dispatch_lock:
+            count = self._dispatch_count
+            average = self._dispatch_delay_total / count if count else 0.0
+            return count, average, self._dispatch_delay_max, self._dispatch_peak
 
     # -------------------------------------------------------- main-thread halves --
 
@@ -418,8 +452,17 @@ class MqttClient:
                 self.connected = False
                 LOG.error("the broker refused the connection: %s", reason_code)
                 return
+            if self._disconnect_callbacks:
+                self._epoch += 1
             self.connected = True
-            LOG.info("connected to %s:%s", self.settings.host, self.settings.port)
+            elapsed = 0.0 if self._epoch_started is None else time.monotonic() - self._epoch_started
+            count, average, maximum, peak = self._dispatch_summary()
+            LOG.info(
+                "mqtt epoch %d: connected in %.3fs; lifetime dispatch "
+                "count=%d avg_ms=%d max_ms=%d peak=%d",
+                self._epoch, elapsed, count, int(average * 1000), int(maximum * 1000), peak,
+            )
+            self._disconnect_callbacks = 0
             if self._on_connect is not None:
                 self._on_connect()
         except Exception:
@@ -430,12 +473,23 @@ class MqttClient:
             if self._on_message is not None:
                 self._on_message(topic, payload, retain)
         except Exception:
-            LOG.exception("the handler for %s raised; the receiver is unaffected", topic)
+            LOG.exception("a message handler raised; the receiver is unaffected")
 
     def _handle_disconnect(self, reason_code):
         try:
             self.connected = False
-            LOG.warning("disconnected from the broker: %s", reason_code)
+            self._disconnect_callbacks += 1
+            count, average, maximum, peak = self._dispatch_summary()
+            LOG.warning(
+                "mqtt epoch %d: disconnected reason=%s callback=%d duplicate=%s; "
+                "lifetime dispatch count=%d avg_ms=%d max_ms=%d peak=%d",
+                self._epoch, reason_code, self._disconnect_callbacks,
+                self._disconnect_callbacks > 1, count, int(average * 1000),
+                int(maximum * 1000), peak,
+            )
+            if self._disconnect_callbacks == 1:
+                self._epoch_started = time.monotonic()
+                LOG.info("mqtt epoch %d: automatic reconnect pending", self._epoch + 1)
             if self._on_disconnect is not None:
                 self._on_disconnect(reason_code)
         except Exception:

@@ -1573,6 +1573,7 @@ def make_bridge(factory, state_path, tmp_path, isolated_log):
             "state_store": StateStore(path=state_path),
             "provisioning_path": str(tmp_path / "absent-mqttbridge.json"),
             "log_path": str(isolated_log),
+            "loop_monitor": None,
         }
         options.update(overrides)
         bridge = Bridge(**options)

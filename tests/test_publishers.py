@@ -8,8 +8,10 @@ publishes, what a guard refuses — is in the module beside each publisher.
 
 import json
 
+from MQTTBridge import bridge as bridge_module
 from MQTTBridge import channels as channels_module
 from MQTTBridge import enigma2, publishers
+from MQTTBridge.publisher import Publisher
 
 NODE = "vuuno4kse_005301"
 ROOT = "enigma2/" + NODE
@@ -87,17 +89,20 @@ def test_a_publisher_publishes_only_when_something_changed(live_bridge, factory,
     assert factory.client.all_for(topic("hdd")) == []
 
 
-def test_a_publisher_publishes_again_when_something_does_change(live_bridge, factory, receiver,
-                                                                monkeypatch):
+def test_a_publisher_publishes_again_when_something_does_change(
+    live_bridge, factory, receiver, monkeypatch, wait_until
+):
     from MQTTBridge import hdd
 
     monkeypatch.setattr(hdd, "read", lambda path=None: {"mounted": True, "path": "/media/hdd",
                                                         "free_mb": 1})
     factory.client.clear()
     live_bridge.publisher("hdd")._poll()
+    assert wait_until(lambda: len(factory.client.all_for(topic("hdd"))) == 1)
     monkeypatch.setattr(hdd, "read", lambda path=None: {"mounted": True, "path": "/media/hdd",
                                                         "free_mb": 2})
     live_bridge.publisher("hdd")._poll()
+    assert wait_until(lambda: len(factory.client.all_for(topic("hdd"))) == 2)
     assert len(factory.client.all_for(topic("hdd"))) == 2
 
 
@@ -149,6 +154,27 @@ def test_a_publisher_that_raises_on_snapshot_costs_only_its_own_topic(live_bridg
     live_bridge.publish_snapshot()
     assert topic("tuner") not in factory.client.topics()
     assert topic("volume") in factory.client.topics()
+
+
+def test_snapshot_timings_name_only_publishers_and_warn_when_slow(
+    connected_bridge, plugin_log, monkeypatch
+):
+    class Slow(Publisher):
+        name = "slow"
+
+        def snapshot(self):
+            return {"state": {"private": "payload"}}
+
+    clock = iter((10.0, 10.0, 10.4, 11.2))
+    monkeypatch.setattr(bridge_module.time, "monotonic", lambda: next(clock))
+    connected_bridge.register_publisher(Slow())
+    connected_bridge.publish_snapshot({"safe": True})
+
+    text = plugin_log()
+    assert "slow snapshot publisher=slow elapsed_ms=400 topics=1" in text
+    assert "slow snapshot total elapsed_ms=1199 topics=2" in text
+    assert "private" not in text
+    assert "payload" not in text
 
 
 def test_the_default_registry_is_the_documented_order():
