@@ -52,6 +52,10 @@ version that has no section here.
   cannot freeze the user interface; unresolved startup probes no longer report a false disk loss.
 - MQTT reconnects now log privacy-safe epochs, main-loop dispatch delay and backlog aggregates,
   plus per-publisher and total snapshot timings for diagnosing receiver stalls.
+- The event-loop monitor now reports both watcher-observed stalls and the measured heartbeat gap
+  when native code resumes before the watcher could run.
+- EPG grids now build in bounded four-channel batches between main-loop turns, retaining the last
+  complete grid until its replacement is ready instead of freezing the interface on a bouquet.
 - `docs/TOPICS.md` gained the `channels` topic, the capability vocabulary's thirteenth name, the
   discovery entity table, and the four things about Home Assistant 2026.9 that were measured
   rather than assumed — `default_entity_id` in place of `object_id`, removal by platform key,

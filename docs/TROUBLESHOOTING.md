@@ -18,10 +18,11 @@ plugin is not running.
 leaving `debug` on cannot fill the flash. Levels are `error`, `warning`, `info` (default) and
 `debug`; set it on the setup screen.
 
-- **`info`** logs the lifecycle: start, connect, disconnect and reconnect, mode changes,
-  refused commands.
-- **`debug`** adds every publish and every command received, with its payload. Use it while you
-  are getting something working, then turn it back down — it is also a log of what is watched.
+- **`info`** logs the lifecycle: start, connection epochs, disconnect reasons, reconnect and
+  snapshot timings, mode changes, disk-probe timings and refused commands.
+- **`warning`** adds slow main-loop dispatches, slow snapshot publishers and event-loop stalls.
+- **`debug`** adds publish metadata (QoS, retention and byte count), command names and key-input
+  classification. It does not log MQTT topics, node ids, broker addresses or payload bodies.
 
 The password is never written at any level. If you see it there, that is a bug worth a security
 report.
@@ -61,6 +62,33 @@ The log names the reason paho gives back. The three common ones:
 
 A reconnect is attempted with a 1 → 60 second backoff, forever. A box that comes back after an
 outage republishes its whole state on connect, so nothing needs to be prodded.
+
+## The receiver pauses or ignores the remote
+
+Start at `info`, not `debug`. The bounded diagnostic lines answer different questions:
+
+- `mqtt epoch … connected in …` measures the connection or reconnection, and includes lifetime
+  enqueue-to-main-loop delay and backlog aggregates;
+- `snapshot complete …` measures the retained-state burst after a connection;
+- `slow main-loop dispatch …` means a paho callback waited at least 250 ms for enigma2's main
+  loop;
+- `event loop stalled … stack …` is a watcher-observed pause of at least two seconds;
+- `event loop resumed; heartbeat gap …` preserves a pause even when native code prevented the
+  watcher itself from running; it deliberately makes no claim about the cause;
+- `recording disk probe timing …` separates the filesystem read in the plugin's daemon worker
+  from the small delay returning its result to the main loop.
+
+The recording-disk probe cannot block the interface: mount and free-space calls run in its daemon
+worker, with one probe in flight. That does **not** make a network recording mount harmless to the
+rest of enigma2. The image's video, timeshift, recording list or another plugin can still access
+the same NFS path synchronously on the UI thread. During a network outage that appears as a
+kernel NFS/RPC wait and can freeze video and remote handling until the mount call times out. A
+slow disk-probe line alongside an event-loop gap is correlation, not proof that MQTT caused it;
+inspect the safe stack in the event-loop warning or sample the receiver's task wait channels.
+
+EPG-grid refreshes yield between batches of at most four channels and keep the previous complete
+grid until the replacement is ready. A full refresh may therefore take several seconds while the
+interface remains responsive; only a slow-batch or event-loop warning indicates a problem.
 
 ## The box connects but no topics appear
 
@@ -155,6 +183,7 @@ There is no acknowledgement topic. A command's answer is the state topic changin
 ## Reporting a problem
 
 Open an issue with: the image and its version, the plugin version, the `info` payload (its
-`capabilities` list is the interesting part), the relevant part of the log at `debug`, and what
-you expected instead. For anything with security implications, use a private advisory instead —
-see [SECURITY.md](../SECURITY.md).
+`capabilities` list is the interesting part), the relevant `info`/`warning` diagnostic lines, and
+what you expected instead. Enable `debug` only when key classification or publish metadata is
+needed. For anything with security implications, use a private advisory instead — see
+[SECURITY.md](../SECURITY.md).
