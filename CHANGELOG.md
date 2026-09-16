@@ -9,6 +9,29 @@ version that has no section here.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.0] - 2026-09-16
+
+The first release: a receiver that publishes what it is doing to MQTT, and stays out of the way.
+
+Install it, point it at your broker, and the box appears on the broker within seconds of enigma2
+starting — `availability` so you can tell a sleeping box from a broken one, `info` with the image,
+the box type, its address and what the plugin found it could do, and an announcement a consumer
+can discover it by. Commands come back on the same session: switch the Home Assistant mode, ask
+it to re-announce itself, or retract every retained topic it owns and publish them again. There
+is a setup screen under *Menu → Plugins → MQTT Bridge* for the broker details, and a provisioning
+file for installing a box without touching a remote control.
+
+It is deliberately quiet about what it cannot do. Bad configuration produces one line in the log
+and an idle plugin, never a dialog and never a retry storm, because the graphical interface has to
+come up whatever the broker is doing. The feature areas that publish live state — the channel, the
+EPG, the tuner, recordings, volume, keys — arrive in 0.2.0; this release is the session, the
+identity and the plumbing they hang off, and `capabilities` says so by being empty.
+
+Tested on a Vu+ Uno 4K SE running OpenViX 6.6. The code uses no syntax above Python 3.9 and is
+tested on 3.9, 3.12 and 3.14.
+
 ### Added
 
 - Repository scaffold: the licence (GPL-2.0-or-later), `NOTICE` recording the vendored
@@ -119,4 +142,5 @@ version that has no section here.
 - Examples throughout the documentation use the documentation MAC `00:00:5e:00:53:01` and the
   node id derived from it.
 
-[Unreleased]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/commits/main
+[Unreleased]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.1.0
