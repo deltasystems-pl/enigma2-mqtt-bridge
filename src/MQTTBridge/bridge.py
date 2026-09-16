@@ -16,9 +16,16 @@ never gets it back.
 **What was published retained is remembered**, so that it can be retracted later
 even from a fresh process. That record is `discovery.StateStore`.
 
-Publishers are how the next milestone grows this file without touching it: a
-publisher has a name, which becomes a capability, and a `snapshot()` that is
-called on connect and on reset.
+Publishers are how this file grows without being rewritten: a publisher has a
+name, which becomes a capability, a `start()` that binds its enigma2 hooks and
+says whether the image provided them, and a `snapshot()` that is called on
+connect and on reset.
+
+**A publisher publishes on change.** `publish_state` compares what it is about
+to send with what went out last and drops a repeat, because a receiver that
+re-publishes the same volume every five seconds writes a row into somebody's
+recorder database every five seconds. The snapshot is the deliberate exception:
+`on_connect` forgets everything it knows and sends the lot.
 """
 
 import json
@@ -30,7 +37,13 @@ from .commands import CommandDispatcher
 from .log import configure as configure_logging
 from .log import get_logger, register_secret
 from .mqttclient import BrokerSettings, MqttClient
+from .publisher import Publisher
 from .version import __version__
+
+# `Publisher` is re-exported: it is part of this module's interface — every
+# publisher subclasses it and the tests import it from here — and it lives in
+# its own module only to keep the imports acyclic.
+__all__ = ["Bridge", "Publisher"]
 
 LOG = get_logger("bridge")
 
@@ -54,38 +67,20 @@ COMMAND_QOS = 1
 WILL_QOS = 1
 
 # Capabilities are the feature-area names in docs/TOPICS.md and nothing else —
-# `power`, `service`, `epg`, `tuner`, … — each added by the publisher that binds
-# its hooks. This build binds none, so it publishes an empty list rather than
-# inventing names outside the contract's vocabulary.
+# `power`, `service`, `epg`, `tuner`, … — each added by the publisher that bound
+# its hooks. The connection itself is not a capability, so this tuple is empty
+# and stays empty: everything in the list got there by working.
 CORE_CAPABILITIES = ()
+
+# The one capability with no publisher behind it. `message` is a command, so
+# what makes it real is the popup machinery being importable, not a hook.
+MESSAGE_CAPABILITY = "message"
 
 SHUTDOWN_FLUSH_SECONDS = 1.0
 
 # A command name comes off the topic, so its length is the publisher's choice.
 # The retained `last_error` is not the place to store somebody's 4 KB topic.
 LAST_ERROR_CMD_LIMIT = 64
-
-
-class Publisher:
-    """One feature area's state. Subclassed in the next milestone."""
-
-    name = ""
-
-    # Suffixes whose payload goes out verbatim rather than as JSON. The contract
-    # has three of them — `availability`, `power` and `screen` — because a
-    # string and a JPEG are not improved by being wrapped in quotes.
-    raw = ()
-
-    def snapshot(self):
-        """{topic suffix: payload} for everything this publisher owns."""
-        return {}
-
-    def start(self):
-        """Bind enigma2 hooks. Returns True when the image provided them."""
-        return True
-
-    def stop(self):
-        pass
 
 
 class Bridge:
@@ -104,6 +99,8 @@ class Bridge:
         self._publishers = []
         self._commands = CommandDispatcher(self)
         self._last_error_published = False
+        # topic -> the bytes last sent to it, so a repeat can be dropped.
+        self._published = {}
 
     # ----------------------------------------------------------------- settings --
 
@@ -220,6 +217,7 @@ class Bridge:
         self.client.set_will(self.topic("availability"), OFFLINE, qos=WILL_QOS, retain=True)
 
         self._last_error_published = self.state.knows(self.topic("last_error"))
+        self.register_default_publishers()
         self._start_publishers()
 
         self.idle_reason = None
@@ -244,22 +242,37 @@ class Bridge:
         try:
             self.running = False
             if self.client is None:
+                self._stop_publishers()
                 return
             if self.client.connected:
                 info = self.client.publish(
                     self.topic("availability"), OFFLINE, qos=STATE_QOS, retain=True
                 )
                 self.client.wait_for(info, SHUTDOWN_FLUSH_SECONDS)
-            for publisher in self._publishers:
-                try:
-                    publisher.stop()
-                except Exception:
-                    LOG.exception("stopping the %s publisher raised", publisher.name)
+            self._stop_publishers()
             self.client.stop()
             self.client = None
             self.state.save()
         except Exception:
             LOG.exception("shutting the bridge down raised; the receiver is unaffected")
+
+    def _stop_publishers(self):
+        """Every publisher lets go of its hooks, and the registry is emptied.
+
+        🔴 Emptying the registry without this is how a receiver ends up with two
+        of every listener. Publishers attach themselves to lists that belong to
+        enigma2 — `session.nav.event`, the standby counter's notifiers, the
+        action map — and those lists outlive the plugin's own objects. Dropping
+        the registry on a settings save would leave the old listeners attached
+        and add a second set beside them, once per save, until the box is
+        restarted.
+        """
+        for publisher in list(self._publishers):
+            try:
+                publisher.stop()
+            except Exception:
+                LOG.exception("stopping the %s publisher raised", publisher.name)
+        self._publishers = []
 
     def reload(self):
         """Apply changed settings. Called by the setup screen after a save."""
@@ -269,7 +282,7 @@ class Bridge:
             if self.client is not None:
                 self.client.stop()
                 self.client = None
-            self._publishers = []
+            self._stop_publishers()
         except Exception:
             LOG.exception("could not shut the old session down cleanly")
         return self.start()
@@ -323,8 +336,38 @@ class Bridge:
     # ---------------------------------------------------------------- publishers --
 
     def register_publisher(self, publisher):
+        if getattr(publisher, "bridge", None) is None:
+            publisher.bridge = self
         self._publishers.append(publisher)
         return publisher
+
+    def publisher(self, name):
+        """One registered publisher by name, or None when it did not bind.
+
+        Commands ask for the publisher of the state they are about to change,
+        because a command is verified by reading the state back — and a state
+        nothing publishes cannot be read back.
+        """
+        for publisher in self._publishers:
+            if publisher.name == name:
+                return publisher
+        return None
+
+    def register_default_publishers(self):
+        """The feature areas of the contract, in the order `capabilities` lists them.
+
+        Only when nothing has been registered by hand, and only with a session:
+        every one of these hangs off `session.nav` or a screen, so a bridge
+        built without one would register publishers that could only fail to
+        start. A test that registers its own is left alone.
+        """
+        if self._publishers or self.session is None:
+            return []
+        from .publishers import default_publishers
+
+        for publisher in default_publishers(self):
+            self.register_publisher(publisher)
+        return self._publishers
 
     def _start_publishers(self):
         for publisher in list(self._publishers):
@@ -337,10 +380,21 @@ class Bridge:
                 self._publishers.remove(publisher)
 
     def capabilities(self):
+        """What this box can actually do — never what the contract says it might.
+
+        A name gets in here by a hook binding on *this* image. Consumers hide
+        what is missing, so a capability claimed and not delivered is a dead
+        entity in somebody's dashboard.
+        """
         names = list(CORE_CAPABILITIES)
         for publisher in self._publishers:
             if publisher.name and publisher.name not in names:
                 names.append(publisher.name)
+        if self.session is not None and MESSAGE_CAPABILITY not in names:
+            from .osd import popups_available
+
+            if popups_available():
+                names.append(MESSAGE_CAPABILITY)
         return names
 
     # -------------------------------------------------------------------- events --
@@ -350,9 +404,18 @@ class Bridge:
         # an older name is still on the broker and this is the first chance to
         # take it back.
         self.retract_stale()
+        # Every payload goes out on every connect, so what was published before
+        # this connection is not what is on the broker now.
+        self.forget_published()
         info = self.build_info()
         self.publish_raw(self.topic("availability"), ONLINE)
         self.publish_snapshot(info)
+        if self.publisher("epg_grid") is None:
+            # With a grid publisher this is its business, and it does it at the
+            # end of every pass. Doing it here as well would retract each grid
+            # on every connect and republish it a moment later, which a consumer
+            # sees as the feature disappearing and coming back.
+            self.sync_grid_slugs()
         self.publish_announcement(info)
         self.publish_discovery(info)
         self.client.subscribe(self.command_root + "/#", qos=COMMAND_QOS)
@@ -372,10 +435,37 @@ class Bridge:
         info = self.client.publish(topic, payload, qos=STATE_QOS, retain=retain)
         if retain:
             self.state.remember(topic)
+            self._published[topic] = payload
         return info
 
     def publish_json(self, topic, payload, retain=True):
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return self.publish_raw(topic, encoded, retain=retain)
+
+    def forget_published(self):
+        """Forget what was published, so the next publish goes out regardless.
+
+        Used wherever the broker's copy stops being what this process last sent
+        it — a new connection, and a reset.
+        """
+        self._published = {}
+
+    def publish_state(self, suffix, payload, raw=False, retain=True):
+        """A feature area's state topic — published only when it has changed.
+
+        `sort_keys` in `publish_json` is what makes the comparison meaningful:
+        two dictionaries built in a different order encode to the same bytes, so
+        „changed" means the box changed, not that the code walked it differently.
+        A topic that is not retained (`key`) is never compared — every press is
+        an event, including the same press twice.
+        """
+        topic = self.topic(suffix)
+        if raw:
+            encoded = payload
+        else:
+            encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if retain and self._published.get(topic) == encoded:
+            return None
         return self.publish_raw(topic, encoded, retain=retain)
 
     def retract(self, topic):
@@ -383,6 +473,7 @@ class Bridge:
             return None
         info = self.client.publish(topic, "", qos=STATE_QOS, retain=True)
         self.state.forget(topic)
+        self._published.pop(topic, None)
         return info
 
     def build_info(self):
@@ -426,6 +517,32 @@ class Bridge:
         )
         self.publish_json(topic, payload)
 
+    @property
+    def discovery_prefix(self):
+        return (
+            self.value("ha_discovery_prefix") or settings_module.DEFAULT_DISCOVERY_PREFIX
+        ).strip("/")
+
+    def channel_options(self):
+        """The channel names a `select` entity offers, in bouquet order.
+
+        Deduplicated by name, because the options of a select are names and
+        `cmd/zap` by name refuses a name that is not unique: offering the same
+        „Sport" twice would be offering an option that can only fail.
+        """
+        channels = self.publisher("channels")
+        if channels is None:
+            return []
+        names = []
+        seen = set()
+        for bouquet in channels.bouquets:
+            for channel in bouquet.get("channels") or []:
+                name = (channel.get("name") or "").strip()
+                if name and name not in seen:
+                    seen.add(name)
+                    names.append(name)
+        return names
+
     def publish_discovery(self, info=None):
         if self.value("ha_mode") != "discovery":
             return
@@ -434,6 +551,10 @@ class Bridge:
             self.value("friendly_name"),
             self.base_topic,
             info if info is not None else self.build_info(),
+            prefix=self.discovery_prefix,
+            channel_options=self.channel_options(),
+            deep_standby_allowed=bool(self.value("deep_standby_allowed")),
+            previous=self.state.component_keys,
         )
         if not components:
             LOG.debug("this build publishes no Home Assistant discovery payloads")
@@ -441,6 +562,28 @@ class Bridge:
         for topic, payload in sorted(components.items()):
             self.publish_json(topic, payload)
         self.state.set_components(sorted(components))
+        device = components.get(discovery.device_topic(self.discovery_prefix, self.node_id))
+        self.state.set_component_keys(discovery.component_platforms(device))
+
+    def sync_grid_slugs(self):
+        """Retract the EPG grid of every bouquet that is no longer configured.
+
+        A bouquet that was renamed is two things at once: a new slug nobody has
+        published yet and an old slug nothing will ever update again. The second
+        one is the retained ghost, and the state file is what makes it findable
+        — including from a process that was restarted between the rename and
+        now. Called with no grid publisher at all, this retracts the lot, which
+        is what turning `epg_grid_events` down to `0` has to mean.
+        """
+        grid = self.publisher("epg_grid")
+        published = list(getattr(grid, "published_slugs", [])) if grid is not None else []
+        stale = [slug for slug in self.state.grid_slugs if slug not in published]
+        for slug in stale:
+            LOG.info("retracting the EPG grid of a bouquet that is no longer configured: %s", slug)
+            self.retract(self.topic("epg_grid/" + slug))
+        self.state.set_grid_slugs(published)
+        self.state.save()
+        return len(stale)
 
     def retract_discovery(self):
         topics = self.state.components
@@ -450,6 +593,8 @@ class Bridge:
         for topic in topics:
             self.retract(topic)
         self.state.set_components([])
+        # Nothing is announced any more, so nothing is left to remove by name.
+        self.state.set_component_keys({})
         return len(topics)
 
     # ------------------------------------------------------------------ commands --
@@ -501,10 +646,15 @@ class Bridge:
         self.state.forget_all()
         self.state.save(force=True)
         self._last_error_published = False
+        # Everything on the broker was just emptied, so nothing this process
+        # believes it published is true any more — including the screenshot and
+        # every grid.
+        self.forget_published()
 
         info = self.build_info()
         self.publish_raw(self.topic("availability"), ONLINE)
         self.publish_snapshot(info)
+        self.sync_grid_slugs()
         self.publish_announcement(info)
         self.publish_discovery(info)
         self.state.save()

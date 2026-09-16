@@ -1,13 +1,14 @@
 """Remote-key names, both ways.
 
-Not bound in this release. Observing the remote means an `eActionMap` binding on
-the main thread, and a key handler that returns anything but `0` swallows the
-button for the person holding the remote — so it arrives with the milestone that
-can test it against a real remote rather than as a convenience added early.
-
 The table below is the Linux input event name every enigma2 image uses, which is
-what the `key` topic carries and what `cmd/key` accepts. It is here now so that
-the contract's key names have exactly one definition.
+what the `key` topic carries and what `cmd/key` accepts.
+
+The receiver has its own copy of this mapping in `keyids`, with a few hundred
+entries to this file's forty, and it is merged in at first use — so a box with
+a remote this plugin has never heard of still publishes `KEY_PVR` rather than
+`KEY_393`. This file is not thereby redundant: it is what the contract means by
+a key name off a receiver, it is what the tests run against, and it decides
+which name wins when the image lists several for one code.
 """
 
 # enigma2 exposes the Linux input codes; these are the names the contract uses.
@@ -61,10 +62,50 @@ COLOUR_KEYS = ("KEY_RED", "KEY_GREEN", "KEY_YELLOW", "KEY_BLUE")
 PRESS_SHORT = "short"
 PRESS_LONG = "long"
 
+_names = None
+_codes = None
+
+
+def _load():
+    """Merge the receiver's own key table into this one, once.
+
+    `keyids.KEYIDS` maps a name to a code, and more than one name can share a
+    code — `KEY_OK` and `KEY_ENTER` are the same button on some remotes. The
+    table above wins wherever it has an opinion, so the name on the `key` topic
+    does not depend on the order a dictionary happened to be built in, and the
+    image fills in everything else.
+    """
+    global _names, _codes
+    if _names is not None:
+        return
+    names = dict(KEY_NAMES)
+    codes = dict(KEY_CODES)
+    try:
+        from keyids import KEYIDS
+    except Exception:
+        KEYIDS = {}
+    for name, code in sorted((KEYIDS or {}).items()):
+        try:
+            code = int(code)
+        except (TypeError, ValueError):
+            continue
+        name = str(name)
+        codes.setdefault(name, code)
+        names.setdefault(code, name)
+    _names, _codes = names, codes
+
+
+def forget_image_keys():
+    """Test seam: the merged table is module state and outlives a test."""
+    global _names, _codes
+    _names = _codes = None
+
 
 def name_for(code):
-    return KEY_NAMES.get(code)
+    _load()
+    return _names.get(code)
 
 
 def code_for(name):
-    return KEY_CODES.get(str(name or "").strip().upper())
+    _load()
+    return _codes.get(str(name or "").strip().upper())

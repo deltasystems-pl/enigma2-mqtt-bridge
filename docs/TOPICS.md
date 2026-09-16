@@ -53,7 +53,8 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
   "uptime": 384210,
   "ha_mode": "discovery",
   "capabilities": ["power", "service", "epg", "tuner", "recording", "timers",
-                   "volume", "keys", "screenshot", "message", "hdd", "epg_grid"]
+                   "volume", "hdd", "channels", "epg_grid", "keys", "screenshot",
+                   "message"]
 }
 ```
 
@@ -73,9 +74,16 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
 plugin detects what it managed to attach and names it here rather than assuming. A consumer
 hides what is missing instead of showing a dead entity. The names are the feature areas, and
 nothing else is ever in the list: `power`, `service`, `epg`, `epg_grid`, `tuner`, `recording`,
-`timers`, `volume`, `keys`, `screenshot`, `message`, `hdd`. A build that has bound no feature
-area publishes `[]` — the connection, `info` and the commands are the plugin itself and are not
-capabilities.
+`timers`, `volume`, `keys`, `screenshot`, `message`, `hdd`, `channels`. A build that has bound no
+feature area publishes `[]` — the connection, `info` and the commands are the plugin itself and
+are not capabilities.
+
+A name is in the list because it **worked on this box**, not because this version of the plugin
+has the code for it. Three things can take one out: the image did not provide the hooks
+(`volume` on a box with no `VolumeControl`), the feature is switched off in the settings
+(`keys` with `publish_keys` off, `screenshot` set to `off`, `epg_grid` with `epg_grid_events` at
+`0`), or the hook raised while it was being attached — which is logged once, with the name that
+could not be bound.
 
 ### `<base>/<node>/power`
 
@@ -99,13 +107,21 @@ Deep standby is not a state here: the box is off and the broker shows `availabil
 | Field | Type | Notes |
 |---|---|---|
 | `sref` | string | The service reference, trailing colon included. The stable identifier — `name` is for people |
-| `name` | string | Channel name as the bouquet spells it |
-| `bouquet` | string \| null | The bouquet the service was tuned from |
+| `name` | string \| null | Channel name as the bouquet spells it |
+| `bouquet` | string \| null | The first of the **configured** bouquets (`bouquets_for_select`) that contains the service — `null` when it is in none of them, which is not the same as „no bouquet" |
 | `provider` | string \| null | |
 | `width`, `height` | int \| null | Video resolution; `null` before the first frame is decoded |
 
-Published on `evStart`, `evTunedIn` and `evNewProgramInfo`, so it settles within a second of a
-zap, and again when the resolution becomes known.
+Published on `evStart`, `evTunedIn`, `evUpdatedInfo`, `evNewProgramInfo` and `evEnd`, so it
+settles within a second of a zap and is published again when the resolution becomes known — a box
+answers `-1` for both until the first frame is decoded, and `-1` is not a resolution.
+
+With nothing playing every field is `null`; the keys are still all there.
+
+Two services are **the same service** when the first eleven colon-separated fields match. That is
+what makes `1:0:19:283D:3FB:1:C00000:0:0:0:` and `1:0:19:283D:3FB:1:C00000:0:0:0::TVP 1 HD` one
+channel rather than two — and it is why the eleventh field is included rather than the tenth: two
+IPTV services differ only in the stream URL that sits in it.
 
 ### `<base>/<node>/epg`
 
@@ -121,6 +137,52 @@ zap, and again when the resolution becomes known.
 `now` and `next` are objects or `null`. Fields: `title` string, `begin`/`end` int epoch seconds,
 `event_id` int (what `cmd/timer` wants for `action: add`), `short` and `long` strings, possibly
 empty.
+
+Published on `evUpdatedEventInfo`, on a zap, and **when the programme it last published was due
+to end**. That last one has no event behind it: at some point the news ends and the weather
+begins, and no zap, no tune and no EPG update need happen for „now" to be a different programme.
+Without a timer, a box left on one channel would show the morning's programme until somebody
+touched the remote.
+
+### `<base>/<node>/channels` — since M2
+
+The bouquets a consumer may offer, and the services in them. This is what a „channel list" is
+built from, and it is the list `cmd/zap` by name resolves against.
+
+```json
+{
+  "generated": 1789459200,
+  "bouquets": [
+    {"name": "Ulubione TV",
+     "sref": "1:7:1:0:0:0:0:0:0:0:FROM BOUQUET \"userbouquet.ulubione.tv\" ORDER BY bouquet",
+     "channels": [{"sref": "1:0:19:283D:3FB:1:C00000:0:0:0:", "name": "TVP 1 HD"}]}
+  ]
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `generated` | int | Epoch seconds, when the bouquets were last walked |
+| `bouquets[].name` | string | As enigma2 spells it |
+| `bouquets[].sref` | string | The bouquet's own reference |
+| `bouquets[].channels[]` | list | In the user's own order, the order the box shows them in |
+
+Which bouquets appear is the **`bouquets_for_select`** setting: a comma-separated list of bouquet
+names (or of their slugs, which is easier to type on a remote control — „Sport (HD)" and
+`sport_hd` both select the same bouquet). Empty means every television bouquet, which is what a
+box that has never been configured publishes.
+
+**Only playable services.** A bouquet holds markers, separators and hidden entries alongside its
+channels, and they arrive from the same call; they are dropped here, because a marker offered as a
+channel is an option in a select box that cannot be tuned. A box with „multiple bouquets" switched
+off has no bouquet list at all — its favourites list is published as a single bouquet.
+
+**Picons are not published.** They are tens of kilobytes each and the box's own web interface
+serves them on the same address.
+
+Rebuilt when `bouquets.tv` or any `userbouquet.*` file changes — there is no event for that, so
+their modification times are compared once a minute — and on `cmd/discovery`. The list on a real
+box went from 36 entries to 11 within half an hour once, so nothing may key on position.
 
 ### `<base>/<node>/epg_grid/<bouquet_slug>` — since M2
 
@@ -164,6 +226,16 @@ Refreshed when a bouquet changes, every 15 minutes, and on `cmd/epg_grid` — wh
 republishes **every** configured bouquet, not just one. `epg_grid_events` is a setting, default
 **4**; `0` turns the topics off entirely and drops `epg_grid` from `capabilities`.
 
+A channel can carry fewer than `epg_grid_events` events: the plugin asks the EPG cache for a
+bounded window of time rather than for a number of events, because that is the question the cache
+takes, and a channel showing a three-hour film has one event in it.
+
+**One bouquet per turn of the main loop.** A bouquet of two hundred channels is two hundred EPG
+lookups, and doing every bouquet in one go would hold the thread that draws the television for as
+long as that takes. So the topics of a multi-bouquet box appear a few milliseconds apart rather
+than together, and the time each one took is in the plugin's log. A grid whose content has not
+changed is not republished.
+
 **Slugs that stop being configured are retracted.** The plugin remembers the slugs it has
 published in its state file on the box, the same file that carries the discovery component list.
 Drop a bouquet from `bouquets_for_select`, or rename one — which changes its slug — and the topic
@@ -187,6 +259,14 @@ a grid, not a database.
 `snr` and `agc` are integer percentages, `ber` an integer error count, `tuner` the letter of the
 frontend in use (`null` when nothing is tuned).
 
+`ber` is deliberately **not** scaled into a percentage the way enigma2's own web interface scales
+it. It is a count of errors; dividing it by 65535 produces a number that looks like a percentage
+and means nothing.
+
+Published on `evTunedIn` and `evTuneFailed`, and re-read every 60 seconds while something is
+playing, because signal quality drifts with the weather rather than with events. A service that
+does not come off a tuner — IPTV, a recording being played back — has every field `null`.
+
 ### `<base>/<node>/recording`
 
 ```json
@@ -198,6 +278,9 @@ frontend in use (`null` when nothing is tuned).
 
 `active` is a list, empty when nothing is recording. `next` is the soonest future recording timer
 or `null`. This topic is what the deep-standby, reboot and GUI-restart guards read.
+
+A timer that only tunes the box — enigma2 calls it `justplay` — is not a recording and appears in
+neither field, though it is in `timers`. A disabled timer is in neither either.
 
 ### `<base>/<node>/timers`
 
@@ -214,7 +297,12 @@ A JSON **list** (not an object), one entry per timer:
 | `sref` | string | |
 | `begin`, `end` | int | Epoch seconds |
 | `state` | string | One of `waiting`, `prepared`, `running`, `ended` |
-| `repeated` | int | enigma2's day bitmask; `0` for a one-off timer |
+| `repeated` | int | enigma2's day bitmask; `0` for a one-off timer, `127` for daily |
+
+In `begin` order. Published whenever enigma2 writes its timer file — which it does after every
+change to the list, including one made with the remote control while somebody is sitting in front
+of the television — and after every recording event. A burst of changes produces one payload, not
+one per call.
 
 ### `<base>/<node>/volume`
 
@@ -243,6 +331,16 @@ Produced by the image's `grab` utility, downscaled. It is debounced and rate-lim
 one capture per five seconds regardless of how many events ask for one, and the `screenshot`
 setting chooses between `off`, on every zap, and a fixed interval.
 
+Both layers, the video and the menus over it, which is what a person means by a screenshot.
+Capped at 400 KB: over that the capture is dropped and the reason goes to `last_error`, because
+this topic is retained and an oversized payload would be delivered to every new subscriber for as
+long as the broker lives.
+
+In standby nothing is captured unless `cmd/screenshot` asks for it — there is nothing on the
+screen to photograph. On a reconnect the **last** picture is republished from memory rather than a
+fresh one being taken: a reconnect loop that ran `grab` each time round would be a receiver on its
+knees.
+
 It is a picture of what is on the television, retained on the broker. Decide that deliberately.
 
 ### `<base>/<node>/key`
@@ -254,7 +352,16 @@ It is a picture of what is on the television, retained on the broker. Decide tha
 ```
 
 `key` is the enigma2 key name; `press` is `short` or `long`. A key that is held produces one
-`long` event, not a stream of repeats.
+`long` event, not a stream of repeats — the press is published when the button comes back up, as
+`long` if the receiver reported the long-press marker while it was down.
+
+The names are the Linux input event names every image uses (`KEY_OK`, `KEY_RED`, `KEY_CHANNELUP`),
+taken from the receiver's own table where it has one, so a remote this plugin has never heard of
+still publishes `KEY_PVR` rather than a number. A code with no name anywhere is published as
+`KEY_<number>`.
+
+At most **20 presses a second** reach the broker; beyond that they are dropped with one line in
+the log.
 
 Not retained on purpose: a retained key press would re-trigger every automation bound to it on
 every reconnect. The plugin observes keys and **never consumes them** — the receiver behaves
@@ -296,20 +403,20 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 
 | Command | Payload | Effect | Guard |
 |---|---|---|---|
-| `power` | `on` \| `standby` \| `toggle` | Leaves or enters standby | — |
+| `power` | `on` \| `standby` \| `toggle` | Leaves or enters standby | Idempotent: asking for the state the box is already in does nothing |
 | `deep_standby` | any (`PRESS` by convention) | Shuts the box down completely | Refused while recording, or with a timer due within 10 minutes; also refused unless `deep_standby_allowed` is on |
 | `reboot` | any | Reboots the receiver | Same as `deep_standby` |
 | `restart_gui` | any | Restarts enigma2 only | Refused while recording or with a timer due within 10 minutes |
-| `zap` | `<sref>` \| `{"sref": "…"}` \| `{"name": "…"}` | Tunes to a service | By name: refused unless exactly one service in the configured bouquets matches — the error names the count |
-| `volume` | `0`–`100` | Sets the volume | Out-of-range values are clamped and noted in the log |
-| `mute` | `ON` \| `OFF` | Sets mute | — |
-| `key` | `KEY_OK` \| `{"key": "KEY_OK", "long": true}` | Injects a remote key | Unknown key names are refused with the name in `last_error` |
-| `message` | `{"text": "…", "type": "info", "timeout": 10}` | Shows an on-screen popup | `text` is required and truncated to 500 characters; `type` is `info`, `warning` or `error` (default `info`); `timeout` is seconds (default 10) |
-| `timer` | see below | Adds or deletes a recording timer | An add that overlaps an existing timer, or refers to an unknown event, is refused |
-| `record` | `start` \| `stop` | Starts or stops an instant recording of the current service | `stop` with nothing recording is a no-op with a note in `last_error` |
-| `screenshot` | any | Captures `screen` now | Rate-limited to one per five seconds |
-| `epg_grid` | any | Rebuilds and republishes **every** `epg_grid/<bouquet_slug>` topic | Ignored when `epg_grid_events` is `0` |
-| `discovery` | any | Republishes the announcement, and the discovery payloads in discovery mode | — |
+| `zap` | `<sref>` \| `{"sref": "…"}` \| `{"name": "…"}` | Tunes to a service, waking the box from standby first | By name: refused unless exactly one service in the configured bouquets matches — the error names the count. A zap that does not show up on `service` within 5 s is reported there too |
+| `volume` | `0`–`100`, or `{"level": 42}` | Sets the volume, with the on-screen bar | Out-of-range values are clamped and noted in the log |
+| `mute` | `ON` \| `OFF` | Sets mute | Never a blind toggle: the state is read first, and read back afterwards. A receiver refuses to mute at volume 0, and that refusal is reported |
+| `key` | `KEY_OK` \| `{"key": "KEY_OK", "long": true}` | Injects a remote key | Unknown key names are refused with the name in `last_error`; at most 20 a second |
+| `message` | `{"text": "…", "type": "info", "timeout": 10}` — or a bare string | Shows an on-screen popup | `text` is required and truncated to 500 characters; `type` is `info`, `warning` or `error` (default `info`); `timeout` is seconds (default 10, `0` until dismissed). A new message replaces the previous one rather than queueing behind it |
+| `timer` | see below | Adds or deletes a recording timer | An add that overlaps an existing timer, or refers to an unknown event, is refused — and so is one the receiver quietly dropped as a duplicate of a timer it already had |
+| `record` | `start` \| `stop` | Starts or stops an instant recording of the current service | `start` records the current service for two hours; `stop` with nothing recording is a no-op with a note in `last_error` |
+| `screenshot` | any | Captures `screen` now, in standby as well | Rate-limited to one per five seconds |
+| `epg_grid` | any | Rebuilds and republishes **every** `epg_grid/<bouquet_slug>` topic | Refused with a note in `last_error` when `epg_grid_events` is `0` |
+| `discovery` | any | Republishes the announcement, the channel list, and the discovery payloads in discovery mode | — |
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
 | `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
 
@@ -326,6 +433,11 @@ Every one of them is refused when it arrives retained, as above.
 The first form is the one to prefer: enigma2 resolves the event itself, so the timer inherits the
 programme's padding and its name. The second is for a manual window. Deletion matches on the
 triple `sref` + `begin` + `end`, which is what enigma2 itself uses as a timer's identity.
+
+🔴 **The `begin` and `end` of a timer are not the `begin` and `end` of the programme.** A receiver
+applies its own recording margins — typically a few minutes before and after — so a timer added
+from an `event_id` appears in `timers` with wider times than the `epg` topic showed. Delete it
+with the times `timers` reports, not the ones the programme had.
 
 Either way, `timers` (and `recording` when it is imminent) is republished afterwards.
 
@@ -387,7 +499,8 @@ It is a cleanup, not a factory reset: settings are untouched.
   "mac": "00:00:5e:00:53:01",
   "ip": "192.0.2.12",
   "capabilities": ["power", "service", "epg", "tuner", "recording", "timers",
-                   "volume", "keys", "screenshot", "message", "hdd", "epg_grid"],
+                   "volume", "hdd", "channels", "epg_grid", "keys", "screenshot",
+                   "message"],
   "ha_mode": "discovery"
 }
 ```
@@ -410,11 +523,54 @@ Published only in `discovery` mode, retained, under the `ha_discovery_prefix` se
 | Topic | What |
 |---|---|
 | `homeassistant/device/<node>/config` | One device-based discovery payload carrying every component in its `cmps` block: the power and mute switches, the volume number, a channel `select` whose options are the services of the configured bouquets, the channel and programme sensors, tuner sensors, recording and disk binary sensors, the screenshot image, and the buttons |
-| `homeassistant/device_automation/<node>/<key>_<press>/config` | Eight payloads — `red`, `green`, `yellow`, `blue` × `short`, `long` — so the colour keys are device triggers in the automation editor |
+| `homeassistant/device_automation/<node>/<colour>_<press>/config` | Eight payloads — `red`, `green`, `yellow`, `blue` × `short`, `long` — so the colour keys are device triggers in the automation editor |
 
 Device-based discovery (one payload, many components) is used rather than a payload per entity:
 it is a single retained topic to retract, and the device identity cannot drift between
 components.
+
+### What is announced, and what it reads
+
+Every component is gated on a **capability**: a box whose image did not provide the volume hooks
+gets no volume entity, rather than one that never moves. The unique id of each is
+`<node>_<key>`, and the key is the one in this table.
+
+| Key | Platform | State from | Notes |
+|---|---|---|---|
+| `power` | switch | `power` | `on` / `standby` as the payloads |
+| `channel` | sensor | `service` | State is the name; the rest are JSON attributes |
+| `program` | sensor | `epg` | State is `now.title`; attributes below |
+| `next_program` | sensor | `epg` | `next.title` |
+| `recording` | binary_sensor | `recording` | On when `active` is not empty |
+| `active_recordings` | sensor | `recording` | How many |
+| `next_timer` | sensor | `recording` | `device_class: timestamp` |
+| `volume` | number | `volume` | 0–100, slider |
+| `mute` | switch | `volume` | |
+| `channel_select` | select | `service` | Options are the channel names of the configured bouquets; selecting one publishes `cmd/zap` |
+| `screen` | image | `screen` | `image/jpeg` |
+| `screenshot`, `restart_gui`, `refresh_discovery` | button | — | And `deep_standby` and `reboot` **only** when `deep_standby_allowed` is on |
+| `snr`, `agc`, `ber` | sensor | `tuner` | Diagnostic, disabled by default |
+| `recording_disk` | binary_sensor | `hdd` | Diagnostic |
+| `uptime` | sensor | `info` | Diagnostic, seconds |
+
+The channel names in `channel_select` are **deduplicated**: `cmd/zap` by name refuses a name that
+is not unique, so offering the same „Sport" twice would be offering an option that can only fail.
+
+Four details of the payload are worth knowing before writing a consumer against it, because each
+was measured against Home Assistant rather than assumed:
+
+- **Commands go out at QoS 1**, as the contract requires. The `qos` key at the top level of the
+  device payload is how a consumer is told so; it reaches every component.
+- **Availability is shared.** `avty_t` is set once, at the top level, and applies to every entity.
+  Device triggers have no availability — their schema has no room for it.
+- **The entity id each component asks for** is `default_entity_id`, not `object_id`. Home
+  Assistant 2026.9 has no `object_id` in its MQTT schema; a payload carrying one is accepted and
+  the key is silently discarded. It is also read **once**, when the entity is first created:
+  changing it later renames nothing.
+- **A component is removed by name**, by republishing the device payload with that component cut
+  down to nothing but its platform. Leaving it out of the payload does not remove it — Home
+  Assistant keeps what it last saw. This is what happens when a capability disappears: switch
+  screenshots off and the image entity goes with them.
 
 ### The attributes the sensors carry
 
@@ -432,12 +588,26 @@ The types are the ones the `service` and `epg` topics define; an attribute whose
 `null` is published as `null`, not dropped. `next_*` is flattened rather than nested because Home
 Assistant templates read a flat attribute far more comfortably than a nested object.
 
+### The device triggers
+
+Eight retained payloads, one per topic, each with `automation_type: trigger`, the `key` topic, and
+a `value_template` of `{{ value_json.key }}_{{ value_json.press }}` matched against a payload of
+`KEY_RED_short` and its seven siblings. The `type` is `button_short_press` or `button_long_press`
+and the `subtype` is the colour, which is how they are labelled in the automation editor.
+
+They are published only when `keys` is a capability — with `publish_keys` off there is no `key`
+topic for them to watch, and a trigger that can never fire is worse than none.
+
 ### The state file
 
 The plugin keeps `/etc/enigma2/mqttbridge-state.json` — beside enigma2's own settings, or beside
 the plugin itself when `/etc/enigma2` will not take a write — and it records **every topic this
 node has published retained**: the state topics, every `epg_grid/<bouquet_slug>`, the
-announcement, and every Home Assistant discovery payload. It is written atomically, through a
+announcement, and every Home Assistant discovery payload. Beside that list it keeps two indexes
+that a topic name alone cannot answer: the **slugs** of the EPG grids it has published, so a
+bouquet that is renamed or dropped can be retracted, and the **components** it last announced with
+their platforms, so one that is no longer announced can be removed by name from a payload that
+otherwise contains only the survivors. It is written atomically, through a
 temporary file in the same directory and a rename, so an interrupted write leaves the previous
 list rather than half of a new one; it survives reboots and plugin upgrades, and `cmd/reset`
 empties it and then fills it again with exactly what the reset republished. Nothing secret is in
