@@ -15,15 +15,15 @@ is no separate configuration file to maintain, and settings survive a plugin upg
 | `ca_file` | — | Path to a CA bundle on the box, for a broker with a private CA |
 | `username` | — | Broker login. Give the box **its own**, not Home Assistant's |
 | `password` | — | Entered as a password field and never written to the log |
-| `node_id` | `<boxtype>_<mac6>` | For example `vuuno4kse_1775fc`. Lowercase ASCII, stable across reinstalls, and the unique identity everything keys on. Changing it orphans the old retained topics — run `cmd/reset` first |
+| `node_id` | `<boxtype>_<mac6>` | For example `vuuno4kse_005301`. Lowercase ASCII, stable across reinstalls, and the unique identity everything keys on. Changing it orphans the old retained topics — run `cmd/reset` first |
 | `friendly_name` | the box type | The device name a user sees in Home Assistant |
 | `base_topic` | `enigma2` | State publishes under `<base_topic>/<node_id>/` |
 | `ha_discovery_prefix` | `homeassistant` | Match your Home Assistant MQTT integration if you changed it there |
 | `ha_mode` | `discovery` | `discovery` / `integration` / `off` — see [TOPICS.md](TOPICS.md#cmdha_mode-semantics) |
 | `publish_keys` | `on` | Remote-key events on the `key` topic. Off if you do not automate on them — it is a log of what is pressed |
 | `screenshot` | `on zap` | `off`, `on zap`, or `interval N s`. At most one capture per five seconds whatever this says |
-| `epg_grid_events` | `4` | Events per channel in the `epg_grid` topic. `0` turns the grid off and drops it from `capabilities` |
-| `bouquets_for_select` | all TV bouquets | Which bouquets feed the channel list, the `zap`-by-name lookup and the EPG grid. Narrow it if you have hundreds of services |
+| `epg_grid_events` | `4` | Events per channel in the EPG grid. `0` turns the grid off and drops it from `capabilities` |
+| `bouquets_for_select` | all TV bouquets | Which bouquets feed the channel list, the `zap`-by-name lookup and the EPG grid — which publishes **one retained topic per bouquet**, `epg_grid/<bouquet_slug>`. Narrow it if you have hundreds of services. Dropping or renaming a bouquet retracts the topic it owned |
 | `deep_standby_allowed` | `off` | Gate for `cmd/deep_standby` and `cmd/reboot`. Off by default because waking the box again needs Wake-on-LAN and that is worth testing before you rely on it |
 | `log_level` | `info` | `error` / `warning` / `info` / `debug` |
 
@@ -41,7 +41,7 @@ For headless installs — and for the companion integration's guided installer �
   "port": 1883,
   "username": "enigma2box",
   "password": "the-broker-password",
-  "node_id": "vuuno4kse_1775fc",
+  "node_id": "vuuno4kse_005301",
   "friendly_name": "Living room receiver",
   "base_topic": "enigma2",
   "ha_mode": "discovery",
@@ -101,7 +101,7 @@ packages` is under `homeassistant:` in your `configuration.yaml`.
 Substitute two things throughout: the entity ids, which Home Assistant derives from the
 `friendly_name` you set on the box (a box called *Living room receiver* gives
 `switch.living_room_receiver_power` and friends — check *Developer tools → States*), and
-`enigma2/vuuno4kse_1775fc` in the MQTT topics, which is `<base_topic>/<node_id>`.
+`enigma2/vuuno4kse_005301` in the MQTT topics, which is `<base_topic>/<node_id>`.
 
 ```yaml
 # The universal player does no arithmetic, so volume 0-100 becomes 0.0-1.0 here.
@@ -160,26 +160,28 @@ media_player:
       media_next_track:
         action: mqtt.publish
         data:
-          topic: enigma2/vuuno4kse_1775fc/cmd/key
+          topic: enigma2/vuuno4kse_005301/cmd/key
           payload: KEY_CHANNELUP
           qos: 1
       media_previous_track:
         action: mqtt.publish
         data:
-          topic: enigma2/vuuno4kse_1775fc/cmd/key
+          topic: enigma2/vuuno4kse_005301/cmd/key
           payload: KEY_CHANNELDOWN
           qos: 1
 
       play_media:
         action: mqtt.publish
         data:
-          topic: enigma2/vuuno4kse_1775fc/cmd/zap
+          topic: enigma2/vuuno4kse_005301/cmd/zap
           payload: "{{ media_id }}"
           qos: 1
 ```
 
 `play_media` takes a service reference as its `media_content_id`; pass the `sref` the channel
-sensor carries as an attribute. `media_content_type` is ignored.
+sensor carries as an attribute — the attributes both sensors carry are listed in
+[TOPICS.md](TOPICS.md#the-attributes-the-sensors-carry), which is why `|sref` above is safe to
+rely on. `media_content_type` is ignored.
 
 What this recipe cannot give you, and the integration can: browsing bouquets and channels with
 picons, the screenshot as the player's artwork, remote keys as device triggers, on-screen
@@ -190,7 +192,10 @@ plugin.
 
 Before you leave this file: the programme sensor, the key events and the screenshot image all go
 into Home Assistant's recorder database by default. Exclude what you would not want to read back
-in six months:
+in six months.
+
+**With the companion integration installed**, the remote keys are an `event` entity and the
+screenshot is an `image`, so both can be named:
 
 ```yaml
 recorder:
@@ -200,5 +205,9 @@ recorder:
       - image.living_room_receiver_screen
 ```
 
-Turning `publish_keys` off on the box is stronger than excluding the entity — it means the
-information never reaches the broker at all.
+**In plain `discovery` mode there is no `event.<box>_key` to exclude.** The key topic becomes MQTT
+*device triggers*, which are not entities and which the recorder never stores, so the first line
+above would name something that does not exist. Turn **`publish_keys` off** on the box instead —
+which is the stronger control in either case, because the information then never reaches the
+broker at all. The screenshot *is* an entity in discovery mode, so the second line applies; on the
+box, `screenshot: off` is its equivalent.

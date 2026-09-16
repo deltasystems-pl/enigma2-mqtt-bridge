@@ -79,7 +79,9 @@ The plugin has no telemetry, no cloud component and no update check that phones 
 
 ## Install
 
-**From a GitHub release** (any image, one line on the box):
+**From a GitHub release** (any image, one line on the box) — **available from v0.1.0, which is not
+yet released**; the [releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases)
+is empty until it is, and the URL below 404s until then:
 
 ```sh
 opkg install https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/download/v0.1.0/enigma2-plugin-extensions-mqttbridge_0.1.0_all.ipk
@@ -116,7 +118,7 @@ For headless installs there is a one-shot provisioning file. Write
   "port": 1883,
   "username": "enigma2box",
   "password": "the-broker-password",
-  "node_id": "vuuno4kse_1775fc",
+  "node_id": "vuuno4kse_005301",
   "friendly_name": "Living room receiver",
   "ha_mode": "discovery"
 }
@@ -155,9 +157,12 @@ are both written against it, and it is versioned with the plugin.
 The `key` and `epg` topics reveal what is being watched and what is being pressed, and they land
 in Home Assistant's recorder database by default. If that matters in your household:
 
-- exclude the key event entity and the screenshot image entity from the recorder, and decide
-  deliberately about the programme-title sensor;
-- turn `publish_keys` off if you do not automate on remote keys;
+- exclude the screenshot image entity from the recorder, and decide deliberately about the
+  programme-title sensor. The key `event` entity is worth excluding too — but it only exists
+  **with the companion integration**; in plain discovery mode the keys are MQTT device triggers,
+  which are not entities and cannot be excluded by name;
+- turn `publish_keys` off if you do not automate on remote keys — on a plugin-only install that
+  is the control, and it is the stronger one either way, because nothing reaches the broker;
 - set `screenshot` to `off` — it is a picture of your screen on the broker, retained;
 - remember that retained topics outlive the plugin: `cmd/reset` retracts everything, and it is
   the documented step before uninstalling.

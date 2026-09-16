@@ -1,5 +1,15 @@
 # Development and CI tooling. The plugin itself has no runtime dependency that is
 # not vendored — see NOTICE.
-ruff>=0.6
-pyflakes>=3.2
-pytest>=8.0
+#
+# Pinned exactly, not with `>=`. A floating lint or test tool means CI can go red
+# on a commit that changed nothing, and a contributor's local run can disagree
+# with the runner for a week before anybody works out why. Bump these on purpose,
+# in their own commit, with the failure they fix or the release they follow.
+#
+# pytest is split on the Python version because the matrix has to keep working:
+# 9.x requires Python >= 3.10 and the floor here is 3.9 (OpenPLi 9), so 3.9 gets
+# the last 8.x. Everything else installs on every version in the matrix.
+ruff==0.16.7
+pyflakes==3.4.0
+pytest==9.1.1 ; python_version >= "3.10"
+pytest==8.4.2 ; python_version < "3.10"

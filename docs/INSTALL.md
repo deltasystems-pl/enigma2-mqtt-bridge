@@ -19,6 +19,11 @@ A telnet transport for the guided installer is planned for v1.1; it is not in v1
 
 ## From a GitHub release
 
+**Available from v0.1.0, which is not yet released.** Until it is, the
+[releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases) is empty and the
+URL below returns a 404 — build the package yourself with
+[the scp route](#manually-with-scp) in the meantime.
+
 One line on the box, nothing to download to your PC first:
 
 ```sh

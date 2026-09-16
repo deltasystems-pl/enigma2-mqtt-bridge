@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly, for the one job that asks a question of the outside world rather
+  # than of this commit: whether the vendored MQTT client has moved on.
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -70,6 +75,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install gettext
+        # msgfmt compiles the .po files into the package. The runner image does
+        # not carry it, and without it the build fails the moment the first
+        # translation lands rather than the moment somebody notices.
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends gettext
+
       - name: Build
         run: ./tools/build-ipk.sh --allow-unreleased
 
@@ -82,17 +93,77 @@ jobs:
           cd dist && sha256sum -c ./*.sha256
 
       - name: Show what is inside
+        # -v so the modes are in the log: the package must carry 0644 data,
+        # 0755 maintainer scripts, and nothing world-writable from whatever
+        # filesystem it happened to be staged on.
         run: |
           ipk=$(ls dist/*.ipk)
           mkdir -p /tmp/ipk && cd /tmp/ipk && ar x "$GITHUB_WORKSPACE/$ipk"
           echo "--- control ---"
-          tar tzf control.tar.gz
+          tar tzvf control.tar.gz
           tar xzf control.tar.gz -O ./control
           echo "--- data ---"
-          tar tzf data.tar.gz | head -40
+          tar tzvf data.tar.gz | head -40
 
       - uses: actions/upload-artifact@v4
         with:
           name: ipk
           path: dist/
           if-no-files-found: error
+
+  vendored-paho:
+    name: Vendored paho-mqtt
+    # paho-mqtt is copied into the tree, so no package manager is watching it
+    # and nothing tells us when upstream moves. This asks, once a week and on
+    # demand. It is soft by design: continue-on-error means a new release shows
+    # up as a warning on the run and never blocks a merge or a release. See the
+    # bump procedure in NOTICE.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compare the vendored version with the latest 2.x on PyPI
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          import sys
+          import urllib.request
+
+          notice = open("NOTICE", encoding="utf-8").read()
+          match = re.search(r"^\s*Vendored version\s+(\S+)\s*$", notice, re.M)
+          if not match:
+              sys.exit("NOTICE: no 'Vendored version' line found")
+          recorded = match.group(1)
+
+          src = open("src/MQTTBridge/paho/mqtt/__init__.py", encoding="utf-8").read()
+          match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', src)
+          if not match:
+              sys.exit("src/MQTTBridge/paho: no __version__ found")
+          vendored = match.group(1)
+
+          if recorded != vendored:
+              sys.exit(f"NOTICE records {recorded}, the vendored tree carries {vendored}")
+
+          with urllib.request.urlopen("https://pypi.org/pypi/paho-mqtt/json", timeout=30) as fh:
+              releases = json.load(fh)["releases"]
+
+          def parts(version):
+              return tuple(int(p) for p in version.split("."))
+
+          # Final 2.x only: a pre-release is not something to vendor.
+          latest = max((v for v in releases if re.fullmatch(r"2(\.\d+)+", v)), key=parts)
+          print(f"vendored:            {vendored}")
+          print(f"latest 2.x on PyPI:  {latest}")
+
+          if parts(latest) > parts(vendored):
+              print(f"::warning::paho-mqtt {latest} is out; this tree carries {vendored}")
+              sys.exit("the vendored copy is behind - follow the bump procedure in NOTICE")
+          print("the vendored copy is current")
+          PY
