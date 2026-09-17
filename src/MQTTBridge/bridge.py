@@ -144,11 +144,12 @@ class Bridge:
     def _replace_configurable_publishers(self):
         """Rebind only hooks controlled by cmd/config; preserve all other work."""
         from .cam import CamPublisher
+        from .oscam import OscamPublisher
         from .publishers import PUBLISHER_CLASSES
         from .remote import KeyPublisher
         from .screen import ScreenPublisher
 
-        replacements = (CamPublisher, KeyPublisher, ScreenPublisher)
+        replacements = (CamPublisher, OscamPublisher, KeyPublisher, ScreenPublisher)
         for publisher_class in replacements:
             name = publisher_class.name
             old = self.publisher(name)
@@ -176,6 +177,8 @@ class Bridge:
             self.retract(self.topic("screen"))
         if not self.value("cam_telemetry"):
             self.retract(self.topic("cam"))
+        if not self.value("oscam_telemetry"):
+            self.retract(self.topic("oscam"))
 
     @property
     def state(self):
@@ -478,6 +481,8 @@ class Bridge:
             self.retract(self.topic("screen"))
         if not self.value("cam_telemetry"):
             self.retract(self.topic("cam"))
+        if not self.value("oscam_telemetry"):
+            self.retract(self.topic("oscam"))
         # Every payload goes out on every connect, so what was published before
         # this connection is not what is on the broker now.
         self.forget_published()

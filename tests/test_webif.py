@@ -181,9 +181,10 @@ def test_valid_post_applies_only_normalized_remote_settings(monkeypatch):
             "publish_keys": False,
             "screenshot": "interval",
             "screenshot_interval": 120,
-            "screenshot_delay": 4,
-            "cam_telemetry": True,
-        }
+                "screenshot_delay": 4,
+                "cam_telemetry": True,
+                "oscam_telemetry": False,
+            }
     ]
     assert b"Publisher settings saved" in body
     assert webif._csrf_token(request) != old_token

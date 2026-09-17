@@ -227,3 +227,19 @@ msgstr "Po zmianie kanału"
 #: src/MQTTBridge/webif.py
 msgid "Periodically"
 msgstr "Okresowo"
+
+#: src/MQTTBridge/setup.py
+msgid "Publish OSCam server telemetry"
+msgstr "Publikuj telemetrię serwera OSCam"
+
+#: src/MQTTBridge/setup.py
+msgid "OSCam WebIf port"
+msgstr "Port WebIf OSCam"
+
+#: src/MQTTBridge/setup.py
+msgid "OSCam WebIf username"
+msgstr "Użytkownik WebIf OSCam"
+
+#: src/MQTTBridge/setup.py
+msgid "OSCam WebIf password"
+msgstr "Hasło WebIf OSCam"

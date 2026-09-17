@@ -227,3 +227,19 @@ msgstr ""
 #: src/MQTTBridge/webif.py
 msgid "Periodically"
 msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "Publish OSCam server telemetry"
+msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "OSCam WebIf port"
+msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "OSCam WebIf username"
+msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "OSCam WebIf password"
+msgstr ""

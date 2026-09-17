@@ -40,6 +40,7 @@ REMOTE_SETTING_NAMES = (
     "screenshot_interval",
     "screenshot_delay",
     "cam_telemetry",
+    "oscam_telemetry",
 )
 SCREENSHOT_INTERVAL_LIMITS = (5, 3600)
 SCREENSHOT_DELAY_LIMITS = (1, 30)
@@ -67,6 +68,10 @@ SETTING_NAMES = (
     "screenshot_interval",
     "screenshot_delay",
     "cam_telemetry",
+    "oscam_telemetry",
+    "oscam_port",
+    "oscam_username",
+    "oscam_password",
     "bouquets_for_select",
     "deep_standby_allowed",
     "log_level",
@@ -94,6 +99,10 @@ SETTING_KINDS = {
     "screenshot_interval": "int",
     "screenshot_delay": "int",
     "cam_telemetry": "bool",
+    "oscam_telemetry": "bool",
+    "oscam_port": "int",
+    "oscam_username": "text",
+    "oscam_password": "text",
     "bouquets_for_select": "text",
     "deep_standby_allowed": "bool",
     "log_level": "choice",
@@ -106,7 +115,7 @@ CHOICES = {
     "log_level": LOG_LEVELS,
 }
 
-SECRET_NAMES = ("password",)
+SECRET_NAMES = ("password", "oscam_password")
 
 _TRUE = ("1", "on", "true", "yes")
 _FALSE = ("0", "off", "false", "no")
@@ -146,6 +155,13 @@ def _build():
     section.screenshot_interval = ConfigInteger(default=60, limits=SCREENSHOT_INTERVAL_LIMITS)
     section.screenshot_delay = ConfigInteger(default=4, limits=SCREENSHOT_DELAY_LIMITS)
     section.cam_telemetry = ConfigYesNo(default=False)
+    section.oscam_telemetry = ConfigYesNo(default=False)
+    section.oscam_port = ConfigInteger(default=8888, limits=(1, 65535))
+    section.oscam_username = ConfigText(default="", fixed_size=False)
+    section.oscam_password = ConfigPassword(default="", fixed_size=False)
+    # Internal only: never shown, provisioned or echoed. It makes neutral reader
+    # handles stable without publishing an unsalted hash of a private label.
+    section.oscam_identity_salt = ConfigText(default="", fixed_size=False)
     section.bouquets_for_select = ConfigText(default="", fixed_size=False)
     section.deep_standby_allowed = ConfigYesNo(default=False)
     section.log_level = ConfigSelection(
@@ -256,6 +272,7 @@ def validate_remote_settings(raw):
     interval = raw["screenshot_interval"]
     delay = raw.get("screenshot_delay", value("screenshot_delay"))
     cam_telemetry = raw.get("cam_telemetry", value("cam_telemetry"))
+    oscam_telemetry = raw.get("oscam_telemetry", value("oscam_telemetry"))
     if not isinstance(publish_keys, bool):
         raise ValueError("publish_keys must be true or false")
     if not isinstance(screenshot, str) or screenshot not in SCREENSHOT_MODES:
@@ -274,12 +291,15 @@ def validate_remote_settings(raw):
         raise ValueError(f"screenshot_delay must be between {minimum} and {maximum}")
     if not isinstance(cam_telemetry, bool):
         raise ValueError("cam_telemetry must be true or false")
+    if not isinstance(oscam_telemetry, bool):
+        raise ValueError("oscam_telemetry must be true or false")
     return {
         "publish_keys": publish_keys,
         "screenshot": screenshot,
         "screenshot_interval": interval,
         "screenshot_delay": delay,
         "cam_telemetry": cam_telemetry,
+        "oscam_telemetry": oscam_telemetry,
     }
 
 

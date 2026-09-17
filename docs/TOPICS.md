@@ -54,9 +54,9 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
   "ha_mode": "discovery",
   "settings": {"publish_keys": true, "screenshot": "on_zap",
                "screenshot_interval": 60, "screenshot_delay": 4,
-               "cam_telemetry": false},
+               "cam_telemetry": false, "oscam_telemetry": false},
   "capabilities": ["power", "service", "epg", "tuner", "recording", "timers",
-                   "volume", "hdd", "channels", "epg_grid", "keys", "screenshot",
+                   "volume", "hdd", "channels", "bouquet_context", "epg_grid", "keys", "screenshot",
                    "message"]
 }
 ```
@@ -71,14 +71,15 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
 | `ip` | string | Current LAN address |
 | `uptime` | int | Seconds since boot |
 | `ha_mode` | string | `discovery` \| `integration` \| `off` — the acknowledgement of `cmd/ha_mode` |
-| `settings` | object | The complete remotely writable, non-secret subset. It contains `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5–3600), `screenshot_delay` (post-zap settling seconds, 1–30), and `cam_telemetry` (bool, off by default). |
+| `settings` | object | The complete remotely writable, non-secret subset. It contains `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5–3600), `screenshot_delay` (post-zap settling seconds, 1–30), `cam_telemetry` (bool, off by default), and `oscam_telemetry` (bool, off by default). |
 | `capabilities` | list of strings | Which hooks this image actually gave the plugin |
 
 **`capabilities` is the honest part of the contract.** Hook names differ between images, so the
 plugin detects what it managed to attach and names it here rather than assuming. A consumer
 hides what is missing instead of showing a dead entity. The names are the feature areas, and
 nothing else is ever in the list: `power`, `service`, `epg`, `epg_grid`, `tuner`, `recording`,
-`timers`, `volume`, `cam`, `keys`, `screenshot`, `message`, `hdd`, `channels`. A build that has bound no
+`timers`, `volume`, `cam`, `oscam`, `keys`, `screenshot`, `message`, `hdd`, `channels`,
+`bouquet_context`. A build that has bound no
 feature area publishes `[]` — the connection, `info` and the commands are the plugin itself and
 are not capabilities.
 
@@ -187,6 +188,19 @@ serves them on the same address.
 Rebuilt when `bouquets.tv` or any `userbouquet.*` file changes — there is no event for that, so
 their modification times are compared once a minute — and on `cmd/discovery`. The list on a real
 box went from 36 entries to 11 within half an hour once, so nothing may key on position.
+
+### `<base>/<node>/bouquet`
+
+The active television bouquet used by the receiver's channel-up and channel-down actions:
+
+```json
+{"name":"Ulubione TV","sref":"1:7:1:0:0:0:0:0:0:0:FROM BOUQUET \"userbouquet.ulubione.tv\" ORDER BY bouquet"}
+```
+
+Retained and present when `bouquet_context` is a capability. It is read from the receiver's real
+service-list root, not inferred from the current channel. A successful `cmd/bouquet` always
+republishes it, including when the requested bouquet was already active, so consumers can require
+a fresh by-effect acknowledgement.
 
 ### `<base>/<node>/epg_grid/<bouquet_slug>` — since M2
 
@@ -337,6 +351,42 @@ invalidates the prior result until the file is updated. Because this file has no
 identity, attribution on multi-tuner images is best effort; this topic must not drive access or
 recording decisions.
 
+### `<base>/<node>/oscam`
+
+```json
+{
+  "software": "OSCam", "version": "1.20_svn build r11739",
+  "software_running": true, "api_reachable": true, "api_access": "granted",
+  "readonly": true, "uptime_s": 86400,
+  "readers_configured": 2, "readers_enabled": 2, "readers_healthy": 2,
+  "cards_ready": 1, "servers_connected": 1, "shared_cards": 18,
+  "readers": [
+    {"id":"reader_4d3b0e8b32c1","kind":"reader","enabled":true,
+     "status":"ready","protocol":"internal","shared_cards":null},
+    {"id":"server_b6a8c0344f12","kind":"server","enabled":true,
+     "status":"connected","protocol":"cccam","shared_cards":18}
+  ]
+}
+```
+
+Opt-in with `oscam_telemetry`; absent entirely by default. Every 30 seconds a dedicated worker
+queries only `status` and `readerlist` from OSCam's JSON API on `127.0.0.1`. It never follows a
+redirect, uses an environment proxy, invokes an action API, or blocks enigma's main loop. A
+response is capped at 128 KiB and the request has a bounded deadline. After 90 seconds without a
+completed probe, counts become unknown and the reader list is cleared instead of presenting old
+health as current.
+
+Reader labels become stable, receiver-local HMAC identifiers using a hidden persisted salt. The
+labels themselves, addresses, users, card identifiers, CAIDs, providers and keys never leave the
+box. Reordering OSCam's response does not change an id; renaming a reader does. `kind` is
+`reader`, `server`, or `unknown`; `status` is one of `ready`, `connected`, `disabled`, `no_card`,
+`initializing`, `connecting`, `disconnected`, `sleeping`, `duplicate`, `error`, or `unknown`.
+
+`cards_ready` counts enabled local readers reporting `CARDOK`. `shared_cards` is OSCam's bounded
+CCcam share count and is deliberately separate: it is never added to the physical-reader count.
+`api_access: granted` means only that the API returned these read-only views; it does not assert
+that OSCam authentication is enabled. `readonly` reports OSCam's own API flag.
+
 ### `<base>/<node>/hdd`
 
 ```json
@@ -435,6 +485,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `reboot` | any | Reboots the receiver | Same as `deep_standby` |
 | `restart_gui` | any | Restarts enigma2 only | Refused while recording or with a timer due within 10 minutes |
 | `zap` | `<sref>` \| `{"sref": "…"}` \| `{"name": "…"}` | Tunes to a service, waking the box from standby first | By name: refused unless exactly one service in the configured bouquets matches — the error names the count. A zap that does not show up on `service` within 5 s is reported there too |
+| `bouquet` | `{"sref": "…"}` | Makes one published TV bouquet the active channel-list context | Exact allowlist match only. The current channel is preserved when it belongs to the bouquet; otherwise the first playable channel is tuned. Empty/marker-only bouquets and unavailable service-list APIs are refused without changing context |
 | `volume` | `0`–`100`, or `{"level": 42}` | Sets the volume, with the on-screen bar | Out-of-range values are clamped and noted in the log |
 | `mute` | `ON` \| `OFF` | Sets mute | Never a blind toggle: the state is read first, and read back afterwards. A receiver refuses to mute at volume 0, and that refusal is reported |
 | `key` | `KEY_OK` \| `{"key": "KEY_OK", "long": true}` | Injects a remote key | Unknown key names are refused with the name in `last_error`; at most 20 a second |
@@ -443,7 +494,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `record` | `start` \| `stop` | Starts or stops an instant recording of the current service | `start` records the current service for two hours; `stop` with nothing recording is a no-op with a note in `last_error` |
 | `screenshot` | any | Captures `screen` now, in standby as well | Rate-limited to one per five seconds |
 | `epg_grid` | any | Rebuilds and republishes **every** `epg_grid/<bouquet_slug>` topic | Refused with a note in `last_error` when `epg_grid_events` is `0` |
-| `config` | `{"publish_keys": false, "screenshot": "interval", "screenshot_interval": 90, "screenshot_delay": 4, "cam_telemetry": false}` | Atomically replaces the remotely writable settings subset and publishes fresh `info`/discovery | The original three keys remain required; the two newer keys are optional for older clients and preserve their current values when omitted. Unknown keys and coercion are refused, and a persistence failure applies none of them |
+| `config` | `{"publish_keys": false, "screenshot": "interval", "screenshot_interval": 90, "screenshot_delay": 4, "cam_telemetry": false, "oscam_telemetry": false}` | Atomically replaces the remotely writable settings subset and publishes fresh `info`/discovery | The original three keys remain required; newer keys are independently optional for older clients and preserve their current values when omitted. Unknown keys and coercion are refused, and a persistence failure applies none of them |
 | `discovery` | any | Republishes the announcement, the channel list, and the discovery payloads in discovery mode | — |
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
 | `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
@@ -472,14 +523,17 @@ Either way, `timers` (and `recording` when it is imminent) is republished afterw
 ### `cmd/config` semantics
 
 This is deliberately not a general settings API. Broker credentials, TLS, identity, topic names,
-Home Assistant mode, bouquet selection, logging and destructive-command permission cannot be
-changed through MQTT. The command accepts the three original keys plus optional `screenshot_delay`
-and `cam_telemetry`,
+the configured bouquet filter, logging and destructive-command permission cannot be changed
+through `cmd/config`. Home Assistant mode has its dedicated command, and active TV bouquet
+context has `cmd/bouquet`; neither broadens this settings API. The command accepts the three original keys plus independently optional `screenshot_delay`,
+`cam_telemetry`, and `oscam_telemetry`,
 with their JSON types unchanged. The plugin validates the whole object before assigning anything,
-persists the five values through enigma2's settings store, then rebinds the key, CAM and screenshot publishers
+persists the values through enigma2's settings store, then rebinds only the affected publishers
 so the new behaviour is immediate. A fresh `info.settings` object is the by-effect acknowledgement.
 Switching screenshots off also retracts the retained `screen` image so disabling the private
-feature does not leave its last picture readable from broker retention.
+feature does not leave its last picture readable from broker retention. Disabling either CAM
+telemetry option likewise retracts its retained topic. OSCam host, port and credentials are never
+accepted here or published in `info`.
 
 ### `cmd/ha_mode` semantics
 
@@ -539,7 +593,7 @@ It is a cleanup, not a factory reset: settings are untouched.
   "mac": "00:00:5e:00:53:01",
   "ip": "192.0.2.12",
   "capabilities": ["power", "service", "epg", "tuner", "recording", "timers",
-                   "volume", "hdd", "channels", "epg_grid", "keys", "screenshot",
+                   "volume", "hdd", "channels", "bouquet_context", "epg_grid", "keys", "screenshot",
                    "message"],
   "ha_mode": "discovery"
 }

@@ -26,6 +26,10 @@ EXPECTED_DEFAULTS = {
     "screenshot_interval": 60,
     "screenshot_delay": 4,
     "cam_telemetry": False,
+    "oscam_telemetry": False,
+    "oscam_port": 8888,
+    "oscam_username": "",
+    "oscam_password": "",
     "bouquets_for_select": "",
     "deep_standby_allowed": False,
     "log_level": "info",
@@ -78,6 +82,7 @@ def test_the_password_is_a_password_field():
     from Components.config import ConfigPassword
 
     assert isinstance(settings_module.settings.password, ConfigPassword)
+    assert isinstance(settings_module.settings.oscam_password, ConfigPassword)
 
 
 def test_remote_settings_are_exact_and_strictly_typed():
@@ -91,6 +96,7 @@ def test_remote_settings_are_exact_and_strictly_typed():
         "screenshot_interval": 300,
         "screenshot_delay": 4,
         "cam_telemetry": False,
+        "oscam_telemetry": False,
     }
 
 
@@ -110,6 +116,8 @@ def test_remote_settings_are_exact_and_strictly_typed():
      "screenshot_delay": 31},
     {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60,
      "cam_telemetry": 1},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60,
+     "oscam_telemetry": 1},
 ])
 def test_remote_settings_reject_partial_unknown_or_invalid_values(payload):
     with pytest.raises(ValueError):

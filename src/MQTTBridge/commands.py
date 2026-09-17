@@ -92,6 +92,7 @@ class CommandDispatcher:
             "reboot": self.reboot,
             "restart_gui": self.restart_gui,
             "zap": self.zap,
+            "bouquet": self.bouquet,
             "volume": self.volume,
             "mute": self.mute,
             "key": self.key,
@@ -264,6 +265,22 @@ class CommandDispatcher:
             # `last_error` if it does not.
             service.expect(sref)
         return None
+
+    def bouquet(self, text):
+        """Switch the active channel-list context to one published bouquet."""
+        try:
+            payload = json.loads(text)
+        except (TypeError, ValueError):
+            return "cmd/bouquet takes a JSON object"
+        if not isinstance(payload, dict) or set(payload) != {"sref"}:
+            return "cmd/bouquet takes exactly one sref field"
+        sref = payload.get("sref")
+        if not isinstance(sref, str) or not sref:
+            return "cmd/bouquet sref must be a non-empty string"
+        publisher = self.publisher("bouquet_context")
+        if publisher is None:
+            return "active bouquet selection is unavailable on this image"
+        return publisher.select(sref)
 
     def volume(self, text):
         from . import volume as volume_module

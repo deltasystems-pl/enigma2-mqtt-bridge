@@ -168,6 +168,10 @@ in Home Assistant's recorder database by default. If that matters in your househ
 - leave `cam_telemetry` off unless you need conditional-access diagnostics. When enabled it
   publishes only the generic CA system, current-service encryption flag and bounded fresh ECM timing,
   never reader, server, user, card or raw ECM data;
+- leave `oscam_telemetry` off unless you need software and reader/server health. It queries only
+  receiver-local read-only WebIf views and publishes opaque source ids and bounded aggregate
+  counts; raw reader names, addresses, users, card identifiers and WebIf credentials stay on the
+  receiver;
 - remember that retained topics outlive the plugin: `cmd/reset` retracts everything, and it is
   the documented step before uninstalling.
 

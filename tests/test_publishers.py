@@ -25,7 +25,7 @@ def test_a_bridge_with_a_session_registers_every_feature_area(live_bridge):
     names = [publisher.name for publisher in live_bridge._publishers]
     assert names == [
         "power", "service", "epg", "tuner", "recording", "timers", "volume", "hdd",
-        "channels", "epg_grid", "keys", "screenshot",
+        "channels", "bouquet_context", "epg_grid", "keys", "screenshot",
     ]
 
 
@@ -35,7 +35,7 @@ def test_capabilities_name_the_areas_that_bound(live_bridge, factory):
     # popup machinery being importable.
     assert capabilities == [
         "power", "service", "epg", "tuner", "recording", "timers", "volume", "hdd",
-        "channels", "epg_grid", "keys", "screenshot", "message",
+        "channels", "bouquet_context", "epg_grid", "keys", "screenshot", "message",
     ]
 
 
@@ -179,8 +179,8 @@ def test_snapshot_timings_name_only_publishers_and_warn_when_slow(
 
 def test_the_default_registry_is_the_documented_order():
     assert [cls.name for cls in publishers.PUBLISHER_CLASSES] == [
-        "power", "service", "epg", "tuner", "cam", "recording", "timers", "volume",
-        "hdd", "channels", "epg_grid", "keys", "screenshot",
+        "power", "service", "epg", "tuner", "cam", "oscam", "recording", "timers", "volume",
+        "hdd", "channels", "bouquet_context", "epg_grid", "keys", "screenshot",
     ]
 
 

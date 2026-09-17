@@ -133,6 +133,7 @@ def test_config_persists_all_values_rebinds_hooks_and_publishes_info(
         "screenshot_interval": 90,
         "screenshot_delay": 9,
         "cam_telemetry": False,
+        "oscam_telemetry": False,
     }
 
 
@@ -150,6 +151,23 @@ def test_config_enables_cam_telemetry(live_bridge, factory, settings):
     assert settings.cam_telemetry.value is True
     assert settings.cam_telemetry.saved_value is True
     assert live_bridge.publisher("cam") is not None
+
+
+def test_config_enables_oscam_without_accepting_its_credentials(
+    live_bridge, factory, settings, monkeypatch
+):
+    from MQTTBridge.oscam import OscamPublisher
+
+    monkeypatch.setattr(OscamPublisher, "start", lambda _self: True)
+    send(
+        factory,
+        "config",
+        b'{"publish_keys":true,"screenshot":"on_zap","screenshot_interval":60,'
+        b'"oscam_telemetry":true}',
+    )
+    assert settings.oscam_telemetry.value is True
+    assert settings.oscam_telemetry.saved_value is True
+    assert live_bridge.publisher("oscam") is not None
 
 
 def test_repeated_config_does_not_restart_unrelated_publishers(

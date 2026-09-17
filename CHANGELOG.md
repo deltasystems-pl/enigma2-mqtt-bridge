@@ -13,10 +13,13 @@ version that has no section here.
 
 - A fail-closed `cmd/config` for the companion integration's safe runtime options:
   `publish_keys`, `screenshot`, `screenshot_interval`, and the backward-compatible optional
-  `screenshot_delay` and `cam_telemetry`. It validates and persists the complete
+  `screenshot_delay`, `cam_telemetry`, and `oscam_telemetry`. It validates and persists the complete
   replacement atomically, reapplies the affected hooks/timers, and acknowledges with the same
   non-secret values in `info.settings`; broker, identity, topic and destructive settings remain
   box-local only.
+- Opt-in receiver-local OSCam health on `oscam`: software/API state, bounded aggregate counts and
+  neutral reader/server entries keyed by salted opaque ids. WebIf credentials and raw OSCam
+  identities remain on the receiver; disabled telemetry retracts the retained topic.
 
 - **The receiver's state, on the broker.** `power`, `service`, `epg`, `tuner`, `recording`,
   `timers`, `volume`, `hdd`, `key` and `screen` are published as `docs/TOPICS.md` describes them,
@@ -28,6 +31,9 @@ version that has no section here.
 - **`channels`**, the configured bouquets and the services in them — the list a channel selector is
   built from and the one `cmd/zap` by name resolves against. Rebuilt when a bouquet file changes,
   which is a modification-time comparison once a minute because enigma2 offers no event for it.
+- **Active bouquet context** on `bouquet` plus guarded `cmd/bouquet`: selecting a published TV
+  bouquet changes the receiver's real channel-up/down list, preserves the current service when it
+  belongs there, and otherwise tunes the first playable channel.
 - **`epg_grid/<bouquet_slug>`**, one retained topic per configured bouquet, with the next few
   events on every channel in it. Built one bouquet per turn of the main loop, and the time each one
   took is logged.

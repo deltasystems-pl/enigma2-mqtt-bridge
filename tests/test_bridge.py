@@ -44,6 +44,7 @@ def test_info_carries_every_documented_field(connected_bridge, factory):
         "screenshot_interval": 60,
         "screenshot_delay": 4,
         "cam_telemetry": False,
+        "oscam_telemetry": False,
     }
 
 

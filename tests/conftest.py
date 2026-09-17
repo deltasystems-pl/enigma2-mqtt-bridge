@@ -910,10 +910,18 @@ class InfoBar:
 class ChannelList:
     """Enough of the receiver's channel list to prove the zap is safe."""
 
-    def __init__(self, selectable=()):
+    def __init__(self, selectable=(), bouquets=None, nav=None):
         self.selectable = [str(s) for s in selectable]
         self.selection = None
         self.zaps = 0
+        self.bouquet_root = eServiceReference(BOUQUET_ROOT)
+        self.root = eServiceReference(FIRST_BOUQUET)
+        self.path = [self.bouquet_root, self.root]
+        self.servicePath = self.path
+        self.bouquets = bouquets or {}
+        self.nav = nav
+        self.saved_roots = 0
+        self.mode = 0
 
     def setCurrentSelection(self, reference):
         wanted = getattr(reference, "reference", str(reference))
@@ -925,6 +933,43 @@ class ChannelList:
 
     def zap(self):
         self.zaps += 1
+        if self.nav is not None and self.selection is not None:
+            # ChannelSelection.zap owns the tune; do not model it as the
+            # fallback Navigation.playService path whose use other tests detect.
+            self.nav.sref = self.selection
+
+    def clearPath(self):
+        self.path.clear()
+        self.root = None
+
+    def enterPath(self, reference):
+        self.path.append(reference)
+        self.root = reference
+        services = self.bouquets.get(getattr(reference, "reference", str(reference)))
+        if services is not None:
+            self.selectable = list(services)
+            if self.selection not in self.selectable:
+                self.selection = None
+
+    def getRoot(self):
+        return self.root
+
+    def saveRoot(self):
+        self.saved_roots += 1
+
+    def channel_down(self):
+        if not self.selectable:
+            return
+        index = self.selectable.index(self.selection) if self.selection in self.selectable else -1
+        self.selection = self.selectable[(index + 1) % len(self.selectable)]
+        self.zap()
+
+    def channel_up(self):
+        if not self.selectable:
+            return
+        index = self.selectable.index(self.selection) if self.selection in self.selectable else 0
+        self.selection = self.selectable[(index - 1) % len(self.selectable)]
+        self.zap()
 
 
 infobar_module.InfoBar = InfoBar
@@ -1425,7 +1470,16 @@ class Receiver:
         return timer
 
     def with_channel_list(self, selectable=(TVP1, TVN)):
-        InfoBar.instance = InfoBar(ChannelList(selectable))
+        InfoBar.instance = InfoBar(
+            ChannelList(
+                selectable,
+                bouquets={
+                    FIRST_BOUQUET: [TVP1, TVN],
+                    SECOND_BOUQUET: [POLSAT],
+                },
+                nav=self.nav,
+            )
+        )
         return InfoBar.instance.servicelist
 
 

@@ -11,10 +11,12 @@ describes the topics in. A reader who compares the two should not have to sort
 anything.
 """
 
+from .bouquet import BouquetPublisher
 from .cam import CamPublisher
 from .channels import ChannelsPublisher
 from .epggrid import EpgGridPublisher
 from .hdd import HddPublisher
+from .oscam import OscamPublisher
 from .power import PowerPublisher
 from .recording import RecordingPublisher, TimersPublisher
 from .remote import KeyPublisher
@@ -28,11 +30,13 @@ PUBLISHER_CLASSES = (
     EpgPublisher,
     TunerPublisher,
     CamPublisher,
+    OscamPublisher,
     RecordingPublisher,
     TimersPublisher,
     VolumePublisher,
     HddPublisher,
     ChannelsPublisher,
+    BouquetPublisher,
     EpgGridPublisher,
     KeyPublisher,
     ScreenPublisher,
