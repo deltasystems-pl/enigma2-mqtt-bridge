@@ -75,6 +75,7 @@ class ScreenPublisher(Publisher):
         self._interval = Ticker(self._on_interval, "screenshot interval")
         self._nav = None
         self._start_event = None
+        self._active = False
 
     # ------------------------------------------------------------------ hooks --
 
@@ -87,11 +88,13 @@ class ScreenPublisher(Publisher):
         if self.value("screenshot") == "off":
             LOG.info("screenshots are switched off")
             return False
+        self._active = True
         self._bind_zap()
         self._arm_interval()
         return True
 
     def stop(self):
+        self._active = False
         self._debounce.stop()
         self._interval.stop()
         self._unbind_zap()
@@ -227,6 +230,9 @@ class ScreenPublisher(Publisher):
         self._container = None
         commanded, self._commanded = self._commanded, False
         try:
+            if not self._active:
+                self._remove_output()
+                return
             if retval:
                 LOG.warning("grab exited with %s", retval)
                 self._remove_output()

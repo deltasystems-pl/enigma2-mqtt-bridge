@@ -52,6 +52,8 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
   "ip": "192.0.2.12",
   "uptime": 384210,
   "ha_mode": "discovery",
+  "settings": {"publish_keys": true, "screenshot": "on_zap",
+               "screenshot_interval": 60},
   "capabilities": ["power", "service", "epg", "tuner", "recording", "timers",
                    "volume", "hdd", "channels", "epg_grid", "keys", "screenshot",
                    "message"]
@@ -68,6 +70,7 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
 | `ip` | string | Current LAN address |
 | `uptime` | int | Seconds since boot |
 | `ha_mode` | string | `discovery` \| `integration` \| `off` — the acknowledgement of `cmd/ha_mode` |
+| `settings` | object | The complete remotely writable, non-secret subset. It contains only `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`) and `screenshot_interval` (integer seconds, 5–3600). |
 | `capabilities` | list of strings | Which hooks this image actually gave the plugin |
 
 **`capabilities` is the honest part of the contract.** Hook names differ between images, so the
@@ -230,10 +233,12 @@ A channel can carry fewer than `epg_grid_events` events: the plugin asks the EPG
 bounded window of time rather than for a number of events, because that is the question the cache
 takes, and a channel showing a three-hour film has one event in it.
 
-**One bouquet per turn of the main loop.** A bouquet of two hundred channels is two hundred EPG
-lookups, and doing every bouquet in one go would hold the thread that draws the television for as
-long as that takes. So the topics of a multi-bouquet box appear a few milliseconds apart rather
-than together, and the time each one took is in the plugin's log. A grid whose content has not
+**Four channels per main-loop turn.** A bouquet of two hundred channels is two hundred EPG
+lookups, and doing one whole bouquet in a single callback can hold the thread that draws the
+television for too long. The builder therefore performs at most four channel lookups, yields for
+20 ms, then resumes from its cursor. A completed bouquet is published only after all of its
+channels have been collected; the previous retained grid stays current while that happens. The
+time each batch and completed bouquet took is in the plugin's log. A grid whose content has not
 changed is not republished.
 
 **Slugs that stop being configured are retracted.** The plugin remembers the slugs it has
@@ -416,6 +421,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `record` | `start` \| `stop` | Starts or stops an instant recording of the current service | `start` records the current service for two hours; `stop` with nothing recording is a no-op with a note in `last_error` |
 | `screenshot` | any | Captures `screen` now, in standby as well | Rate-limited to one per five seconds |
 | `epg_grid` | any | Rebuilds and republishes **every** `epg_grid/<bouquet_slug>` topic | Refused with a note in `last_error` when `epg_grid_events` is `0` |
+| `config` | `{"publish_keys": false, "screenshot": "interval", "screenshot_interval": 90}` | Atomically replaces the complete remotely writable settings subset and publishes fresh `info`/discovery | All three keys are required, unknown keys and coercion are refused, and a persistence failure applies none of them |
 | `discovery` | any | Republishes the announcement, the channel list, and the discovery payloads in discovery mode | — |
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
 | `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
@@ -440,6 +446,17 @@ from an `event_id` appears in `timers` with wider times than the `epg` topic sho
 with the times `timers` reports, not the ones the programme had.
 
 Either way, `timers` (and `recording` when it is imminent) is republished afterwards.
+
+### `cmd/config` semantics
+
+This is deliberately not a general settings API. Broker credentials, TLS, identity, topic names,
+Home Assistant mode, bouquet selection, logging and destructive-command permission cannot be
+changed through MQTT. The command accepts exactly the three keys shown in the table, with their
+JSON types unchanged. The plugin validates the whole object before assigning anything, persists
+the three values through enigma2's settings store, then rebinds the key and screenshot publishers
+so the new behaviour is immediate. A fresh `info.settings` object is the by-effect acknowledgement.
+Switching screenshots off also retracts the retained `screen` image so disabling the private
+feature does not leave its last picture readable from broker retention.
 
 ### `cmd/ha_mode` semantics
 

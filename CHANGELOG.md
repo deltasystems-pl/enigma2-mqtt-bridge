@@ -11,6 +11,12 @@ version that has no section here.
 
 ### Added
 
+- A fail-closed `cmd/config` for the companion integration's three safe runtime options:
+  `publish_keys`, `screenshot`, and `screenshot_interval`. It validates and persists the complete
+  replacement atomically, reapplies the affected hooks/timers, and acknowledges with the same
+  non-secret values in `info.settings`; broker, identity, topic and destructive settings remain
+  box-local only.
+
 - **The receiver's state, on the broker.** `power`, `service`, `epg`, `tuner`, `recording`,
   `timers`, `volume`, `hdd`, `key` and `screen` are published as `docs/TOPICS.md` describes them,
   each from the enigma2 hook that knows about it rather than from a poll: standby from the standby

@@ -78,6 +78,32 @@ def test_the_password_is_a_password_field():
     assert isinstance(settings_module.settings.password, ConfigPassword)
 
 
+def test_remote_settings_are_exact_and_strictly_typed():
+    assert settings_module.validate_remote_settings({
+        "publish_keys": False,
+        "screenshot": "interval",
+        "screenshot_interval": 300,
+    }) == {
+        "publish_keys": False,
+        "screenshot": "interval",
+        "screenshot_interval": 300,
+    }
+
+
+@pytest.mark.parametrize("payload", [
+    {},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60, "host": "x"},
+    {"publish_keys": 1, "screenshot": "off", "screenshot_interval": 60},
+    {"publish_keys": True, "screenshot": "sometimes", "screenshot_interval": 60},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": True},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 4},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 3601},
+])
+def test_remote_settings_reject_partial_unknown_or_invalid_values(payload):
+    with pytest.raises(ValueError):
+        settings_module.validate_remote_settings(payload)
+
+
 def test_save_writes_enigma2s_settings_file():
     from Components.config import configfile
 

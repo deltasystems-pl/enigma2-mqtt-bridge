@@ -28,7 +28,8 @@ def test_availability_is_online_retained_on_connect(connected_bridge, factory):
 def test_info_carries_every_documented_field(connected_bridge, factory):
     payload = factory.client.last(INFO).json()
     assert set(payload) == {
-        "image", "enigma", "plugin", "boxtype", "mac", "ip", "uptime", "ha_mode", "capabilities",
+        "image", "enigma", "plugin", "boxtype", "mac", "ip", "uptime", "ha_mode", "settings",
+        "capabilities",
     }
     assert payload["plugin"] == __version__
     assert payload["boxtype"] == "vuuno4kse"
@@ -37,6 +38,11 @@ def test_info_carries_every_documented_field(connected_bridge, factory):
     assert payload["ha_mode"] == "discovery"
     assert isinstance(payload["uptime"], int)
     assert isinstance(payload["capabilities"], list)
+    assert payload["settings"] == {
+        "publish_keys": True,
+        "screenshot": "on_zap",
+        "screenshot_interval": 60,
+    }
 
 
 def test_info_is_retained(connected_bridge, factory):

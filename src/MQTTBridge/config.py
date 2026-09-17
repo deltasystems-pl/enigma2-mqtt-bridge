@@ -34,6 +34,8 @@ PROVISIONING_PATH = "/etc/enigma2/mqttbridge.json"
 HA_MODES = ("discovery", "integration", "off")
 LOG_LEVELS = ("error", "warning", "info", "debug")
 SCREENSHOT_MODES = ("off", "on_zap", "interval")
+REMOTE_SETTING_NAMES = ("publish_keys", "screenshot", "screenshot_interval")
+SCREENSHOT_INTERVAL_LIMITS = (5, 3600)
 
 DEFAULT_BASE_TOPIC = "enigma2"
 DEFAULT_DISCOVERY_PREFIX = "homeassistant"
@@ -130,7 +132,7 @@ def _build():
         default="on_zap",
         choices=[("off", _("off")), ("on_zap", _("on zap")), ("interval", _("at an interval"))],
     )
-    section.screenshot_interval = ConfigInteger(default=60, limits=(5, 3600))
+    section.screenshot_interval = ConfigInteger(default=60, limits=SCREENSHOT_INTERVAL_LIMITS)
     section.bouquets_for_select = ConfigText(default="", fixed_size=False)
     section.deep_standby_allowed = ConfigYesNo(default=False)
     section.log_level = ConfigSelection(
@@ -223,6 +225,58 @@ def coerce(name, raw):
     if kind == "choice":
         return _coerce_choice(name, raw)
     return _coerce_text(raw)
+
+
+def validate_remote_settings(raw):
+    """Validate the complete, deliberately small remotely writable subset."""
+    if not isinstance(raw, dict):
+        raise ValueError("cmd/config takes a JSON object")
+    unknown = sorted(set(raw) - set(REMOTE_SETTING_NAMES))
+    missing = sorted(set(REMOTE_SETTING_NAMES) - set(raw))
+    if unknown:
+        raise ValueError("the config object contains unknown settings")
+    if missing:
+        raise ValueError("missing setting(s): " + ", ".join(missing))
+
+    publish_keys = raw["publish_keys"]
+    screenshot = raw["screenshot"]
+    interval = raw["screenshot_interval"]
+    if not isinstance(publish_keys, bool):
+        raise ValueError("publish_keys must be true or false")
+    if not isinstance(screenshot, str) or screenshot not in SCREENSHOT_MODES:
+        raise ValueError("screenshot must be one of " + ", ".join(SCREENSHOT_MODES))
+    if isinstance(interval, bool) or not isinstance(interval, int):
+        raise ValueError("screenshot_interval must be an integer")
+    minimum, maximum = SCREENSHOT_INTERVAL_LIMITS
+    if not minimum <= interval <= maximum:
+        raise ValueError(
+            f"screenshot_interval must be between {minimum} and {maximum}"
+        )
+    return {
+        "publish_keys": publish_keys,
+        "screenshot": screenshot,
+        "screenshot_interval": interval,
+    }
+
+
+def save_remote_settings(values, section=None):
+    """Persist one validated remote replacement, restoring memory on failure."""
+    target = section if section is not None else settings
+    previous = {name: value(name, target) for name in REMOTE_SETTING_NAMES}
+    try:
+        for name in REMOTE_SETTING_NAMES:
+            found = element(name, target)
+            found.value = values[name]
+            found.save()
+        configfile.save()
+    except Exception:
+        for name in REMOTE_SETTING_NAMES:
+            found = element(name, target)
+            found.value = previous[name]
+            found.save()
+        LOG.exception("could not write remote settings to enigma2's settings file")
+        return False
+    return True
 
 
 # -------------------------------------------------------------- provisioning --

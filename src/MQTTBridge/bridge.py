@@ -124,6 +124,56 @@ class Bridge:
     def save_settings(self):
         return settings_module.save(self.settings)
 
+    def remote_settings(self):
+        """The non-secret settings exposed to and writable by the integration."""
+        return {
+            name: self.value(name) for name in settings_module.REMOTE_SETTING_NAMES
+        }
+
+    def apply_remote_settings(self, values):
+        """Persist one validated replacement, then apply its publisher lifecycle."""
+        if not settings_module.save_remote_settings(values, self.settings):
+            return "could not persist the plugin settings"
+
+        self._replace_configurable_publishers()
+        info = self.build_info()
+        self.publish_json(self.topic("info"), info)
+        self.publish_discovery(info)
+        return None
+
+    def _replace_configurable_publishers(self):
+        """Rebind only hooks controlled by cmd/config; preserve all other work."""
+        from .publishers import PUBLISHER_CLASSES
+        from .remote import KeyPublisher
+        from .screen import ScreenPublisher
+
+        replacements = (KeyPublisher, ScreenPublisher)
+        for publisher_class in replacements:
+            name = publisher_class.name
+            old = self.publisher(name)
+            if old is not None:
+                old.stop()
+                self._publishers.remove(old)
+
+            replacement = publisher_class(self)
+            try:
+                started = replacement.start()
+            except Exception:
+                LOG.exception("the %s publisher could not restart", name)
+                started = False
+            if started:
+                order = PUBLISHER_CLASSES.index(publisher_class)
+                index = sum(
+                    PUBLISHER_CLASSES.index(type(item)) < order
+                    for item in self._publishers
+                    if type(item) in PUBLISHER_CLASSES
+                )
+                self._publishers.insert(index, replacement)
+
+        if self.value("screenshot") == "off":
+            # A disabled private image must not remain readable from broker retention.
+            self.retract(self.topic("screen"))
+
     @property
     def state(self):
         if self._state_store is None:
@@ -501,6 +551,7 @@ class Bridge:
             "ip": boxinfo.local_ip(self.value("host")),
             "uptime": boxinfo.uptime_seconds(),
             "ha_mode": self.value("ha_mode"),
+            "settings": self.remote_settings(),
             "capabilities": self.capabilities(),
         }
 

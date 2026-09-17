@@ -1,5 +1,7 @@
 """The screenshot: what runs it, what stops it running too often, and what it publishes."""
 
+import os
+
 from conftest import ConsoleAppContainer
 
 from MQTTBridge import screen as screen_module
@@ -47,6 +49,19 @@ def test_the_picture_is_published_when_grab_finishes(live_bridge, factory, tmp_p
     entry = factory.client.last(SCREEN)
     assert entry.payload == JPEG
     assert entry.retain is True
+
+
+def test_a_capture_finishing_after_stop_is_cleaned_without_publishing(
+        live_bridge, factory, tmp_path):
+    found = publisher(live_bridge, tmp_path)
+    found.capture(commanded=True)
+    write_a_picture(found.path)
+    found.stop()
+    factory.client.clear()
+    ConsoleAppContainer.instances[-1].finish(0)
+    assert factory.client.all_for(SCREEN) == []
+    assert not found._busy
+    assert not os.path.exists(found.path)
 
 
 def test_an_identical_commanded_picture_is_still_a_fresh_state_event(

@@ -181,8 +181,9 @@ bundles.
       questions closed in [ADR-0001](docs/adr/0001-m0-decisions.md)
 - [x] **M1** — repository and skeleton: the plugin loads, connects, publishes `availability`
       and `info`, and has a setup screen
-- [x] **M2** — state and discovery: power, service, EPG, volume, recording, timers, disk, keys,
-      screenshot, the EPG grid, every `cmd/*` with its guards
+- [ ] **M2** — implementation complete: power, service, EPG, volume, recording, timers, disk,
+      keys, screenshot, the EPG grid, and every `cmd/*` with its guards. Acceptance remains open
+      until the required soak and remaining live drills pass.
 - [ ] **M3** — the integration's entities
 - [ ] **M4** — the guided installer and the `update` entity
 - [ ] **M5** — public beta `v0.x`: releases, opkg feed, HACS custom repository, testers per image

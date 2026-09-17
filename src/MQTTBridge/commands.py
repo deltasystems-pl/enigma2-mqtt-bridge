@@ -100,6 +100,7 @@ class CommandDispatcher:
             "record": self.record,
             "screenshot": self.screenshot,
             "epg_grid": self.epg_grid,
+            "config": self.config,
             "discovery": self.discovery,
             "ha_mode": self.ha_mode,
             "reset": self.reset,
@@ -389,6 +390,16 @@ class CommandDispatcher:
             return "the EPG grid is switched off"
         publisher.regenerate()
         return None
+
+    def config(self, text):
+        from .config import validate_remote_settings
+
+        payload = parse(text)
+        try:
+            values = validate_remote_settings(payload)
+        except ValueError as error:
+            return str(error)
+        return self.bridge.apply_remote_settings(values)
 
     def discovery(self, _text):
         info = self.bridge.build_info()
