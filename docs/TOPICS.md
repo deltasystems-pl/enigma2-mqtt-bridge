@@ -53,7 +53,8 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
   "uptime": 384210,
   "ha_mode": "discovery",
   "settings": {"publish_keys": true, "screenshot": "on_zap",
-               "screenshot_interval": 60},
+               "screenshot_interval": 60, "screenshot_delay": 4,
+               "cam_telemetry": false},
   "capabilities": ["power", "service", "epg", "tuner", "recording", "timers",
                    "volume", "hdd", "channels", "epg_grid", "keys", "screenshot",
                    "message"]
@@ -70,14 +71,14 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
 | `ip` | string | Current LAN address |
 | `uptime` | int | Seconds since boot |
 | `ha_mode` | string | `discovery` \| `integration` \| `off` — the acknowledgement of `cmd/ha_mode` |
-| `settings` | object | The complete remotely writable, non-secret subset. It contains only `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`) and `screenshot_interval` (integer seconds, 5–3600). |
+| `settings` | object | The complete remotely writable, non-secret subset. It contains `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5–3600), `screenshot_delay` (post-zap settling seconds, 1–30), and `cam_telemetry` (bool, off by default). |
 | `capabilities` | list of strings | Which hooks this image actually gave the plugin |
 
 **`capabilities` is the honest part of the contract.** Hook names differ between images, so the
 plugin detects what it managed to attach and names it here rather than assuming. A consumer
 hides what is missing instead of showing a dead entity. The names are the feature areas, and
 nothing else is ever in the list: `power`, `service`, `epg`, `epg_grid`, `tuner`, `recording`,
-`timers`, `volume`, `keys`, `screenshot`, `message`, `hdd`, `channels`. A build that has bound no
+`timers`, `volume`, `cam`, `keys`, `screenshot`, `message`, `hdd`, `channels`. A build that has bound no
 feature area publishes `[]` — the connection, `info` and the commands are the plugin itself and
 are not capabilities.
 
@@ -319,6 +320,23 @@ one per call.
 — the remote, OpenWebif, the plugin itself — and reconciled on a short timer, because enigma2 has
 no single choke point every volume change passes through.
 
+### `<base>/<node>/cam`
+
+```json
+{"system": "Nagra", "active": true, "encrypted": true, "ecm_ms": 123}
+```
+
+Opt-in with `cam_telemetry`; absent entirely by default. `encrypted` is Enigma's current-service
+flag. `active` means only that a fresh, valid ECM result was observed after the latest known
+service start; it is **not** a softcam-process or server-health check. `system` is limited to a fixed
+list of generic conditional-access systems and `ecm_ms` to 0–600000. Unknown values are `null`.
+
+The source is the receiver-local `/tmp/ecm.info`, opened without following symlinks and read to
+an 8 KiB cap. Reader, server, user, card, CAID, provider and raw lines are never published. A zap
+invalidates the prior result until the file is updated. Because this file has no universal tuner
+identity, attribution on multi-tuner images is best effort; this topic must not drive access or
+recording decisions.
+
 ### `<base>/<node>/hdd`
 
 ```json
@@ -335,6 +353,10 @@ Retained, QoS 0. **Not JSON** — the raw bytes of a JPEG.
 Produced by the image's `grab` utility, downscaled. It is debounced and rate-limited to at most
 one capture per five seconds regardless of how many events ask for one, and the `screenshot`
 setting chooses between `off`, on every zap, and a fixed interval.
+An on-zap capture waits `screenshot_delay` seconds (four by default). Another zap resets that
+wait; a grab already running for an earlier channel is discarded and the newest one is scheduled.
+Enigma's tune events do not prove that a video frame has been decoded, so this is deliberately a
+bounded settling delay rather than a claim to detect black video, audio or image readiness.
 
 Both layers, the video and the menus over it, which is what a person means by a screenshot.
 Capped at 400 KB: over that the capture is dropped and the reason goes to `last_error`, because
@@ -421,7 +443,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `record` | `start` \| `stop` | Starts or stops an instant recording of the current service | `start` records the current service for two hours; `stop` with nothing recording is a no-op with a note in `last_error` |
 | `screenshot` | any | Captures `screen` now, in standby as well | Rate-limited to one per five seconds |
 | `epg_grid` | any | Rebuilds and republishes **every** `epg_grid/<bouquet_slug>` topic | Refused with a note in `last_error` when `epg_grid_events` is `0` |
-| `config` | `{"publish_keys": false, "screenshot": "interval", "screenshot_interval": 90}` | Atomically replaces the complete remotely writable settings subset and publishes fresh `info`/discovery | All three keys are required, unknown keys and coercion are refused, and a persistence failure applies none of them |
+| `config` | `{"publish_keys": false, "screenshot": "interval", "screenshot_interval": 90, "screenshot_delay": 4, "cam_telemetry": false}` | Atomically replaces the remotely writable settings subset and publishes fresh `info`/discovery | The original three keys remain required; the two newer keys are optional for older clients and preserve their current values when omitted. Unknown keys and coercion are refused, and a persistence failure applies none of them |
 | `discovery` | any | Republishes the announcement, the channel list, and the discovery payloads in discovery mode | — |
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
 | `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
@@ -451,9 +473,10 @@ Either way, `timers` (and `recording` when it is imminent) is republished afterw
 
 This is deliberately not a general settings API. Broker credentials, TLS, identity, topic names,
 Home Assistant mode, bouquet selection, logging and destructive-command permission cannot be
-changed through MQTT. The command accepts exactly the three keys shown in the table, with their
-JSON types unchanged. The plugin validates the whole object before assigning anything, persists
-the three values through enigma2's settings store, then rebinds the key and screenshot publishers
+changed through MQTT. The command accepts the three original keys plus optional `screenshot_delay`
+and `cam_telemetry`,
+with their JSON types unchanged. The plugin validates the whole object before assigning anything,
+persists the five values through enigma2's settings store, then rebinds the key, CAM and screenshot publishers
 so the new behaviour is immediate. A fresh `info.settings` object is the by-effect acknowledgement.
 Switching screenshots off also retracts the retained `screen` image so disabling the private
 feature does not leave its last picture readable from broker retention.

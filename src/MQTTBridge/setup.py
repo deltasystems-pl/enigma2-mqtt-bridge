@@ -41,6 +41,8 @@ def setting_labels():
         ("publish_keys", _("Publish remote key presses")),
         ("screenshot", _("Screenshots")),
         ("screenshot_interval", _("Screenshot interval (seconds)")),
+        ("screenshot_delay", _("Screenshot delay after a zap (seconds)")),
+        ("cam_telemetry", _("Publish conditional-access telemetry")),
         ("bouquets_for_select", _("Bouquets for the channel list")),
         ("deep_standby_allowed", _("Allow deep standby and reboot")),
         ("log_level", _("Log level")),

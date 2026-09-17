@@ -24,6 +24,8 @@ EXPECTED_DEFAULTS = {
     "publish_keys": True,
     "screenshot": "on_zap",
     "screenshot_interval": 60,
+    "screenshot_delay": 4,
+    "cam_telemetry": False,
     "bouquets_for_select": "",
     "deep_standby_allowed": False,
     "log_level": "info",
@@ -87,6 +89,8 @@ def test_remote_settings_are_exact_and_strictly_typed():
         "publish_keys": False,
         "screenshot": "interval",
         "screenshot_interval": 300,
+        "screenshot_delay": 4,
+        "cam_telemetry": False,
     }
 
 
@@ -98,6 +102,14 @@ def test_remote_settings_are_exact_and_strictly_typed():
     {"publish_keys": True, "screenshot": "off", "screenshot_interval": True},
     {"publish_keys": True, "screenshot": "off", "screenshot_interval": 4},
     {"publish_keys": True, "screenshot": "off", "screenshot_interval": 3601},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60,
+     "screenshot_delay": True},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60,
+     "screenshot_delay": 0},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60,
+     "screenshot_delay": 31},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60,
+     "cam_telemetry": 1},
 ])
 def test_remote_settings_reject_partial_unknown_or_invalid_values(payload):
     with pytest.raises(ValueError):

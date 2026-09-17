@@ -160,6 +160,7 @@ class iServiceInformation:
     sVideoWidth = 902
     sVideoHeight = 903
     sServiceref = 904
+    sIsCrypted = 905
 
 
 class iPlayableService:
@@ -226,12 +227,13 @@ class Event:
 
 class ServiceInfo:
     def __init__(self, name="TVP 1 HD", provider="Cyfrowy Polsat", width=1920, height=1080,
-                 events=None):
+                 events=None, encrypted=False):
         self.name = name
         self.provider = provider
         self.width = width
         self.height = height
         self.events = list(events or [])
+        self.encrypted = encrypted
         self.raises_on_event = False
 
     def getName(self):
@@ -247,6 +249,8 @@ class ServiceInfo:
             return self.width
         if key == iServiceInformation.sVideoHeight:
             return self.height
+        if key == iServiceInformation.sIsCrypted:
+            return int(self.encrypted)
         return -1
 
     def getEvent(self, index):

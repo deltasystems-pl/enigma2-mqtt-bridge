@@ -11,8 +11,9 @@ version that has no section here.
 
 ### Added
 
-- A fail-closed `cmd/config` for the companion integration's three safe runtime options:
-  `publish_keys`, `screenshot`, and `screenshot_interval`. It validates and persists the complete
+- A fail-closed `cmd/config` for the companion integration's safe runtime options:
+  `publish_keys`, `screenshot`, `screenshot_interval`, and the backward-compatible optional
+  `screenshot_delay` and `cam_telemetry`. It validates and persists the complete
   replacement atomically, reapplies the affected hooks/timers, and acknowledges with the same
   non-secret values in `info.settings`; broker, identity, topic and destructive settings remain
   box-local only.
@@ -43,6 +44,12 @@ version that has no section here.
   nothing will ever update.
 
 ### Changed
+
+- On-zap screenshots now wait a configurable four seconds by default. Rapid channel changes reset
+  the wait, and a capture still completing for an older channel is discarded and rescheduled.
+- Optional conditional-access telemetry reports only the current encryption flag, a generic
+  allowlisted CA system and bounded ECM timing. It is off by default and excludes reader, server,
+  user, card and raw ECM data.
 
 - A state topic is published **only when it has changed**. The snapshot on every connect is the
   deliberate exception, because a broker that lost its retained store has to be told everything.

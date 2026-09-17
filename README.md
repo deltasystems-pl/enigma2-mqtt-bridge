@@ -163,6 +163,11 @@ in Home Assistant's recorder database by default. If that matters in your househ
 - turn `publish_keys` off if you do not automate on remote keys — on a plugin-only install that
   is the control, and it is the stronger one either way, because nothing reaches the broker;
 - set `screenshot` to `off` — it is a picture of your screen on the broker, retained;
+- adjust `screenshot_delay` (four seconds by default) if the image needs longer to settle after a
+  channel change; rapid zaps reset the delay and stale in-flight captures are discarded;
+- leave `cam_telemetry` off unless you need conditional-access diagnostics. When enabled it
+  publishes only the generic CA system, current-service encryption flag and bounded fresh ECM timing,
+  never reader, server, user, card or raw ECM data;
 - remember that retained topics outlive the plugin: `cmd/reset` retracts everything, and it is
   the documented step before uninstalling.
 

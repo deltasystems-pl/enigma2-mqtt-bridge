@@ -11,6 +11,7 @@ describes the topics in. A reader who compares the two should not have to sort
 anything.
 """
 
+from .cam import CamPublisher
 from .channels import ChannelsPublisher
 from .epggrid import EpgGridPublisher
 from .hdd import HddPublisher
@@ -26,6 +27,7 @@ PUBLISHER_CLASSES = (
     ServicePublisher,
     EpgPublisher,
     TunerPublisher,
+    CamPublisher,
     RecordingPublisher,
     TimersPublisher,
     VolumePublisher,

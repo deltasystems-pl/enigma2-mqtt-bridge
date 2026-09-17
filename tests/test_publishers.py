@@ -179,8 +179,8 @@ def test_snapshot_timings_name_only_publishers_and_warn_when_slow(
 
 def test_the_default_registry_is_the_documented_order():
     assert [cls.name for cls in publishers.PUBLISHER_CLASSES] == [
-        "power", "service", "epg", "tuner", "recording", "timers", "volume", "hdd",
-        "channels", "epg_grid", "keys", "screenshot",
+        "power", "service", "epg", "tuner", "cam", "recording", "timers", "volume",
+        "hdd", "channels", "epg_grid", "keys", "screenshot",
     ]
 
 

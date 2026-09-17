@@ -174,7 +174,7 @@ def test_a_zap_takes_a_screenshot_after_the_box_has_settled(live_bridge, factory
                                                             tmp_path):
     found = publisher(live_bridge, tmp_path)
     receiver.nav.fire(1)  # evStart
-    assert found._debounce.timer.started == (screen_module.DEBOUNCE_MILLISECONDS, True)
+    assert found._debounce.timer.started == (4000, True)
     found._debounce.timer.fire()
     assert ConsoleAppContainer.instances[-1].commands
 
@@ -187,6 +187,56 @@ def test_running_through_ten_channels_takes_one_screenshot(live_bridge, receiver
         receiver.nav.fire(1)
     found._debounce.timer.fire()
     assert len(ConsoleAppContainer.instances) == before + 1
+
+
+def test_the_configured_zap_delay_is_used(live_bridge, receiver, settings, tmp_path):
+    settings.screenshot_delay.value = 8
+    found = publisher(live_bridge, tmp_path)
+    receiver.nav.fire(1)
+    assert found._debounce.timer.started == (8000, True)
+
+
+def test_a_new_zap_discards_an_inflight_automatic_capture(
+    live_bridge, factory, receiver, tmp_path
+):
+    found = publisher(live_bridge, tmp_path)
+    receiver.nav.fire(1)
+    found._debounce.timer.fire()
+    old = ConsoleAppContainer.instances[-1]
+    write_a_picture(found.path)
+
+    receiver.nav.fire(1)
+    factory.client.clear()
+    old.finish(0)
+
+    assert factory.client.all_for(SCREEN) == []
+    assert not os.path.exists(found.path)
+    assert found._debounce.timer.started == (5000, True)
+
+
+def test_a_commanded_capture_is_not_invalidated_by_a_zap(
+    live_bridge, factory, receiver, tmp_path
+):
+    found = publisher(live_bridge, tmp_path)
+    found.capture(commanded=True)
+    write_a_picture(found.path)
+    receiver.nav.fire(1)
+    ConsoleAppContainer.instances[-1].finish(0)
+    assert factory.client.last(SCREEN).payload == JPEG
+
+
+def test_stop_prevents_a_stale_capture_from_rearming(
+    live_bridge, receiver, tmp_path
+):
+    found = publisher(live_bridge, tmp_path)
+    receiver.nav.fire(1)
+    found._debounce.timer.fire()
+    running = ConsoleAppContainer.instances[-1]
+    write_a_picture(found.path)
+    receiver.nav.fire(1)
+    found.stop()
+    running.finish(0)
+    assert found._debounce.timer.stopped is True
 
 
 def test_no_screenshot_on_a_zap_when_the_setting_is_an_interval(live_bridge, receiver, settings,
@@ -207,6 +257,54 @@ def test_the_interval_timer_is_armed_when_the_setting_says_so(make_bridge, facto
     bridge = make_bridge(session=receiver.session)
     bridge.start()
     assert bridge.publisher("screenshot")._interval.timer.started == (90000, False)
+
+
+def test_an_interval_capture_completion_is_published(
+    make_bridge, factory, settings, receiver, tmp_path
+):
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    settings.screenshot.value = "interval"
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+    found = publisher(bridge, tmp_path)
+    found._interval.timer.fire()
+    write_a_picture(found.path)
+    ConsoleAppContainer.instances[-1].finish(0)
+    assert factory.client.last(SCREEN).payload == JPEG
+
+
+def test_a_queued_debounce_after_stop_does_nothing(live_bridge, receiver, tmp_path):
+    found = publisher(live_bridge, tmp_path)
+    receiver.nav.fire(1)
+    timer = found._debounce.timer
+    found.stop()
+    before = len(ConsoleAppContainer.instances)
+    timer.fire()
+    assert len(ConsoleAppContainer.instances) == before
+
+
+def test_rebind_does_not_let_old_completion_remove_new_capture(
+    live_bridge, factory, tmp_path
+):
+    old = live_bridge.publisher("screenshot")
+    assert old.capture(commanded=True) is None
+    old_container = ConsoleAppContainer.instances[-1]
+    old_path = old.path
+    old.stop()
+
+    new = screen_module.ScreenPublisher(live_bridge)
+    assert new.path != old_path
+    new.path = str(tmp_path / "new.jpg")
+    assert new.start() is True
+    assert new.capture(commanded=True) is None
+    new_container = ConsoleAppContainer.instances[-1]
+    write_a_picture(new.path)
+
+    old_container.finish(0)
+    assert os.path.exists(new.path)
+    new_container.finish(0)
+    assert factory.client.last(SCREEN).payload == JPEG
 
 
 def test_the_interval_never_goes_below_five_seconds(make_bridge, settings, receiver):

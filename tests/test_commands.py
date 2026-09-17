@@ -109,6 +109,7 @@ def test_a_payload_at_the_limit_is_still_read(connected_bridge, factory):
 
 def test_config_persists_all_values_rebinds_hooks_and_publishes_info(
         live_bridge, factory, settings, receiver):
+    settings.screenshot_delay.value = 9
     hdd = live_bridge.publisher("hdd")
     epg_grid = live_bridge.publisher("epg_grid")
     factory.client.clear()
@@ -121,6 +122,7 @@ def test_config_persists_all_values_rebinds_hooks_and_publishes_info(
     assert settings.screenshot.saved_value == "interval"
     assert settings.screenshot_interval.value == 90
     assert settings.screenshot_interval.saved_value == 90
+    assert settings.screenshot_delay.value == 9
     assert receiver.actions.bound == []
     assert live_bridge.publisher("hdd") is hdd
     assert live_bridge.publisher("epg_grid") is epg_grid
@@ -129,7 +131,25 @@ def test_config_persists_all_values_rebinds_hooks_and_publishes_info(
         "publish_keys": False,
         "screenshot": "interval",
         "screenshot_interval": 90,
+        "screenshot_delay": 9,
+        "cam_telemetry": False,
     }
+
+
+def test_config_persists_a_custom_post_zap_delay(live_bridge, factory, settings):
+    send(factory, "config", b'{"publish_keys":true,"screenshot":"on_zap",'
+          b'"screenshot_interval":60,"screenshot_delay":8}')
+    assert settings.screenshot_delay.value == 8
+    assert settings.screenshot_delay.saved_value == 8
+    assert factory.client.last(INFO).json()["settings"]["screenshot_delay"] == 8
+
+
+def test_config_enables_cam_telemetry(live_bridge, factory, settings):
+    send(factory, "config", b'{"publish_keys":true,"screenshot":"on_zap",'
+          b'"screenshot_interval":60,"screenshot_delay":4,"cam_telemetry":true}')
+    assert settings.cam_telemetry.value is True
+    assert settings.cam_telemetry.saved_value is True
+    assert live_bridge.publisher("cam") is not None
 
 
 def test_repeated_config_does_not_restart_unrelated_publishers(

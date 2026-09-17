@@ -34,8 +34,15 @@ PROVISIONING_PATH = "/etc/enigma2/mqttbridge.json"
 HA_MODES = ("discovery", "integration", "off")
 LOG_LEVELS = ("error", "warning", "info", "debug")
 SCREENSHOT_MODES = ("off", "on_zap", "interval")
-REMOTE_SETTING_NAMES = ("publish_keys", "screenshot", "screenshot_interval")
+REMOTE_SETTING_NAMES = (
+    "publish_keys",
+    "screenshot",
+    "screenshot_interval",
+    "screenshot_delay",
+    "cam_telemetry",
+)
 SCREENSHOT_INTERVAL_LIMITS = (5, 3600)
+SCREENSHOT_DELAY_LIMITS = (1, 30)
 
 DEFAULT_BASE_TOPIC = "enigma2"
 DEFAULT_DISCOVERY_PREFIX = "homeassistant"
@@ -58,6 +65,8 @@ SETTING_NAMES = (
     "publish_keys",
     "screenshot",
     "screenshot_interval",
+    "screenshot_delay",
+    "cam_telemetry",
     "bouquets_for_select",
     "deep_standby_allowed",
     "log_level",
@@ -83,6 +92,8 @@ SETTING_KINDS = {
     "publish_keys": "bool",
     "screenshot": "choice",
     "screenshot_interval": "int",
+    "screenshot_delay": "int",
+    "cam_telemetry": "bool",
     "bouquets_for_select": "text",
     "deep_standby_allowed": "bool",
     "log_level": "choice",
@@ -133,6 +144,8 @@ def _build():
         choices=[("off", _("off")), ("on_zap", _("on zap")), ("interval", _("at an interval"))],
     )
     section.screenshot_interval = ConfigInteger(default=60, limits=SCREENSHOT_INTERVAL_LIMITS)
+    section.screenshot_delay = ConfigInteger(default=4, limits=SCREENSHOT_DELAY_LIMITS)
+    section.cam_telemetry = ConfigYesNo(default=False)
     section.bouquets_for_select = ConfigText(default="", fixed_size=False)
     section.deep_standby_allowed = ConfigYesNo(default=False)
     section.log_level = ConfigSelection(
@@ -232,15 +245,17 @@ def validate_remote_settings(raw):
     if not isinstance(raw, dict):
         raise ValueError("cmd/config takes a JSON object")
     unknown = sorted(set(raw) - set(REMOTE_SETTING_NAMES))
-    missing = sorted(set(REMOTE_SETTING_NAMES) - set(raw))
+    required = {"publish_keys", "screenshot", "screenshot_interval"}
+    missing = sorted(required - set(raw))
     if unknown:
         raise ValueError("the config object contains unknown settings")
     if missing:
         raise ValueError("missing setting(s): " + ", ".join(missing))
-
     publish_keys = raw["publish_keys"]
     screenshot = raw["screenshot"]
     interval = raw["screenshot_interval"]
+    delay = raw.get("screenshot_delay", value("screenshot_delay"))
+    cam_telemetry = raw.get("cam_telemetry", value("cam_telemetry"))
     if not isinstance(publish_keys, bool):
         raise ValueError("publish_keys must be true or false")
     if not isinstance(screenshot, str) or screenshot not in SCREENSHOT_MODES:
@@ -252,10 +267,19 @@ def validate_remote_settings(raw):
         raise ValueError(
             f"screenshot_interval must be between {minimum} and {maximum}"
         )
+    if isinstance(delay, bool) or not isinstance(delay, int):
+        raise ValueError("screenshot_delay must be an integer")
+    minimum, maximum = SCREENSHOT_DELAY_LIMITS
+    if not minimum <= delay <= maximum:
+        raise ValueError(f"screenshot_delay must be between {minimum} and {maximum}")
+    if not isinstance(cam_telemetry, bool):
+        raise ValueError("cam_telemetry must be true or false")
     return {
         "publish_keys": publish_keys,
         "screenshot": screenshot,
         "screenshot_interval": interval,
+        "screenshot_delay": delay,
+        "cam_telemetry": cam_telemetry,
     }
 
 

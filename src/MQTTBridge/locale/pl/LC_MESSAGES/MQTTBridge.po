@@ -92,18 +92,26 @@ msgid "Screenshot interval (seconds)"
 msgstr "Odstęp między zrzutami (sekundy)"
 
 #: src/MQTTBridge/setup.py:44
+msgid "Screenshot delay after a zap (seconds)"
+msgstr "Opóźnienie zrzutu po zmianie kanału (sekundy)"
+
+#: src/MQTTBridge/setup.py:45
+msgid "Publish conditional-access telemetry"
+msgstr "Publikuj telemetrię dostępu warunkowego"
+
+#: src/MQTTBridge/setup.py:46
 msgid "Bouquets for the channel list"
 msgstr "Bukiety na liście kanałów"
 
-#: src/MQTTBridge/setup.py:45
+#: src/MQTTBridge/setup.py:47
 msgid "Allow deep standby and reboot"
 msgstr "Zezwalaj na głębokie uśpienie i restart"
 
-#: src/MQTTBridge/setup.py:46
+#: src/MQTTBridge/setup.py:48
 msgid "Log level"
 msgstr "Poziom logowania"
 
-#: src/MQTTBridge/setup.py:47
+#: src/MQTTBridge/setup.py:49
 msgid "EPG grid events per channel"
 msgstr "Liczba audycji na kanał w siatce EPG"
 
@@ -143,3 +151,79 @@ msgstr "Zapisz"
 #: src/MQTTBridge/setup.py:121
 msgid "MQTT Bridge"
 msgstr "MQTT Bridge"
+
+#: src/MQTTBridge/webif.py
+msgid "Version"
+msgstr "Wersja"
+
+#: src/MQTTBridge/webif.py
+msgid "Bridge"
+msgstr "Most"
+
+#: src/MQTTBridge/webif.py
+msgid "Running"
+msgstr "Uruchomiony"
+
+#: src/MQTTBridge/webif.py
+msgid "Stopped"
+msgstr "Zatrzymany"
+
+#: src/MQTTBridge/webif.py
+msgid "MQTT"
+msgstr "MQTT"
+
+#: src/MQTTBridge/webif.py
+msgid "Save publisher settings"
+msgstr "Zapisz ustawienia publikowania"
+
+#: src/MQTTBridge/webif.py
+msgid "Receiver integration status"
+msgstr "Stan integracji dekodera"
+
+#: src/MQTTBridge/webif.py
+msgid "Status"
+msgstr "Stan"
+
+#: src/MQTTBridge/webif.py
+msgid "Publisher settings"
+msgstr "Ustawienia publikowania"
+
+#: src/MQTTBridge/webif.py
+msgid "Sanitized log tail"
+msgstr "Oczyszczony fragment dziennika"
+
+#: src/MQTTBridge/webif.py
+msgid "Request rejected."
+msgstr "Żądanie odrzucone."
+
+#: src/MQTTBridge/webif.py
+msgid "Invalid publisher settings."
+msgstr "Nieprawidłowe ustawienia publikowania."
+
+#: src/MQTTBridge/webif.py
+msgid "Publisher settings were not changed."
+msgstr "Ustawienia publikowania nie zostały zmienione."
+
+#: src/MQTTBridge/webif.py
+msgid "Publisher settings saved."
+msgstr "Ustawienia publikowania zapisano."
+
+#: src/MQTTBridge/webif.py
+msgid "Logging is unavailable."
+msgstr "Dziennik jest niedostępny."
+
+#: src/MQTTBridge/webif.py
+msgid "OpenWebif authentication is required for MQTT Bridge."
+msgstr "Most MQTT wymaga uwierzytelniania OpenWebif."
+
+#: src/MQTTBridge/webif.py
+msgid "Off"
+msgstr "Wyłączone"
+
+#: src/MQTTBridge/webif.py
+msgid "After a channel change"
+msgstr "Po zmianie kanału"
+
+#: src/MQTTBridge/webif.py
+msgid "Periodically"
+msgstr "Okresowo"
