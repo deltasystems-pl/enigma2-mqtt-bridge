@@ -180,6 +180,7 @@ in Home Assistant's recorder database by default. If that matters in your househ
 | Plugin | Integration |
 |---|---|
 | 0.1.0 (current) | 0.1.0 |
+| 0.2.0 (unreleased) | 0.2.0 (unreleased) |
 
 The integration warns on its `update` entity when the box runs a plugin older than the one it
 bundles.

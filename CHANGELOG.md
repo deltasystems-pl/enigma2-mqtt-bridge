@@ -9,17 +9,9 @@ version that has no section here.
 
 ## [Unreleased]
 
-### Added
+Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
 
-- A fail-closed `cmd/config` for the companion integration's safe runtime options:
-  `publish_keys`, `screenshot`, `screenshot_interval`, and the backward-compatible optional
-  `screenshot_delay`, `cam_telemetry`, and `oscam_telemetry`. It validates and persists the complete
-  replacement atomically, reapplies the affected hooks/timers, and acknowledges with the same
-  non-secret values in `info.settings`; broker, identity, topic and destructive settings remain
-  box-local only.
-- Opt-in receiver-local OSCam health on `oscam`: software/API state, bounded aggregate counts and
-  neutral reader/server entries keyed by salted opaque ids. WebIf credentials and raw OSCam
-  identities remain on the receiver; disabled telemetry retracts the retained topic.
+### Added
 
 - **The receiver's state, on the broker.** `power`, `service`, `epg`, `tuner`, `recording`,
   `timers`, `volume`, `hdd`, `key` and `screen` are published as `docs/TOPICS.md` describes them,
@@ -48,15 +40,28 @@ version that has no section here.
 - **Capability detection that is worth reading.** `info.capabilities` lists the feature areas that
   actually bound on this box, so a consumer hides what is missing instead of showing an entity
   nothing will ever update.
+- **Settings a consumer may change**, through a fail-closed `cmd/config`: `publish_keys`,
+  `screenshot`, `screenshot_interval`, and the backward-compatible optional `screenshot_delay`,
+  `cam_telemetry` and `oscam_telemetry`. The complete replacement is validated and persisted in one
+  step, the affected hooks and timers are rebound, and the acknowledgement is the same non-secret
+  values coming back in `info.settings`. The broker, the identity, the topic and everything
+  destructive stay box-local: they cannot be reached from the broker at all.
+- **A status page in the box's own web interface**, under OpenWebif: what the bridge is connected
+  to, the same publisher settings the remote can change, and the tail of the plugin's log with the
+  broker password and every other credential scrubbed out of it. Writes are authenticated by
+  OpenWebif and carry a one-shot token, and the log viewer is bounded in both bytes and lines.
+- **Optional conditional-access telemetry** on `cam`: the current encryption flag, a generic
+  allowlisted CA system name and bounded ECM timing. Off by default, and it excludes reader,
+  server, user, card and raw ECM data.
+- **Optional OSCam health** on `oscam`, read from the receiver's own loopback interface: whether
+  the software and its API are up, bounded aggregate counts, and one neutral entry per reader or
+  server keyed by a salted opaque id. WebIf credentials, reader labels, addresses and card
+  identifiers never leave the box, and switching the telemetry off retracts the retained topic.
 
 ### Changed
 
 - On-zap screenshots now wait a configurable four seconds by default. Rapid channel changes reset
   the wait, and a capture still completing for an older channel is discarded and rescheduled.
-- Optional conditional-access telemetry reports only the current encryption flag, a generic
-  allowlisted CA system and bounded ECM timing. It is off by default and excludes reader, server,
-  user, card and raw ECM data.
-
 - A state topic is published **only when it has changed**. The snapshot on every connect is the
   deliberate exception, because a broker that lost its retained store has to be told everything.
 - Every successful `cmd/screenshot` now publishes a fresh `screen` event even when its JPEG is
@@ -75,10 +80,30 @@ version that has no section here.
   when native code resumes before the watcher could run.
 - EPG grids now build in bounded four-channel batches between main-loop turns, retaining the last
   complete grid until its replacement is ready instead of freezing the interface on a bouquet.
-- `docs/TOPICS.md` gained the `channels` topic, the capability vocabulary's thirteenth name, the
-  discovery entity table, and the four things about Home Assistant 2026.9 that were measured
-  rather than assumed — `default_entity_id` in place of `object_id`, removal by platform key,
-  QoS 1 for commands, and shared availability.
+- `docs/TOPICS.md` gained the `channels`, `cam` and `oscam` topics, the names those areas add to
+  the capability vocabulary, the discovery entity table, and the four things about Home Assistant
+  2026.9 that were measured rather than assumed — `default_entity_id` in place of `object_id`,
+  removal by platform key, QoS 1 for commands, and shared availability.
+
+### Fixed
+
+- `bouquet_context` is claimed only once the receiver's own service list has actually been read.
+  A box whose channel list the plugin never gets to see used to announce the capability anyway,
+  which promised a consumer a `bouquet` topic and a working `cmd/bouquet` it would never get. The
+  list may still appear seconds after the plugin connects; when it does, `info` and the
+  announcement are published again with the capability in them.
+- Selecting a bouquet now enters it under the root its channel list was read from. On a box with
+  „multiple bouquets" switched off there is no bouquet list at all and everything is read from the
+  favourites list, so entering `bouquets.tv` first built — and then persisted — a channel-list path
+  the receiver does not use.
+- An OSCam probe that stops answering is abandoned instead of holding the plugin's single probe
+  slot forever. The deadline only ever governed reading the response body; a connect or an
+  authentication exchange that hung froze the telemetry until the plugin was restarted. The
+  abandoned worker's answer, whenever it arrives, is discarded.
+- OSCam telemetry reports a listener that is not an HTTP server as unavailable, instead of relying
+  on a broad `except` further out to make that true.
+- The OSCam web-interface password is registered with the log scrubber whether or not the
+  telemetry is switched on, so it cannot reach the log through a code path that runs anyway.
 
 ## [0.1.0] - 2026-09-16
 
