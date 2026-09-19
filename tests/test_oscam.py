@@ -99,6 +99,18 @@ def test_normalize_publishes_neutral_stable_handles_and_honest_counts():
     assert reversed_payload["readers"] == payload["readers"]
 
 
+def test_a_build_suffix_on_the_revision_is_still_a_version():
+    """🔴 A receiver here reports `1.20_svn build r11718-079`, and the whole
+    version used to be dropped because of the three digits after the hyphen."""
+    assert oscam._safe_version("1.20_svn build r11718-079") == "1.20_svn build r11718-079"
+    assert oscam._safe_version("1.20_svn build r11718") == "1.20_svn build r11718"
+    assert oscam._safe_version("1.20_svn") == "1.20_svn"
+    # And the allowlist still refuses anything that is not a version.
+    assert oscam._safe_version("private operator build") is None
+    assert oscam._safe_version("1.20_svn build r11718-079 <script>") is None
+    assert oscam._safe_version("1.20_svn build r11718-0123456789") is None
+
+
 def test_unknown_protocol_status_and_huge_counts_are_bounded():
     clients = [
         {

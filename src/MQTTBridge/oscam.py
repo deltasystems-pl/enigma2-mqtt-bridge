@@ -85,8 +85,14 @@ class _ProbeSlot:
 
 _PROBE_SLOT = _ProbeSlot()
 
+# The allowlist a version string has to match before it is published at all —
+# anything else becomes null rather than an echo of whatever the API said.
+# 🔴 The revision can carry a suffix: a receiver here reports
+# `1.20_svn build r11718-079`, and without the last group that whole version
+# was dropped as unrecognised.
 _VERSION = re.compile(
-    r"^[0-9]{1,3}\.[0-9]{1,3}(?:[._-][A-Za-z0-9]+)*(?: build r[0-9]{1,8})?$"
+    r"^[0-9]{1,3}\.[0-9]{1,3}(?:[._-][A-Za-z0-9]+)*"
+    r"(?: build r[0-9]{1,8}(?:-[A-Za-z0-9]{1,8})?)?$"
 )
 _PROTOCOLS = frozenset(
     {

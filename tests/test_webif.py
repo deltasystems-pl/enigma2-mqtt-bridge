@@ -160,6 +160,18 @@ def test_the_icon_url_follows_the_path_the_page_was_reached_by(monkeypatch, tmp_
     assert b"src='/mqttbridge/icon'" in body
 
 
+def test_the_page_answers_with_and_without_the_trailing_slash(monkeypatch):
+    """🔴 `/mqttbridge/` resolves to an empty child; without one it is a 404."""
+    monkeypatch.setattr(webif, "_bridge", lambda: _Bridge())
+    monkeypatch.setattr(webif.log_module, "active_path", lambda: None)
+    page = webif.MQTTBridgeWebResource()
+
+    assert page.children[b""] is page
+    # And the icon URL that page builds still points at the icon, not at itself.
+    body = page.render_GET(_Request(prepath=[b"mqttbridge", b""]))
+    assert b"src='/mqttbridge/icon'" in body
+
+
 def test_a_page_that_cannot_be_built_is_the_plugins_own_failure_page(monkeypatch, plugin_log):
     """OpenWebif would otherwise render this plugin's traceback to a browser."""
     monkeypatch.setattr(webif, "_bridge", lambda: _Bridge())
