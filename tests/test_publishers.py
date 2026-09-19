@@ -32,11 +32,14 @@ def test_a_bridge_with_a_session_registers_every_feature_area(live_bridge):
 def test_capabilities_name_the_areas_that_bound(live_bridge, factory):
     capabilities = factory.client.last(topic("info")).json()["capabilities"]
     # `message` has no publisher: it is a command, and what makes it real is the
-    # popup machinery being importable.
+    # popup machinery being importable. `bouquet_context` is registered on this
+    # receiver and absent from the list, because nothing has opened the channel
+    # list yet and a bouquet that cannot be read is not a capability.
     assert capabilities == [
         "power", "service", "epg", "tuner", "recording", "timers", "volume", "hdd",
-        "channels", "bouquet_context", "epg_grid", "keys", "screenshot", "message",
+        "channels", "epg_grid", "keys", "screenshot", "message",
     ]
+    assert live_bridge.publisher("bouquet_context") is not None
 
 
 def test_capabilities_drop_an_area_whose_hooks_are_missing(make_bridge, factory, settings,

@@ -455,11 +455,13 @@ class Bridge:
 
         A name gets in here by a hook binding on *this* image. Consumers hide
         what is missing, so a capability claimed and not delivered is a dead
-        entity in somebody's dashboard.
+        entity in somebody's dashboard. Registered is not the same as bound:
+        a publisher that is still waiting for a hook stays in the registry and
+        out of this list until it has one — see `Publisher.claimed`.
         """
         names = list(CORE_CAPABILITIES)
         for publisher in self._publishers:
-            if publisher.name and publisher.name not in names:
+            if publisher.name and publisher.name not in names and publisher.claimed():
                 names.append(publisher.name)
         if self.session is not None and MESSAGE_CAPABILITY not in names:
             from .osd import popups_available
@@ -467,6 +469,22 @@ class Bridge:
             if popups_available():
                 names.append(MESSAGE_CAPABILITY)
         return names
+
+    def announce_capabilities(self):
+        """Say again what this box can do, after a late bind changed the answer.
+
+        `info` and the announcement are published on connect, so a capability
+        that appears a few seconds later — a hook that could only bind once
+        enigma2 had built the screen behind it — would otherwise stay invisible
+        until the next reconnect.
+        """
+        if not self.connected:
+            return False
+        info = self.build_info()
+        self.publish_json(self.topic("info"), info)
+        self.publish_announcement(info)
+        self.publish_discovery(info)
+        return True
 
     # -------------------------------------------------------------------- events --
 

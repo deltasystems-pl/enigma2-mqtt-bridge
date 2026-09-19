@@ -142,22 +142,55 @@ def test_command_payload_is_exact_and_context_is_read_back(
     assert "did not enter" in factory.client.last(ROOT + "/last_error").json()["error"]
 
 
-def test_late_infobar_binding_keeps_capability_and_publishes_when_ready(
+def test_the_capability_is_claimed_only_once_the_list_can_be_read(
     make_bridge, factory, settings, receiver
+):
+    """An unreadable service list publishes no `bouquet`, so it claims nothing."""
+    settings.host.value = "192.0.2.2"
+    settings.node_id.value = NODE
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+    factory.client.fire_connect()
+
+    publisher = bridge.publisher("bouquet_context")
+    assert publisher is not None
+    assert "bouquet_context" not in bridge.capabilities()
+    assert "bouquet_context" not in factory.client.last(ROOT + "/info").json()["capabilities"]
+    assert factory.client.last(BOUQUET) is None
+
+    receiver.with_channel_list()
+    publisher._ticker.timer.fire()
+
+    assert factory.client.last(BOUQUET).json()["sref"] == FIRST_BOUQUET
+    assert "bouquet_context" in bridge.capabilities()
+    # The capability appeared after the connect, so what was published on the
+    # connect is out of date and is said again.
+    assert "bouquet_context" in factory.client.last(ROOT + "/info").json()["capabilities"]
+    announcement = factory.client.last("enigma2mqtt/discovery/" + NODE + "/config")
+    assert "bouquet_context" in announcement.json()["capabilities"]
+
+
+def test_an_image_that_never_offers_a_list_stops_asking_and_says_so_once(
+    make_bridge, factory, settings, receiver, plugin_log
 ):
     settings.host.value = "192.0.2.2"
     settings.node_id.value = NODE
     bridge = make_bridge(session=receiver.session)
     bridge.start()
-
     publisher = bridge.publisher("bouquet_context")
-    assert publisher is not None
-    assert "bouquet_context" in bridge.capabilities()
-    assert factory.client.last(BOUQUET) is None
 
+    for _ in range(10):
+        if publisher._ticker.timer.running:
+            publisher._ticker.timer.fire()
+
+    assert publisher._ticker.timer.running is False
+    assert "bouquet_context" not in bridge.capabilities()
+    assert plugin_log().count("bouquet_context is not claimed") == 1
+
+    # And it is still ready to work if the list turns up later after all.
     receiver.with_channel_list()
-    publisher._ticker.timer.fire()
-    assert factory.client.last(BOUQUET).json()["sref"] == FIRST_BOUQUET
+    assert publisher.select(FIRST_BOUQUET) is None
+    assert "bouquet_context" in bridge.capabilities()
 
 
 def test_failed_zap_restores_full_path_selection_and_persisted_root(

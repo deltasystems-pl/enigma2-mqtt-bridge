@@ -9,6 +9,12 @@ from .service import navigation
 LOG = get_logger("bouquet")
 POLL_MILLISECONDS = 2000
 
+# How many turns of the ticker the service list gets to appear before the
+# publisher stops asking. Five of them is ten seconds, which is longer than any
+# image measured here takes to build its InfoBar, and short enough that a box
+# that will never have one is not polled for the rest of its uptime.
+BIND_ATTEMPTS = 5
+
 
 def _servicelist():
     try:
@@ -41,13 +47,26 @@ def _tv_mode(servicelist):
 
 
 class BouquetPublisher(Publisher):
-    """`bouquet` — the active channel-list root used by channel up/down."""
+    """`bouquet` — the active channel-list root used by channel up/down.
+
+    The capability is claimed by reading, not by registering. A box whose
+    InfoBar this plugin never gets to see produces no `bouquet` topic and no
+    working `cmd/bouquet`, so naming `bouquet_context` in `info.capabilities`
+    before the first successful read would promise a consumer an entity that
+    nothing would ever update.
+    """
 
     name = "bouquet_context"
 
     def __init__(self, bridge=None):
         Publisher.__init__(self, bridge)
         self._ticker = Ticker(self.refresh, "bouquet context")
+        self._bound = False
+        self._attempts = 0
+        self._gave_up = False
+
+    def claimed(self):
+        return self._bound
 
     def start(self):
         if self.bridge.publisher("channels") is None:
@@ -56,11 +75,40 @@ class BouquetPublisher(Publisher):
         # the bounded retry: it binds by lookup on every turn without creating
         # another timer or logging on every miss.
         self.refresh()
-        self._ticker.start(POLL_MILLISECONDS)
+        if not self._gave_up:
+            self._ticker.start(POLL_MILLISECONDS)
         return True
 
     def stop(self):
         self._ticker.stop()
+
+    def _bind(self):
+        """The root was readable: claim the capability and say so, once."""
+        self._attempts = 0
+        if self._gave_up:
+            self._gave_up = False
+            self._ticker.start(POLL_MILLISECONDS)
+        if self._bound:
+            return
+        self._bound = True
+        LOG.info("the receiver's service list is readable; bouquet_context is available")
+        if self.bridge is not None:
+            self.bridge.announce_capabilities()
+
+    def _not_yet(self):
+        """The root was not readable: keep waiting, but not forever."""
+        if self._bound or self._gave_up:
+            return
+        self._attempts += 1
+        if self._attempts < BIND_ATTEMPTS:
+            return
+        self._gave_up = True
+        self._ticker.stop()
+        LOG.warning(
+            "this image gave no readable service list in %d attempts; "
+            "bouquet_context is not claimed",
+            BIND_ATTEMPTS,
+        )
 
     def _known(self, sref):
         channels = self.bridge.publisher("channels")
@@ -87,11 +135,14 @@ class BouquetPublisher(Publisher):
 
     def refresh(self, force=False):
         payload = self._payload()
-        if payload is not None:
-            if force:
-                self.bridge.publish_json(self.bridge.topic("bouquet"), payload)
-            else:
-                self.publish("bouquet", payload)
+        if payload is None:
+            self._not_yet()
+            return None
+        if force:
+            self.bridge.publish_json(self.bridge.topic("bouquet"), payload)
+        else:
+            self.publish("bouquet", payload)
+        self._bind()
         return payload
 
     def snapshot(self):

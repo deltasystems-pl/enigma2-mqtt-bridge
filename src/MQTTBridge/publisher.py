@@ -33,6 +33,18 @@ class Publisher:
         """Bind enigma2 hooks. Returns True when the image provided them."""
         return True
 
+    def claimed(self):
+        """Whether this area's capability is true *now*.
+
+        Starting and working are usually the same thing, which is why this says
+        yes by default. They come apart when a hook can only bind later — an
+        InfoBar enigma2 has not created yet — and the publisher has to stay
+        registered while it waits. Claiming a capability that produces no topic
+        is exactly the dead entity `capabilities` exists to prevent, so the wait
+        is unclaimed and the bridge republishes `info` when it ends.
+        """
+        return True
+
     def stop(self):
         pass
 

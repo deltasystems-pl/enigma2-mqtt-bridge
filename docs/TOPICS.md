@@ -90,6 +90,15 @@ has the code for it. Three things can take one out: the image did not provide th
 `0`), or the hook raised while it was being attached — which is logged once, with the name that
 could not be bound.
 
+**A capability can also arrive late.** Some hooks can only bind once enigma2 has built the screen
+behind them, which on some images happens after the plugin has already connected. `bouquet_context`
+is the one that does this today: it is claimed on the first successful read of the receiver's own
+service list, not when the plugin starts, so a box that never offers one publishes neither the
+capability nor the `bouquet` topic. When a capability appears after the connect, `info` and the
+announcement are published again with it — a consumer that acts on `info` therefore has to accept
+it more than once per connection, which it has to do anyway because `cmd/config` and `cmd/ha_mode`
+both republish it.
+
 ### `<base>/<node>/power`
 
 Retained. **Not JSON** — `on` or `standby`.
