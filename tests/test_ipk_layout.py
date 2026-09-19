@@ -9,6 +9,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTROL = REPO_ROOT / "CONTROL" / "control"
+WEBIF_SHIM = (
+    REPO_ROOT / "src" / "WebInterface" / "WebChilds" / "External" / "MQTTBridge.py"
+)
 
 REQUIRED_FIELDS = (
     "Package",
@@ -71,3 +74,10 @@ def test_description_has_a_synopsis_and_a_body():
     synopsis, _, body = description.partition("\n")
     assert synopsis.strip(), "the first Description line is the synopsis"
     assert body.strip(), "the extended description is what a plugin browser shows"
+
+
+def test_optional_openwebif_shim_is_packaged_from_its_unique_external_path():
+    build = (REPO_ROOT / "tools" / "build-ipk.sh").read_text(encoding="utf-8")
+    assert WEBIF_SHIM.is_file()
+    assert "src/WebInterface/WebChilds/External/MQTTBridge.py" in build
+    assert "Plugins/Extensions/WebInterface/WebChilds/External" in build

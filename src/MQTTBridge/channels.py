@@ -191,16 +191,22 @@ def bouquet_roots():
 
 
 def read_bouquets(wanted=None):
-    """Every television bouquet, or only the ones named, with their channels.
+    """`(root, bouquets)` — which root answered, and the bouquets it holds.
 
     `wanted` is the `bouquets_for_select` setting already split into names. An
     empty selection means every bouquet — which is what a box that has never
     been configured should publish, rather than nothing.
+
+    The root is returned rather than assumed, because the one that answered is
+    not always the first one asked: a box with „multiple bouquets" switched off
+    has no `bouquets.tv` at all, and everything published here then came out of
+    the favourites list. Anything that later wants to *enter* one of these
+    bouquets has to enter it under the root it was read from.
     """
     handler = _service_center()
     if handler is None:
         missing("eServiceCenter")
-        return []
+        return None, []
     selection = [name.strip().lower() for name in (wanted or []) if name.strip()]
     slugs = {slugify(name) for name in selection}
 
@@ -211,6 +217,7 @@ def read_bouquets(wanted=None):
         # what „multiple bouquets" being switched off means.
         LOG.info("no bouquet list on this box; reading the favourites list instead")
         listed = [(favourites, FAVOURITES_NAME)]
+        root = favourites
 
     bouquets = []
     for sref, name in listed:
@@ -222,7 +229,7 @@ def read_bouquets(wanted=None):
             if is_playable(service)
         ]
         bouquets.append({"name": name, "sref": sref, "channels": channels})
-    return bouquets
+    return root, bouquets
 
 
 def selection_from(setting):
@@ -264,6 +271,7 @@ class ChannelsPublisher(Publisher):
     def __init__(self, bridge=None):
         Publisher.__init__(self, bridge)
         self._bouquets = []
+        self._root = None
         self._generated = 0
         self._mtimes = ()
         self._index = {}
@@ -297,7 +305,7 @@ class ChannelsPublisher(Publisher):
         if not force and mtimes == self._mtimes:
             return None
         self._mtimes = mtimes
-        self._bouquets = read_bouquets(self._selection())
+        self._root, self._bouquets = read_bouquets(self._selection())
         self._generated = int(time.time())
         self._index = {}
         for bouquet in self._bouquets:
@@ -322,6 +330,17 @@ class ChannelsPublisher(Publisher):
     @property
     def bouquets(self):
         return list(self._bouquets)
+
+    @property
+    def root(self):
+        """The service-list root these bouquets were read from, or None.
+
+        Whoever activates one of them has to enter it under this root and not
+        under „the first one we would have tried": on a box with no bouquet
+        list the two are different, and entering the wrong one builds a path
+        the receiver then persists.
+        """
+        return self._root
 
     def snapshot(self):
         if not self._bouquets:

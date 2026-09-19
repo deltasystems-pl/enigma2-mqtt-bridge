@@ -31,6 +31,7 @@ cd "$REPO_ROOT"
 
 PACKAGE=enigma2-plugin-extensions-mqttbridge
 PLUGIN_DIR=usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge
+WEBIF_EXTERNAL_DIR=usr/lib/enigma2/python/Plugins/Extensions/WebInterface/WebChilds/External
 
 # ---------------------------------------------------------------- version ----
 VERSION=$(python3 - <<'PY'
@@ -95,9 +96,10 @@ trap 'rm -rf "$STAGE"' EXIT
 
 DIST=$REPO_ROOT/dist
 rm -rf "$REPO_ROOT/build"          # where the tree used to be staged
-mkdir -p "$STAGE/data/$PLUGIN_DIR" "$STAGE/control" "$DIST"
+mkdir -p "$STAGE/data/$PLUGIN_DIR" "$STAGE/data/$WEBIF_EXTERNAL_DIR" "$STAGE/control" "$DIST"
 
 cp -r src/MQTTBridge/. "$STAGE/data/$PLUGIN_DIR/"
+cp src/WebInterface/WebChilds/External/MQTTBridge.py "$STAGE/data/$WEBIF_EXTERNAL_DIR/"
 find "$STAGE/data" -name '__pycache__' -type d -prune -exec rm -rf {} +
 find "$STAGE/data" -name '*.pyc' -delete
 

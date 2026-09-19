@@ -92,14 +92,22 @@ msgid "Screenshot interval (seconds)"
 msgstr ""
 
 #: src/MQTTBridge/setup.py:44
-msgid "Bouquets for the channel list"
+msgid "Screenshot delay after a zap (seconds)"
 msgstr ""
 
 #: src/MQTTBridge/setup.py:45
-msgid "Allow deep standby and reboot"
+msgid "Publish conditional-access telemetry"
 msgstr ""
 
 #: src/MQTTBridge/setup.py:46
+msgid "Bouquets for the channel list"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:47
+msgid "Allow deep standby and reboot"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:48
 msgid "Log level"
 msgstr ""
 
@@ -142,4 +150,100 @@ msgstr ""
 
 #: src/MQTTBridge/setup.py:121
 msgid "MQTT Bridge"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Version"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Bridge"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Running"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Stopped"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "MQTT"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Save publisher settings"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Receiver integration status"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Status"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Publisher settings"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Sanitized log tail"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Request rejected."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Invalid publisher settings."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Publisher settings were not changed."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Publisher settings saved."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Logging is unavailable."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "OpenWebif authentication is required for MQTT Bridge."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "The MQTT Bridge page could not be built; see the plugin log."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Off"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "After a channel change"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Periodically"
+msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "Publish OSCam server telemetry"
+msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "OSCam WebIf port"
+msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "OSCam WebIf username"
+msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "OSCam WebIf password"
 msgstr ""

@@ -92,6 +92,7 @@ class CommandDispatcher:
             "reboot": self.reboot,
             "restart_gui": self.restart_gui,
             "zap": self.zap,
+            "bouquet": self.bouquet,
             "volume": self.volume,
             "mute": self.mute,
             "key": self.key,
@@ -100,6 +101,7 @@ class CommandDispatcher:
             "record": self.record,
             "screenshot": self.screenshot,
             "epg_grid": self.epg_grid,
+            "config": self.config,
             "discovery": self.discovery,
             "ha_mode": self.ha_mode,
             "reset": self.reset,
@@ -264,6 +266,22 @@ class CommandDispatcher:
             service.expect(sref)
         return None
 
+    def bouquet(self, text):
+        """Switch the active channel-list context to one published bouquet."""
+        try:
+            payload = json.loads(text)
+        except (TypeError, ValueError):
+            return "cmd/bouquet takes a JSON object"
+        if not isinstance(payload, dict) or set(payload) != {"sref"}:
+            return "cmd/bouquet takes exactly one sref field"
+        sref = payload.get("sref")
+        if not isinstance(sref, str) or not sref:
+            return "cmd/bouquet sref must be a non-empty string"
+        publisher = self.publisher("bouquet_context")
+        if publisher is None:
+            return "active bouquet selection is unavailable on this image"
+        return publisher.select(sref)
+
     def volume(self, text):
         from . import volume as volume_module
 
@@ -389,6 +407,17 @@ class CommandDispatcher:
             return "the EPG grid is switched off"
         publisher.regenerate()
         return None
+
+    def config(self, text):
+        from .config import validate_remote_settings
+
+        payload = parse(text)
+        try:
+            # The bridge's own settings, because that is what it will save into.
+            values = validate_remote_settings(payload, self.bridge.settings)
+        except ValueError as error:
+            return str(error)
+        return self.bridge.apply_remote_settings(values)
 
     def discovery(self, _text):
         info = self.bridge.build_info()

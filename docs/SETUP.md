@@ -22,6 +22,12 @@ is no separate configuration file to maintain, and settings survive a plugin upg
 | `ha_mode` | `discovery` | `discovery` / `integration` / `off` — see [TOPICS.md](TOPICS.md#cmdha_mode-semantics) |
 | `publish_keys` | `on` | Remote-key events on the `key` topic. Off if you do not automate on them — it is a log of what is pressed |
 | `screenshot` | `on zap` | `off`, `on zap`, or `interval N s`. At most one capture per five seconds whatever this says |
+| `screenshot_delay` | `4` | Seconds to wait after a zap before capturing. Another zap restarts the wait |
+| `cam_telemetry` | `off` | Publish bounded current-service conditional-access status from `/tmp/ecm.info` |
+| `oscam_telemetry` | `off` | Publish privacy-reduced OSCam software and reader/server health |
+| `oscam_port` | `8888` | Receiver-local OSCam WebIf port; the host is fixed to `127.0.0.1` |
+| `oscam_username` | — | OSCam WebIf login, used only on the receiver |
+| `oscam_password` | — | OSCam WebIf password, masked in Setup and excluded from MQTT and logs |
 | `epg_grid_events` | `4` | Events per channel in the EPG grid. `0` turns the grid off and drops it from `capabilities` |
 | `bouquets_for_select` | all TV bouquets | Which bouquets feed the channel list, the `zap`-by-name lookup and the EPG grid — which publishes **one retained topic per bouquet**, `epg_grid/<bouquet_slug>`. Narrow it if you have hundreds of services. Dropping or renaming a bouquet retracts the topic it owned |
 | `deep_standby_allowed` | `off` | Gate for `cmd/deep_standby` and `cmd/reboot`. Off by default because waking the box again needs Wake-on-LAN and that is worth testing before you rely on it |
@@ -29,6 +35,12 @@ is no separate configuration file to maintain, and settings survive a plugin upg
 
 The log is `/home/root/mqttbridge.log`, capped at 1 MB with two rotations kept, so a debug
 session cannot fill the flash.
+
+OSCam telemetry does not enable or change WebIf. Enable OSCam's JSON API yourself, restrict WebIf
+to loopback or an explicit local allowlist, and set OSCam `httpreadonly = 1`; the bridge itself
+requests only the `status` and `readerlist` views, but cannot enforce OSCam's global policy. The
+login is stored by enigma in `/etc/enigma2/settings`: `ConfigPassword` masks it in the UI, not on
+disk. It is never sent to Home Assistant, MQTT, provisioning acknowledgements or the log.
 
 ## Provisioning file
 

@@ -24,6 +24,12 @@ EXPECTED_DEFAULTS = {
     "publish_keys": True,
     "screenshot": "on_zap",
     "screenshot_interval": 60,
+    "screenshot_delay": 4,
+    "cam_telemetry": False,
+    "oscam_telemetry": False,
+    "oscam_port": 8888,
+    "oscam_username": "",
+    "oscam_password": "",
     "bouquets_for_select": "",
     "deep_standby_allowed": False,
     "log_level": "info",
@@ -76,6 +82,72 @@ def test_the_password_is_a_password_field():
     from Components.config import ConfigPassword
 
     assert isinstance(settings_module.settings.password, ConfigPassword)
+    assert isinstance(settings_module.settings.oscam_password, ConfigPassword)
+
+
+def test_remote_settings_are_exact_and_strictly_typed():
+    assert settings_module.validate_remote_settings({
+        "publish_keys": False,
+        "screenshot": "interval",
+        "screenshot_interval": 300,
+    }) == {
+        "publish_keys": False,
+        "screenshot": "interval",
+        "screenshot_interval": 300,
+        "screenshot_delay": 4,
+        "cam_telemetry": False,
+        "oscam_telemetry": False,
+    }
+
+
+def test_an_omitted_key_falls_back_to_the_section_that_will_be_saved():
+    """🔴 Reading the fallback from one section and writing into another copies
+    the module-global value over whatever the target actually held."""
+    from types import SimpleNamespace
+
+    class _Element:
+        def __init__(self, value):
+            self.value = value
+
+    settings_module.settings.screenshot_delay.value = 4
+    settings_module.settings.cam_telemetry.value = False
+    other = SimpleNamespace(
+        screenshot_delay=_Element(19),
+        cam_telemetry=_Element(True),
+        oscam_telemetry=_Element(True),
+    )
+
+    values = settings_module.validate_remote_settings(
+        {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60}, other
+    )
+
+    assert values["screenshot_delay"] == 19
+    assert values["cam_telemetry"] is True
+    assert values["oscam_telemetry"] is True
+
+
+@pytest.mark.parametrize("payload", [
+    {},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60, "host": "x"},
+    {"publish_keys": 1, "screenshot": "off", "screenshot_interval": 60},
+    {"publish_keys": True, "screenshot": "sometimes", "screenshot_interval": 60},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": True},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 4},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 3601},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60,
+     "screenshot_delay": True},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60,
+     "screenshot_delay": 0},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60,
+     "screenshot_delay": 31},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60,
+     "cam_telemetry": 1},
+    {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60,
+     "oscam_telemetry": 1},
+])
+def test_remote_settings_reject_partial_unknown_or_invalid_values(payload):
+    with pytest.raises(ValueError):
+        settings_module.validate_remote_settings(payload)
 
 
 def test_save_writes_enigma2s_settings_file():

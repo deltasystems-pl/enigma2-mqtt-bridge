@@ -34,6 +34,16 @@ PROVISIONING_PATH = "/etc/enigma2/mqttbridge.json"
 HA_MODES = ("discovery", "integration", "off")
 LOG_LEVELS = ("error", "warning", "info", "debug")
 SCREENSHOT_MODES = ("off", "on_zap", "interval")
+REMOTE_SETTING_NAMES = (
+    "publish_keys",
+    "screenshot",
+    "screenshot_interval",
+    "screenshot_delay",
+    "cam_telemetry",
+    "oscam_telemetry",
+)
+SCREENSHOT_INTERVAL_LIMITS = (5, 3600)
+SCREENSHOT_DELAY_LIMITS = (1, 30)
 
 DEFAULT_BASE_TOPIC = "enigma2"
 DEFAULT_DISCOVERY_PREFIX = "homeassistant"
@@ -56,6 +66,12 @@ SETTING_NAMES = (
     "publish_keys",
     "screenshot",
     "screenshot_interval",
+    "screenshot_delay",
+    "cam_telemetry",
+    "oscam_telemetry",
+    "oscam_port",
+    "oscam_username",
+    "oscam_password",
     "bouquets_for_select",
     "deep_standby_allowed",
     "log_level",
@@ -81,6 +97,12 @@ SETTING_KINDS = {
     "publish_keys": "bool",
     "screenshot": "choice",
     "screenshot_interval": "int",
+    "screenshot_delay": "int",
+    "cam_telemetry": "bool",
+    "oscam_telemetry": "bool",
+    "oscam_port": "int",
+    "oscam_username": "text",
+    "oscam_password": "text",
     "bouquets_for_select": "text",
     "deep_standby_allowed": "bool",
     "log_level": "choice",
@@ -93,7 +115,7 @@ CHOICES = {
     "log_level": LOG_LEVELS,
 }
 
-SECRET_NAMES = ("password",)
+SECRET_NAMES = ("password", "oscam_password")
 
 _TRUE = ("1", "on", "true", "yes")
 _FALSE = ("0", "off", "false", "no")
@@ -130,7 +152,16 @@ def _build():
         default="on_zap",
         choices=[("off", _("off")), ("on_zap", _("on zap")), ("interval", _("at an interval"))],
     )
-    section.screenshot_interval = ConfigInteger(default=60, limits=(5, 3600))
+    section.screenshot_interval = ConfigInteger(default=60, limits=SCREENSHOT_INTERVAL_LIMITS)
+    section.screenshot_delay = ConfigInteger(default=4, limits=SCREENSHOT_DELAY_LIMITS)
+    section.cam_telemetry = ConfigYesNo(default=False)
+    section.oscam_telemetry = ConfigYesNo(default=False)
+    section.oscam_port = ConfigInteger(default=8888, limits=(1, 65535))
+    section.oscam_username = ConfigText(default="", fixed_size=False)
+    section.oscam_password = ConfigPassword(default="", fixed_size=False)
+    # Internal only: never shown, provisioned or echoed. It makes neutral reader
+    # handles stable without publishing an unsalted hash of a private label.
+    section.oscam_identity_salt = ConfigText(default="", fixed_size=False)
     section.bouquets_for_select = ConfigText(default="", fixed_size=False)
     section.deep_standby_allowed = ConfigYesNo(default=False)
     section.log_level = ConfigSelection(
@@ -223,6 +254,79 @@ def coerce(name, raw):
     if kind == "choice":
         return _coerce_choice(name, raw)
     return _coerce_text(raw)
+
+
+def validate_remote_settings(raw, section=None):
+    """Validate the complete, deliberately small remotely writable subset.
+
+    `section` is the settings the result will be saved into, and it is where
+    an omitted optional key's current value comes from. Reading the fallback
+    from one section and writing the result into another would silently copy
+    the module-global value over whatever the target actually held.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("cmd/config takes a JSON object")
+    unknown = sorted(set(raw) - set(REMOTE_SETTING_NAMES))
+    required = {"publish_keys", "screenshot", "screenshot_interval"}
+    missing = sorted(required - set(raw))
+    if unknown:
+        raise ValueError("the config object contains unknown settings")
+    if missing:
+        raise ValueError("missing setting(s): " + ", ".join(missing))
+    publish_keys = raw["publish_keys"]
+    screenshot = raw["screenshot"]
+    interval = raw["screenshot_interval"]
+    delay = raw.get("screenshot_delay", value("screenshot_delay", section))
+    cam_telemetry = raw.get("cam_telemetry", value("cam_telemetry", section))
+    oscam_telemetry = raw.get("oscam_telemetry", value("oscam_telemetry", section))
+    if not isinstance(publish_keys, bool):
+        raise ValueError("publish_keys must be true or false")
+    if not isinstance(screenshot, str) or screenshot not in SCREENSHOT_MODES:
+        raise ValueError("screenshot must be one of " + ", ".join(SCREENSHOT_MODES))
+    if isinstance(interval, bool) or not isinstance(interval, int):
+        raise ValueError("screenshot_interval must be an integer")
+    minimum, maximum = SCREENSHOT_INTERVAL_LIMITS
+    if not minimum <= interval <= maximum:
+        raise ValueError(
+            f"screenshot_interval must be between {minimum} and {maximum}"
+        )
+    if isinstance(delay, bool) or not isinstance(delay, int):
+        raise ValueError("screenshot_delay must be an integer")
+    minimum, maximum = SCREENSHOT_DELAY_LIMITS
+    if not minimum <= delay <= maximum:
+        raise ValueError(f"screenshot_delay must be between {minimum} and {maximum}")
+    if not isinstance(cam_telemetry, bool):
+        raise ValueError("cam_telemetry must be true or false")
+    if not isinstance(oscam_telemetry, bool):
+        raise ValueError("oscam_telemetry must be true or false")
+    return {
+        "publish_keys": publish_keys,
+        "screenshot": screenshot,
+        "screenshot_interval": interval,
+        "screenshot_delay": delay,
+        "cam_telemetry": cam_telemetry,
+        "oscam_telemetry": oscam_telemetry,
+    }
+
+
+def save_remote_settings(values, section=None):
+    """Persist one validated remote replacement, restoring memory on failure."""
+    target = section if section is not None else settings
+    previous = {name: value(name, target) for name in REMOTE_SETTING_NAMES}
+    try:
+        for name in REMOTE_SETTING_NAMES:
+            found = element(name, target)
+            found.value = values[name]
+            found.save()
+        configfile.save()
+    except Exception:
+        for name in REMOTE_SETTING_NAMES:
+            found = element(name, target)
+            found.value = previous[name]
+            found.save()
+        LOG.exception("could not write remote settings to enigma2's settings file")
+        return False
+    return True
 
 
 # -------------------------------------------------------------- provisioning --

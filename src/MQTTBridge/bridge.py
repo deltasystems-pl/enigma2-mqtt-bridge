@@ -124,6 +124,62 @@ class Bridge:
     def save_settings(self):
         return settings_module.save(self.settings)
 
+    def remote_settings(self):
+        """The non-secret settings exposed to and writable by the integration."""
+        return {
+            name: self.value(name) for name in settings_module.REMOTE_SETTING_NAMES
+        }
+
+    def apply_remote_settings(self, values):
+        """Persist one validated replacement, then apply its publisher lifecycle."""
+        if not settings_module.save_remote_settings(values, self.settings):
+            return "could not persist the plugin settings"
+
+        self._replace_configurable_publishers()
+        info = self.build_info()
+        self.publish_json(self.topic("info"), info)
+        self.publish_discovery(info)
+        return None
+
+    def _replace_configurable_publishers(self):
+        """Rebind only hooks controlled by cmd/config; preserve all other work."""
+        from .cam import CamPublisher
+        from .oscam import OscamPublisher
+        from .publishers import PUBLISHER_CLASSES
+        from .remote import KeyPublisher
+        from .screen import ScreenPublisher
+
+        replacements = (CamPublisher, OscamPublisher, KeyPublisher, ScreenPublisher)
+        for publisher_class in replacements:
+            name = publisher_class.name
+            old = self.publisher(name)
+            if old is not None:
+                old.stop()
+                self._publishers.remove(old)
+
+            replacement = publisher_class(self)
+            try:
+                started = replacement.start()
+            except Exception:
+                LOG.exception("the %s publisher could not restart", name)
+                started = False
+            if started:
+                order = PUBLISHER_CLASSES.index(publisher_class)
+                index = sum(
+                    PUBLISHER_CLASSES.index(type(item)) < order
+                    for item in self._publishers
+                    if type(item) in PUBLISHER_CLASSES
+                )
+                self._publishers.insert(index, replacement)
+
+        if self.value("screenshot") == "off":
+            # A disabled private image must not remain readable from broker retention.
+            self.retract(self.topic("screen"))
+        if not self.value("cam_telemetry"):
+            self.retract(self.topic("cam"))
+        if not self.value("oscam_telemetry"):
+            self.retract(self.topic("oscam"))
+
     @property
     def state(self):
         if self._state_store is None:
@@ -399,11 +455,13 @@ class Bridge:
 
         A name gets in here by a hook binding on *this* image. Consumers hide
         what is missing, so a capability claimed and not delivered is a dead
-        entity in somebody's dashboard.
+        entity in somebody's dashboard. Registered is not the same as bound:
+        a publisher that is still waiting for a hook stays in the registry and
+        out of this list until it has one — see `Publisher.claimed`.
         """
         names = list(CORE_CAPABILITIES)
         for publisher in self._publishers:
-            if publisher.name and publisher.name not in names:
+            if publisher.name and publisher.name not in names and publisher.claimed():
                 names.append(publisher.name)
         if self.session is not None and MESSAGE_CAPABILITY not in names:
             from .osd import popups_available
@@ -412,6 +470,22 @@ class Bridge:
                 names.append(MESSAGE_CAPABILITY)
         return names
 
+    def announce_capabilities(self):
+        """Say again what this box can do, after a late bind changed the answer.
+
+        `info` and the announcement are published on connect, so a capability
+        that appears a few seconds later — a hook that could only bind once
+        enigma2 had built the screen behind it — would otherwise stay invisible
+        until the next reconnect.
+        """
+        if not self.connected:
+            return False
+        info = self.build_info()
+        self.publish_json(self.topic("info"), info)
+        self.publish_announcement(info)
+        self.publish_discovery(info)
+        return True
+
     # -------------------------------------------------------------------- events --
 
     def on_connect(self):
@@ -419,6 +493,14 @@ class Bridge:
         # an older name is still on the broker and this is the first chance to
         # take it back.
         self.retract_stale()
+        # Privacy switches also apply to retained data left by an earlier
+        # process, including when they were changed on the receiver setup screen.
+        if self.value("screenshot") == "off":
+            self.retract(self.topic("screen"))
+        if not self.value("cam_telemetry"):
+            self.retract(self.topic("cam"))
+        if not self.value("oscam_telemetry"):
+            self.retract(self.topic("oscam"))
         # Every payload goes out on every connect, so what was published before
         # this connection is not what is on the broker now.
         self.forget_published()
@@ -501,6 +583,7 @@ class Bridge:
             "ip": boxinfo.local_ip(self.value("host")),
             "uptime": boxinfo.uptime_seconds(),
             "ha_mode": self.value("ha_mode"),
+            "settings": self.remote_settings(),
             "capabilities": self.capabilities(),
         }
 

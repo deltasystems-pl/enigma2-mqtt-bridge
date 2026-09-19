@@ -75,6 +75,11 @@ plugin stores your broker credentials on that box, so before you install it:
    **silently** — the publisher sees success either way.
 4. TLS to the broker is optional (`tls`, `ca_file`); client certificates are not in v1.
 
+🔴 **That ACL is the privacy boundary.** Anything able to publish on `<base>/<node>/cmd/config`
+can switch on screenshots, key reporting and the CAM and OSCam telemetry, and then ask for a
+picture of the television whenever it likes — the companion integration's options flow is built on
+exactly that path, so the plugin does not ask the box for a second confirmation.
+
 The plugin has no telemetry, no cloud component and no update check that phones home.
 
 ## Install
@@ -163,6 +168,15 @@ in Home Assistant's recorder database by default. If that matters in your househ
 - turn `publish_keys` off if you do not automate on remote keys — on a plugin-only install that
   is the control, and it is the stronger one either way, because nothing reaches the broker;
 - set `screenshot` to `off` — it is a picture of your screen on the broker, retained;
+- adjust `screenshot_delay` (four seconds by default) if the image needs longer to settle after a
+  channel change; rapid zaps reset the delay and stale in-flight captures are discarded;
+- leave `cam_telemetry` off unless you need conditional-access diagnostics. When enabled it
+  publishes only the generic CA system, current-service encryption flag and bounded fresh ECM timing,
+  never reader, server, user, card or raw ECM data;
+- leave `oscam_telemetry` off unless you need software and reader/server health. It queries only
+  receiver-local read-only WebIf views and publishes opaque source ids and bounded aggregate
+  counts; raw reader names, addresses, users, card identifiers and WebIf credentials stay on the
+  receiver;
 - remember that retained topics outlive the plugin: `cmd/reset` retracts everything, and it is
   the documented step before uninstalling.
 
@@ -171,6 +185,7 @@ in Home Assistant's recorder database by default. If that matters in your househ
 | Plugin | Integration |
 |---|---|
 | 0.1.0 (current) | 0.1.0 |
+| 0.2.0 (unreleased) | 0.2.0 (unreleased) |
 
 The integration warns on its `update` entity when the box runs a plugin older than the one it
 bundles.
@@ -181,8 +196,9 @@ bundles.
       questions closed in [ADR-0001](docs/adr/0001-m0-decisions.md)
 - [x] **M1** — repository and skeleton: the plugin loads, connects, publishes `availability`
       and `info`, and has a setup screen
-- [x] **M2** — state and discovery: power, service, EPG, volume, recording, timers, disk, keys,
-      screenshot, the EPG grid, every `cmd/*` with its guards
+- [ ] **M2** — implementation complete: power, service, EPG, volume, recording, timers, disk,
+      keys, screenshot, the EPG grid, and every `cmd/*` with its guards. Acceptance remains open
+      until the required soak and remaining live drills pass.
 - [ ] **M3** — the integration's entities
 - [ ] **M4** — the guided installer and the `update` entity
 - [ ] **M5** — public beta `v0.x`: releases, opkg feed, HACS custom repository, testers per image

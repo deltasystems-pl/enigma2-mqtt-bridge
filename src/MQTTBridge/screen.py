@@ -18,8 +18,10 @@ That is a decision for whoever turns it on, which is why `off` is a setting and
 why `screenshot` is `on_zap` rather than `interval` by default.
 """
 
+import math
 import os
 import time
+from itertools import count
 
 from .enigma2 import Ticker, enigma_attribute
 from .log import get_logger
@@ -27,7 +29,10 @@ from .publisher import Publisher
 
 LOG = get_logger("screen")
 
-OUTPUT_PATH = "/tmp/mqttbridge.jpg"
+# Where every capture went before 0.2.0, and where one may still be lying
+# around. Captures are per-instance now; see `ScreenPublisher.__init__`.
+LEGACY_OUTPUT_PATH = "/tmp/mqttbridge.jpg"
+_INSTANCE_IDS = count()
 
 # Quality 80 at 720 pixels wide: about 30 KB on this hardware, measured.
 #
@@ -39,12 +44,27 @@ OUTPUT_PATH = "/tmp/mqttbridge.jpg"
 GRAB_BINARIES = ("/usr/bin/grab", "/usr/sbin/grab", "grab")
 GRAB_ARGUMENTS = "-j 80 -r 720 "
 
-DEBOUNCE_MILLISECONDS = 2000
 MINIMUM_INTERVAL_SECONDS = 5
 
 # Above this a capture is dropped rather than retained. A 720-pixel JPEG is
 # tens of kilobytes; anything near half a megabyte is a grab that went wrong.
 MAX_BYTES = 400 * 1024
+
+
+def forget_legacy_output(path):
+    """Delete the fixed capture file older versions of this plugin left behind.
+
+    Before the per-instance name below, every capture went to one fixed path.
+    A file left there by a process that is no longer running is a picture of
+    somebody's living room sitting in `/tmp` until the box is rebooted, and
+    nothing else will ever remove it — including switching screenshots off.
+    """
+    try:
+        os.unlink(path)
+    except OSError:
+        return False
+    LOG.info("removed a capture left behind by an earlier version of this plugin")
+    return True
 
 
 def grab_binary():
@@ -63,8 +83,13 @@ class ScreenPublisher(Publisher):
     name = "screenshot"
     raw = ("screen",)
 
-    def __init__(self, bridge=None, path=OUTPUT_PATH):
+    def __init__(self, bridge=None, path=None):
         Publisher.__init__(self, bridge)
+        # Settings changes replace this publisher while an old asynchronous
+        # grab may still be closing. Give each production instance its own
+        # file so the old completion cannot unlink the new capture.
+        if path is None:
+            path = "/tmp/mqttbridge-" + str(os.getpid()) + "-" + str(next(_INSTANCE_IDS)) + ".jpg"
         self.path = path
         self._container = None
         self._busy = False
@@ -75,10 +100,19 @@ class ScreenPublisher(Publisher):
         self._interval = Ticker(self._on_interval, "screenshot interval")
         self._nav = None
         self._start_event = None
+        self._active = False
+        self._zap_generation = 0
+        self._capture_generation = None
+        self._pending_generation = None
 
     # ------------------------------------------------------------------ hooks --
 
     def start(self):
+        # Before anything else, and whatever this publisher then decides: the
+        # leftover is a private image and removing it does not depend on
+        # screenshots being available, or even on them being switched on.
+        if self.path != LEGACY_OUTPUT_PATH:
+            forget_legacy_output(LEGACY_OUTPUT_PATH)
         if enigma_attribute("eConsoleAppContainer") is None:
             return False
         if grab_binary() is None:
@@ -87,11 +121,15 @@ class ScreenPublisher(Publisher):
         if self.value("screenshot") == "off":
             LOG.info("screenshots are switched off")
             return False
+        self._active = True
         self._bind_zap()
         self._arm_interval()
         return True
 
     def stop(self):
+        self._active = False
+        self._zap_generation += 1
+        self._pending_generation = None
         self._debounce.stop()
         self._interval.stop()
         self._unbind_zap()
@@ -131,9 +169,8 @@ class ScreenPublisher(Publisher):
                 return
             if self.value("screenshot") != "on_zap":
                 return
-            # One capture for a run through ten channels, taken once the box has
-            # settled on the last of them.
-            self._debounce.start(DEBOUNCE_MILLISECONDS, True)
+            self._zap_generation += 1
+            self._arm_zap_capture()
         except Exception:
             LOG.exception("the zap listener raised")
 
@@ -144,8 +181,22 @@ class ScreenPublisher(Publisher):
         seconds = max(MINIMUM_INTERVAL_SECONDS, int(self.value("screenshot_interval") or 60))
         self._interval.start(seconds * 1000)
 
+    def _arm_zap_capture(self):
+        """Schedule the newest zap after both settling and rate-limit delays."""
+        seconds = int(self.value("screenshot_delay") or 4)
+        elapsed = time.time() - self._last_capture
+        rate_wait = max(0.0, MINIMUM_INTERVAL_SECONDS - elapsed)
+        milliseconds = max(seconds * 1000, int(math.ceil(rate_wait * 1000)))
+        self._debounce.start(milliseconds, True)
+
     def _debounced(self):
-        self.capture()
+        if not self._active:
+            return
+        generation = self._zap_generation
+        if self._busy:
+            self._pending_generation = generation
+            return
+        self.capture(generation=generation)
 
     def _on_interval(self):
         self.capture()
@@ -157,7 +208,7 @@ class ScreenPublisher(Publisher):
 
         return bool(in_standby())
 
-    def capture(self, commanded=False):
+    def capture(self, commanded=False, generation=None):
         """Take a picture. None when one was started, otherwise the refusal.
 
         „Started", not „taken": the answer comes back on `screen` when `grab`
@@ -194,6 +245,7 @@ class ScreenPublisher(Publisher):
             return "grab could not be started"
         self._busy = True
         self._commanded = bool(commanded)
+        self._capture_generation = generation
         self._last_capture = time.time()
         return None
 
@@ -226,7 +278,19 @@ class ScreenPublisher(Publisher):
         self._busy = False
         self._container = None
         commanded, self._commanded = self._commanded, False
+        generation, self._capture_generation = self._capture_generation, None
         try:
+            if not self._active:
+                self._remove_output()
+                return
+            if (
+                not commanded
+                and generation is not None
+                and generation != self._zap_generation
+            ):
+                self._remove_output()
+                self._pending_generation = self._zap_generation
+                return
             if retval:
                 LOG.warning("grab exited with %s", retval)
                 self._remove_output()
@@ -258,6 +322,14 @@ class ScreenPublisher(Publisher):
             LOG.info("published a %d byte screenshot", len(data))
         except Exception:
             LOG.exception("handling a finished screenshot raised")
+        finally:
+            if (
+                self._active
+                and self.value("screenshot") == "on_zap"
+                and self._pending_generation == self._zap_generation
+            ):
+                self._pending_generation = None
+                self._arm_zap_capture()
 
     def _read_and_remove(self):
         try:

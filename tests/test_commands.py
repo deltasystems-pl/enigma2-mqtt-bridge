@@ -107,6 +107,129 @@ def test_a_payload_at_the_limit_is_still_read(connected_bridge, factory):
     assert factory.client.last(INFO).json()["ha_mode"] == "integration"
 
 
+def test_config_persists_all_values_rebinds_hooks_and_publishes_info(
+        live_bridge, factory, settings, receiver):
+    settings.screenshot_delay.value = 9
+    hdd = live_bridge.publisher("hdd")
+    epg_grid = live_bridge.publisher("epg_grid")
+    factory.client.clear()
+    send(factory, "config", b'{"publish_keys":false,"screenshot":"interval",'
+          b'"screenshot_interval":90}')
+
+    assert settings.publish_keys.value is False
+    assert settings.publish_keys.saved_value is False
+    assert settings.screenshot.value == "interval"
+    assert settings.screenshot.saved_value == "interval"
+    assert settings.screenshot_interval.value == 90
+    assert settings.screenshot_interval.saved_value == 90
+    assert settings.screenshot_delay.value == 9
+    assert receiver.actions.bound == []
+    assert live_bridge.publisher("hdd") is hdd
+    assert live_bridge.publisher("epg_grid") is epg_grid
+    assert live_bridge.publisher("screenshot")._interval.timer.started == (90000, False)
+    assert factory.client.last(INFO).json()["settings"] == {
+        "publish_keys": False,
+        "screenshot": "interval",
+        "screenshot_interval": 90,
+        "screenshot_delay": 9,
+        "cam_telemetry": False,
+        "oscam_telemetry": False,
+    }
+
+
+def test_config_persists_a_custom_post_zap_delay(live_bridge, factory, settings):
+    send(factory, "config", b'{"publish_keys":true,"screenshot":"on_zap",'
+          b'"screenshot_interval":60,"screenshot_delay":8}')
+    assert settings.screenshot_delay.value == 8
+    assert settings.screenshot_delay.saved_value == 8
+    assert factory.client.last(INFO).json()["settings"]["screenshot_delay"] == 8
+
+
+def test_config_enables_cam_telemetry(live_bridge, factory, settings):
+    send(factory, "config", b'{"publish_keys":true,"screenshot":"on_zap",'
+          b'"screenshot_interval":60,"screenshot_delay":4,"cam_telemetry":true}')
+    assert settings.cam_telemetry.value is True
+    assert settings.cam_telemetry.saved_value is True
+    assert live_bridge.publisher("cam") is not None
+
+
+def test_config_enables_oscam_without_accepting_its_credentials(
+    live_bridge, factory, settings, monkeypatch
+):
+    from MQTTBridge.oscam import OscamPublisher
+
+    monkeypatch.setattr(OscamPublisher, "start", lambda _self: True)
+    send(
+        factory,
+        "config",
+        b'{"publish_keys":true,"screenshot":"on_zap","screenshot_interval":60,'
+        b'"oscam_telemetry":true}',
+    )
+    assert settings.oscam_telemetry.value is True
+    assert settings.oscam_telemetry.saved_value is True
+    assert live_bridge.publisher("oscam") is not None
+
+
+def test_repeated_config_does_not_restart_unrelated_publishers(
+        live_bridge, factory):
+    hdd = live_bridge.publisher("hdd")
+    worker_lock = hdd._worker_lock
+    ticker = hdd._ticker
+    send(factory, "config", b'{"publish_keys":false,"screenshot":"off",'
+          b'"screenshot_interval":60}')
+    send(factory, "config", b'{"publish_keys":true,"screenshot":"on_zap",'
+          b'"screenshot_interval":60}')
+    assert live_bridge.publisher("hdd") is hdd
+    assert live_bridge.publisher("hdd")._worker_lock is worker_lock
+    assert live_bridge.publisher("hdd")._ticker is ticker
+
+
+def test_switching_screenshots_off_retracts_the_private_image(
+        live_bridge, factory):
+    live_bridge.publish_raw(live_bridge.topic("screen"), b"private image")
+    send(factory, "config", b'{"publish_keys":true,"screenshot":"off",'
+          b'"screenshot_interval":60}')
+    retraction = factory.client.last(live_bridge.topic("screen"))
+    assert retraction.payload == b""
+    assert retraction.retain is True
+
+
+def test_config_rejects_the_whole_patch_before_changing_anything(
+        connected_bridge, factory, settings):
+    before = (settings.publish_keys.value, settings.screenshot.value,
+              settings.screenshot_interval.value)
+    factory.client.clear()
+    send(factory, "config", b'{"publish_keys":false,"screenshot":"interval",'
+          b'"screenshot_interval":4}')
+    assert (settings.publish_keys.value, settings.screenshot.value,
+            settings.screenshot_interval.value) == before
+    assert factory.client.last(LAST_ERROR).json()["cmd"] == "config"
+    assert factory.client.last(INFO) is None
+
+
+def test_config_restores_runtime_values_when_persistence_fails(
+        connected_bridge, factory, settings, monkeypatch):
+    before = (settings.publish_keys.value, settings.screenshot.value,
+              settings.screenshot_interval.value)
+    from Components.config import configfile
+
+    def fail():
+        raise OSError("disk full")
+
+    monkeypatch.setattr(configfile, "save", fail)
+    factory.client.clear()
+    send(factory, "config", b'{"publish_keys":false,"screenshot":"off",'
+          b'"screenshot_interval":120}')
+    assert (settings.publish_keys.value, settings.screenshot.value,
+            settings.screenshot_interval.value) == before
+    assert (settings.publish_keys.saved_value, settings.screenshot.saved_value,
+            settings.screenshot_interval.saved_value) == before
+    assert factory.client.last(LAST_ERROR).json()["error"] == (
+        "could not persist the plugin settings"
+    )
+    assert factory.client.last(INFO) is None
+
+
 def test_a_message_on_a_foreign_topic_is_ignored(connected_bridge, factory, plugin_log):
     factory.client.clear()
     factory.client.fire_message("frigate/events", b"{}")
