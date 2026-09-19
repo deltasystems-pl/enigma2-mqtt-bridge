@@ -70,12 +70,37 @@ class _RedactingFilter(logging.Filter):
         try:
             message = record.getMessage()
         except Exception:
+            record.msg = "<unformattable log record>"
+            record.args = ()
             return True
         cleaned = redact(message)
         if cleaned != message:
             record.msg = cleaned
             record.args = ()
         return True
+
+
+class _RedactingFormatter(logging.Formatter):
+    """Scrub the complete rendered record, including exception and stack text."""
+
+    def format(self, record):
+        try:
+            return redact(logging.Formatter.format(self, record))
+        except Exception:
+            # Never let malformed third-party logging arguments reach logging's
+            # stderr fallback, which prints the raw record and its arguments.
+            safe = logging.LogRecord(
+                record.name,
+                record.levelno,
+                record.pathname,
+                record.lineno,
+                "<unformattable log record>",
+                (),
+                None,
+            )
+            safe.created = record.created
+            safe.msecs = record.msecs
+            return logging.Formatter.format(self, safe)
 
 
 def level_value(name):
@@ -129,7 +154,7 @@ def configure(level="info", path=None):
         except OSError as error:
             rejected.append((candidate, error))
             continue
-        handler.setFormatter(logging.Formatter(LOG_FORMAT))
+        handler.setFormatter(_RedactingFormatter(LOG_FORMAT))
         handler.addFilter(_RedactingFilter())
         logger.addHandler(handler)
         _handler = handler

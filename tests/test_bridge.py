@@ -449,3 +449,67 @@ def test_a_bridge_built_with_no_arguments_uses_the_real_settings():
     bridge = Bridge()
     assert bridge.settings is settings_module.settings
     assert bridge.base_topic == "enigma2"
+
+
+def test_the_event_loop_monitor_follows_the_active_bridge_lifecycle(
+    make_bridge, settings
+):
+    class Monitor:
+        def __init__(self):
+            self.starts = 0
+            self.stops = 0
+
+        def start(self):
+            self.starts += 1
+            return True
+
+        def stop(self):
+            self.stops += 1
+
+    monitor = Monitor()
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    bridge = make_bridge(loop_monitor=monitor)
+
+    bridge.start()
+    bridge.reload()
+    bridge.stop()
+
+    assert monitor.starts == 2
+    assert monitor.stops == 2
+
+
+def test_an_idle_bridge_stops_its_event_loop_monitor(make_bridge, settings):
+    class Monitor:
+        def __init__(self):
+            self.started = False
+            self.stopped = False
+
+        def start(self):
+            self.started = True
+            return True
+
+        def stop(self):
+            self.stopped = True
+
+    monitor = Monitor()
+    settings.host.value = ""
+    bridge = make_bridge(loop_monitor=monitor)
+    bridge.start()
+
+    assert monitor.started is False
+    assert monitor.stopped is True
+
+
+def test_startup_lifecycle_log_omits_node_and_broker_identity(
+    make_bridge, settings, plugin_log
+):
+    settings.host.value = "private-broker.example"
+    settings.node_id.value = "private-node"
+    bridge = make_bridge()
+    bridge.start()
+
+    text = plugin_log()
+    assert "starting: ha_mode=" in text
+    assert "private-broker.example" not in text
+    assert "private-node" not in text

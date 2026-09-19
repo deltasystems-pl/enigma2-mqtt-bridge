@@ -9,7 +9,57 @@ version that has no section here.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **The receiver's state, on the broker.** `power`, `service`, `epg`, `tuner`, `recording`,
+  `timers`, `volume`, `hdd`, `key` and `screen` are published as `docs/TOPICS.md` describes them,
+  each from the enigma2 hook that knows about it rather than from a poll: standby from the standby
+  counter and the standby screen closing, the service and its programme from `session.nav.event`,
+  recordings from the record events and from a wrapper around the call enigma2 makes after every
+  change to its timer list, and the volume from wrappers on the receiver's own volume control plus
+  a five-second reconciliation that catches whatever changed it from somewhere else.
+- **`channels`**, the configured bouquets and the services in them — the list a channel selector is
+  built from and the one `cmd/zap` by name resolves against. Rebuilt when a bouquet file changes,
+  which is a modification-time comparison once a minute because enigma2 offers no event for it.
+- **`epg_grid/<bouquet_slug>`**, one retained topic per configured bouquet, with the next few
+  events on every channel in it. Built one bouquet per turn of the main loop, and the time each one
+  took is logged.
+- **Every command in the contract**: `power`, `deep_standby`, `reboot`, `restart_gui`, `zap`,
+  `volume`, `mute`, `key`, `message`, `timer`, `record`, `screenshot`, `epg_grid`, and `discovery`
+  now republishes the channel list as well. Each is verified by effect — the plugin reads the
+  resulting state back rather than trusting a return value — and each refusal is a sentence on
+  `last_error` written for the person who will read it.
+- **Home Assistant discovery**: one device payload with nineteen components and eight device
+  triggers for the colour keys. A component whose capability is missing is not announced, and one
+  that was announced before and is not now is removed by name.
+- **Capability detection that is worth reading.** `info.capabilities` lists the feature areas that
+  actually bound on this box, so a consumer hides what is missing instead of showing an entity
+  nothing will ever update.
+
+### Changed
+
+- A state topic is published **only when it has changed**. The snapshot on every connect is the
+  deliberate exception, because a broker that lost its retained store has to be told everything.
+- Every successful `cmd/screenshot` now publishes a fresh `screen` event even when its JPEG is
+  byte-identical to the previous capture. Asynchronous capture failures report `last_error` for
+  commanded screenshots, while automatic captures only log their failure.
+- Volume hooks now retry for a bounded five-second startup window while images such as OpenViX
+  create their `VolumeControl` singleton, so remote and OpenWebif button changes publish
+  immediately instead of waiting for the five-second reconciliation.
+- Remote-key events classify a physical hold as `long` from its repeat duration when an image
+  omits the synthetic long marker, while still emitting one event and never swallowing the key.
+- Recording-disk probes now run outside the receiver's main loop, so an unavailable network mount
+  cannot freeze the user interface; unresolved startup probes no longer report a false disk loss.
+- MQTT reconnects now log privacy-safe epochs, main-loop dispatch delay and backlog aggregates,
+  plus per-publisher and total snapshot timings for diagnosing receiver stalls.
+- The event-loop monitor now reports both watcher-observed stalls and the measured heartbeat gap
+  when native code resumes before the watcher could run.
+- EPG grids now build in bounded four-channel batches between main-loop turns, retaining the last
+  complete grid until its replacement is ready instead of freezing the interface on a bouquet.
+- `docs/TOPICS.md` gained the `channels` topic, the capability vocabulary's thirteenth name, the
+  discovery entity table, and the four things about Home Assistant 2026.9 that were measured
+  rather than assumed — `default_entity_id` in place of `object_id`, removal by platform key,
+  QoS 1 for commands, and shared availability.
 
 ## [0.1.0] - 2026-09-16
 

@@ -80,7 +80,75 @@ def test_every_callback_goes_through_the_dispatcher(factory):
     factory.client.fire_message("enigma2/x/cmd/reset", b"PRESS")
     factory.client.fire_disconnect()
 
-    assert handed == ["_handle_connect", "_handle_message", "_handle_disconnect"]
+    assert handed == ["_run_dispatched", "_run_dispatched", "_run_dispatched"]
+
+
+def test_a_slow_main_loop_dispatch_logs_delay_and_backlog(factory, plugin_log, monkeypatch):
+    queued = []
+    now = [100.0]
+    monkeypatch.setattr(mqttclient.time, "monotonic", lambda: now[0])
+
+    client = mqttclient.MqttClient(
+        mqttclient.BrokerSettings(host="10.0.0.5"),
+        dispatcher=lambda function, *args: queued.append((function, args)),
+        client_factory=factory,
+    )
+    client.start()
+    factory.client.fire_connect()
+    factory.client.fire_message("private/topic", b"private payload")
+    now[0] += mqttclient.SLOW_DISPATCH_SECONDS + 0.1
+    function, args = queued.pop(0)
+    function(*args)
+
+    text = plugin_log()
+    assert "slow main-loop dispatch kind=connect" in text
+    assert "pending=1 peak=2" in text
+    assert "private/topic" not in text
+    assert "private payload" not in text
+
+
+def test_connection_lifecycle_logs_are_privacy_safe(factory, plugin_log):
+    client = mqttclient.MqttClient(
+        mqttclient.BrokerSettings(
+            host="private-broker", client_id="private-node", username="private-user"
+        ),
+        dispatcher=lambda function, *args: function(*args),
+        client_factory=factory,
+    )
+    client.start()
+    factory.client.fire_connect()
+    factory.client.fire_disconnect(7)
+
+    text = plugin_log()
+    assert "mqtt epoch 1: connection attempt started" in text
+    assert "mqtt epoch 1: connected" in text
+    assert "mqtt epoch 1: disconnected reason=7" in text
+    assert "mqtt epoch 2: automatic reconnect pending" in text
+    assert "private-broker" not in text
+    assert "private-node" not in text
+    assert "private-user" not in text
+
+
+def test_duplicate_disconnect_callbacks_stay_visible_without_inventing_epochs(
+    factory, plugin_log
+):
+    callbacks = []
+    client = mqttclient.MqttClient(
+        mqttclient.BrokerSettings(host="10.0.0.5"),
+        on_disconnect=callbacks.append,
+        dispatcher=lambda function, *args: function(*args),
+        client_factory=factory,
+    )
+    client.start()
+    factory.client.fire_connect()
+    factory.client.fire_disconnect(7)
+    factory.client.fire_disconnect(8)
+
+    text = plugin_log()
+    assert "mqtt epoch 1: disconnected reason=7 callback=1 duplicate=False" in text
+    assert "mqtt epoch 1: disconnected reason=8 callback=2 duplicate=True" in text
+    assert text.count("automatic reconnect pending") == 1
+    assert callbacks == [7, 8]
 
 
 @pytest.mark.parametrize(

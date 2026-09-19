@@ -222,5 +222,16 @@ def test_cmd_discovery_republishes_the_announcement(connected_bridge, factory):
     assert factory.client.last(ANNOUNCEMENT).json()["node_id"] == NODE
 
 
-def test_this_build_publishes_no_home_assistant_discovery_payloads(connected_bridge, factory):
-    assert not [t for t in factory.client.topics() if t.startswith("homeassistant/")]
+def test_a_bridge_with_no_feature_areas_still_announces_the_plugins_own_entities(
+    connected_bridge, factory
+):
+    """A box that bound nothing can still be restarted and still has an uptime.
+
+    There is no session here, so no publisher registered and no capability was
+    claimed — and the discovery payload is exactly the components that depend on
+    no capability at all.
+    """
+    device = factory.client.last("homeassistant/device/" + NODE + "/config").json()
+    assert set(device["cmps"]) == {"restart_gui", "refresh_discovery", "uptime"}
+    # And nothing claiming to know what is playing.
+    assert "channel" not in device["cmps"]

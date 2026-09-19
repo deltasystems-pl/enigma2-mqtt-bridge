@@ -43,13 +43,28 @@ enigma = _module("enigma")
 
 
 class eTimer:
+    """enigma2's timer, which fires only when a test tells it to.
+
+    Deliberately not a real timer: a test that waits for a second to pass is a
+    test that will one day fail on a busy machine, and every timer in this
+    plugin exists to do something a test can simply ask for.
+    """
+
+    instances = []
+
     def __init__(self):
         self.callback = []
         self.started = None
         self.stopped = False
+        eTimer.instances.append(self)
+
+    @property
+    def running(self):
+        return self.started is not None and not self.stopped
 
     def start(self, interval, single=False):
         self.started = (interval, single)
+        self.stopped = False
 
     def stop(self):
         self.stopped = True
@@ -82,6 +97,411 @@ enigma.eTimer = eTimer
 enigma.ePythonMessagePump = ePythonMessagePump
 # What OE-Alliance images actually return: a build date, not a version number.
 enigma.getEnigmaVersionString = lambda: "2024-09-11-Release"
+
+
+# ------------------------------------------------------- services and references --
+
+
+class eServiceReference:
+    """The string form is the reference; everything else is derived from it.
+
+    The real class carries the fields as members and rebuilds the string on
+    demand. Nothing in this plugin depends on that, and everything in it depends
+    on the string round-tripping unchanged — including the flags in the second
+    field, which are how a marker is told from a channel.
+    """
+
+    isDirectory = 1
+    mustDescent = 2
+    canDescent = 4
+    flagDirectory = 7
+    shouldSort = 8
+    hasSortKey = 16
+    sort1 = 32
+    isMarker = 64
+    isGroup = 128
+    isNumberedMarker = 256
+    isInvisible = 512
+
+    def __init__(self, reference=""):
+        self.reference = str(reference)
+
+    @property
+    def flags(self):
+        parts = self.reference.split(":")
+        try:
+            return int(parts[1])
+        except (IndexError, ValueError):
+            return 0
+
+    def toString(self):
+        return self.reference
+
+    def valid(self):
+        return bool(self.reference)
+
+    def __eq__(self, other):
+        return self.reference == getattr(other, "reference", None)
+
+    def __hash__(self):
+        return hash(self.reference)
+
+    def __repr__(self):
+        return f"eServiceReference({self.reference!r})"
+
+
+enigma.eServiceReference = eServiceReference
+
+
+class iServiceInformation:
+    # The values are arbitrary and that is the point: nothing in the plugin may
+    # hard-code them, so the stub uses numbers no image would.
+    sProvider = 901
+    sVideoWidth = 902
+    sVideoHeight = 903
+    sServiceref = 904
+
+
+class iPlayableService:
+    evStart = 1
+    evEnd = 2
+    evTunedIn = 3
+    evTuneFailed = 4
+    evUpdatedInfo = 5
+    evUpdatedEventInfo = 6
+    evNewProgramInfo = 7
+
+
+class iRecordableService:
+    evStart = 11
+    evEnd = 12
+    evRecordWriteError = 13
+
+
+class iFrontendInformation:
+    bitErrorRate = 0
+    signalPower = 1
+    signalQuality = 2
+    lockState = 3
+    syncState = 4
+    frontendNumber = 5
+
+
+enigma.iServiceInformation = iServiceInformation
+enigma.iPlayableService = iPlayableService
+enigma.iRecordableService = iRecordableService
+enigma.iFrontendInformation = iFrontendInformation
+
+
+class Event:
+    """`eServiceEvent`: a programme."""
+
+    def __init__(self, event_id=1, begin=1000, duration=1800, title="Programme",
+                 short="", extended=""):
+        self.event_id = event_id
+        self.begin = begin
+        self.duration = duration
+        self.title = title
+        self.short = short
+        self.extended = extended
+
+    def getEventId(self):
+        return self.event_id
+
+    def getBeginTime(self):
+        return self.begin
+
+    def getDuration(self):
+        return self.duration
+
+    def getEventName(self):
+        return self.title
+
+    def getShortDescription(self):
+        return self.short
+
+    def getExtendedDescription(self):
+        return self.extended
+
+
+class ServiceInfo:
+    def __init__(self, name="TVP 1 HD", provider="Cyfrowy Polsat", width=1920, height=1080,
+                 events=None):
+        self.name = name
+        self.provider = provider
+        self.width = width
+        self.height = height
+        self.events = list(events or [])
+        self.raises_on_event = False
+
+    def getName(self):
+        return self.name
+
+    def getInfoString(self, key):
+        if key == iServiceInformation.sProvider:
+            return self.provider
+        return ""
+
+    def getInfo(self, key):
+        if key == iServiceInformation.sVideoWidth:
+            return self.width
+        if key == iServiceInformation.sVideoHeight:
+            return self.height
+        return -1
+
+    def getEvent(self, index):
+        if self.raises_on_event:
+            raise RuntimeError("no EPG here")
+        try:
+            return self.events[index]
+        except IndexError:
+            return None
+
+
+class Frontend:
+    def __init__(self, quality=52428, power=40000, ber=0, tuner_number=0, status=True):
+        self.quality = quality
+        self.power = power
+        self.ber = ber
+        self.tuner_number = tuner_number
+        self.status = status
+
+    def getFrontendStatus(self):
+        if not self.status:
+            return None
+        # Note what is *not* here: `tuner_signal_quality_db` is absent rather
+        # than negative when the driver has no reading, which is the real
+        # behaviour and the reason the plugin uses `.get`.
+        return {
+            "tuner_signal_quality": self.quality,
+            "tuner_signal_power": self.power,
+            "tuner_bit_error_rate": self.ber,
+            "tuner_locked": 1,
+        }
+
+    def getFrontendData(self):
+        return {"tuner_number": self.tuner_number, "tuner_type": "DVB-S"}
+
+    def getFrontendInfo(self, key):
+        return {
+            iFrontendInformation.signalQuality: self.quality,
+            iFrontendInformation.signalPower: self.power,
+            iFrontendInformation.bitErrorRate: self.ber,
+        }.get(key)
+
+
+class Service:
+    def __init__(self, info=None, frontend=None):
+        self._info = info if info is not None else ServiceInfo()
+        self._frontend = frontend
+
+    def info(self):
+        return self._info
+
+    def frontendInfo(self):
+        return self._frontend
+
+
+class ServiceList:
+    def __init__(self, entries):
+        self.entries = list(entries)
+
+    def getContent(self, fmt="SN", sorted=True):
+        rows = []
+        for sref, name in self.entries:
+            row = []
+            for letter in fmt:
+                if letter == "S":
+                    row.append(sref)
+                elif letter == "C":
+                    row.append(":".join(sref.split(":")[:10]) + ":")
+                elif letter in ("N", "n"):
+                    row.append(name)
+            rows.append(row[0] if len(row) == 1 else row)
+        return rows
+
+
+class ServiceCenter:
+    """One instance, with a dictionary of what each reference contains."""
+
+    _instance = None
+
+    def __init__(self):
+        self.contents = {}
+        self.listed = []
+
+    @classmethod
+    def getInstance(cls):
+        if cls._instance is None:
+            cls._instance = ServiceCenter()
+        return cls._instance
+
+    def list(self, reference):
+        sref = getattr(reference, "reference", str(reference))
+        self.listed.append(sref)
+        entries = self.contents.get(sref)
+        return None if entries is None else ServiceList(entries)
+
+    def info(self, reference):
+        return ServiceInfo()
+
+
+enigma.eServiceCenter = ServiceCenter
+
+
+class EPGCache:
+    """`lookupEventId` and `lookupEvent`, over a dictionary of events."""
+
+    _instance = None
+
+    def __init__(self):
+        # {sref: [Event, …]}, in time order.
+        self.events = {}
+        self.queries = []
+        self.multi_service = True
+        self.raises = False
+
+    @classmethod
+    def getInstance(cls):
+        if cls._instance is None:
+            cls._instance = EPGCache()
+        return cls._instance
+
+    def lookupEventId(self, reference, event_id):
+        sref = getattr(reference, "reference", str(reference))
+        for event in self.events.get(sref, []):
+            if event.getEventId() == int(event_id):
+                return event
+        return None
+
+    def lookupEvent(self, query):
+        self.queries.append(query)
+        if self.raises:
+            raise RuntimeError("this image does not like that query")
+        fields = query[0]
+        entries = query[1:]
+        if len(entries) > 1 and not self.multi_service:
+            # What an image that will not take a multi-service query does: it
+            # answers None rather than raising.
+            return None
+        rows = []
+        for entry in entries:
+            sref = entry[0]
+            minutes = entry[3] if len(entry) > 3 else 0
+            window = (minutes or 0) * 60
+            begin_from = entry[2]
+            for event in self.events.get(sref, []):
+                if window and begin_from != -1 and event.getBeginTime() > begin_from + window:
+                    continue
+                row = []
+                for letter in fields:
+                    if letter == "R":
+                        row.append(sref)
+                    elif letter == "I":
+                        row.append(event.getEventId())
+                    elif letter == "B":
+                        row.append(event.getBeginTime())
+                    elif letter == "D":
+                        row.append(event.getDuration())
+                    elif letter == "T":
+                        row.append(event.getEventName())
+                    elif letter == "N":
+                        row.append("")
+                rows.append(row)
+        return rows
+
+
+enigma.eEPGCache = EPGCache
+
+
+class KeyActionMap:
+    _instance = None
+
+    def __init__(self):
+        self.bound = []
+        self.pressed = []
+
+    @classmethod
+    def getInstance(cls):
+        if cls._instance is None:
+            cls._instance = KeyActionMap()
+        return cls._instance
+
+    def bindAction(self, context, priority, function):
+        self.bound.append((context, priority, function))
+
+    def unbindAction(self, context, function):
+        self.bound = [entry for entry in self.bound if entry[2] is not function]
+
+    def keyPressed(self, device, key, flags):
+        """The three-argument form every current image has.
+
+        Injected presses are delivered to whatever bound a handler, which is how
+        a test proves that `cmd/key` reaches the plugin's own listener — exactly
+        as it does on the box.
+        """
+        self.pressed.append((device, key, flags))
+        for _context, _priority, function in list(self.bound):
+            function(key, flags)
+
+
+enigma.eActionMap = KeyActionMap
+
+
+class ConsoleAppContainer:
+    """`eConsoleAppContainer`: runs nothing, remembers everything."""
+
+    instances = []
+
+    def __init__(self):
+        self.appClosed = []
+        self.stdoutAvail = []
+        self.commands = []
+        self.rejects = False
+        ConsoleAppContainer.instances.append(self)
+
+    def execute(self, command, *arguments):
+        self.commands.append(command)
+        return 1 if self.rejects else 0
+
+    def finish(self, retval=0):
+        for function in list(self.appClosed):
+            function(retval)
+
+    def kill(self):
+        pass
+
+
+enigma.eConsoleAppContainer = ConsoleAppContainer
+
+
+class DVBVolumeControl:
+    _instance = None
+
+    def __init__(self):
+        self.volume = 35
+        self.muted = False
+
+    @classmethod
+    def getInstance(cls):
+        if cls._instance is None:
+            cls._instance = DVBVolumeControl()
+        return cls._instance
+
+    def getVolume(self):
+        return self.volume
+
+    def setVolume(self, left, right):
+        self.volume = int(left)
+
+    def isMuted(self):
+        return self.muted
+
+    def volumeToggleMute(self):
+        self.muted = not self.muted
+
+
+enigma.eDVBVolumecontrol = DVBVolumeControl
 
 
 # -------------------------------------------------------------- boxbranding --
@@ -227,8 +647,36 @@ def getConfigListEntry(*args):
     return tuple(args)
 
 
+class StandbyCounter(ConfigInteger):
+    """`config.misc.standbyCounter`: a number that goes up when the box sleeps.
+
+    Its notifier list is the only event enigma2 offers for *entering* standby,
+    which is why the plugin hangs off a counter rather than off a state.
+    """
+
+    def __init__(self):
+        ConfigInteger.__init__(self, default=0)
+        self.notifiers = []
+
+    def addNotifier(self, notifier, initial_call=True, immediate_feedback=True):
+        self.notifiers.append(notifier)
+        if initial_call:
+            notifier(self)
+
+    def removeNotifier(self, notifier):
+        if notifier in self.notifiers:
+            self.notifiers.remove(notifier)
+
+    def increment(self):
+        self._value += 1
+        for notifier in list(self.notifiers):
+            notifier(self)
+
+
 config = ConfigSubsection()
 config.plugins = ConfigSubsection()
+config.misc = ConfigSubsection()
+config.misc.standbyCounter = StandbyCounter()
 configfile = ConfigFile()
 
 config_module.ConfigElement = ConfigElement
@@ -381,8 +829,285 @@ def resolveFilename(scope, path=""):
 directories_module.resolveFilename = resolveFilename
 
 notifications_module = _module("Tools.Notifications")
-notifications_module.AddPopup = lambda *args, **kwargs: None
-notifications_module.RemovePopup = lambda *args, **kwargs: None
+
+
+class Notifications:
+    """What was put on the screen, and in which order."""
+
+    popups = []
+    removed = []
+    notifications = []
+    raises = False
+
+
+def AddPopup(text, type=1, timeout=10, id=None):
+    if Notifications.raises:
+        raise RuntimeError("no screen to put it on")
+    Notifications.popups.append({"text": text, "type": type, "timeout": timeout, "id": id})
+
+
+def RemovePopup(id):
+    Notifications.removed.append(id)
+
+
+def AddNotification(screen, *arguments):
+    Notifications.notifications.append((screen, arguments))
+
+
+notifications_module.AddPopup = AddPopup
+notifications_module.RemovePopup = RemovePopup
+notifications_module.AddNotification = AddNotification
+notifications_module.Notifications = Notifications
+
+
+# ------------------------------------------------------------ Screens.Standby --
+
+standby_module = _module("Screens.Standby")
+
+
+class StandbyScreen:
+    def __init__(self):
+        self.onClose = []
+        self.power_calls = 0
+
+    def Power(self):
+        self.power_calls += 1
+        # Leaving standby is the screen closing, which is what the plugin
+        # listens for.
+        standby_module.inStandby = None
+        for function in list(self.onClose):
+            function()
+
+
+class Standby:
+    """The class enigma2 hands to `AddNotification` to *enter* standby."""
+
+
+class TryQuitMainloop:
+    """The screen that shuts the box down; its argument is what kind of down."""
+
+
+standby_module.inStandby = None
+standby_module.Standby = Standby
+standby_module.StandbyScreen = StandbyScreen
+standby_module.TryQuitMainloop = TryQuitMainloop
+
+
+infobar_module = _module("Screens.InfoBar")
+
+
+class InfoBar:
+    instance = None
+
+    def __init__(self, servicelist=None):
+        self.servicelist = servicelist
+
+
+class ChannelList:
+    """Enough of the receiver's channel list to prove the zap is safe."""
+
+    def __init__(self, selectable=()):
+        self.selectable = [str(s) for s in selectable]
+        self.selection = None
+        self.zaps = 0
+
+    def setCurrentSelection(self, reference):
+        wanted = getattr(reference, "reference", str(reference))
+        if wanted in self.selectable:
+            self.selection = wanted
+
+    def getCurrentSelection(self):
+        return None if self.selection is None else eServiceReference(self.selection)
+
+    def zap(self):
+        self.zaps += 1
+
+
+infobar_module.InfoBar = InfoBar
+infobar_module.ChannelList = ChannelList
+
+channel_selection_module = _module("Screens.ChannelSelection")
+channel_selection_module.service_types_tv = (
+    "1:7:1:0:0:0:0:0:0:0:(type == 1) || (type == 17) || (type == 22)"
+)
+
+
+# ------------------------------------------------- ServiceReference / RecordTimer --
+
+service_reference_module = _module("ServiceReference")
+
+
+class ServiceReference(eServiceReference):
+    """On current images this really is an `eServiceReference` subclass."""
+
+    names = {}
+
+    def __init__(self, reference=""):
+        eServiceReference.__init__(self, getattr(reference, "reference", str(reference)))
+
+    @property
+    def ref(self):
+        return self
+
+    def getServiceName(self):
+        return ServiceReference.names.get(self.reference, "")
+
+    def __str__(self):
+        return self.reference
+
+
+service_reference_module.ServiceReference = ServiceReference
+
+record_timer_module = _module("RecordTimer")
+
+
+class RecordTimerEntry:
+    StateWaiting = 0
+    StatePrepared = 1
+    StateRunning = 2
+    StateEnded = 3
+
+    def __init__(self, serviceref, begin, end, name, description, eit, disabled=False,
+                 justplay=False, afterEvent=3, *args, **kwargs):
+        # The real class asserts this, so a wrapper of the wrong kind would fail
+        # on a box and pass here if the stub were kinder.
+        assert isinstance(serviceref, eServiceReference)
+        self.service_ref = serviceref
+        self.begin = int(begin)
+        self.end = int(end)
+        self.name = name
+        self.description = description
+        self.eit = eit
+        self.disabled = disabled
+        self.justplay = justplay
+        self.afterEvent = afterEvent
+        self.state = RecordTimerEntry.StateWaiting
+        self.repeated = 0
+        self.dontSave = False
+
+    def isRunning(self):
+        return self.state == RecordTimerEntry.StateRunning
+
+
+def parseEvent(event, description=True):
+    """Exactly the five-tuple the real one returns, margins and all."""
+    begin = event.getBeginTime() - record_timer_module.margin_before * 60
+    end = event.getBeginTime() + event.getDuration() + record_timer_module.margin_after * 60
+    name = event.getEventName() if description else ""
+    short = (event.getShortDescription() or event.getExtendedDescription()) if description else ""
+    return (begin, end, name, short, event.getEventId())
+
+
+record_timer_module.RecordTimerEntry = RecordTimerEntry
+record_timer_module.parseEvent = parseEvent
+record_timer_module.margin_before = 0
+record_timer_module.margin_after = 0
+
+
+class RecordTimer:
+    """`session.nav.RecordTimer`, with the two return values that matter."""
+
+    def __init__(self):
+        self.timer_list = []
+        self.processed_timers = []
+        self.save_calls = 0
+        self.conflicts = None
+        # The trap: `record()` answers None both for „accepted" and for
+        # „dropped as a duplicate".
+        self.swallow = False
+        self.removed = []
+
+    def record(self, entry, *args, **kwargs):
+        if self.conflicts:
+            return list(self.conflicts)
+        if self.swallow:
+            return None
+        self.timer_list.append(entry)
+        self.saveTimer()
+        return None
+
+    def removeEntry(self, entry):
+        self.removed.append(entry)
+        if entry in self.timer_list:
+            self.timer_list.remove(entry)
+        self.saveTimer()
+
+    def saveTimer(self):
+        self.save_calls += 1
+
+    def isRecording(self):
+        return any(timer.state == RecordTimerEntry.StateRunning for timer in self.timer_list)
+
+    def getNextRecordingTime(self):
+        upcoming = [
+            timer.begin
+            for timer in self.timer_list
+            if timer.state == RecordTimerEntry.StateWaiting and not timer.disabled
+        ]
+        return min(upcoming) if upcoming else -1
+
+
+# -------------------------------------------------------- Components.VolumeControl --
+
+volume_control_module = _module("Components.VolumeControl")
+
+
+class VolumeDialog:
+    def __init__(self):
+        self.shown = 0
+        self.value = None
+
+    def show(self):
+        self.shown += 1
+
+    def setValue(self, value):
+        self.value = value
+
+
+class VolumeControl:
+    instance = None
+
+    def __init__(self):
+        self.volctrl = DVBVolumeControl.getInstance()
+        self.volumeDialog = VolumeDialog()
+        self.hideVolTimer = eTimer()
+        self.saves = 0
+        self.mute_calls = 0
+        # The real one refuses to mute at volume 0 unless forced.
+        self.refuses_mute_at_zero = True
+
+    def volSave(self):
+        self.saves += 1
+
+    def volUp(self):
+        self.volctrl.setVolume(min(100, self.volctrl.getVolume() + 1),
+                               min(100, self.volctrl.getVolume() + 1))
+
+    def volDown(self):
+        self.volctrl.setVolume(max(0, self.volctrl.getVolume() - 1),
+                               max(0, self.volctrl.getVolume() - 1))
+
+    def volMute(self, showMuteSymbol=True, force=False):
+        self.mute_calls += 1
+        if self.refuses_mute_at_zero and not force and self.volctrl.getVolume() == 0:
+            return
+        self.volctrl.volumeToggleMute()
+
+
+volume_control_module.VolumeControl = VolumeControl
+
+
+# -------------------------------------------------------------------- keyids --
+
+keyids_module = _module("keyids")
+keyids_module.KEYIDS = {
+    "KEY_OK": 352,
+    "KEY_ENTER": 352,
+    "KEY_RED": 398,
+    "KEY_INFO": 358,
+    # One this plugin's own table does not carry, to prove the merge happens.
+    "KEY_PVR": 366,
+}
 
 
 # -------------------------------------------------------- twisted, immediately --
@@ -416,7 +1141,10 @@ class Published:
     @property
     def text(self):
         if isinstance(self.payload, (bytes, bytearray)):
-            return bytes(self.payload).decode("utf-8")
+            # `replace` rather than strict: one of the payloads on this contract
+            # is a JPEG, and a test that only wants to know whether a topic was
+            # retracted should not blow up on it.
+            return bytes(self.payload).decode("utf-8", "replace")
         return "" if self.payload is None else str(self.payload)
 
     def json(self):
@@ -525,6 +1253,9 @@ class FakeMQTTClient:
 
     # --- what a test asks it ------------------------------------------------
 
+    def client_disconnected(self):
+        return self.disconnect_calls > 0
+
     def topics(self):
         return [entry.topic for entry in self.published]
 
@@ -556,6 +1287,183 @@ class ClientFactory:
     @property
     def client(self):
         return self.clients[-1] if self.clients else None
+
+
+# ------------------------------------------------------------ a whole receiver --
+
+
+class Navigation:
+    """`session.nav`: what is playing, what is recording, and who is watching."""
+
+    def __init__(self, service=None, sref=""):
+        self.event = []
+        self.record_event = []
+        self.RecordTimer = RecordTimer()
+        self.service = service
+        self.sref = sref
+        self.played = []
+
+    def getCurrentService(self):
+        return self.service
+
+    def getCurrentlyPlayingServiceReference(self):
+        return eServiceReference(self.sref) if self.sref else None
+
+    def playService(self, reference):
+        self.sref = getattr(reference, "reference", str(reference))
+        self.played.append(self.sref)
+
+    def fire(self, event):
+        for listener in list(self.event):
+            listener(event)
+
+    def fire_record(self, service=None, event=None):
+        for listener in list(self.record_event):
+            listener(service, event)
+
+
+class Session:
+    def __init__(self, nav):
+        self.nav = nav
+        self.opened = []
+
+    def open(self, screen, *arguments):
+        self.opened.append((screen, arguments))
+        return screen
+
+    def openWithCallback(self, callback, screen, *arguments):
+        self.opened.append((screen, arguments))
+        return screen
+
+
+BOUQUET_ROOT = (
+    channel_selection_module.service_types_tv
+    + ' FROM BOUQUET "bouquets.tv" ORDER BY bouquet'
+)
+FIRST_BOUQUET = '1:7:1:0:0:0:0:0:0:0:FROM BOUQUET "userbouquet.ulubione.tv" ORDER BY bouquet'
+SECOND_BOUQUET = '1:7:1:0:0:0:0:0:0:0:FROM BOUQUET "userbouquet.sport.tv" ORDER BY bouquet'
+
+TVP1 = "1:0:19:283D:3FB:1:C00000:0:0:0:"
+TVN = "1:0:19:283E:3FB:1:C00000:0:0:0:"
+POLSAT = "1:0:19:283F:3FB:1:C00000:0:0:0:"
+MARKER = "1:64:0:0:0:0:0:0:0:0::A heading"
+
+
+class Receiver:
+    """A whole fake box: bouquets, EPG, a tuner, a volume and a session."""
+
+    def __init__(self):
+        self.service_center = ServiceCenter.getInstance()
+        self.epg = EPGCache.getInstance()
+        self.volume = DVBVolumeControl.getInstance()
+        self.actions = KeyActionMap.getInstance()
+        self.info = ServiceInfo(
+            events=[
+                Event(27431, 1789459200, 1500, "Wiadomości", "Serwis informacyjny"),
+                Event(27432, 1789460700, 300, "Pogoda"),
+            ]
+        )
+        self.frontend = Frontend()
+        self.service = Service(self.info, self.frontend)
+        self.nav = Navigation(self.service, TVP1)
+        self.session = Session(self.nav)
+
+        self.service_center.contents = {
+            BOUQUET_ROOT: [
+                (FIRST_BOUQUET, "Ulubione TV"),
+                (SECOND_BOUQUET, "Sport (HD)"),
+            ],
+            FIRST_BOUQUET: [
+                (MARKER, "A heading"),
+                (TVP1, "TVP 1 HD"),
+                (TVN, "TVN HD"),
+            ],
+            SECOND_BOUQUET: [
+                (POLSAT, "Polsat Sport"),
+            ],
+        }
+        ServiceReference.names.update({
+            TVP1: "TVP 1 HD",
+            TVN: "TVN HD",
+            POLSAT: "Polsat Sport",
+        })
+        self.epg.events = {
+            TVP1: [
+                Event(27431, 1789459200, 1500, "Wiadomości"),
+                Event(27432, 1789460700, 300, "Pogoda"),
+                Event(27433, 1789461000, 3600, "Film"),
+            ],
+            TVN: [Event(31001, 1789459200, 1800, "Fakty")],
+            POLSAT: [],
+        }
+        VolumeControl.instance = VolumeControl()
+        self.volume_control = VolumeControl.instance
+
+    # --- what a test does to it ---------------------------------------------
+
+    def enter_standby(self):
+        standby_module.inStandby = StandbyScreen()
+        config.misc.standbyCounter.increment()
+        return standby_module.inStandby
+
+    def leave_standby(self):
+        screen = standby_module.inStandby
+        if screen is not None:
+            screen.Power()
+
+    def add_timer(self, sref=TVP1, begin=1789459200, end=1789460700, name="Wiadomości",
+                  state=RecordTimerEntry.StateWaiting, justplay=False, repeated=0):
+        timer = RecordTimerEntry(ServiceReference(sref), begin, end, name, "", 0)
+        timer.state = state
+        timer.justplay = justplay
+        timer.repeated = repeated
+        self.nav.RecordTimer.timer_list.append(timer)
+        return timer
+
+    def with_channel_list(self, selectable=(TVP1, TVN)):
+        InfoBar.instance = InfoBar(ChannelList(selectable))
+        return InfoBar.instance.servicelist
+
+
+@pytest.fixture
+def receiver():
+    return Receiver()
+
+
+@pytest.fixture(autouse=True)
+def fresh_receiver():
+    """Every singleton the receiver stubs keep, put back between tests."""
+    from MQTTBridge import enigma2 as enigma2_module
+    from MQTTBridge import keys as keys_module
+    from MQTTBridge import remote as remote_module
+
+    def reset():
+        ServiceCenter._instance = None
+        EPGCache._instance = None
+        KeyActionMap._instance = None
+        DVBVolumeControl._instance = None
+        VolumeControl.instance = None
+        InfoBar.instance = None
+        standby_module.inStandby = None
+        ServiceReference.names = {}
+        ConsoleAppContainer.instances = []
+        eTimer.instances = []
+        Notifications.popups = []
+        Notifications.removed = []
+        Notifications.notifications = []
+        Notifications.raises = False
+        record_timer_module.margin_before = 0
+        record_timer_module.margin_after = 0
+        counter = config.misc.standbyCounter
+        counter.notifiers = []
+        counter._value = 0
+        enigma2_module.forget_missing()
+        keys_module.forget_image_keys()
+        remote_module.forget_rate_limit()
+
+    reset()
+    yield
+    reset()
 
 
 # --------------------------------------------------------------- fixtures --
@@ -665,6 +1573,7 @@ def make_bridge(factory, state_path, tmp_path, isolated_log):
             "state_store": StateStore(path=state_path),
             "provisioning_path": str(tmp_path / "absent-mqttbridge.json"),
             "log_path": str(isolated_log),
+            "loop_monitor": None,
         }
         options.update(overrides)
         bridge = Bridge(**options)
@@ -677,7 +1586,12 @@ def make_bridge(factory, state_path, tmp_path, isolated_log):
 
 @pytest.fixture
 def connected_bridge(make_bridge, factory, settings):
-    """A started, connected bridge with a plausible broker configured."""
+    """A started, connected bridge with a plausible broker configured.
+
+    No session, so no feature area registers: this is the bridge itself — the
+    connection, `info`, the announcement and the commands that need nothing from
+    the receiver.
+    """
     settings.host.value = "10.0.0.5"
     settings.node_id.value = "vuuno4kse_005301"
     settings.friendly_name.value = "Living room receiver"
@@ -685,3 +1599,32 @@ def connected_bridge(make_bridge, factory, settings):
     bridge.start()
     factory.client.fire_connect()
     return bridge
+
+
+def settle(bridge, rounds=20):
+    """Let the work that is spread across timer ticks finish.
+
+    The EPG grid builds one bouquet per turn of the main loop, so on a real box
+    it is complete a fraction of a second after the connect. A test that wants
+    the settled state has to turn that handle itself.
+    """
+    grid = bridge.publisher("epg_grid")
+    if grid is None:
+        return bridge
+    for _ in range(rounds):
+        if not grid._queue:
+            break
+        grid._step.timer.fire()
+    return bridge
+
+
+@pytest.fixture
+def live_bridge(make_bridge, factory, settings, receiver):
+    """A bridge on a working receiver: every publisher registered and started."""
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = "vuuno4kse_005301"
+    settings.friendly_name.value = "Living room receiver"
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+    factory.client.fire_connect()
+    return settle(bridge)
