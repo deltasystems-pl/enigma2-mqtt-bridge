@@ -313,8 +313,11 @@ def test_unexpected_http_exception_never_logs_credentials(
         raise RuntimeError("private-webif-password appeared in a third-party error")
 
     monkeypatch.setattr(oscam, "probe", fail)
-    assert oscam._PROBE_SLOT.acquire(False)
-    found._probe(1, 1, 8888, "private-user", "private-webif-password", SALT)
+    ticket = oscam._PROBE_SLOT.acquire()
+    assert ticket is not None
+    found._ticket = ticket
+    found._probe(1, 1, ticket, 8888, "private-user", "private-webif-password", SALT)
+    assert oscam._PROBE_SLOT.held is False
     written = plugin_log()
     assert "OSCam health probe failed" in written
     assert "private-webif-password" not in written
@@ -343,23 +346,54 @@ def test_stopped_or_disabled_completion_cannot_republish(live_bridge, factory, s
     assert len(factory.client.published) == before
 
 
-def test_hung_probe_expires_the_last_success_without_spawning_another(
-    live_bridge, factory, settings
+def test_hung_probe_expires_the_last_success_and_lets_the_next_one_start(
+    live_bridge, factory, settings, monkeypatch, wait_until
 ):
+    """🔴 One stuck worker used to hold the process-wide slot until a restart."""
     settings.oscam_telemetry.value = True
+    calls = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocked_probe(*_args, **_kwargs):
+        calls.append("probe")
+        entered.set()
+        release.wait(5)
+        return oscam.unavailable(True, reachable=True, access="granted")
+
+    monkeypatch.setattr(oscam, "probe", blocked_probe)
     found = oscam.OscamPublisher(live_bridge)
     found._stopped = False
-    found._running = True
-    found._last_completion = time.monotonic() - oscam.STALE_SECONDS - 1
+    found._salt = SALT
     found._cached = oscam.unavailable(True, reachable=True, access="granted")
+    found._last_completion = time.monotonic()
+    assert found._start_probe() is True
+    assert entered.wait(1)
+    stuck_generation = found._generation
+    stuck_serial = found._serial
+
+    found._last_completion = time.monotonic() - oscam.STALE_SECONDS - 1
     found._poll()
+
     state = factory.client.last(live_bridge.topic("oscam")).json()
     assert state["software_running"] is None
     assert state["api_reachable"] is False
-    assert found._running is True
+    # The slot was taken back, so a replacement probe is already running.
+    assert wait_until(lambda: calls == ["probe", "probe"])
+    assert found._generation != stuck_generation
+
+    # Whatever the abandoned worker eventually answers is not published.
+    before = len(factory.client.published)
+    found._finish_probe(
+        stuck_generation, stuck_serial, oscam.unavailable(True, reachable=True, access="granted")
+    )
+    assert len(factory.client.published) == before
+
+    release.set()
+    assert wait_until(lambda: not found._running)
+    found.stop()
 
     before = len(factory.client.published)
-    found.stop()
     found._poll()
     assert len(factory.client.published) == before
 

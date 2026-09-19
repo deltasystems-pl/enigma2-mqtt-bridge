@@ -383,7 +383,9 @@ queries only `status` and `readerlist` from OSCam's JSON API on `127.0.0.1`. It 
 redirect, uses an environment proxy, invokes an action API, or blocks enigma's main loop. A
 response is capped at 128 KiB and the request has a bounded deadline. After 90 seconds without a
 completed probe, counts become unknown and the reader list is cleared instead of presenting old
-health as current.
+health as current, and that probe is abandoned: whatever it answers afterwards is discarded, so a
+worker stuck on a listener that accepts a connection and never replies delays the next reading by
+one interval rather than stopping the telemetry until the plugin restarts.
 
 Reader labels become stable, receiver-local HMAC identifiers using a hidden persisted salt. The
 labels themselves, addresses, users, card identifiers, CAIDs, providers and keys never leave the

@@ -34,7 +34,50 @@ STALE_SECONDS = 90
 # absolute budget across the initial request plus those retries so its internal
 # challenge loop cannot restart the full timeout each time.
 MAX_DIGEST_REQUESTS = 6
-_PROBE_SLOT = threading.Lock()
+
+
+class _ProbeSlot:
+    """One OSCam probe at a time in this process, with a way to take it back.
+
+    A plain lock is not enough, because the thread holding it is the one that
+    may be stuck: `opener.open()` covers a connect, a digest challenge loop and
+    the response headers, none of which the body deadline governs, and nothing
+    here can kill a thread. So the slot is taken away instead of waited for.
+
+    The ticket is what makes that safe. A worker whose slot was taken no longer
+    holds it, so its own release does nothing and cannot hand a slot it has
+    lost to a third probe behind the second one's back.
+    """
+
+    def __init__(self):
+        self._guard = threading.Lock()
+        self._holder = None
+        self._issued = 0
+
+    def acquire(self):
+        """A ticket for the caller that took the slot, or None when it is held."""
+        with self._guard:
+            if self._holder is not None:
+                return None
+            self._issued += 1
+            self._holder = self._issued
+            return self._holder
+
+    def release(self, ticket):
+        """Give the slot back, unless it has already been taken away."""
+        with self._guard:
+            if ticket is None or self._holder != ticket:
+                return False
+            self._holder = None
+            return True
+
+    @property
+    def held(self):
+        with self._guard:
+            return self._holder is not None
+
+
+_PROBE_SLOT = _ProbeSlot()
 
 _VERSION = re.compile(
     r"^[0-9]{1,3}\.[0-9]{1,3}(?:[._-][A-Za-z0-9]+)*(?: build r[0-9]{1,8})?$"
@@ -372,6 +415,7 @@ class OscamPublisher(Publisher):
         self._generation = 0
         self._serial = 0
         self._latest_serial = 0
+        self._ticket = None
         self._cached = None
         self._salt = None
         self._last_completion = 0.0
@@ -405,16 +449,38 @@ class OscamPublisher(Publisher):
     def _poll(self):
         if self._stopped or not self.value("oscam_telemetry"):
             return
-        if (
-            self._running
-            and self._last_completion
-            and time.monotonic() - self._last_completion >= STALE_SECONDS
-            and not self._stale_published
-        ):
+        self._abandon_stuck_probe()
+        self._start_probe()
+
+    def _abandon_stuck_probe(self):
+        """Take the slot back from a probe that is past the stale window.
+
+        A worker can block for longer than its own deadline governs, and while
+        it does it holds the one slot: without this, one stuck probe freezes
+        OSCam telemetry until the plugin is restarted. Nothing here can kill
+        the thread, so its generation is retired instead — whatever it
+        eventually answers is ignored — and the slot is released on its behalf
+        so the next tick can start a fresh probe.
+        """
+        if self._stopped or not self._running or not self._last_completion:
+            return False
+        if time.monotonic() - self._last_completion < STALE_SECONDS:
+            return False
+        with self._lock:
+            ticket = self._ticket
+            self._ticket = None
+            self._running = False
+            self._generation += 1
+            # The next stale window is measured from here, so that the
+            # replacement probe is not declared stuck the moment it starts.
+            self._last_completion = time.monotonic()
+        _PROBE_SLOT.release(ticket)
+        LOG.warning("the OSCam health probe did not answer in time; abandoning it")
+        if not self._stale_published:
             self._stale_published = True
             self._cached = unavailable(None)
             self.publish("oscam", self._cached)
-        self._start_probe()
+        return True
 
     def _start_probe(self):
         if self._stopped:
@@ -422,9 +488,11 @@ class OscamPublisher(Publisher):
         with self._lock:
             if self._running:
                 return False
-            if not _PROBE_SLOT.acquire(False):
+            ticket = _PROBE_SLOT.acquire()
+            if ticket is None:
                 return False
             self._running = True
+            self._ticket = ticket
             self._serial += 1
             serial = self._serial
             self._latest_serial = serial
@@ -435,19 +503,21 @@ class OscamPublisher(Publisher):
         try:
             threading.Thread(
                 target=self._probe,
-                args=(generation, serial, port, username, password, self._salt),
+                args=(generation, serial, ticket, port, username, password, self._salt),
                 name="mqttbridge-oscam",
                 daemon=True,
             ).start()
         except Exception:
             with self._lock:
-                self._running = False
-            _PROBE_SLOT.release()
+                if self._ticket == ticket:
+                    self._running = False
+                    self._ticket = None
+            _PROBE_SLOT.release(ticket)
             LOG.exception("could not start the OSCam health probe")
             return False
         return True
 
-    def _probe(self, generation, serial, port, username, password, salt):
+    def _probe(self, generation, serial, ticket, port, username, password, salt):
         try:
             try:
                 if salt is None:
@@ -461,8 +531,14 @@ class OscamPublisher(Publisher):
                 payload = unavailable(None)
         finally:
             with self._lock:
-                self._running = False
-            _PROBE_SLOT.release()
+                # Only if this worker still holds the slot: a watchdog that
+                # gave up on it has already handed it to somebody else, and
+                # clearing `_running` here would let a third probe start
+                # beside the second one.
+                if self._ticket == ticket:
+                    self._running = False
+                    self._ticket = None
+            _PROBE_SLOT.release(ticket)
         client = getattr(self.bridge, "client", None) if self.bridge is not None else None
         dispatch = getattr(client, "_dispatch", None)
         if dispatch is None:
