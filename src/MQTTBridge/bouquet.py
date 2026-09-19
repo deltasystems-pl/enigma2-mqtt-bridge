@@ -9,11 +9,27 @@ from .service import navigation
 LOG = get_logger("bouquet")
 POLL_MILLISECONDS = 2000
 
-# How many turns of the ticker the service list gets to appear before the
-# publisher stops asking. Five of them is ten seconds, which is longer than any
-# image measured here takes to build its InfoBar, and short enough that a box
-# that will never have one is not polled for the rest of its uptime.
-BIND_ATTEMPTS = 5
+# Once a minute, for a box that has not produced a service list yet. A cold
+# boot can spend a while before enigma2 builds its InfoBar, and an image that
+# never does should not be asked every two seconds for the rest of its uptime —
+# but it must still be asked, because „never so far" is not „never".
+SLOW_POLL_MILLISECONDS = 60000
+
+# How many fast turns that gets before the polling slows down: a minute.
+BIND_ATTEMPTS = 30
+
+# What one look at the receiver's own service list found.
+UNREADABLE = "unreadable"
+# Readable, but the root is not one of the configured bouquets: the box is on
+# the radio list, in the movie list, or in a bouquet `bouquets_for_select`
+# excludes. That is ordinary operation, not a missing hook.
+FOREIGN_ROOT = "foreign_root"
+READABLE = "readable"
+
+# The `bouquet` payload for a root that is not one of ours. The fields stay,
+# because a consumer templating `value_json.name` should get a null rather than
+# an error, and because the topic is how „not in a configured bouquet" is said.
+NO_BOUQUET = {"name": None, "sref": None}
 
 
 def _servicelist():
@@ -63,7 +79,7 @@ class BouquetPublisher(Publisher):
         self._ticker = Ticker(self.refresh, "bouquet context")
         self._bound = False
         self._attempts = 0
-        self._gave_up = False
+        self._slow = False
 
     def claimed(self):
         return self._bound
@@ -75,7 +91,7 @@ class BouquetPublisher(Publisher):
         # the bounded retry: it binds by lookup on every turn without creating
         # another timer or logging on every miss.
         self.refresh()
-        if not self._gave_up:
+        if not self._slow:
             self._ticker.start(POLL_MILLISECONDS)
         return True
 
@@ -83,10 +99,10 @@ class BouquetPublisher(Publisher):
         self._ticker.stop()
 
     def _bind(self):
-        """The root was readable: claim the capability and say so, once."""
+        """The list was readable: claim the capability and say so, once."""
         self._attempts = 0
-        if self._gave_up:
-            self._gave_up = False
+        if self._slow:
+            self._slow = False
             self._ticker.start(POLL_MILLISECONDS)
         if self._bound:
             return
@@ -96,18 +112,24 @@ class BouquetPublisher(Publisher):
             self.bridge.announce_capabilities()
 
     def _not_yet(self):
-        """The root was not readable: keep waiting, but not forever."""
-        if self._bound or self._gave_up:
+        """No usable service list this turn: keep watching, but stop hurrying.
+
+        Only a missing hook gets here. A list that reads perfectly well and
+        happens to be showing something this plugin does not publish is not a
+        failure to bind, and counting it as one used to retire the whole
+        feature a few seconds after somebody opened the radio list.
+        """
+        if self._bound or self._slow:
             return
         self._attempts += 1
         if self._attempts < BIND_ATTEMPTS:
             return
-        self._gave_up = True
-        self._ticker.stop()
+        self._slow = True
+        self._ticker.start(SLOW_POLL_MILLISECONDS)
         LOG.warning(
-            "this image gave no readable service list in %d attempts; "
-            "bouquet_context is not claimed",
-            BIND_ATTEMPTS,
+            "no readable service list after %d seconds; bouquet_context is not claimed "
+            "and the list is now checked once a minute",
+            BIND_ATTEMPTS * POLL_MILLISECONDS // 1000,
         )
 
     def _root(self):
@@ -125,22 +147,40 @@ class BouquetPublisher(Publisher):
                 return bouquet
         return None
 
-    def _payload(self):
+    def _read(self):
+        """`(state, payload)` for one look at the receiver's own service list.
+
+        Three different things used to come back as None from here, and the
+        caller could not tell them apart: an image with no service list, a
+        lookup that raised, and a perfectly readable list showing a root this
+        plugin does not publish. Only the first two mean the hooks are missing.
+        """
         servicelist = _servicelist()
         get_root = getattr(servicelist, "getRoot", None)
         if get_root is None:
-            return None
+            return UNREADABLE, None
         try:
-            bouquet = self._known(get_root())
+            root = get_root()
         except Exception:
-            return None
+            return UNREADABLE, None
+        if root is None:
+            return UNREADABLE, None
+        try:
+            bouquet = self._known(root)
+        except Exception:
+            return UNREADABLE, None
         if bouquet is None:
-            return None
-        return {"name": bouquet.get("name"), "sref": bouquet.get("sref")}
+            return FOREIGN_ROOT, dict(NO_BOUQUET)
+        return READABLE, {"name": bouquet.get("name"), "sref": bouquet.get("sref")}
+
+    def _payload(self):
+        """The active configured bouquet, or None when it is not one of ours."""
+        state, payload = self._read()
+        return payload if state == READABLE else None
 
     def refresh(self, force=False):
-        payload = self._payload()
-        if payload is None:
+        state, payload = self._read()
+        if state == UNREADABLE:
             self._not_yet()
             return None
         if force:
@@ -148,11 +188,11 @@ class BouquetPublisher(Publisher):
         else:
             self.publish("bouquet", payload)
         self._bind()
-        return payload
+        return payload if state == READABLE else None
 
     def snapshot(self):
-        payload = self._payload()
-        return {} if payload is None else {"bouquet": payload}
+        state, payload = self._read()
+        return {} if state == UNREADABLE else {"bouquet": payload}
 
     def select(self, sref):
         """Activate one published bouquet; tune first channel only when needed."""

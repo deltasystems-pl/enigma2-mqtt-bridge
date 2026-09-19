@@ -211,6 +211,19 @@ service-list root, not inferred from the current channel. A successful `cmd/bouq
 republishes it, including when the requested bouquet was already active, so consumers can require
 a fresh by-effect acknowledgement.
 
+**The receiver is not always in one of the configured bouquets.** It may be showing the radio
+list, the movie list, or a bouquet that `bouquets_for_select` leaves out. That is ordinary
+operation rather than a fault, and it is published as both fields being null:
+
+```json
+{"name":null,"sref":null}
+```
+
+A consumer should read that as „channel up and down are not walking a list I know about". The
+capability stays, because the service list is being read successfully — what is missing is a
+match, not a hook — and the topic goes back to naming a bouquet as soon as the receiver is in one
+again.
+
 ### `<base>/<node>/epg_grid/<bouquet_slug>` — since M2
 
 A compact grid, **one retained topic per configured bouquet**: the next few events on every

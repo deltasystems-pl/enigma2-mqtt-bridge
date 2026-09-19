@@ -4,6 +4,7 @@ import json
 
 from conftest import FIRST_BOUQUET, POLSAT, SECOND_BOUQUET, TVN, TVP1
 
+from MQTTBridge import bouquet
 from MQTTBridge import channels as channels_module
 
 NODE = "vuuno4kse_005301"
@@ -172,27 +173,61 @@ def test_the_capability_is_claimed_only_once_the_list_can_be_read(
     assert "bouquet_context" in announcement.json()["capabilities"]
 
 
-def test_an_image_that_never_offers_a_list_stops_asking_and_says_so_once(
+def test_an_image_that_never_offers_a_list_slows_down_but_keeps_watching(
     make_bridge, factory, settings, receiver, plugin_log
 ):
+    """Giving up for good would need a restart to undo; slowing down does not."""
     settings.host.value = "192.0.2.2"
     settings.node_id.value = NODE
     bridge = make_bridge(session=receiver.session)
     bridge.start()
     publisher = bridge.publisher("bouquet_context")
 
-    for _ in range(10):
-        if publisher._ticker.timer.running:
-            publisher._ticker.timer.fire()
+    for _ in range(bouquet.BIND_ATTEMPTS + 5):
+        publisher._ticker.timer.fire()
 
-    assert publisher._ticker.timer.running is False
     assert "bouquet_context" not in bridge.capabilities()
     assert plugin_log().count("bouquet_context is not claimed") == 1
+    assert publisher._ticker.timer.running is True
+    assert publisher._ticker.timer.started[0] == bouquet.SLOW_POLL_MILLISECONDS
 
-    # And it is still ready to work if the list turns up later after all.
+    # The slow tick is what makes the late arrival recoverable.
     receiver.with_channel_list()
-    assert publisher.select(FIRST_BOUQUET) is None
+    publisher._ticker.timer.fire()
+
     assert "bouquet_context" in bridge.capabilities()
+    assert factory.client.last(BOUQUET).json()["sref"] == FIRST_BOUQUET
+    assert publisher._ticker.timer.started[0] == bouquet.POLL_MILLISECONDS
+
+
+def test_a_root_that_is_no_configured_bouquet_is_published_as_none(
+    make_bridge, factory, settings, receiver, plugin_log
+):
+    """🔴 Radio, the movie list, a bouquet the filter leaves out: all ordinary."""
+    settings.host.value = "192.0.2.2"
+    settings.node_id.value = NODE
+    servicelist = receiver.with_channel_list()
+    elsewhere = type(servicelist.bouquet_root)(
+        '1:7:1:0:0:0:0:0:0:0:FROM BOUQUET "userbouquet.private.tv" ORDER BY bouquet'
+    )
+    servicelist.root = elsewhere
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+    factory.client.fire_connect()
+    publisher = bridge.publisher("bouquet_context")
+
+    for _ in range(bouquet.BIND_ATTEMPTS + 5):
+        publisher._ticker.timer.fire()
+
+    # The list reads perfectly well; it simply is not showing one of ours.
+    assert factory.client.last(BOUQUET).json() == {"name": None, "sref": None}
+    assert "bouquet_context" in bridge.capabilities()
+    assert publisher._ticker.timer.started[0] == bouquet.POLL_MILLISECONDS
+    assert "bouquet_context is not claimed" not in plugin_log()
+
+    servicelist.root = type(servicelist.bouquet_root)(FIRST_BOUQUET)
+    publisher._ticker.timer.fire()
+    assert factory.client.last(BOUQUET).json()["sref"] == FIRST_BOUQUET
 
 
 def test_a_box_with_no_bouquet_list_selects_inside_the_root_it_read(
