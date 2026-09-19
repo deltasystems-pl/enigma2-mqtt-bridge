@@ -75,6 +75,11 @@ plugin stores your broker credentials on that box, so before you install it:
    **silently** — the publisher sees success either way.
 4. TLS to the broker is optional (`tls`, `ca_file`); client certificates are not in v1.
 
+🔴 **That ACL is the privacy boundary.** Anything able to publish on `<base>/<node>/cmd/config`
+can switch on screenshots, key reporting and the CAM and OSCam telemetry, and then ask for a
+picture of the television whenever it likes — the companion integration's options flow is built on
+exactly that path, so the plugin does not ask the box for a second confirmation.
+
 The plugin has no telemetry, no cloud component and no update check that phones home.
 
 ## Install

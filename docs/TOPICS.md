@@ -409,6 +409,9 @@ box. Reordering OSCam's response does not change an id; renaming a reader does. 
 `reader`, `server`, or `unknown`; `status` is one of `ready`, `connected`, `disabled`, `no_card`,
 `initializing`, `connecting`, `disconnected`, `sleeping`, `duplicate`, `error`, or `unknown`.
 
+An entry whose kind could be worked out from neither the row type nor the protocol is published as
+kind `unknown`, and its id carries the prefix `source_` rather than `reader_` or `server_`.
+
 `cards_ready` counts enabled local readers reporting `CARDOK`. `shared_cards` is OSCam's bounded
 CCcam share count and is deliberately separate: it is never added to the physical-reader count.
 `api_access: granted` means only that the API returned these read-only views; it does not assert
@@ -562,6 +565,17 @@ feature does not leave its last picture readable from broker retention. Disablin
 telemetry option likewise retracts its retained topic. OSCam host, port and credentials are never
 accepted here or published in `info`.
 
+🔴 **What this command can switch on is the privacy boundary, and the broker is where that
+boundary is.** `cmd/config` is deliberately writable, because the companion integration's options
+flow is built on it — which means **any client with publish rights on `<base>/<node>/cmd/config`
+can turn on `screenshot`, `publish_keys`, `cam_telemetry` and `oscam_telemetry`**, and with
+screenshots on it can ask for a picture of the television at any time with `cmd/screenshot`. There
+is no second, box-local confirmation for this, by design: a broker login that can publish there is
+a login that can watch the living room. Give the receiver its own broker credential, restrict it
+with an ACL, and treat `cmd/#` on this node as sensitive — the ACL recipe is in the project's
+README. The settings this command cannot reach are listed above, and that list is the only limit
+the plugin itself imposes.
+
 ### `cmd/ha_mode` semantics
 
 | Value | Announcement on `enigma2mqtt/discovery/<node>/config` | HA discovery payloads | State topics |
@@ -692,6 +706,14 @@ was measured against Home Assistant rather than assumed:
   down to nothing but its platform. Leaving it out of the payload does not remove it — Home
   Assistant keeps what it last saw. This is what happens when a capability disappears: switch
   screenshots off and the image entity goes with them.
+
+### What discovery deliberately leaves out
+
+`cam`, `oscam` and `bouquet` have **no discovery components at all**, whatever their capabilities
+say. All three are consumed by the companion integration, which subscribes to the topics directly:
+the first two would need a whole set of per-reader entities built from a list that changes shape,
+and the third is a selector whose options are the channel list, not a state anybody wants as a
+sensor. A plugin-only install reads them from the broker as they are documented above.
 
 ### The attributes the sensors carry
 
