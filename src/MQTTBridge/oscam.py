@@ -456,6 +456,7 @@ class OscamPublisher(Publisher):
         # replacement, and the setup screen itself logs.
         register_secret(self.value("oscam_password"))
         if not self.value("oscam_telemetry"):
+            self.switched_off = True
             return False
         self._salt = self._identity_salt()
         if self._salt is None:

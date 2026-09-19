@@ -279,6 +279,56 @@ def test_a_ticker_callback_that_raises_is_caught(plugin_log):
     assert "explosive" in plugin_log()
 
 
+def test_a_stopped_ticker_gives_the_timer_back():
+    """A stopped timer holding a bound method keeps its owner reachable."""
+    ticker = enigma2.Ticker(lambda: None, "tidy")
+    ticker.start(10)
+    timer = ticker.timer
+    assert timer.callback
+
+    assert ticker.stop() is True
+    assert timer.callback == []
+    assert ticker.timer is None
+
+    # And it can be used again: `start` builds a fresh one.
+    ticker.start(10)
+    assert ticker.timer is not None and ticker.timer is not timer
+    ticker.stop()
+
+
+def test_a_ticker_stopped_from_inside_its_own_callback_detaches_afterwards():
+    """🔴 The list is being walked right then; the detach has to wait."""
+    fired = []
+    ticker = enigma2.Ticker(lambda: (fired.append(1), ticker.stop()), "self-stopping")
+    ticker.start(10)
+    timer = ticker.timer
+
+    timer.fire()
+
+    assert fired == [1]
+    assert timer.callback == []
+    assert ticker.timer is None
+
+
+def test_replacing_publishers_does_not_leave_live_timers_behind(live_bridge, settings):
+    """Every `cmd/config` rebuilds four publishers; their timers must go."""
+    from conftest import eTimer
+
+    def live_timers():
+        """Timers enigma2 would still call into."""
+        return len([timer for timer in eTimer.instances if timer.callback])
+
+    settings.screenshot.value = "interval"          # gives the screenshot publisher a timer
+    live_bridge._replace_configurable_publishers()
+    before = live_timers()
+    assert before > 0
+
+    for _ in range(5):
+        live_bridge._replace_configurable_publishers()
+
+    assert live_timers() == before
+
+
 def test_identity_ignores_the_name_a_bouquet_gave_a_service():
     plain = "1:0:19:283D:3FB:1:C00000:0:0:0:"
     named = "1:0:19:283D:3FB:1:C00000:0:0:0::TVP 1 HD"

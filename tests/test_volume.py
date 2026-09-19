@@ -195,8 +195,9 @@ def test_volume_control_created_after_session_start_is_wrapped_after_delayed_tur
     assert len(factory.client.all_for(VOLUME)) == 1
 
     wrapped = control.volUp
+    deferred = publisher._deferred_wrap.timer
     publisher.stop()
-    assert publisher._deferred_wrap.timer.stopped is True
+    assert deferred.stopped is True
     assert control.volUp is not wrapped
 
 

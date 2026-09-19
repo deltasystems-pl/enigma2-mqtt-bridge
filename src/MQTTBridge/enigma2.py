@@ -111,16 +111,23 @@ class Ticker:
         self._callback = callback
         self._name = name
         self._timer = None
+        self._firing = False
+        self._detach_wanted = False
 
     @property
     def timer(self):
         return self._timer
 
     def _fire(self):
+        self._firing = True
         try:
             self._callback()
         except Exception:
             LOG.exception("the %s timer raised", self._name)
+        finally:
+            self._firing = False
+            if self._detach_wanted:
+                self._detach()
 
     def _build(self):
         factory = enigma_attribute("eTimer")
@@ -164,7 +171,34 @@ class Ticker:
         except Exception:
             LOG.exception("could not stop the %s timer", self._name)
             return False
+        if self._firing:
+            # Called from inside our own callback — which is what a publisher
+            # that gives up on a poll does. The timer is walking its callback
+            # list right now, so the detach waits for `_fire` to return.
+            self._detach_wanted = True
+            return True
+        self._detach()
         return True
+
+    def _detach(self):
+        """Give the timer back: our callback off its list, our reference gone.
+
+        A stopped timer that still holds a bound method of the object that
+        owns it keeps that object reachable from enigma2's side. `start` builds
+        a fresh timer, so nothing needs this one afterwards.
+        """
+        timer, self._timer = self._timer, None
+        self._detach_wanted = False
+        if timer is None:
+            return
+        try:
+            handle = getattr(timer, "callback", None)
+            if handle is not None:
+                handle.remove(self._fire)
+            else:
+                timer.timeout.get().remove(self._fire)
+        except Exception:
+            LOG.debug("could not detach the %s timer's callback", self._name)
 
 
 # --------------------------------------------------------- service references --

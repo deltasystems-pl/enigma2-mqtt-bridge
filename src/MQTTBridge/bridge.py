@@ -444,7 +444,13 @@ class Bridge:
         for publisher in list(self._publishers):
             try:
                 if not publisher.start():
-                    LOG.warning("this image does not provide the %s hooks", publisher.name)
+                    if publisher.switched_off:
+                        LOG.info(
+                            "%s is switched off in the settings; it publishes nothing",
+                            publisher.name,
+                        )
+                    else:
+                        LOG.warning("this image does not provide the %s hooks", publisher.name)
                     self._publishers.remove(publisher)
             except Exception:
                 LOG.exception("the %s publisher could not start", publisher.name)

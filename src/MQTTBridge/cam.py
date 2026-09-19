@@ -155,7 +155,10 @@ class CamPublisher(NavPublisher):
         self._poll = Ticker(self._publish, "cam telemetry")
 
     def start(self):
-        if not self.value("cam_telemetry") or info_constant("sIsCrypted") is None:
+        if not self.value("cam_telemetry"):
+            self.switched_off = True
+            return False
+        if info_constant("sIsCrypted") is None:
             return False
         if not NavPublisher.start(self):
             return False

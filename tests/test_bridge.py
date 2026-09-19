@@ -304,6 +304,27 @@ def test_a_publisher_that_cannot_bind_is_dropped(make_bridge, factory, settings,
     assert "does not provide the tuner hooks" in plugin_log()
 
 
+def test_a_feature_switched_off_is_not_blamed_on_the_image(make_bridge, settings, receiver,
+                                                           factory, plugin_log):
+    """🔴 „this image does not provide the oscam hooks" for a setting nobody
+    turned on reads as a broken receiver. It is a choice, and it is logged as one."""
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    settings.publish_keys.value = False
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+    factory.client.fire_connect()
+
+    written = plugin_log()
+    assert "keys is switched off in the settings" in written
+    assert "does not provide the keys hooks" not in written
+    assert "does not provide the cam hooks" not in written
+    assert "does not provide the oscam hooks" not in written
+    assert "cam is switched off in the settings" in written
+    assert "oscam is switched off in the settings" in written
+    assert "keys" not in bridge.capabilities()
+
+
 def test_reload_restarts_the_session_with_the_new_settings(connected_bridge, factory, settings):
     settings.host.value = "10.0.0.9"
     connected_bridge.reload()
