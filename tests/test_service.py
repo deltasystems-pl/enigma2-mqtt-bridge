@@ -279,10 +279,11 @@ def test_a_zap_without_a_session_is_refused():
 def test_a_zap_that_lands_says_nothing(live_bridge, factory, receiver):
     publisher = live_bridge.publisher("service")
     publisher.expect(TVN)
+    verify = publisher._verify.timer          # the zap satisfies it and hands it back
     receiver.nav.sref = TVN
     receiver.nav.fire(1)
     factory.client.clear()
-    publisher._verify.timer.fire()
+    verify.fire()
     assert factory.client.all_for(LAST_ERROR) == []
 
 
@@ -299,10 +300,11 @@ def test_a_zap_that_does_not_land_says_so(live_bridge, factory, receiver):
 def test_a_zap_is_verified_against_the_identity_not_the_spelling(live_bridge, factory, receiver):
     publisher = live_bridge.publisher("service")
     publisher.expect(TVN + ":TVN HD")
+    verify = publisher._verify.timer
     receiver.nav.sref = TVN
     receiver.nav.fire(1)
     factory.client.clear()
-    publisher._verify.timer.fire()
+    verify.fire()
     assert factory.client.all_for(LAST_ERROR) == []
 
 

@@ -22,6 +22,13 @@ class Publisher:
     # string and a JPEG are not improved by being wrapped in quotes.
     raw = ()
 
+    # Set by a publisher that returns False from `start()` because its feature
+    # is switched off in the settings, rather than because this image could not
+    # give it the hooks. The two look identical from outside and read very
+    # differently in a log: one is a choice somebody made, the other is a
+    # limitation of the receiver.
+    switched_off = False
+
     def __init__(self, bridge=None):
         self.bridge = bridge
 

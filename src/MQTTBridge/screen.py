@@ -92,6 +92,7 @@ class ScreenPublisher(Publisher):
             path = "/tmp/mqttbridge-" + str(os.getpid()) + "-" + str(next(_INSTANCE_IDS)) + ".jpg"
         self.path = path
         self._container = None
+        self._finished_container = None
         self._busy = False
         self._commanded = False
         self._last_capture = 0.0
@@ -113,13 +114,16 @@ class ScreenPublisher(Publisher):
         # screenshots being available, or even on them being switched on.
         if self.path != LEGACY_OUTPUT_PATH:
             forget_legacy_output(LEGACY_OUTPUT_PATH)
+        # The switch is read first. A box with screenshots off has not been
+        # asked for `grab` and should not be told it is missing one.
+        if self.value("screenshot") == "off":
+            self.switched_off = True
+            LOG.info("screenshots are switched off")
+            return False
         if enigma_attribute("eConsoleAppContainer") is None:
             return False
         if grab_binary() is None:
             LOG.warning("this image has no grab utility; screenshots are unavailable")
-            return False
-        if self.value("screenshot") == "off":
-            LOG.info("screenshots are switched off")
             return False
         self._active = True
         self._bind_zap()
@@ -133,6 +137,10 @@ class ScreenPublisher(Publisher):
         self._debounce.stop()
         self._interval.stop()
         self._unbind_zap()
+        # Only a container that has already finished: one still running has to
+        # keep its callback, or the capture it is about to produce would never
+        # be cleaned up.
+        self._release_finished_container()
 
     def _bind_zap(self):
         """`evStart` is the zap; a screenshot of the channel before it is noise."""
@@ -249,7 +257,28 @@ class ScreenPublisher(Publisher):
         self._last_capture = time.time()
         return None
 
+    def _release_finished_container(self):
+        """Take our callback off the container whose program has ended.
+
+        Deliberately not done inside `_finished`: that runs while the
+        container is walking its own callback list, and a list that is
+        modified mid-walk is a different bug on every image. One finished
+        container is held until the next capture needs one, and no more.
+        """
+        container, self._finished_container = self._finished_container, None
+        if container is None:
+            return
+        hook = getattr(container, "appClosed", None)
+        try:
+            if hasattr(hook, "remove"):
+                hook.remove(self._finished)
+            elif hook is not None:
+                hook.get().remove(self._finished)
+        except Exception:
+            LOG.debug("could not detach from a finished console container")
+
     def _new_container(self):
+        self._release_finished_container()
         factory = enigma_attribute("eConsoleAppContainer")
         if factory is None:
             return None
@@ -276,7 +305,7 @@ class ScreenPublisher(Publisher):
     def _finished(self, retval=0):
         """`grab` is done — read the file, publish it, and delete it."""
         self._busy = False
-        self._container = None
+        self._finished_container, self._container = self._container, None
         commanded, self._commanded = self._commanded, False
         generation, self._capture_generation = self._capture_generation, None
         try:

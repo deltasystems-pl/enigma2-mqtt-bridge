@@ -21,7 +21,7 @@ is no separate configuration file to maintain, and settings survive a plugin upg
 | `ha_discovery_prefix` | `homeassistant` | Match your Home Assistant MQTT integration if you changed it there |
 | `ha_mode` | `discovery` | `discovery` / `integration` / `off` — see [TOPICS.md](TOPICS.md#cmdha_mode-semantics) |
 | `publish_keys` | `on` | Remote-key events on the `key` topic. Off if you do not automate on them — it is a log of what is pressed |
-| `screenshot` | `on zap` | `off`, `on zap`, or `interval N s`. At most one capture per five seconds whatever this says |
+| `screenshot` | `on zap` | `off`, `on zap`, or `interval N s`. At most one capture per five seconds whatever this says. Each capture costs the receiver about 22 kB of memory it does not give back — see below |
 | `screenshot_delay` | `4` | Seconds to wait after a zap before capturing. Another zap restarts the wait |
 | `cam_telemetry` | `off` | Publish bounded current-service conditional-access status from `/tmp/ecm.info` |
 | `oscam_telemetry` | `off` | Publish privacy-reduced OSCam software and reader/server health |
@@ -35,6 +35,27 @@ is no separate configuration file to maintain, and settings survive a plugin upg
 
 The log is `/home/root/mqttbridge.log`, capped at 1 MB with two rotations kept, so a debug
 session cannot fill the flash.
+
+### What a screenshot costs
+
+**Every capture leaves about 22 kB in enigma2 that it does not give back, whoever takes it.**
+That is the image's own `grab`, not this plugin: measured on OpenViX 6.6 by running 60 captures
+from the receiver's own shell with the plugin idle — enigma2's resident memory rose by 1 320 kB
+and stayed there. The same 60 captures taken *through* the plugin cost the same or less, so the
+read-and-publish path here adds nothing measurable. The price is paid by anything that runs
+`grab`, which presumably includes the image's own web interface.
+
+`on zap` stays the default: it is what makes the picture in Home Assistant follow the television,
+and on a receiver that is restarted every few weeks the arithmetic is small — 60 zaps a day is
+about 1.3 MB a day. On a box that runs for months without a restart, or one that is short of
+memory to begin with, set `interval` with a long period and take a capture on demand with
+`cmd/screenshot` when you actually want one.
+
+**`off` means off, including on demand.** It does not leave a manual shutter behind: the
+screenshot publisher does not start at all, `screenshot` leaves `capabilities`, the retained
+`screen` topic is retracted, and `cmd/screenshot` is refused with *screenshots are not available
+on this box*. Choose it when you want no captures; choose a long `interval` when you want them
+only when you ask.
 
 OSCam telemetry does not enable or change WebIf. Enable OSCam's JSON API yourself, restrict WebIf
 to loopback or an explicit local allowlist, and set OSCam `httpreadonly = 1`; the bridge itself

@@ -218,6 +218,7 @@ class EpgGridPublisher(Publisher):
 
     def start(self):
         if self.events_per_channel <= 0:
+            self.switched_off = True
             LOG.info("epg_grid_events is 0; the EPG grid is switched off")
             return False
         if epg_cache() is None:

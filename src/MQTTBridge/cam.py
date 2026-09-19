@@ -7,7 +7,10 @@ import stat
 import time
 
 from .enigma2 import Ticker
+from .log import get_logger
 from .service import NavPublisher, _service_info, info_constant
+
+LOG = get_logger("cam")
 
 ECM_PATH = "/tmp/ecm.info"
 MAX_BYTES = 8 * 1024
@@ -155,7 +158,11 @@ class CamPublisher(NavPublisher):
         self._poll = Ticker(self._publish, "cam telemetry")
 
     def start(self):
-        if not self.value("cam_telemetry") or info_constant("sIsCrypted") is None:
+        if not self.value("cam_telemetry"):
+            self.switched_off = True
+            LOG.info("cam_telemetry is off; conditional-access status is not published")
+            return False
+        if info_constant("sIsCrypted") is None:
             return False
         if not NavPublisher.start(self):
             return False

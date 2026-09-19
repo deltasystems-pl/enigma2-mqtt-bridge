@@ -102,6 +102,8 @@ def test_disabling_cam_retracts_retained_state(live_bridge, factory, settings):
     live_bridge._replace_configurable_publishers()
     live_bridge.publish_json(live_bridge.topic("cam"), {"active": True})
     old = live_bridge.publisher("cam")
+    # enigma2 keeps the timer; the publisher lets go of it when it stops.
+    old_timer = old._poll.timer
     settings.cam_telemetry.value = False
     live_bridge._replace_configurable_publishers()
     entry = factory.client.last(CAM)
@@ -110,7 +112,7 @@ def test_disabling_cam_retracts_retained_state(live_bridge, factory, settings):
 
     # eTimer callbacks already queued by enigma2 can still arrive after stop.
     published = len(factory.client.published)
-    old._poll.timer.fire()
+    old_timer.fire()
     assert len(factory.client.published) == published
     assert factory.client.last(CAM).payload == b""
 

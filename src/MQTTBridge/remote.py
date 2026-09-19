@@ -183,6 +183,7 @@ class KeyPublisher(Publisher):
 
     def start(self):
         if not self.value("publish_keys"):
+            self.switched_off = True
             LOG.info("publish_keys is off; the remote is not watched")
             return False
         actions = action_map()

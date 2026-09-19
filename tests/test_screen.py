@@ -42,6 +42,25 @@ def test_a_capture_left_by_an_older_version_is_removed_at_start(
     assert "screenshot" not in bridge.capabilities()
 
 
+def test_screenshots_off_is_read_before_the_image_is_blamed(
+    make_bridge, settings, receiver, monkeypatch, plugin_log
+):
+    """🔴 A box with screenshots off and no `grab` is not a box with no hooks."""
+    monkeypatch.setattr(screen_module, "grab_binary", lambda: None)
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    settings.screenshot.value = "off"
+
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+
+    written = plugin_log()
+    assert "screenshots are switched off" in written
+    assert "no grab utility" not in written
+    assert "does not provide the screenshot hooks" not in written
+    assert "screenshot" not in bridge.capabilities()
+
+
 def test_removing_a_capture_that_is_not_there_is_not_an_error(tmp_path):
     assert screen_module.forget_legacy_output(str(tmp_path / "absent.jpg")) is False
 
@@ -256,9 +275,12 @@ def test_stop_prevents_a_stale_capture_from_rearming(
     running = ConsoleAppContainer.instances[-1]
     write_a_picture(found.path)
     receiver.nav.fire(1)
+    debounce = found._debounce.timer
     found.stop()
     running.finish(0)
-    assert found._debounce.timer.stopped is True
+    assert debounce.stopped is True
+    # And the publisher is no longer on that timer's callback list at all.
+    assert found._debounce.timer is None
 
 
 def test_no_screenshot_on_a_zap_when_the_setting_is_an_interval(live_bridge, receiver, settings,
@@ -304,6 +326,29 @@ def test_a_queued_debounce_after_stop_does_nothing(live_bridge, receiver, tmp_pa
     before = len(ConsoleAppContainer.instances)
     timer.fire()
     assert len(ConsoleAppContainer.instances) == before
+
+
+def test_a_finished_container_gets_its_callback_back(live_bridge, tmp_path):
+    """One finished console container is held, and only until the next one."""
+    found = publisher(live_bridge, tmp_path)
+    assert found.capture(commanded=True) is None
+    first = ConsoleAppContainer.instances[-1]
+    write_a_picture(found.path)
+    first.finish(0)
+    # Still attached: the walk of its own callback list has only just ended.
+    assert found._finished_container is first
+
+    found._last_capture = 0.0
+    assert found.capture(commanded=True) is None
+    second = ConsoleAppContainer.instances[-1]
+
+    assert second is not first
+    assert first.appClosed == []
+    assert found._finished_container is None
+    write_a_picture(found.path)
+    second.finish(0)
+    found.stop()
+    assert second.appClosed == []
 
 
 def test_rebind_does_not_let_old_completion_remove_new_capture(

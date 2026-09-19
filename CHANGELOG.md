@@ -85,6 +85,15 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
   when native code resumes before the watcher could run.
 - EPG grids now build in bounded four-channel batches between main-loop turns, retaining the last
   complete grid until its replacement is ready instead of freezing the interface on a bouquet.
+- A publisher that is stopped now hands its enigma2 objects back: a `Ticker` takes its callback
+  off the timer and drops it, and the screenshot publisher takes its callback off a console
+  container once that container's program has ended. Both were append-without-remove, which is
+  the shape that keeps an object reachable from enigma2's side for no reason; measurement found
+  no growth from either, and this is tidiness rather than a fix for anything observed.
+- `docs/SETUP.md` and `docs/TROUBLESHOOTING.md` record what a screenshot actually costs: about
+  22 kB of enigma2's memory per capture, permanently, whoever takes it — the image's own `grab`,
+  not this plugin — with the measurement behind the number and the advice for a receiver that is
+  never restarted.
 - `docs/TOPICS.md` gained the `channels`, `cam` and `oscam` topics, the names those areas add to
   the capability vocabulary, the discovery entity table, and the four things about Home Assistant
   2026.9 that were measured rather than assumed — `default_entity_id` in place of `object_id`,
@@ -92,6 +101,10 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
 
 ### Fixed
 
+- A feature that is switched off in the settings no longer says the image could not provide its
+  hooks. `cam`, `oscam`, `keys`, `screenshot` and `epg_grid` each have an off switch, and a log
+  line blaming the receiver for a choice somebody made is a wrong answer to the question the
+  reader is asking.
 - `bouquet_context` is claimed only once the receiver's own service list has actually been read.
   A box whose channel list the plugin never gets to see used to announce the capability anyway,
   which promised a consumer a `bouquet` topic and a working `cmd/bouquet` it would never get. The
