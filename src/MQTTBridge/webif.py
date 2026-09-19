@@ -33,6 +33,8 @@ from . import log as log_module
 from .i18n import _
 from .version import __version__
 
+LOG = log_module.get_logger("webif")
+
 MAX_LOG_BYTES = 65536
 MAX_LOG_LINES = 200
 CSRF_KEY = "mqttbridge_csrf"
@@ -185,6 +187,48 @@ def _forbidden(request):
     return _("OpenWebif authentication is required for MQTT Bridge.").encode("utf-8")
 
 
+def _failed(request):
+    """The last resort, for when building the page is what went wrong.
+
+    OpenWebif would otherwise answer with its own traceback page, which is a
+    stack trace from this plugin on an authenticated web page.
+    """
+    request.setResponseCode(http.INTERNAL_SERVER_ERROR)
+    _set_headers(request, "text/plain; charset=utf-8")
+    return _("The MQTT Bridge page could not be built; see the plugin log.").encode("utf-8")
+
+
+def _answer(request, message="", code=None):
+    """The status page, or the failure page when building it raised.
+
+    Every entry point answers through this: a template or a setting the page
+    reads can fail at any time, and a plugin is not allowed to turn that into
+    OpenWebif's traceback page.
+    """
+    if code is not None:
+        request.setResponseCode(code)
+    try:
+        return _page(request, message)
+    except Exception:
+        LOG.exception("the MQTT Bridge status page could not be rendered")
+        return _failed(request)
+
+
+def _mount_path(request):
+    """Where this page is mounted, as the browser reached it.
+
+    The mount point is the first element of the tuple handed to OpenWebif's
+    `addExternalChild`, but it is OpenWebif that decides what to do with it, so
+    the page asks the request rather than hard-coding its own name.
+    """
+    segments = [part for part in (getattr(request, "prepath", None) or []) if part]
+    joined = "/".join(
+        part.decode("utf-8", "replace") if isinstance(part, bytes) else str(part)
+        for part in segments
+    )
+    return "/" + joined if joined else ""
+
+
 def _page(request, message=""):
     bridge = _bridge()
     running = bridge is not None
@@ -243,6 +287,7 @@ def _page(request, message=""):
         )
     notice = f"<p class='notice'>{html.escape(message)}</p>" if message else ""
     log_tail = html.escape(bounded_log_tail())
+    icon = html.escape(_mount_path(request) + "/icon", quote=True)
     document = f"""<!doctype html><html><head><meta charset='utf-8'>
 <meta name='viewport' content='width=device-width,initial-scale=1'>
 <title>MQTT Bridge</title><style>
@@ -261,7 +306,7 @@ pre{{white-space:pre-wrap;overflow-wrap:anywhere;background:#272b29;color:#f4f5f
 pre{{max-height:34rem;overflow:auto}}.notice{{color:#8ce0bd}}
 @media(max-width:520px){{main{{padding:16px}}label{{grid-template-columns:1fr}}}}
 @media(max-width:520px){{dl{{grid-template-columns:100px 1fr}}}}
-</style></head><body><main><header><img src='/mqttbridge/icon' alt=''>
+</style></head><body><main><header><img src='{icon}' alt=''>
 <div><h1>MQTT Bridge</h1><p>{html.escape(_("Receiver integration status"))}</p></div>
 </header>{notice}<section><h2>{html.escape(_("Status"))}</h2><dl>{rows}</dl></section>
 <section><h2>{html.escape(_("Publisher settings"))}</h2>{form}</section>
@@ -300,15 +345,14 @@ class MQTTBridgeWebResource(resource.Resource):
     def render_GET(self, request):
         if not _authenticated(request):
             return _forbidden(request)
-        return _page(request)
+        return _answer(request)
 
     def render_POST(self, request):
         if not _authenticated(request):
             return _forbidden(request)
         content_type = (request.getHeader("content-type") or "").split(";", 1)[0].lower()
         if content_type != "application/x-www-form-urlencoded" or not _same_origin(request):
-            request.setResponseCode(http.FORBIDDEN)
-            return _page(request, _("Request rejected."))
+            return _answer(request, _("Request rejected."), http.FORBIDDEN)
         try:
             supplied = _single_arg(request, "csrf")
             expected = _session(request).get(CSRF_KEY)
@@ -346,16 +390,16 @@ class MQTTBridgeWebResource(resource.Resource):
             if error:
                 raise RuntimeError(error)
         except PermissionError:
-            request.setResponseCode(http.FORBIDDEN)
-            return _page(request, _("Request rejected."))
+            return _answer(request, _("Request rejected."), http.FORBIDDEN)
         except (KeyError, TypeError, ValueError):
-            request.setResponseCode(http.BAD_REQUEST)
-            return _page(request, _("Invalid publisher settings."))
+            return _answer(request, _("Invalid publisher settings."), http.BAD_REQUEST)
         except Exception:
-            request.setResponseCode(http.INTERNAL_SERVER_ERROR)
-            return _page(request, _("Publisher settings were not changed."))
+            LOG.exception("the publisher settings could not be saved")
+            return _answer(
+                request, _("Publisher settings were not changed."), http.INTERNAL_SERVER_ERROR
+            )
         _session(request)[CSRF_KEY] = secrets.token_urlsafe(32)
-        return _page(request, _("Publisher settings saved."))
+        return _answer(request, _("Publisher settings saved."))
 
 
 def create_resource():

@@ -218,6 +218,10 @@ msgid "OpenWebif authentication is required for MQTT Bridge."
 msgstr "MQTT Bridge erfordert OpenWebif-Authentifizierung."
 
 #: src/MQTTBridge/webif.py
+msgid "The MQTT Bridge page could not be built; see the plugin log."
+msgstr "Die MQTT-Bridge-Seite konnte nicht erstellt werden; siehe Plugin-Protokoll."
+
+#: src/MQTTBridge/webif.py
 msgid "Off"
 msgstr "Aus"
 
