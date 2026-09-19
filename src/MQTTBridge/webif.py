@@ -341,6 +341,10 @@ class MQTTBridgeWebResource(resource.Resource):
     def __init__(self):
         resource.Resource.__init__(self)
         self.putChild(b"icon", PluginIconResource())
+        # `/mqttbridge/` is the same page as `/mqttbridge`. Twisted resolves the
+        # trailing slash to an empty child, and without this the receiver
+        # answers 404 to a perfectly ordinary URL — measured on the box.
+        self.putChild(b"", self)
 
     def render_GET(self, request):
         if not _authenticated(request):

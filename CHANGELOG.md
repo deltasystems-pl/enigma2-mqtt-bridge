@@ -113,6 +113,11 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
   will be saved into, rather than from the module-global settings.
 - A capture file left in `/tmp` by a plugin older than 0.2.0 is removed at start-up. Nothing else
   would ever have deleted it, including switching screenshots off.
+- An OSCam version whose revision carries a suffix — `1.20_svn build r11718-079`, which is what a
+  receiver running the current OpenViX build reports — is published instead of being dropped as
+  unrecognised. The allowlist still refuses anything that is not a version.
+- The status page answers on `/mqttbridge/` as well as `/mqttbridge`. The trailing slash resolves
+  to an empty child in Twisted, and without one the receiver answered 404 to an ordinary URL.
 - Selecting a bouquet now enters it under the root its channel list was read from. On a box with
   „multiple bouquets" switched off there is no bouquet list at all and everything is read from the
   favourites list, so entering `bouquets.tv` first built — and then persisted — a channel-list path
