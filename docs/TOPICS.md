@@ -394,11 +394,14 @@ recording decisions.
 Opt-in with `oscam_telemetry`; absent entirely by default. Every 30 seconds a dedicated worker
 queries only `status` and `readerlist` from OSCam's JSON API on `127.0.0.1`. It never follows a
 redirect, uses an environment proxy, invokes an action API, or blocks enigma's main loop. A
-response is capped at 128 KiB and the request has a bounded deadline. After 90 seconds without a
-completed probe, counts become unknown and the reader list is cleared instead of presenting old
-health as current, and that probe is abandoned: whatever it answers afterwards is discarded, so a
-worker stuck on a listener that accepts a connection and never replies delays the next reading by
-one interval rather than stopping the telemetry until the plugin restarts.
+response is capped at 128 KiB and the request has a bounded deadline. A probe that has not
+completed within 90 seconds is expired on the next tick — so between 90 and 120 seconds in
+practice, because the check rides the same 30-second timer — and counts become unknown with the
+reader list cleared, instead of presenting old health as current. That probe is also abandoned:
+whatever it answers afterwards is discarded, so a worker stuck on a listener that accepts a
+connection and never replies delays the next reading by one interval rather than stopping the
+telemetry until the plugin restarts. At most two abandoned workers may be outstanding; while there
+are that many, no new probe is started and the state stays unknown until one of them returns.
 
 Reader labels become stable, receiver-local HMAC identifiers using a hidden persisted salt. The
 labels themselves, addresses, users, card identifiers, CAIDs, providers and keys never leave the

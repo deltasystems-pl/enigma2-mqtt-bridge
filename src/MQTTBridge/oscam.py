@@ -36,6 +36,11 @@ STALE_SECONDS = 90
 # challenge loop cannot restart the full timeout each time.
 MAX_DIGEST_REQUESTS = 6
 
+# How many abandoned workers may still be alive before no further probe is
+# started. A listener that drip-feeds headers can outlive every deadline, and
+# one abandoned thread per poll would be a thread leak with a 30-second clock.
+MAX_ABANDONED_PROBES = 2
+
 
 class _ProbeSlot:
     """One OSCam probe at a time in this process, with a way to take it back.
@@ -429,6 +434,9 @@ class OscamPublisher(Publisher):
         self._serial = 0
         self._latest_serial = 0
         self._ticket = None
+        # Tickets of workers the watchdog gave up on that have not returned.
+        self._abandoned = set()
+        self._over_capacity = False
         self._cached = None
         self._salt = None
         self._last_completion = 0.0
@@ -461,6 +469,19 @@ class OscamPublisher(Publisher):
         self._generation += 1
         self._stopped = True
         self._ticker.stop()
+        # Hand the slot back rather than waiting for a worker that may never
+        # return. Saving the setup screen stops this publisher and starts a
+        # replacement; a slot still held by a retired instance is telemetry
+        # that never comes back, because the replacement can neither acquire
+        # the slot nor run the watchdog that would free it. The old worker's
+        # own release is already a no-op once it no longer holds the ticket.
+        with self._lock:
+            ticket = self._ticket
+            self._ticket = None
+            self._running = False
+            if ticket is not None:
+                self._abandoned.add(ticket)
+        _PROBE_SLOT.release(ticket)
 
     def _poll(self):
         if self._stopped or not self.value("oscam_telemetry"):
@@ -487,6 +508,8 @@ class OscamPublisher(Publisher):
             self._ticket = None
             self._running = False
             self._generation += 1
+            if ticket is not None:
+                self._abandoned.add(ticket)
             # The next stale window is measured from here, so that the
             # replacement probe is not declared stuck the moment it starts.
             self._last_completion = time.monotonic()
@@ -504,6 +527,18 @@ class OscamPublisher(Publisher):
         with self._lock:
             if self._running:
                 return False
+            if len(self._abandoned) >= MAX_ABANDONED_PROBES:
+                # Every abandoned worker is a thread this process cannot end.
+                # Stop making more of them and leave the unavailable state the
+                # watchdog published standing until one of them returns.
+                if not self._over_capacity:
+                    self._over_capacity = True
+                    LOG.warning(
+                        "%d OSCam probes have not returned; starting no more until they do",
+                        len(self._abandoned),
+                    )
+                return False
+            self._over_capacity = False
             ticket = _PROBE_SLOT.acquire()
             if ticket is None:
                 return False
@@ -554,6 +589,8 @@ class OscamPublisher(Publisher):
                 if self._ticket == ticket:
                     self._running = False
                     self._ticket = None
+                # It has returned, so it no longer counts against the cap.
+                self._abandoned.discard(ticket)
             _PROBE_SLOT.release(ticket)
         client = getattr(self.bridge, "client", None) if self.bridge is not None else None
         dispatch = getattr(client, "_dispatch", None)

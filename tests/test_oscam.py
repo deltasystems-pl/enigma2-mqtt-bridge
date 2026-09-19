@@ -421,9 +421,11 @@ def test_hung_probe_expires_the_last_success_and_lets_the_next_one_start(
     assert len(factory.client.published) == before
 
 
-def test_replacement_waits_for_the_retired_instance_probe(
-    live_bridge, settings, monkeypatch, wait_until
+def test_a_replacement_instance_does_not_wait_for_a_stuck_retired_probe(
+    live_bridge, factory, settings, monkeypatch, wait_until
 ):
+    """🔴 Saving the setup screen replaces this publisher; a slot the retired
+    instance still held was telemetry that never came back."""
     settings.oscam_telemetry.value = True
     entered = threading.Event()
     release = threading.Event()
@@ -432,7 +434,7 @@ def test_replacement_waits_for_the_retired_instance_probe(
     def blocked_probe(*_args, **_kwargs):
         calls.append("probe")
         entered.set()
-        release.wait(2)
+        release.wait(5)
         return oscam.unavailable(True, reachable=True, access="granted")
 
     monkeypatch.setattr(oscam, "probe", blocked_probe)
@@ -445,16 +447,64 @@ def test_replacement_waits_for_the_retired_instance_probe(
     second = oscam.OscamPublisher(live_bridge)
     second._stopped = False
     second._salt = SALT
+    # While the first one is alive and unstopped, one probe at a time holds.
     assert second._start_probe() is False
     assert calls == ["probe"]
 
     first.stop()
-    release.set()
-    assert wait_until(lambda: not first._running)
+
+    # The retired instance is gone, so the replacement probes straight away —
+    # with the old worker still blocked.
     assert second._start_probe() is True
+    assert wait_until(lambda: calls == ["probe", "probe"])
+
+    before = len(factory.client.published)
+    release.set()
     assert wait_until(lambda: not second._running)
-    assert calls == ["probe", "probe"]
+    # The retired instance's own answer publishes nothing.
+    assert wait_until(lambda: not first._running)
+    published = len(factory.client.published)
+    assert published - before <= 1
     second.stop()
+
+
+def test_abandoned_workers_are_capped_so_threads_cannot_accumulate(
+    live_bridge, settings, monkeypatch, wait_until, plugin_log
+):
+    settings.oscam_telemetry.value = True
+    calls = []
+    release = threading.Event()
+
+    def blocked_probe(*_args, **_kwargs):
+        calls.append("probe")
+        release.wait(5)
+        return oscam.unavailable(True, reachable=True, access="granted")
+
+    monkeypatch.setattr(oscam, "probe", blocked_probe)
+    found = oscam.OscamPublisher(live_bridge)
+    found._stopped = False
+    found._salt = SALT
+    found._last_completion = time.monotonic()
+    assert found._start_probe() is True
+    assert wait_until(lambda: len(calls) == 1)
+
+    # Two stale windows: the first abandonment starts a replacement, the second
+    # must not, because two workers are already out there and unreachable.
+    for _ in range(2):
+        found._last_completion = time.monotonic() - oscam.STALE_SECONDS - 1
+        found._poll()
+
+    assert calls == ["probe", "probe"]
+    assert len(found._abandoned) == oscam.MAX_ABANDONED_PROBES
+    assert found._running is False
+    assert plugin_log().count("starting no more until they do") == 1
+
+    # And it starts probing again once they finally return.
+    release.set()
+    assert wait_until(lambda: not found._abandoned)
+    found._poll()
+    assert wait_until(lambda: len(calls) == 3)
+    found.stop()
 
 
 def test_start_publishes_unknown_before_the_first_probe(
