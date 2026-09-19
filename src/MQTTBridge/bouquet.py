@@ -110,6 +110,11 @@ class BouquetPublisher(Publisher):
             BIND_ATTEMPTS,
         )
 
+    def _root(self):
+        """The root the channel list was read from, or the one it starts with."""
+        channels = self.bridge.publisher("channels") if self.bridge is not None else None
+        return getattr(channels, "root", None) or bouquet_roots()[0]
+
     def _known(self, sref):
         channels = self.bridge.publisher("channels")
         if channels is None:
@@ -200,8 +205,11 @@ class BouquetPublisher(Publisher):
         try:
             servicelist.clearPath()
             # `channels` contains TV bouquets only.  Do not inherit a radio
-            # service-list root merely because that happened to be on screen.
-            root = service_reference(bouquet_roots()[0])
+            # service-list root merely because that happened to be on screen —
+            # and enter the bouquet under the root it was actually read from,
+            # which on a box with „multiple bouquets" off is the favourites
+            # list rather than `bouquets.tv`.
+            root = service_reference(self._root())
             bouquet_ref = service_reference(bouquet["sref"])
             selected_ref = service_reference(chosen["sref"])
             if root is None or bouquet_ref is None or selected_ref is None:

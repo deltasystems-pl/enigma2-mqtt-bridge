@@ -4,6 +4,8 @@ import json
 
 from conftest import FIRST_BOUQUET, POLSAT, SECOND_BOUQUET, TVN, TVP1
 
+from MQTTBridge import channels as channels_module
+
 NODE = "vuuno4kse_005301"
 
 ROOT = "enigma2/" + NODE
@@ -191,6 +193,28 @@ def test_an_image_that_never_offers_a_list_stops_asking_and_says_so_once(
     receiver.with_channel_list()
     assert publisher.select(FIRST_BOUQUET) is None
     assert "bouquet_context" in bridge.capabilities()
+
+
+def test_a_box_with_no_bouquet_list_selects_inside_the_root_it_read(
+    make_bridge, factory, settings, receiver
+):
+    """🔴 „Multiple bouquets" off: the list came from favourites, so entering
+    `bouquets.tv` first would build — and persist — a path the box does not use."""
+    favourites = channels_module.bouquet_roots()[1]
+    receiver.service_center.contents = {favourites: [(TVP1, "TVP 1 HD"), (TVN, "TVN HD")]}
+    settings.host.value = "192.0.2.2"
+    settings.node_id.value = NODE
+    servicelist = receiver.with_channel_list()
+    servicelist.bouquets = {favourites: [TVP1, TVN]}
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+
+    select(factory, favourites)
+
+    assert [item.toString() for item in servicelist.path] == [favourites]
+    assert servicelist.getRoot().toString() == favourites
+    assert factory.client.last(BOUQUET).json()["sref"] == favourites
+    assert factory.client.last(ROOT + "/last_error") is None
 
 
 def test_failed_zap_restores_full_path_selection_and_persisted_root(

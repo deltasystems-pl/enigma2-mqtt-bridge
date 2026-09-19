@@ -216,7 +216,7 @@ def test_a_box_with_no_channels_offers_no_select(make_bridge, factory, settings,
                                                  monkeypatch):
     from MQTTBridge import channels as channels_module
 
-    monkeypatch.setattr(channels_module, "read_bouquets", lambda wanted=None: [])
+    monkeypatch.setattr(channels_module, "read_bouquets", lambda wanted=None: (None, []))
     settings.host.value = "10.0.0.5"
     settings.node_id.value = NODE
     bridge = make_bridge(session=receiver.session)
