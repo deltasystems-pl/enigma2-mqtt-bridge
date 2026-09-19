@@ -29,7 +29,9 @@ from .publisher import Publisher
 
 LOG = get_logger("screen")
 
-OUTPUT_PATH = "/tmp/mqttbridge.jpg"
+# Where every capture went before 0.2.0, and where one may still be lying
+# around. Captures are per-instance now; see `ScreenPublisher.__init__`.
+LEGACY_OUTPUT_PATH = "/tmp/mqttbridge.jpg"
 _INSTANCE_IDS = count()
 
 # Quality 80 at 720 pixels wide: about 30 KB on this hardware, measured.
@@ -49,6 +51,22 @@ MINIMUM_INTERVAL_SECONDS = 5
 MAX_BYTES = 400 * 1024
 
 
+def forget_legacy_output(path):
+    """Delete the fixed capture file older versions of this plugin left behind.
+
+    Before the per-instance name below, every capture went to one fixed path.
+    A file left there by a process that is no longer running is a picture of
+    somebody's living room sitting in `/tmp` until the box is rebooted, and
+    nothing else will ever remove it — including switching screenshots off.
+    """
+    try:
+        os.unlink(path)
+    except OSError:
+        return False
+    LOG.info("removed a capture left behind by an earlier version of this plugin")
+    return True
+
+
 def grab_binary():
     """The `grab` this image ships, or None."""
     for candidate in GRAB_BINARIES:
@@ -65,12 +83,12 @@ class ScreenPublisher(Publisher):
     name = "screenshot"
     raw = ("screen",)
 
-    def __init__(self, bridge=None, path=OUTPUT_PATH):
+    def __init__(self, bridge=None, path=None):
         Publisher.__init__(self, bridge)
         # Settings changes replace this publisher while an old asynchronous
         # grab may still be closing. Give each production instance its own
         # file so the old completion cannot unlink the new capture.
-        if path == OUTPUT_PATH:
+        if path is None:
             path = "/tmp/mqttbridge-" + str(os.getpid()) + "-" + str(next(_INSTANCE_IDS)) + ".jpg"
         self.path = path
         self._container = None
@@ -90,6 +108,11 @@ class ScreenPublisher(Publisher):
     # ------------------------------------------------------------------ hooks --
 
     def start(self):
+        # Before anything else, and whatever this publisher then decides: the
+        # leftover is a private image and removing it does not depend on
+        # screenshots being available, or even on them being switched on.
+        if self.path != LEGACY_OUTPUT_PATH:
+            forget_legacy_output(LEGACY_OUTPUT_PATH)
         if enigma_attribute("eConsoleAppContainer") is None:
             return False
         if grab_binary() is None:

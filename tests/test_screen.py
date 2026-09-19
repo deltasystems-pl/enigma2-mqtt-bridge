@@ -24,6 +24,28 @@ def publisher(bridge, tmp_path):
     return found
 
 
+def test_a_capture_left_by_an_older_version_is_removed_at_start(
+    make_bridge, settings, receiver, tmp_path, monkeypatch
+):
+    """Nothing else ever deleted it — not even switching screenshots off."""
+    legacy = tmp_path / "mqttbridge.jpg"
+    write_a_picture(str(legacy))
+    monkeypatch.setattr(screen_module, "LEGACY_OUTPUT_PATH", str(legacy))
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    settings.screenshot.value = "off"
+
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+
+    assert not legacy.exists()
+    assert "screenshot" not in bridge.capabilities()
+
+
+def test_removing_a_capture_that_is_not_there_is_not_an_error(tmp_path):
+    assert screen_module.forget_legacy_output(str(tmp_path / "absent.jpg")) is False
+
+
 def test_a_capture_runs_grab_through_the_console_container(live_bridge, tmp_path):
     """Never a subprocess: waiting for one blocks the thread that draws the picture."""
     assert publisher(live_bridge, tmp_path).capture(commanded=True) is None
