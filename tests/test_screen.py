@@ -42,6 +42,25 @@ def test_a_capture_left_by_an_older_version_is_removed_at_start(
     assert "screenshot" not in bridge.capabilities()
 
 
+def test_screenshots_off_is_read_before_the_image_is_blamed(
+    make_bridge, settings, receiver, monkeypatch, plugin_log
+):
+    """🔴 A box with screenshots off and no `grab` is not a box with no hooks."""
+    monkeypatch.setattr(screen_module, "grab_binary", lambda: None)
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    settings.screenshot.value = "off"
+
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+
+    written = plugin_log()
+    assert "screenshots are switched off" in written
+    assert "no grab utility" not in written
+    assert "does not provide the screenshot hooks" not in written
+    assert "screenshot" not in bridge.capabilities()
+
+
 def test_removing_a_capture_that_is_not_there_is_not_an_error(tmp_path):
     assert screen_module.forget_legacy_output(str(tmp_path / "absent.jpg")) is False
 

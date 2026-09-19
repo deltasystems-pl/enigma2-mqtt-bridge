@@ -310,6 +310,30 @@ def test_a_ticker_stopped_from_inside_its_own_callback_detaches_afterwards():
     assert ticker.timer is None
 
 
+def test_a_ticker_restarted_inside_its_own_callback_keeps_running():
+    """🔴 stop() then start() in one turn: the deferred detach must not undo it."""
+    turns = []
+
+    def callback():
+        turns.append(1)
+        ticker.stop()
+        if len(turns) == 1:
+            ticker.start(10)
+
+    ticker = enigma2.Ticker(callback, "restarting")
+    ticker.start(10)
+    timer = ticker.timer
+
+    timer.fire()
+    assert ticker.timer is timer          # restarted, not handed back
+    assert timer.callback                 # and still on its callback list
+
+    timer.fire()                          # this turn only stops
+    assert turns == [1, 1]
+    assert ticker.timer is None
+    assert timer.callback == []
+
+
 def test_replacing_publishers_does_not_leave_live_timers_behind(live_bridge, settings):
     """Every `cmd/config` rebuilds four publishers; their timers must go."""
     from conftest import eTimer

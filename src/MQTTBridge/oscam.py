@@ -457,6 +457,7 @@ class OscamPublisher(Publisher):
         register_secret(self.value("oscam_password"))
         if not self.value("oscam_telemetry"):
             self.switched_off = True
+            LOG.info("oscam_telemetry is off; OSCam health is not published")
             return False
         self._salt = self._identity_salt()
         if self._salt is None:

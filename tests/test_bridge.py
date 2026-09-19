@@ -316,12 +316,14 @@ def test_a_feature_switched_off_is_not_blamed_on_the_image(make_bridge, settings
     factory.client.fire_connect()
 
     written = plugin_log()
-    assert "keys is switched off in the settings" in written
-    assert "does not provide the keys hooks" not in written
-    assert "does not provide the cam hooks" not in written
-    assert "does not provide the oscam hooks" not in written
-    assert "cam is switched off in the settings" in written
-    assert "oscam is switched off in the settings" in written
+    # Each of them says it once, in its own words, and none of them blames the
+    # receiver for a switch somebody chose. The phrases are the distinctive
+    # halves: „cam_telemetry is off" is also a substring of the oscam line.
+    assert written.count("publish_keys is off") == 1
+    assert written.count("conditional-access status is not published") == 1
+    assert written.count("OSCam health is not published") == 1
+    for name in ("keys", "cam", "oscam"):
+        assert "does not provide the " + name + " hooks" not in written
     assert "keys" not in bridge.capabilities()
 
 

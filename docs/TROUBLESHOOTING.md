@@ -96,8 +96,9 @@ Most of it is the receiver, not this plugin. The one cost worth knowing is the s
 **every capture leaves about 22 kB in enigma2 permanently, whoever takes it** — measured on
 OpenViX 6.6 with 60 captures from the box's own shell and the plugin idle (+1 320 kB, never
 returned), and the same 60 taken through the plugin cost no more. If a box that is never
-restarted is short of memory, set `screenshot` to `off` or to a long `interval` and take one on
-demand with `cmd/screenshot`; see [SETUP.md](SETUP.md#what-a-screenshot-costs). Plugin loads that
+restarted is short of memory, set `screenshot` to a long `interval` and take one on demand with
+`cmd/screenshot`. `off` is stronger and stops captures altogether — the publisher does not start,
+so `cmd/screenshot` is refused too; see [SETUP.md](SETUP.md#what-a-screenshot-costs). Plugin loads that
 were measured against a 20-minute idle baseline — commands, EPG-grid and channel-list rebuilds,
 OSCam polling, settings writes — all stayed at or below the receiver's own background variation.
 

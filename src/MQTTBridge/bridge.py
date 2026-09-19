@@ -445,10 +445,10 @@ class Bridge:
             try:
                 if not publisher.start():
                     if publisher.switched_off:
-                        LOG.info(
-                            "%s is switched off in the settings; it publishes nothing",
-                            publisher.name,
-                        )
+                        # The publisher has already said so in its own words,
+                        # and it says it on the settings-change path too, where
+                        # this loop does not run.
+                        LOG.debug("%s did not start: switched off", publisher.name)
                     else:
                         LOG.warning("this image does not provide the %s hooks", publisher.name)
                     self._publishers.remove(publisher)

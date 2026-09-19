@@ -114,14 +114,16 @@ class ScreenPublisher(Publisher):
         # screenshots being available, or even on them being switched on.
         if self.path != LEGACY_OUTPUT_PATH:
             forget_legacy_output(LEGACY_OUTPUT_PATH)
+        # The switch is read first. A box with screenshots off has not been
+        # asked for `grab` and should not be told it is missing one.
+        if self.value("screenshot") == "off":
+            self.switched_off = True
+            LOG.info("screenshots are switched off")
+            return False
         if enigma_attribute("eConsoleAppContainer") is None:
             return False
         if grab_binary() is None:
             LOG.warning("this image has no grab utility; screenshots are unavailable")
-            return False
-        if self.value("screenshot") == "off":
-            self.switched_off = True
-            LOG.info("screenshots are switched off")
             return False
         self._active = True
         self._bind_zap()

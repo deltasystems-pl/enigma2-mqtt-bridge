@@ -152,6 +152,10 @@ class Ticker:
         return timer
 
     def start(self, milliseconds, single=False):
+        # A callback that stops this ticker and starts it again in the same
+        # turn has already asked for a deferred detach. It just changed its
+        # mind, and detaching after `_fire` returns would undo the restart.
+        self._detach_wanted = False
         if self._timer is None:
             self._timer = self._build()
         if self._timer is None:
