@@ -7,6 +7,7 @@ import os
 import re
 import threading
 import time
+from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlsplit
 from urllib.request import (
@@ -226,7 +227,6 @@ def normalize(status_document, readers_document, salt, process_running=True):
         raise ValueError("OSCam API returned too many readers")
     public = []
     cards_ready = 0
-    servers_connected = 0
     shared_total = 0
     shared_known = False
     enabled_count = 0
@@ -285,8 +285,9 @@ def normalize(status_document, readers_document, salt, process_running=True):
         "readers_enabled": enabled_count,
         "readers_healthy": healthy_count,
         "cards_ready": cards_ready,
-        "servers_connected": servers_connected
-        + sum(1 for row in public if row["kind"] == "server" and row["status"] == "connected"),
+        "servers_connected": sum(
+            1 for row in public if row["kind"] == "server" and row["status"] == "connected"
+        ),
         "shared_cards": shared_total if shared_known else None,
         "readers": public,
     }
@@ -397,7 +398,19 @@ def probe(
         if error.code in (401, 403):
             return unavailable(running, reachable=True, access="denied")
         return unavailable(running, reachable=True)
-    except (OSError, URLError, ValueError, UnicodeError, json.JSONDecodeError, TimeoutError):
+    except (
+        OSError,
+        URLError,
+        # A listener on the configured port that is not an HTTP server at all
+        # answers with something `http.client` raises on rather than returns.
+        # This is the documented „returns unavailable" contract, not the
+        # caller's broad except saving it.
+        HTTPException,
+        ValueError,
+        UnicodeError,
+        json.JSONDecodeError,
+        TimeoutError,
+    ):
         return unavailable(running)
 
 
@@ -422,15 +435,18 @@ class OscamPublisher(Publisher):
         self._stale_published = False
 
     def start(self):
+        # Keep every historical value registered, and register it whether or
+        # not telemetry is on: the credential exists in the settings either
+        # way, and the log filter can only scrub what it has been told about.
+        # An old in-flight worker can still fail after Setup saved a
+        # replacement, and the setup screen itself logs.
+        register_secret(self.value("oscam_password"))
         if not self.value("oscam_telemetry"):
             return False
         self._salt = self._identity_salt()
         if self._salt is None:
             LOG.error("could not persist the OSCam reader identity salt")
             return False
-        # Keep every historical value registered: an old in-flight worker can
-        # still fail after Setup saved a replacement credential.
-        register_secret(self.value("oscam_password"))
         self._generation += 1
         self._stopped = False
         self._cached = unavailable(None)

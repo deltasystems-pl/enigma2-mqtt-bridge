@@ -324,6 +324,29 @@ def test_unexpected_http_exception_never_logs_credentials(
     assert "private-user" not in written
 
 
+def test_a_configured_password_is_registered_even_with_telemetry_off(live_bridge, settings):
+    """The credential is in the settings whether or not anything probes with it."""
+    settings.oscam_telemetry.value = False
+    settings.oscam_password.value = "disabled-private-value"
+    found = oscam.OscamPublisher(live_bridge)
+
+    assert found.start() is False
+    assert "disabled-private-value" not in log_module.redact("disabled-private-value")
+
+
+def test_a_listener_that_is_not_an_http_server_is_unavailable(tmp_path):
+    """🔴 A non-HTTP answer raises `HTTPException`, which is not an `OSError`."""
+    from http.client import BadStatusLine
+
+    payload = oscam.probe(
+        8888, salt=SALT, opener=Opener([BadStatusLine("\\x16\\x03\\x01")]),
+        proc_root=str(tmp_path),
+    )
+    assert payload["api_reachable"] is False
+    assert payload["api_access"] is None
+    assert payload["readers"] == []
+
+
 def test_stopped_or_disabled_completion_cannot_republish(live_bridge, factory, settings):
     settings.oscam_telemetry.value = True
     found = oscam.OscamPublisher(live_bridge)
