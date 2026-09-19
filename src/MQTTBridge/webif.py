@@ -385,7 +385,9 @@ class MQTTBridgeWebResource(resource.Resource):
                     for name, value in editable.items()
                 }
             )
-            validated = settings_module.validate_remote_settings(raw)
+            validated = settings_module.validate_remote_settings(
+                raw, getattr(bridge, "settings", None)
+            )
             error = bridge.apply_remote_settings(validated)
             if error:
                 raise RuntimeError(error)

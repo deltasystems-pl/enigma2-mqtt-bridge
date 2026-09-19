@@ -100,6 +100,32 @@ def test_remote_settings_are_exact_and_strictly_typed():
     }
 
 
+def test_an_omitted_key_falls_back_to_the_section_that_will_be_saved():
+    """🔴 Reading the fallback from one section and writing into another copies
+    the module-global value over whatever the target actually held."""
+    from types import SimpleNamespace
+
+    class _Element:
+        def __init__(self, value):
+            self.value = value
+
+    settings_module.settings.screenshot_delay.value = 4
+    settings_module.settings.cam_telemetry.value = False
+    other = SimpleNamespace(
+        screenshot_delay=_Element(19),
+        cam_telemetry=_Element(True),
+        oscam_telemetry=_Element(True),
+    )
+
+    values = settings_module.validate_remote_settings(
+        {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60}, other
+    )
+
+    assert values["screenshot_delay"] == 19
+    assert values["cam_telemetry"] is True
+    assert values["oscam_telemetry"] is True
+
+
 @pytest.mark.parametrize("payload", [
     {},
     {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60, "host": "x"},

@@ -413,7 +413,8 @@ class CommandDispatcher:
 
         payload = parse(text)
         try:
-            values = validate_remote_settings(payload)
+            # The bridge's own settings, because that is what it will save into.
+            values = validate_remote_settings(payload, self.bridge.settings)
         except ValueError as error:
             return str(error)
         return self.bridge.apply_remote_settings(values)

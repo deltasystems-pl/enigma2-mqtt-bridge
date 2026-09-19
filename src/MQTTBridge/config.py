@@ -256,8 +256,14 @@ def coerce(name, raw):
     return _coerce_text(raw)
 
 
-def validate_remote_settings(raw):
-    """Validate the complete, deliberately small remotely writable subset."""
+def validate_remote_settings(raw, section=None):
+    """Validate the complete, deliberately small remotely writable subset.
+
+    `section` is the settings the result will be saved into, and it is where
+    an omitted optional key's current value comes from. Reading the fallback
+    from one section and writing the result into another would silently copy
+    the module-global value over whatever the target actually held.
+    """
     if not isinstance(raw, dict):
         raise ValueError("cmd/config takes a JSON object")
     unknown = sorted(set(raw) - set(REMOTE_SETTING_NAMES))
@@ -270,9 +276,9 @@ def validate_remote_settings(raw):
     publish_keys = raw["publish_keys"]
     screenshot = raw["screenshot"]
     interval = raw["screenshot_interval"]
-    delay = raw.get("screenshot_delay", value("screenshot_delay"))
-    cam_telemetry = raw.get("cam_telemetry", value("cam_telemetry"))
-    oscam_telemetry = raw.get("oscam_telemetry", value("oscam_telemetry"))
+    delay = raw.get("screenshot_delay", value("screenshot_delay", section))
+    cam_telemetry = raw.get("cam_telemetry", value("cam_telemetry", section))
+    oscam_telemetry = raw.get("oscam_telemetry", value("oscam_telemetry", section))
     if not isinstance(publish_keys, bool):
         raise ValueError("publish_keys must be true or false")
     if not isinstance(screenshot, str) or screenshot not in SCREENSHOT_MODES:
