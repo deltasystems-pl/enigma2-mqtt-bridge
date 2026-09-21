@@ -1,6 +1,100 @@
 #!/bin/sh
 # Never restart the GUI from a package script: a restart during a recording
 # loses the recording, and opkg has no idea what the box is doing.
+#
+# What this script does do is sweep the plugin directory clear of bytecode
+# whose source is gone.
+#
+# The image byte-compiles a plugin after installing it, so the `.pyc` files in
+# the plugin directory were written by the receiver and are not in opkg's file
+# list. opkg removes only the files it installed, so an upgrade that drops or
+# moves a module — `paho/` becoming `_vendor/paho/` is the one that happened —
+# leaves that module's compiled copy behind with no source next to it. In
+# Python 3 a legacy-location `.pyc` (beside the source rather than under
+# `__pycache__`) is importable on its own, so the old module goes on being
+# importable after the upgrade that was supposed to remove it.
+#
+# postinst is the only hook where „orphan" is a true statement. opkg orders an
+# upgrade prerm(old) → preinst(new) → unpack → postinst(new): at prerm and
+# preinst time the old package's sources are all still on disk, so nothing
+# looks orphaned; by postinst the new tree is unpacked and the files the old
+# package owned and the new one does not are gone. Whatever argument opkg
+# passes is ignored — on a fresh install the sweep finds nothing, which is the
+# correct outcome and cheaper than guessing at opkg's argument conventions.
+#
+# Rules this obeys, and the tests in tests/test_postinst_sweep.py hold it to:
+# nothing outside the plugin directory is touched, a `.pyc` whose `.py` is
+# present is kept, and no error here fails the install.
+
+# The override exists for the test suite and for nothing else; on a receiver
+# the directory below is where the package installs.
+PLUGIN_DIR=${MQTTBRIDGE_PLUGIN_DIR:-/usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge}
+
+# How many times to walk the tree looking for directories that have become
+# empty. A directory is removable only once its children are gone, so one pass
+# per level of nesting is needed; the plugin tree is three deep
+# (`_vendor/paho/mqtt`, `locale/<lang>/LC_MESSAGES`) and six passes is room to
+# spare. Counting passes rather than asking find for depth-first order keeps
+# this working on a busybox whose find was built without `-depth`.
+EMPTY_DIR_PASSES=6
+
+# The source `.py` that a compiled file belongs to, given its full path.
+#   …/MQTTBridge/hdd.pyc                      -> …/MQTTBridge/hdd.py
+#   …/MQTTBridge/__pycache__/hdd.cpython-312.pyc -> …/MQTTBridge/hdd.py
+# The stem is cut at the first dot because a module name cannot contain one,
+# which is what makes `.cpython-312` and `.opt-1` fall off together.
+source_of() {
+    holder=${1%/*}
+    base=${1##*/}
+    stem=${base%.*}
+    case "$holder" in
+        */__pycache__)
+            stem=${stem%%.*}
+            holder=${holder%/__pycache__}
+            ;;
+    esac
+    # `printf` rather than `echo`: dash's echo expands backslash escapes, and a
+    # path is not a format string.
+    printf '%s\n' "$holder/$stem.py"
+}
+
+sweep_orphaned_bytecode() {
+    dir=$1
+
+    # A belt on the brace: the only directory this may ever sweep is the
+    # plugin's own, whatever an environment variable says.
+    case "$dir" in
+        */MQTTBridge) ;;
+        *) return 0 ;;
+    esac
+    [ -d "$dir" ] || return 0
+
+    # `-type f` and no `-L`: a symlink is neither followed nor removed, so a
+    # link out of the plugin directory cannot become a way out of it.
+    find "$dir" \( -name '*.pyc' -o -name '*.pyo' \) -type f -print 2>/dev/null |
+    while IFS= read -r bytecode; do
+        [ -f "$bytecode" ] || continue
+        source_file=$(source_of "$bytecode")
+        [ -f "$source_file" ] && continue
+        printf '%s\n' "MQTT Bridge: removing orphaned bytecode ${bytecode##*/}"
+        rm -f "$bytecode" 2>/dev/null
+    done
+
+    pass=0
+    while [ "$pass" -lt "$EMPTY_DIR_PASSES" ]; do
+        pass=$((pass + 1))
+        find "$dir" -type d -print 2>/dev/null |
+        while IFS= read -r found; do
+            # Never the plugin directory itself: an upgrade that emptied it
+            # would be a broken install, not a tidy one.
+            [ "$found" = "$dir" ] && continue
+            rmdir "$found" 2>/dev/null
+        done
+    done
+}
+
+sweep_orphaned_bytecode "$PLUGIN_DIR" 2>/dev/null
+
 echo ""
 echo "MQTT Bridge installed."
 echo "Restart enigma2 to activate it, then configure it under"

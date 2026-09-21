@@ -5,10 +5,12 @@ up when a feed rejects the package or a receiver refuses to install it, long
 after the commit. The template is cheap to assert here instead.
 """
 
+import stat
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTROL = REPO_ROOT / "CONTROL" / "control"
+MAINTAINER_SCRIPTS = ("postinst", "prerm")
 WEBIF_SHIM = (
     REPO_ROOT / "src" / "WebInterface" / "WebChilds" / "External" / "MQTTBridge.py"
 )
@@ -74,6 +76,28 @@ def test_description_has_a_synopsis_and_a_body():
     synopsis, _, body = description.partition("\n")
     assert synopsis.strip(), "the first Description line is the synopsis"
     assert body.strip(), "the extended description is what a plugin browser shows"
+
+
+def test_maintainer_scripts_are_executable_in_the_checkout():
+    """A maintainer script opkg cannot execute is a maintainer script that never runs.
+
+    The mode is carried by git, and it is the only thing between `postinst` and
+    being a file opkg unpacks and ignores — which on an upgrade would mean the
+    orphaned-bytecode sweep silently not happening.
+    """
+    for name in MAINTAINER_SCRIPTS:
+        script = REPO_ROOT / "CONTROL" / name
+        assert script.is_file(), name
+        assert script.stat().st_mode & stat.S_IXUSR, f"CONTROL/{name} is not executable"
+
+
+def test_maintainer_scripts_are_packaged_and_their_mode_is_asserted_from_the_archive():
+    build = (REPO_ROOT / "tools" / "build-ipk.sh").read_text(encoding="utf-8")
+    assert "cp CONTROL/postinst CONTROL/prerm" in build
+    # Staged with an explicit mode, then read back out of the built archive:
+    # the check that survives a change of staging filesystem.
+    assert 'chmod 755 "$STAGE/control/postinst" "$STAGE/control/prerm"' in build
+    assert "for script in ./postinst ./prerm; do" in build
 
 
 def test_optional_openwebif_shim_is_packaged_from_its_unique_external_path():

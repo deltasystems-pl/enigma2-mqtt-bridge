@@ -101,6 +101,15 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
 
 ### Fixed
 
+- An upgrade no longer leaves a removed module behind as importable bytecode. The image
+  byte-compiles the plugin after opkg has installed it, so the `.pyc` files are not in opkg's file
+  list and opkg — which removes only what it installed — leaves them. Moving `paho/` under
+  `_vendor/` took the sources away and left the compiled copies, and in Python 3 a legacy-location
+  `.pyc` with no `.py` beside it is still importable, so the old module survived the upgrade meant
+  to remove it. `postinst` now deletes every `.pyc` and `.pyo` in the plugin directory whose source
+  is gone, in both the same-directory and the `__pycache__` form, and removes the directories that
+  leaves empty. It keeps every compiled file whose source is present, touches nothing outside the
+  plugin directory, and cannot fail an install.
 - A feature that is switched off in the settings no longer says the image could not provide its
   hooks. `cam`, `oscam`, `keys`, `screenshot` and `epg_grid` each have an off switch, and a log
   line blaming the receiver for a choice somebody made is a wrong answer to the question the
