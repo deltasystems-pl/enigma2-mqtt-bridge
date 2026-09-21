@@ -134,7 +134,29 @@ def test_config_persists_all_values_rebinds_hooks_and_publishes_info(
         "screenshot_delay": 9,
         "cam_telemetry": False,
         "oscam_telemetry": False,
+        "deep_standby_allowed": False,
     }
+
+
+def test_config_cannot_write_the_permission_it_can_read(connected_bridge, factory, settings):
+    """A read-only member of `info.settings` is still an unknown key to `cmd/config`.
+
+    The permission is published so a consumer can hide the buttons the box would
+    refuse; publishing it must not turn it into a remote switch, because the
+    whole point of it is that it is granted at the television.
+    """
+    assert factory.client.last(INFO).json()["settings"]["deep_standby_allowed"] is False
+    factory.client.clear()
+    send(factory, "config", b'{"publish_keys":true,"screenshot":"on_zap",'
+          b'"screenshot_interval":60,"deep_standby_allowed":true}')
+
+    payload = factory.client.last(LAST_ERROR).json()
+    assert payload["cmd"] == "config"
+    assert payload["error"] == "the config object contains unknown settings"
+    assert settings.deep_standby_allowed.value is False
+    assert settings.deep_standby_allowed.saved_value is False
+    # Nothing was applied, so nothing is acknowledged either.
+    assert factory.client.last(INFO) is None
 
 
 def test_config_persists_a_custom_post_zap_delay(live_bridge, factory, settings):

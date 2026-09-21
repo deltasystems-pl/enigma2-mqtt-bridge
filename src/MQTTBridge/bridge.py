@@ -130,6 +130,21 @@ class Bridge:
             name: self.value(name) for name in settings_module.REMOTE_SETTING_NAMES
         }
 
+    def published_settings(self):
+        """What `info.settings` carries: the non-secret settings, writable or not.
+
+        Presence is not permission. The writable ones are the `cmd/config`
+        allowlist and nothing else; the rest are read-only and are set on the
+        box's setup screen, which `docs/TOPICS.md` says member by member.
+        """
+        values = self.remote_settings()
+        for name in settings_module.READ_ONLY_SETTING_NAMES:
+            # Published the way the command guard applies it — anything falsy is
+            # a refusal — so it is a boolean even on an image where the element
+            # did not build, and a consumer reading it hides the control.
+            values[name] = bool(self.value(name))
+        return values
+
     def apply_remote_settings(self, values):
         """Persist one validated replacement, then apply its publisher lifecycle."""
         if not settings_module.save_remote_settings(values, self.settings):
@@ -589,7 +604,7 @@ class Bridge:
             "ip": boxinfo.local_ip(self.value("host")),
             "uptime": boxinfo.uptime_seconds(),
             "ha_mode": self.value("ha_mode"),
-            "settings": self.remote_settings(),
+            "settings": self.published_settings(),
             "capabilities": self.capabilities(),
         }
 

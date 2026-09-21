@@ -62,8 +62,20 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
   the software and its API are up, bounded aggregate counts, and one neutral entry per reader or
   server keyed by a salted opaque id. WebIf credentials, reader labels, addresses and card
   identifiers never leave the box, and switching the telemetry off retracts the retained topic.
+- **`info.settings` echoes `deep_standby_allowed`**, the box-only permission that decides whether
+  `cmd/deep_standby` and `cmd/reboot` are obeyed at all. It is always present and always
+  read-only: `cmd/config` refuses it like any other key outside its allowlist, and it is granted
+  on the receiver's own setup screen. A consumer can now hide the two buttons the box would refuse
+  instead of offering controls that always fail, and the fresh `info` that a save publishes is how
+  it learns the permission was granted.
 
 ### Changed
+
+- 🔴 **`info.settings` no longer means „the remotely writable subset".** It is the non-secret
+  settings a consumer may **read**, of which the writable ones are the `cmd/config` allowlist and
+  nothing else. Writability must not be inferred from presence — an unknown key fails the whole
+  object, so a client that writes back everything it reads loses the settings it did mean to
+  change. `docs/TOPICS.md` §1 names which members are read-only.
 
 - On-zap screenshots now wait a configurable four seconds by default. Rapid channel changes reset
   the wait, and a capture still completing for an older channel is discarded and rescheduled.
@@ -180,8 +192,9 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
   [docs/TOPICS.md](docs/TOPICS.md) under **Planned (not implemented yet)**, with the payload fields
   and their types, so the contract keeps one home and a consumer can be written against it before
   it exists. 🔴 One of those additions changes what `info.settings` means: presence there no longer
-  implies that a setting is writable. **Nothing in the plan is implemented**, and the README's
-  roadmap says so.
+  implies that a setting is writable. **Only the `deep_standby_allowed` echo is implemented so
+  far** — it has moved out of that section and into the contract — and the README's roadmap says
+  so.
 
 ## [0.1.0] - 2026-09-16
 

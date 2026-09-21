@@ -54,7 +54,8 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
   "ha_mode": "discovery",
   "settings": {"publish_keys": true, "screenshot": "on_zap",
                "screenshot_interval": 60, "screenshot_delay": 4,
-               "cam_telemetry": false, "oscam_telemetry": false},
+               "cam_telemetry": false, "oscam_telemetry": false,
+               "deep_standby_allowed": false},
   "capabilities": ["power", "service", "epg", "tuner", "recording", "timers",
                    "volume", "hdd", "channels", "bouquet_context", "epg_grid", "keys", "screenshot",
                    "message"]
@@ -71,8 +72,24 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
 | `ip` | string | Current LAN address |
 | `uptime` | int | Seconds since boot |
 | `ha_mode` | string | `discovery` \| `integration` \| `off` — the acknowledgement of `cmd/ha_mode` |
-| `settings` | object | The complete remotely writable, non-secret subset. It contains `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5–3600), `screenshot_delay` (post-zap settling seconds, 1–30), `cam_telemetry` (bool, off by default), and `oscam_telemetry` (bool, off by default). |
+| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5–3600), `screenshot_delay` (post-zap settling seconds, 1–30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default). **Read-only**: `deep_standby_allowed` (bool, off by default). See below. |
 | `capabilities` | list of strings | Which hooks this image actually gave the plugin |
+
+**Presence in `settings` is not permission to write it back.** Until 0.2.0 this object was „the
+complete remotely writable subset" and the two things were the same; they are not any more. The
+**writable** members are the `cmd/config` allowlist and nothing else, and a consumer that writes
+back everything it reads is refused — an unknown key fails the whole object, so it loses the
+settings it did mean to change as well.
+
+| Read-only member | Since | Meaning | Where it is set |
+|---|---|---|---|
+| `deep_standby_allowed` | 0.2.0 | Whether `cmd/deep_standby` and `cmd/reboot` are permitted on this box. Always present, whichever way it is set | The box's setup screen, *Menu → Plugins → MQTT Bridge* |
+
+The rule behind which side of the line a setting falls on: one that **enables a command** is
+settable on the box only; one that **tunes a command already permitted** may be remote. A member
+of this table exists so a consumer can **hide what the box will refuse** rather than offering a
+control that always fails. `info` is republished when it changes, because saving the setup screen
+reconnects the bridge and a connect publishes the snapshot.
 
 **`capabilities` is the honest part of the contract.** Hook names differ between images, so the
 plugin detects what it managed to attach and names it here rather than assuming. A consumer
@@ -554,7 +571,9 @@ Either way, `timers` (and `recording` when it is imminent) is republished afterw
 
 This is deliberately not a general settings API. Broker credentials, TLS, identity, topic names,
 the configured bouquet filter, logging and destructive-command permission cannot be changed
-through `cmd/config`. Home Assistant mode has its dedicated command, and active TV bouquet
+through `cmd/config`. `deep_standby_allowed` is **read** from `info.settings` (§1) and is refused
+here like any other key outside the allowlist; reading a setting and writing it are two different
+permissions. Home Assistant mode has its dedicated command, and active TV bouquet
 context has `cmd/bouquet`; neither broadens this settings API. The command accepts the three original keys plus independently optional `screenshot_delay`,
 `cam_telemetry`, and `oscam_telemetry`,
 with their JSON types unchanged. The plugin validates the whole object before assigning anything,
@@ -777,25 +796,20 @@ between now and the release that carries them. Each is decided in
 the heading. Until a capability below is in `info.capabilities`, the box does not have it — that
 rule is unchanged, and it is how a consumer tells a plan from a feature.
 
-### `info.settings` gains read-only members — 0.2.0 and 0.3.0
+### `info.settings` gains further members — 0.3.0
 
-🔴 **This changes what `info.settings` means.** §1 describes it as „the complete remotely writable,
-non-secret subset". It becomes **the non-secret settings a consumer may read**, of which the
-**writable** ones are the `cmd/config` allowlist and nothing else. A consumer must not infer
-writability from presence, and one that writes back everything it reads will be refused.
+The object already carries read-only members and says so in §1; `deep_standby_allowed` shipped in
+0.2.0. These join it on the same terms, rather than inventing a separate `info.permissions`.
 
 | Member | Release | Writable | Meaning |
 |---|---|---|---|
-| `deep_standby_allowed` | 0.2.0 | **no** | Whether `cmd/deep_standby` and `cmd/reboot` are permitted on this box. Set on the box's setup screen only |
 | `softcam_restart_allowed` | 0.3.0 | **no** | Whether `cmd/softcam_restart` is permitted |
 | `epg_import_allowed` | 0.3.0 | **no** | Whether `cmd/epg_import` is permitted |
 | `softcam_autoheal` | 0.3.0 | yes | Opt-in automatic softcam restart, default `false` |
 | `softcam_autoheal_seconds` | 0.3.0 | yes | How long a stuck decode must hold, default `90`, range 30–600 |
 
-The three read-only members exist so a consumer can **hide what the box will refuse** rather than
-offering a control that always fails. The rule behind which side of the line a setting falls on: a
-setting that **enables a command** is settable on the box only; a setting that **tunes a command
-already permitted** may be remote.
+Which side of the line each one falls on is §1's rule: a setting that **enables a command** is
+settable on the box only; a setting that **tunes a command already permitted** may be remote.
 
 ### `info` gains `wol` — 0.3.0
 

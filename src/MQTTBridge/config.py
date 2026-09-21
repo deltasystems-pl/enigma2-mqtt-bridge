@@ -42,6 +42,11 @@ REMOTE_SETTING_NAMES = (
     "cam_telemetry",
     "oscam_telemetry",
 )
+# Published in `info.settings` and refused by `cmd/config`, like any other key
+# that is not in the allowlist above. A setting that *enables* a command is set
+# on the box's own setup screen and nowhere else; echoing it lets a consumer
+# hide a control the box would always refuse instead of offering one that fails.
+READ_ONLY_SETTING_NAMES = ("deep_standby_allowed",)
 SCREENSHOT_INTERVAL_LIMITS = (5, 3600)
 SCREENSHOT_DELAY_LIMITS = (1, 30)
 
