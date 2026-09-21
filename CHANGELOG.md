@@ -107,9 +107,16 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
   `_vendor/` took the sources away and left the compiled copies, and in Python 3 a legacy-location
   `.pyc` with no `.py` beside it is still importable, so the old module survived the upgrade meant
   to remove it. `postinst` now deletes every `.pyc` and `.pyo` in the plugin directory whose source
-  is gone, in both the same-directory and the `__pycache__` form, and removes the directories that
-  leaves empty. It keeps every compiled file whose source is present, touches nothing outside the
-  plugin directory, and cannot fail an install.
+  is gone, in both the same-directory and the `__pycache__` form, and gives back the directories
+  that sweep emptied — walking upward from each deleted file and stopping at the first directory
+  that still holds something, so one that was already empty before the upgrade is left alone. It
+  keeps every compiled file whose source is present; it checks that every path is under the plugin
+  directory before touching it, because a directory name may contain a newline and a line-by-line
+  read would otherwise hand the second half of one to `rm` as a path relative to a working
+  directory `opkg` never set; it follows no symlink and crosses no mount; it does nothing at all in
+  a tree with no `plugin.py`, which is a build-time packaging rather than an orphaned tree, or
+  during an offline rootfs build, where its absolute paths would be the build host's; and nothing
+  in it can fail an install.
 - A feature that is switched off in the settings no longer says the image could not provide its
   hooks. `cam`, `oscam`, `keys`, `screenshot` and `epg_grid` each have an off switch, and a log
   line blaming the receiver for a choice somebody made is a wrong answer to the question the

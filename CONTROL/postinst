@@ -22,74 +22,147 @@
 # passes is ignored — on a fresh install the sweep finds nothing, which is the
 # correct outcome and cheaper than guessing at opkg's argument conventions.
 #
-# Rules this obeys, and the tests in tests/test_postinst_sweep.py hold it to:
-# nothing outside the plugin directory is touched, a `.pyc` whose `.py` is
-# present is kept, and no error here fails the install.
+# What it promises, and what tests/test_postinst_sweep.py holds it to:
+#
+#   * a `.pyc` whose `.py` is present is kept;
+#   * nothing outside the plugin directory is read, deleted or rmdir'd —
+#     every path is checked to be under it before anything happens to it,
+#     because a filename may contain a newline and `read` would otherwise hand
+#     the second half of one to `rm` as a path relative to a working directory
+#     opkg never set;
+#   * the only directories removed are ones this sweep emptied;
+#   * nothing happens at all in a tree with no `plugin.py`;
+#   * nothing happens at all during an offline rootfs build;
+#   * no error here can fail an install.
 
-# The override exists for the test suite and for nothing else; on a receiver
-# the directory below is where the package installs.
-PLUGIN_DIR=${MQTTBRIDGE_PLUGIN_DIR:-/usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge}
+# A rootfs being assembled is not a receiver. OE's do_rootfs runs maintainer
+# scripts on the build host with `D` or `OPKG_OFFLINE_ROOT` pointing at the
+# image directory and `--force-postinstall`; every path below is absolute, so
+# the sweep would walk the *build host's* filesystem. `exit 0` rather than the
+# legacy `exit 1` deferral: there is nothing to defer, because a freshly
+# assembled image cannot have an orphan in it.
+[ -z "${D:-}${OPKG_OFFLINE_ROOT:-}" ] || exit 0
 
-# How many times to walk the tree looking for directories that have become
-# empty. A directory is removable only once its children are gone, so one pass
-# per level of nesting is needed; the plugin tree is three deep
-# (`_vendor/paho/mqtt`, `locale/<lang>/LC_MESSAGES`) and six passes is room to
-# spare. Counting passes rather than asking find for depth-first order keeps
-# this working on a busybox whose find was built without `-depth`.
-EMPTY_DIR_PASSES=6
+PLUGIN_DIR=/usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge
+
+# `MQTTBRIDGE_PLUGIN_DIR` is the test suite's seam, and opkg passes its
+# environment to maintainer scripts verbatim — so it is reachable in
+# production whether or not that was anybody's intention. It is therefore
+# honoured only alongside a second variable that exists for no other purpose,
+# and the guards below (the basename, the resolved basename and `plugin.py`)
+# apply to it exactly as they do to the real path.
+if [ "${MQTTBRIDGE_POSTINST_TEST:-}" = "1" ] && [ -n "${MQTTBRIDGE_PLUGIN_DIR:-}" ]; then
+    PLUGIN_DIR=$MQTTBRIDGE_PLUGIN_DIR
+fi
+
+# A trailing slash would defeat every `case` below, which compares against
+# `"$dir"/*`.
+while :; do
+    case "$PLUGIN_DIR" in
+        */) PLUGIN_DIR=${PLUGIN_DIR%/} ;;
+        *) break ;;
+    esac
+done
 
 # The source `.py` that a compiled file belongs to, given its full path.
-#   …/MQTTBridge/hdd.pyc                      -> …/MQTTBridge/hdd.py
+#   …/MQTTBridge/hdd.pyc                         -> …/MQTTBridge/hdd.py
 #   …/MQTTBridge/__pycache__/hdd.cpython-312.pyc -> …/MQTTBridge/hdd.py
 # The stem is cut at the first dot because a module name cannot contain one,
 # which is what makes `.cpython-312` and `.opt-1` fall off together.
 source_of() {
-    holder=${1%/*}
-    base=${1##*/}
-    stem=${base%.*}
-    case "$holder" in
+    _so_holder=${1%/*}
+    _so_base=${1##*/}
+    _so_stem=${_so_base%.*}
+    case "$_so_holder" in
         */__pycache__)
-            stem=${stem%%.*}
-            holder=${holder%/__pycache__}
+            _so_stem=${_so_stem%%.*}
+            _so_holder=${_so_holder%/__pycache__}
             ;;
     esac
     # `printf` rather than `echo`: dash's echo expands backslash escapes, and a
     # path is not a format string.
-    printf '%s\n' "$holder/$stem.py"
+    printf '%s\n' "$_so_holder/$_so_stem.py"
+}
+
+# Give back the directories this sweep emptied — and only those. Starts at the
+# directory a file was just deleted from and walks upward for as long as each
+# one is now empty, so a `screenshots/` or `data/cache/` that was already empty
+# before the upgrade is never touched. `rmdir` refuses a directory with
+# anything in it, which is what ends the walk.
+prune_upwards() {
+    _pu_root=$1
+    _pu_holder=$2
+    while [ "$_pu_holder" != "$_pu_root" ]; do
+        case "$_pu_holder" in
+            "$_pu_root"/*) ;;
+            *) return 0 ;;
+        esac
+        rmdir "$_pu_holder" 2>/dev/null || return 0
+        _pu_holder=${_pu_holder%/*}
+    done
 }
 
 sweep_orphaned_bytecode() {
     dir=$1
 
-    # A belt on the brace: the only directory this may ever sweep is the
-    # plugin's own, whatever an environment variable says.
+    # The only directory this may ever sweep is the plugin's own, whatever an
+    # environment variable says.
     case "$dir" in
         */MQTTBridge) ;;
         *) return 0 ;;
     esac
     [ -d "$dir" ] || return 0
 
-    # `-type f` and no `-L`: a symlink is neither followed nor removed, so a
-    # link out of the plugin directory cannot become a way out of it.
-    find "$dir" \( -name '*.pyc' -o -name '*.pyo' \) -type f -print 2>/dev/null |
+    # A plugin directory that is itself a symlink would disable the sweep in
+    # silence: `find` does not descend a symlink operand unless asked, so it
+    # would print nothing and the script would report success. Resolve it, and
+    # apply the same rules to what it resolved to.
+    dir=$(cd -P "$dir" 2>/dev/null && pwd -P) || return 0
+    [ -n "$dir" ] || return 0
+    case "$dir" in
+        */MQTTBridge) ;;
+        *) return 0 ;;
+    esac
+    [ -d "$dir" ] || return 0
+
+    # 🔴 Never sweep a tree that has no `plugin.py`. oe-alliance-core's
+    # python3-compileall.inc strips `.py` out of a package at build time —
+    # sources go to `${PN}-src`, which is not in the feed — so the day this
+    # ships inside an image recipe the plugin directory is bytecode only, and
+    # „every `.pyc` whose `.py` is missing" would be every file it has. A
+    # receiver whose plugin directory then has no plugin.py/.pyc/.pyo at all is
+    # one whose PluginComponent deletes the directory outright. No image does
+    # this to a runtime-installed ipk today; this costs one `test` and makes
+    # the day it happens a no-op instead of a self-destruct.
+    [ -f "$dir/plugin.py" ] || return 0
+
+    # `-xdev` so a bind mount under the plugin directory is not crossed. Probed
+    # rather than assumed: busybox builds it optionally, and a busybox without
+    # it must lose the hardening rather than lose the sweep. Checked at
+    # `-maxdepth 0`, so the probe does not walk the tree.
+    XDEV=-xdev
+    find "$dir" -xdev -maxdepth 0 >/dev/null 2>&1 || XDEV=
+
+    # `-type f` and no `-L`: a symlink inside the tree is neither followed nor
+    # removed, so a link out of the plugin directory cannot become a way out.
+    # $XDEV is deliberately unquoted — it is one fixed word or nothing.
+    find "$dir" $XDEV \( -name '*.pyc' -o -name '*.pyo' \) -type f -print 2>/dev/null |
     while IFS= read -r bytecode; do
+        # 🔴 `read` splits on newlines and a filename may contain one, so a
+        # directory called `evil<newline>etc` arrives here as two lines and the
+        # second of them — `etc/passwd.pyc` — is a *relative* path. opkg never
+        # chdir()s, so for a GUI-driven install that would resolve against `/`.
+        # Nothing is touched unless it is under the plugin directory.
+        case "$bytecode" in
+            "$dir"/*) ;;
+            *) continue ;;
+        esac
         [ -f "$bytecode" ] || continue
         source_file=$(source_of "$bytecode")
         [ -f "$source_file" ] && continue
         printf '%s\n' "MQTT Bridge: removing orphaned bytecode ${bytecode##*/}"
         rm -f "$bytecode" 2>/dev/null
-    done
-
-    pass=0
-    while [ "$pass" -lt "$EMPTY_DIR_PASSES" ]; do
-        pass=$((pass + 1))
-        find "$dir" -type d -print 2>/dev/null |
-        while IFS= read -r found; do
-            # Never the plugin directory itself: an upgrade that emptied it
-            # would be a broken install, not a tidy one.
-            [ "$found" = "$dir" ] && continue
-            rmdir "$found" 2>/dev/null
-        done
+        prune_upwards "$dir" "${bytecode%/*}"
     done
 }
 
