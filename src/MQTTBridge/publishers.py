@@ -18,6 +18,7 @@ from .epggrid import EpgGridPublisher
 from .hdd import HddPublisher
 from .oscam import OscamPublisher
 from .power import PowerPublisher
+from .process import ProcessPublisher
 from .recording import RecordingPublisher, TimersPublisher
 from .remote import KeyPublisher
 from .screen import ScreenPublisher
@@ -35,6 +36,7 @@ PUBLISHER_CLASSES = (
     TimersPublisher,
     VolumePublisher,
     HddPublisher,
+    ProcessPublisher,
     ChannelsPublisher,
     BouquetPublisher,
     EpgGridPublisher,

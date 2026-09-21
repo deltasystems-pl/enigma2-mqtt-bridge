@@ -414,6 +414,68 @@ class _Components:
             dev_cla="connectivity",
             ent_cat="diagnostic",
         )
+        # What the enigma2 process costs. Diagnostic, and all but the resident
+        # set disabled by default: the one a dashboard ever wants is the curve
+        # of how much memory the box is using, and the other four are what
+        # somebody enables for a fortnight when that curve turns upwards.
+        self.add(
+            "process_memory", "sensor", "process",
+            name="Process memory",
+            stat_t=self.topic("process"),
+            val_tpl="{{ (value_json.rss_kb / 1024) | round(1) }}",
+            unit_of_meas="MiB",
+            dev_cla="data_size",
+            stat_cla="measurement",
+            ent_cat="diagnostic",
+            ic="mdi:memory",
+        )
+        self.add(
+            "process_memory_peak", "sensor", "process",
+            name="Process memory peak",
+            stat_t=self.topic("process"),
+            val_tpl="{{ (value_json.hwm_kb / 1024) | round(1) }}",
+            unit_of_meas="MiB",
+            dev_cla="data_size",
+            stat_cla="measurement",
+            ent_cat="diagnostic",
+            ic="mdi:memory",
+            en=False,
+        )
+        self.add(
+            "process_threads", "sensor", "process",
+            name="Process threads",
+            stat_t=self.topic("process"),
+            val_tpl="{{ value_json.threads | default(none) }}",
+            stat_cla="measurement",
+            ent_cat="diagnostic",
+            ic="mdi:cog-outline",
+            en=False,
+        )
+        self.add(
+            "process_open_files", "sensor", "process",
+            name="Process open files",
+            stat_t=self.topic("process"),
+            val_tpl="{{ value_json.fds | default(none) }}",
+            stat_cla="measurement",
+            ent_cat="diagnostic",
+            ic="mdi:file-multiple",
+            en=False,
+        )
+        self.add(
+            "process_started", "sensor", "process",
+            name="Process started",
+            stat_t=self.topic("process"),
+            # Same shape as `next_timer`: a timestamp sensor takes neither epoch
+            # seconds nor a time without a zone.
+            val_tpl=(
+                "{% if value_json.started %}"
+                "{{ value_json.started | int | timestamp_utc }}+00:00"
+                "{% else %}None{% endif %}"
+            ),
+            dev_cla="timestamp",
+            ent_cat="diagnostic",
+            en=False,
+        )
         self.add(
             "uptime", "sensor", None,
             name="Uptime",

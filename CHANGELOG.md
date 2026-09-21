@@ -91,7 +91,7 @@ Wake-on-LAN have not been drilled. The code uses no syntax above Python 3.9 and 
   now republishes the channel list as well. Each is verified by effect — the plugin reads the
   resulting state back rather than trusting a return value — and each refusal is a sentence on
   `last_error` written for the person who will read it.
-- **Home Assistant discovery**: one device payload with nineteen components and eight device
+- **Home Assistant discovery**: one device payload with twenty-four components and eight device
   triggers for the colour keys. A component whose capability is missing is not announced, and one
   that was announced before and is not now is removed by name.
 - **Capability detection that is worth reading.** `info.capabilities` lists the feature areas that
@@ -115,6 +115,17 @@ Wake-on-LAN have not been drilled. The code uses no syntax above Python 3.9 and 
 - **Optional conditional-access telemetry** on `cam`: the current encryption flag, a generic
   allowlisted CA system name and bounded ECM timing. Off by default, and it excludes reader,
   server, user, card and raw ECM data.
+- **What the enigma2 process costs**, on `process`: resident set, its high-water mark, threads,
+  open file descriptors and the epoch second the process started, read from `/proc`. It answers the
+  question a box that is never restarted eventually raises — „is it leaking?" — which cannot be
+  answered by looking once, only by a curve somebody's recorder already has. Published in the
+  snapshot on every connect and then every 300 seconds, plus early whenever the resident set moves
+  by 4 MiB either way, so a jump is on the curve at the minute it happened. The numbers are the
+  process's and not the plugin's: enigma2 is one process and nothing in `/proc` can attribute a
+  kilobyte to any of the things sharing it. Five diagnostic sensors in discovery mode, of which the
+  resident set is the only one enabled by default. There is no setting — the topic reveals nothing
+  about what anybody is watching — and unlike every other poll here it runs on the main loop,
+  because procfs is memory and cannot block.
 - **Optional OSCam health** on `oscam`, read from the receiver's own loopback interface: whether
   the software and its API are up, bounded aggregate counts, and one neutral entry per reader or
   server keyed by a salted opaque id. WebIf credentials, reader labels, addresses and card

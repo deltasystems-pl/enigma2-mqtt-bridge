@@ -140,6 +140,8 @@ def test_the_expected_entities_are_all_there(live_bridge, factory):
         "power", "channel", "program", "next_program", "recording", "active_recordings",
         "next_timer", "volume", "mute", "channel_select", "screen", "screenshot",
         "restart_gui", "refresh_discovery", "snr", "agc", "ber", "recording_disk", "uptime",
+        "process_memory", "process_memory_peak", "process_threads", "process_open_files",
+        "process_started",
     }
 
 
