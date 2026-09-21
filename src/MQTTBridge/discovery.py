@@ -141,6 +141,25 @@ def _entity_id(platform, slug, key):
     return platform + "." + slug + "_" + key
 
 
+def _kibibytes(field):
+    """A kB field rendered as MiB, and rendered as unknown when it is not there.
+
+    The arithmetic has to be guarded. A `value_template` over a JSON `null`
+    renders the literal string `None` for free — but only where the template
+    does nothing to the value first; `null / 1024` is a template *error*, and a
+    template error is not an unknown state, it is the previous reading staying
+    on screen for ever with a line in the log nobody reads.
+
+    `| default(none)` before the test so that an absent key and an explicit null
+    take the same branch: an absent key would otherwise be Undefined, which is
+    not `none` and would go down the arithmetic path after all.
+    """
+    return (
+        "{% set kb = value_json." + field + " | default(none) %}"
+        "{{ (kb / 1024) | round(1) if kb is not none else none }}"
+    )
+
+
 def build_discovery_components(node_id, friendly_name, base_topic, info, prefix="homeassistant",
                                channel_options=(), deep_standby_allowed=False, previous=None):
     """Home Assistant discovery payloads, as {topic: payload}.
@@ -422,7 +441,11 @@ class _Components:
             "process_memory", "sensor", "process",
             name="Process memory",
             stat_t=self.topic("process"),
-            val_tpl="{{ (value_json.rss_kb / 1024) | round(1) }}",
+            # kB on the wire, MiB on screen — and the division is guarded,
+            # because dividing a JSON `null` is a template error and a template
+            # error leaves the last reading on screen for ever. `| default(none)`
+            # first, so an absent key and an explicit null take the same branch.
+            val_tpl=_kibibytes("rss_kb"),
             unit_of_meas="MiB",
             dev_cla="data_size",
             stat_cla="measurement",
@@ -433,7 +456,7 @@ class _Components:
             "process_memory_peak", "sensor", "process",
             name="Process memory peak",
             stat_t=self.topic("process"),
-            val_tpl="{{ (value_json.hwm_kb / 1024) | round(1) }}",
+            val_tpl=_kibibytes("hwm_kb"),
             unit_of_meas="MiB",
             dev_cla="data_size",
             stat_cla="measurement",

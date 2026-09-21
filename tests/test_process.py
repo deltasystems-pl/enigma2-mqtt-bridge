@@ -17,6 +17,18 @@ from MQTTBridge import discovery, process
 
 NODE = "vuuno4kse_005301"
 
+
+def kibibytes(field):
+    """The guarded kB-to-MiB rendering, written out here rather than imported.
+
+    Spelling it a second time is the point: a change to the template has to be
+    made twice, on purpose, rather than being asserted against itself.
+    """
+    return (
+        "{% set kb = value_json." + field + " | default(none) %}"
+        "{{ (kb / 1024) | round(1) if kb is not none else none }}"
+    )
+
 # A real OpenViX 6.6 status file, cut to the lines this reads plus enough of its
 # neighbours that a parser matching the wrong prefix would be caught.
 STATUS = """Name:\tenigma2
@@ -396,7 +408,7 @@ def test_the_resident_set_is_the_one_enabled_by_default(live_bridge, factory):
 
     memory = found["process_memory"]
     assert "en" not in memory
-    assert memory["val_tpl"] == "{{ (value_json.rss_kb / 1024) | round(1) }}"
+    assert memory["val_tpl"] == kibibytes("rss_kb")
     assert memory["unit_of_meas"] == "MiB"
     assert memory["dev_cla"] == "data_size"
     assert memory["stat_cla"] == "measurement"
@@ -409,8 +421,27 @@ def test_the_resident_set_is_the_one_enabled_by_default(live_bridge, factory):
 def test_the_peak_reads_the_high_water_mark(live_bridge, factory):
     peak = device_components(factory)["process_memory_peak"]
 
-    assert peak["val_tpl"] == "{{ (value_json.hwm_kb / 1024) | round(1) }}"
+    assert peak["val_tpl"] == kibibytes("hwm_kb")
     assert peak["unit_of_meas"] == "MiB"
+
+
+def test_neither_memory_template_divides_something_that_might_be_null(live_bridge, factory):
+    """`null / 1024` is a template error, and a template error is not „unknown".
+
+    It leaves the previous reading on screen for ever with a line in a log
+    nobody reads — which is exactly the failure a diagnostic sensor exists to
+    make visible. `| default(none)` comes first so that an absent key takes the
+    same branch as an explicit null rather than being Undefined and going down
+    the arithmetic path after all.
+    """
+    found = device_components(factory)
+
+    for key, field in (("process_memory", "rss_kb"), ("process_memory_peak", "hwm_kb")):
+        template = found[key]["val_tpl"]
+        assert "value_json." + field + " | default(none)" in template
+        assert "if kb is not none else none" in template
+        # The division never sees the raw field.
+        assert "value_json." + field + " / 1024" not in template
 
 
 def test_the_counts_are_measurements(live_bridge, factory):
