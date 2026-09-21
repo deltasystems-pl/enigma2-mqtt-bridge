@@ -26,6 +26,9 @@ Every record carries one, in its header:
   wrong about exactly the part somebody already argued over.
 - **amended `<date>`** — a later paragraph appended to a record that is otherwise unchanged, for
   an ambiguity rather than a reversal. Same rule as above: nothing already agreed is rewritten.
+- **extended by ADR-NNNN** — still in force, and a later record adds scope it never mentioned.
+  Nothing in it is wrong; it is simply no longer the whole picture, and the index says so because a
+  reader who takes it as the current scope will be missing something rather than mistaken.
 
 A record also names what it supersedes, so the chain reads in both directions.
 
@@ -52,5 +55,6 @@ What this costs, what it rules out, and what has to change if it is ever reverse
 
 | # | Title | Status |
 |---|---|---|
-| [0000](0000-prd.md) | Product requirements (PRD) | accepted 2026-09-16, partly superseded by [ADR-0001](0001-m0-decisions.md) |
+| [0000](0000-prd.md) | Product requirements (PRD) | accepted 2026-09-16, partly superseded by [ADR-0001](0001-m0-decisions.md), extended by [ADR-0002](0002-scope-after-m0.md) |
 | [0001](0001-m0-decisions.md) | M0 sign-off — the three open questions | accepted 2026-09-16, amended 2026-09-16 |
+| [0002](0002-scope-after-m0.md) | Scope added and changed after M0 | accepted 2026-09-21 |

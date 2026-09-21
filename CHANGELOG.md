@@ -144,6 +144,18 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
 - The OSCam web-interface password is registered with the log scrubber whether or not the
   telemetry is switched on, so it cannot reach the log through a code path that runs anyway.
 
+### Documentation
+
+- **[ADR-0002](docs/adr/0002-scope-after-m0.md) records the scope added and changed after M0** —
+  bouquet context, the optional CAM and OSCam telemetry, `cmd/config` and the privacy boundary it
+  moves to the broker login, the post-zap screenshot delay, the OpenWebif status page, the runtime
+  diagnostics, `channels`, and the reproducible build — each with why it exists and what it costs.
+  It also states what is **not** done: there is no 0.2.0 release, there are no call-for-testers
+  issues, `.pyc` files orphaned by an upgrade are not swept, and M2's long soak and the
+  deep-standby drill are open. The README's roadmap and its claim that a call-for-testers thread
+  exists per image are corrected to match — testers are wanted, and opening the issue is the way to
+  volunteer.
+
 ## [0.1.0] - 2026-09-16
 
 The first release: a receiver that publishes what it is doing to MQTT, and stays out of the way.
