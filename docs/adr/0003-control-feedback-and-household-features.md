@@ -31,9 +31,10 @@ and the two must be read together for anything that spans both.
 
 ### 1. `deep_standby_allowed` is echoed, read-only — 0.2.0
 
-> **Shipped 2026-09-22, and one line of this corrected.**
+> **Merged to `main` 2026-09-21, unreleased; noted 2026-09-22, with one line corrected.**
 >
-> This decision is implemented and merged: `info.settings` carries `deep_standby_allowed` as a
+> This decision is implemented and on `main`; it is in no release. `info.settings` carries
+> `deep_standby_allowed` as a
 > boolean, always present, writable through neither `cmd/config` nor the OpenWebif status page.
 > `docs/TOPICS.md` lists it among the read-only members, and the rule it establishes — **presence
 > in `info.settings` does not imply writability** — is now part of the contract.
@@ -206,7 +207,7 @@ that the contract keeps one home and a consumer can be written against it before
 
 | Release | Addition | Kind | Capability | Notes |
 |---|---|---|---|---|
-| 0.2.0 | `info.settings.deep_standby_allowed` | read-only member | — | **Shipped 2026-09-22.** Not writable by `cmd/config` or the status page; changes what `info.settings` means |
+| 0.2.0 | `info.settings.deep_standby_allowed` | read-only member | — | **On `main` since 2026-09-21; unreleased.** Not writable by `cmd/config` or the status page; changes what `info.settings` means |
 | 0.3.0 | `cmd/message` optional `style`: `popup` \| `toast` | command field | `toast` | `popup` is the default and is today's behaviour |
 | 0.3.0 | `cmd/softcam_restart` | command | `softcam` | Permission `softcam_restart_allowed`; refused while recording; 1/min |
 | 0.3.0 | `softcam` | retained topic | `softcam` | `{selected, running_instances, last_restart, last_restart_reason, restarts_today}` |
@@ -264,13 +265,16 @@ above and none of them reverses a decision.
 
 - 🔴 **A deliberate disconnect suppresses the last will, and `Bridge.reload()` performs one.** A
   clean MQTT disconnect is a goodbye, so the broker does **not** publish the retained last-will
-  payload. `reload()` — which the setup screen calls after every save — stops the client cleanly
-  and then starts a new session. If that reconnect fails, retained `availability` stays **`online`
-  with nothing connected**, and every consumer believes the receiver is there. The fix is to
-  publish `offline` **explicitly before** any deliberate disconnect, so that the retained state is
-  true whether or not the reconnect succeeds. This is the retained-availability trap approached
-  from the side nobody watches: the familiar version is a last will that fires and is never
-  cleared, and this is a last will that never fires at all.
+  payload. 🔴 **`Bridge.stop()` already knows this and publishes a retained `offline` before its
+  own clean disconnect — `reload()` does not.** That asymmetry is the whole defect and the whole
+  fix. `reload()` — which the setup screen calls after every save — stops the client cleanly and
+  then starts a new session; if that reconnect fails, retained `availability` stays **`online`
+  with nothing connected**, and every consumer believes the receiver is there. Publish `offline`
+  **explicitly before** any deliberate disconnect, so that the retained state is true whether or
+  not the reconnect succeeds. This is the retained-availability trap approached from the side
+  nobody watches: the familiar version is a last will that fires and is never cleared, and this is
+  a last will that never fires at all. It is a live defect rather than a decision, it predates
+  this record, and it is **to be tracked as an issue** — this bullet is a pointer, not its home.
 - **The companion integration's update entity compares version strings**, so a receiver running an
   earlier development build of the same version is never offered a newer one. Comparing the built
   commit instead would need this plugin to publish a build identifier alongside its version — a

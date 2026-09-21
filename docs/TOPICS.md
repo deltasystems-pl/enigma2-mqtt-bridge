@@ -789,7 +789,7 @@ retained ghost nobody can find: the list is the only record that they exist.
 
 ## 5. Planned (not implemented yet)
 
-🔴 **Nothing in this section exists on any release or on `main`.** It is here because the contract
+🔴 **Nothing in this section exists on any release, and nothing in it is on `main`.** It is here because the contract
 keeps one home: a consumer can be written against these shapes, and they will not move quietly
 between now and the release that carries them. Each is decided in
 [ADR-0003](adr/0003-control-feedback-and-household-features.md); the release that carries it is in
@@ -798,8 +798,9 @@ rule is unchanged, and it is how a consumer tells a plan from a feature.
 
 ### `info.settings` gains further members — 0.3.0
 
-The object already carries read-only members and says so in §1; `deep_standby_allowed` shipped in
-0.2.0. These join it on the same terms, rather than inventing a separate `info.permissions`.
+The object already carries read-only members and says so in §1: `deep_standby_allowed` is on
+`main` and is documented there, which is why it is not in this section. These join it on the same
+terms, rather than inventing a separate `info.permissions`.
 
 | Member | Release | Writable | Meaning |
 |---|---|---|---|
