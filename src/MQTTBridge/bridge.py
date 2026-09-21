@@ -681,14 +681,18 @@ class Bridge:
     def publish_discovery(self, info=None):
         if self.value("ha_mode") != "discovery":
             return
+        if info is None:
+            info = self.build_info()
         components = discovery.build_discovery_components(
             self.node_id,
             self.value("friendly_name"),
             self.base_topic,
-            info if info is not None else self.build_info(),
+            info,
             prefix=self.discovery_prefix,
             channel_options=self.channel_options(),
-            deep_standby_allowed=bool(self.value("deep_standby_allowed")),
+            # From the same payload the announcement carries, so what is
+            # announced and what is published cannot disagree about it.
+            deep_standby_allowed=bool(info.get("settings", {}).get("deep_standby_allowed")),
             previous=self.state.component_keys,
         )
         if not components:

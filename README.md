@@ -225,9 +225,10 @@ are still ahead are in [docs/TOPICS.md](docs/TOPICS.md) under **Planned (not imp
 
 **0.2.0 — fixes.** Cut after the guided installer has been run end to end on a receiver.
 
-- **Done.** `deep_standby_allowed` is echoed **read-only** in `info.settings`, so a consumer can
-  tell „the box refused this" from „the box cannot do this" and hide a control that would always
-  fail. 🔴 This changes what `info.settings` means: presence no longer implies writability.
+- *Plugin half implemented on `main` and unreleased; the integration's half is in progress.*
+  `deep_standby_allowed` is echoed **read-only** in `info.settings`, so a consumer can tell „the
+  box refused this" from „the box cannot do this" and hide a control that would always fail.
+  🔴 This changes what `info.settings` means: presence no longer implies writability.
 
 **0.3.0 — features**, in this order:
 

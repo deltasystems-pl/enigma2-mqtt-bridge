@@ -65,9 +65,10 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
 - **`info.settings` echoes `deep_standby_allowed`**, the box-only permission that decides whether
   `cmd/deep_standby` and `cmd/reboot` are obeyed at all. It is always present and always
   read-only: `cmd/config` refuses it like any other key outside its allowlist, and it is granted
-  on the receiver's own setup screen. A consumer can now hide the two buttons the box would refuse
-  instead of offering controls that always fail, and the fresh `info` that a save publishes is how
-  it learns the permission was granted.
+  on the receiver's own setup screen or in the provisioning file at first install — never over
+  MQTT and never from the OpenWebif page. A consumer can now hide the two buttons the box would
+  refuse instead of offering controls that always fail, and the fresh `info` that a save publishes
+  is how it learns the permission was granted.
 
 ### Changed
 
@@ -76,7 +77,6 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
   nothing else. Writability must not be inferred from presence — an unknown key fails the whole
   object, so a client that writes back everything it reads loses the settings it did mean to
   change. `docs/TOPICS.md` §1 names which members are read-only.
-
 - On-zap screenshots now wait a configurable four seconds by default. Rapid channel changes reset
   the wait, and a capture still completing for an older channel is discarded and rescheduled.
 - A state topic is published **only when it has changed**. The snapshot on every connect is the

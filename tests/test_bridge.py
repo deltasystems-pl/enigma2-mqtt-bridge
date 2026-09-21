@@ -7,6 +7,7 @@ start-up.
 """
 
 from MQTTBridge import boxinfo, discovery
+from MQTTBridge import config as settings_module
 from MQTTBridge.bridge import Bridge, Publisher
 from MQTTBridge.version import __version__
 
@@ -72,8 +73,6 @@ def test_the_writable_subset_is_smaller_than_what_info_publishes(connected_bridg
     a consumer reads. Letting the two converge would make the contract's
     read-only members writable by accident.
     """
-    from MQTTBridge import config as settings_module
-
     published = connected_bridge.published_settings()
     assert set(connected_bridge.remote_settings()) == set(
         settings_module.REMOTE_SETTING_NAMES

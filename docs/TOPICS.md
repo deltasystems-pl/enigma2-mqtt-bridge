@@ -83,7 +83,7 @@ settings it did mean to change as well.
 
 | Read-only member | Since | Meaning | Where it is set |
 |---|---|---|---|
-| `deep_standby_allowed` | 0.2.0 | Whether `cmd/deep_standby` and `cmd/reboot` are permitted on this box. Always present, whichever way it is set | The box's setup screen, *Menu → Plugins → MQTT Bridge* |
+| `deep_standby_allowed` | 0.2.0 | Whether `cmd/deep_standby` and `cmd/reboot` are permitted on this box. Always present, whichever way it is set | The box's setup screen, *Menu → Plugins → MQTT Bridge*, or the provisioning file at first install — never over MQTT, never from the OpenWebif status page |
 
 The rule behind which side of the line a setting falls on: one that **enables a command** is
 settable on the box only; one that **tunes a command already permitted** may be remote. A member
@@ -572,8 +572,8 @@ Either way, `timers` (and `recording` when it is imminent) is republished afterw
 This is deliberately not a general settings API. Broker credentials, TLS, identity, topic names,
 the configured bouquet filter, logging and destructive-command permission cannot be changed
 through `cmd/config`. `deep_standby_allowed` is **read** from `info.settings` (§1) and is refused
-here like any other key outside the allowlist; reading a setting and writing it are two different
-permissions. Home Assistant mode has its dedicated command, and active TV bouquet
+here like any other key outside the allowlist; it is granted on the box's setup screen or in the
+provisioning file, and reading a setting and writing it are two different permissions. Home Assistant mode has its dedicated command, and active TV bouquet
 context has `cmd/bouquet`; neither broadens this settings API. The command accepts the three original keys plus independently optional `screenshot_delay`,
 `cam_telemetry`, and `oscam_telemetry`,
 with their JSON types unchanged. The plugin validates the whole object before assigning anything,
