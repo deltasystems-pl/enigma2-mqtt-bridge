@@ -130,6 +130,21 @@ class Bridge:
             name: self.value(name) for name in settings_module.REMOTE_SETTING_NAMES
         }
 
+    def published_settings(self):
+        """What `info.settings` carries: the non-secret settings, writable or not.
+
+        Presence is not permission. The writable ones are the `cmd/config`
+        allowlist and nothing else; the rest are read-only and are set on the
+        box's setup screen, which `docs/TOPICS.md` says member by member.
+        """
+        values = self.remote_settings()
+        for name in settings_module.READ_ONLY_SETTING_NAMES:
+            # Published the way the command guard applies it — anything falsy is
+            # a refusal — so it is a boolean even on an image where the element
+            # did not build, and a consumer reading it hides the control.
+            values[name] = bool(self.value(name))
+        return values
+
     def apply_remote_settings(self, values):
         """Persist one validated replacement, then apply its publisher lifecycle."""
         if not settings_module.save_remote_settings(values, self.settings):
@@ -589,7 +604,7 @@ class Bridge:
             "ip": boxinfo.local_ip(self.value("host")),
             "uptime": boxinfo.uptime_seconds(),
             "ha_mode": self.value("ha_mode"),
-            "settings": self.remote_settings(),
+            "settings": self.published_settings(),
             "capabilities": self.capabilities(),
         }
 
@@ -666,14 +681,18 @@ class Bridge:
     def publish_discovery(self, info=None):
         if self.value("ha_mode") != "discovery":
             return
+        if info is None:
+            info = self.build_info()
         components = discovery.build_discovery_components(
             self.node_id,
             self.value("friendly_name"),
             self.base_topic,
-            info if info is not None else self.build_info(),
+            info,
             prefix=self.discovery_prefix,
             channel_options=self.channel_options(),
-            deep_standby_allowed=bool(self.value("deep_standby_allowed")),
+            # From the same payload the announcement carries, so what is
+            # announced and what is published cannot disagree about it.
+            deep_standby_allowed=bool(info.get("settings", {}).get("deep_standby_allowed")),
             previous=self.state.component_keys,
         )
         if not components:

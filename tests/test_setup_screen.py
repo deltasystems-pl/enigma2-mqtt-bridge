@@ -91,6 +91,37 @@ def test_saving_asks_the_bridge_to_reconnect(settings):
     assert bridge.reloads == 1
 
 
+def test_saving_the_permission_republishes_info_with_it(settings, make_bridge, factory):
+    """The box-only permission is granted here, and `info` has to say so.
+
+    Nothing else tells Home Assistant the two power-off buttons have become
+    usable, and the screen's own save is the only moment it changes. No code
+    does this deliberately: `keySave` reloads the bridge, and a connect
+    republishes the snapshot — which is why it is asserted rather than assumed.
+    The second session is asserted *before* the connect is fired, because firing
+    it by hand would otherwise hide a `keySave` that had stopped reloading.
+    """
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = "vuuno4kse_005301"
+    bridge = make_bridge()
+    bridge.start()
+    factory.client.fire_connect()
+    info = "enigma2/vuuno4kse_005301/info"
+    assert factory.client.last(info).json()["settings"]["deep_standby_allowed"] is False
+    assert len(factory.clients) == 1
+
+    settings.deep_standby_allowed.value = True
+    build(settings, bridge=bridge).keySave()
+
+    # The save reconnects, and that new session is what carries the snapshot.
+    assert len(factory.clients) == 2
+    fresh = factory.clients[-1]
+    fresh.fire_connect()
+
+    assert settings.deep_standby_allowed.saved_value is True
+    assert fresh.last(info).json()["settings"]["deep_standby_allowed"] is True
+
+
 def test_a_bridge_that_cannot_reload_does_not_break_the_screen(settings):
     class Broken:
         idle_reason = None

@@ -7,6 +7,7 @@ start-up.
 """
 
 from MQTTBridge import boxinfo, discovery
+from MQTTBridge import config as settings_module
 from MQTTBridge.bridge import Bridge, Publisher
 from MQTTBridge.version import __version__
 
@@ -45,7 +46,43 @@ def test_info_carries_every_documented_field(connected_bridge, factory):
         "screenshot_delay": 4,
         "cam_telemetry": False,
         "oscam_telemetry": False,
+        "deep_standby_allowed": False,
     }
+
+
+def test_info_settings_echo_the_box_only_permission(make_bridge, factory, settings):
+    """`deep_standby_allowed` is in `info.settings` whichever way it is set.
+
+    It is there so a consumer can tell „the box refused this" from „the box
+    cannot do this" and hide the two buttons rather than offering ones that
+    always fail — which is only possible if the key is present either way.
+    """
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    settings.deep_standby_allowed.value = True
+    make_bridge().start()
+    factory.client.fire_connect()
+
+    assert factory.client.last(INFO).json()["settings"]["deep_standby_allowed"] is True
+
+
+def test_the_writable_subset_is_smaller_than_what_info_publishes(connected_bridge):
+    """Presence in `info.settings` is not permission to write it back.
+
+    `remote_settings` is what `cmd/config` replaces; `published_settings` is what
+    a consumer reads. Letting the two converge would make the contract's
+    read-only members writable by accident.
+    """
+    published = connected_bridge.published_settings()
+    assert set(connected_bridge.remote_settings()) == set(
+        settings_module.REMOTE_SETTING_NAMES
+    )
+    assert set(published) == set(settings_module.REMOTE_SETTING_NAMES) | set(
+        settings_module.READ_ONLY_SETTING_NAMES
+    )
+    assert not set(settings_module.REMOTE_SETTING_NAMES) & set(
+        settings_module.READ_ONLY_SETTING_NAMES
+    )
 
 
 def test_info_is_retained(connected_bridge, factory):

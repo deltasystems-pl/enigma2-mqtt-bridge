@@ -212,20 +212,21 @@ bundles.
 - [ ] **M6** — `v1.0.0`: third-party feed and HACS default pull requests
 - [ ] **M7** — OE-Alliance recipe, OpenPLi, broker-login auto-provisioning
 
-Everything after M1 is unreleased. The package on the feed reports `0.1.0`; so does the development
-build, because a coordinated version bump with the integration has not happened yet.
+Everything after M1 is unreleased. The package on the feed and on the releases page reports
+`0.1.0`; the development build reports `0.2.0`, which has no tag or release behind it yet.
 
 ### What 0.2.0 and 0.3.0 will carry
 
 Two days of household use produced a list of problems and a list of wants, and they are split into
 two releases. The reasoning is in
-[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md); the contract additions are in
-[docs/TOPICS.md](docs/TOPICS.md) under **Planned (not implemented yet)**. **None of it is
-implemented.**
+[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md); the contract additions that
+are still ahead are in [docs/TOPICS.md](docs/TOPICS.md) under **Planned (not implemented yet)**.
+**Nothing here is released.**
 
 **0.2.0 — fixes.** Cut after the guided installer has been run end to end on a receiver.
 
-- `deep_standby_allowed` is echoed **read-only** in `info.settings`, so a consumer can tell „the
+- *Plugin half implemented on `main` and unreleased; the integration's half is in progress.*
+  `deep_standby_allowed` is echoed **read-only** in `info.settings`, so a consumer can tell „the
   box refused this" from „the box cannot do this" and hide a control that would always fail.
   🔴 This changes what `info.settings` means: presence no longer implies writability.
 
