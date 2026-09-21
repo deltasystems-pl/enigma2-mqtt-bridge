@@ -47,9 +47,9 @@ The code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14. Ev
 import is guarded, and what the running image cannot provide is reported in the `capabilities`
 list rather than assumed — so a missing hook loses one feature, not the plugin.
 
-If you run an image that is not in the first two rows, please open an issue: there is a
-call-for-testers thread per image and your report is what moves a row from *best effort* to
-*supported*.
+**Testers wanted — please open an issue.** If you run an image that is not in the first two rows,
+your report is what moves a row from *best effort* to *supported*. There is no per-image thread to
+find yet; opening the first one is genuinely useful.
 
 ## Security first
 
@@ -193,17 +193,27 @@ bundles.
 ## Roadmap
 
 - [x] **M0** — PRD approved and recorded as [ADR-0000](docs/adr/0000-prd.md); the three open
-      questions closed in [ADR-0001](docs/adr/0001-m0-decisions.md)
+      questions closed in [ADR-0001](docs/adr/0001-m0-decisions.md). The scope added since is
+      [ADR-0002](docs/adr/0002-scope-after-m0.md)
 - [x] **M1** — repository and skeleton: the plugin loads, connects, publishes `availability`
-      and `info`, and has a setup screen
-- [ ] **M2** — implementation complete: power, service, EPG, volume, recording, timers, disk,
-      keys, screenshot, the EPG grid, and every `cmd/*` with its guards. Acceptance remains open
-      until the required soak and remaining live drills pass.
-- [ ] **M3** — the integration's entities
-- [ ] **M4** — the guided installer and the `update` entity
+      and `info`, and has a setup screen. Released as **v0.1.0**, which is what the feed and the
+      releases page still serve
+- [ ] **M2** — *code complete, awaiting acceptance.* Power, service, EPG, volume, recording,
+      timers, disk, keys, screenshot, the channel list, the EPG grid, bouquet context, the optional
+      CAM and OSCam telemetry, and every `cmd/*` with its guards are implemented and running on the
+      maintainer's box. The by-effect checklist and a 60-minute active soak have passed; the **long
+      passive soak** and the **watchdog-restart interplay** have not, and **deep standby with
+      Wake-on-LAN has never been drilled**
+- [ ] **M3** — the integration's entities: *live on the maintainer's Home Assistant, not released*
+- [ ] **M4** — the guided installer and the `update` entity: *coded and reviewed; the installer has
+      never been run end to end on a receiver that did not already have the plugin, and no real
+      rollback has been exercised*
 - [ ] **M5** — public beta `v0.x`: releases, opkg feed, HACS custom repository, testers per image
 - [ ] **M6** — `v1.0.0`: third-party feed and HACS default pull requests
 - [ ] **M7** — OE-Alliance recipe, OpenPLi, broker-login auto-provisioning
+
+Everything after M1 is unreleased. The package on the feed reports `0.1.0`; so does the development
+build, because a coordinated version bump with the integration has not happened yet.
 
 ## Contributing
 
@@ -213,8 +223,8 @@ that every change lands through a pull request with CI green.
 Two things are worth more than code right now:
 
 - **Testers.** One box, one image, one afternoon. OpenATV, OpenPLi and OpenBH all need somebody
-  who can run the by-effect checklist and paste the log. There is a call-for-testers issue per
-  image.
+  who can run the by-effect checklist and paste the log. **Testers wanted: open an issue** — there
+  is no per-image thread yet, so yours starts it.
 - **Translators.** The source strings are English, the Polish ones are reviewed, and the
   **German ones are drafted and marked for review** — a native speaker's pass would be very
   welcome.
