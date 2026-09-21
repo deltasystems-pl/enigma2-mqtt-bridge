@@ -174,6 +174,15 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
 
 ### Documentation
 
+- **[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md) records that its first
+  decision is implemented on `main`, and corrects one line of it.** `info.settings` carries
+  `deep_standby_allowed` as a read-only member; the permission can be set on the setup screen **or
+  in the provisioning file at first install**, and never over MQTT or from the status page — the
+  record said „only on the setup screen". A consumer needs three states rather than two, because
+  the announcement arrives before `info` and carries no settings at all. The record also gains a
+  **Found since** section: a deliberate disconnect suppresses the last will, so `Bridge.reload()`
+  can leave retained availability saying `online` with nothing connected, and the fix is to publish
+  `offline` before any deliberate disconnect.
 - **[ADR-0002](docs/adr/0002-scope-after-m0.md) records the scope added and changed after M0** —
   bouquet context, the optional CAM and OSCam telemetry, `cmd/config` and the privacy boundary it
   moves to the broker login, the post-zap screenshot delay, the OpenWebif status page, the runtime
