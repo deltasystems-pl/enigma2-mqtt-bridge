@@ -171,6 +171,17 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
   deep-standby drill are open. The README's roadmap and its claim that a call-for-testers thread
   exists per image are corrected to match — testers are wanted, and opening the issue is the way to
   volunteer.
+- **[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md) records the 0.2.0 and
+  0.3.0 plan** that came out of two days of household use: a read-only `deep_standby_allowed` echo
+  so a consumer can hide a control the box will refuse (0.2.0), and then the discreet toast, the
+  softcam restart with its opt-in auto-heal, the EPG import, the opt-in CEC standby workaround,
+  Wake-on-LAN arming and the process topic (0.3.0). Every contract addition — three topics, two
+  commands, `cmd/message`'s `style`, the new `info` members — is written out in
+  [docs/TOPICS.md](docs/TOPICS.md) under **Planned (not implemented yet)**, with the payload fields
+  and their types, so the contract keeps one home and a consumer can be written against it before
+  it exists. 🔴 One of those additions changes what `info.settings` means: presence there no longer
+  implies that a setting is writable. **Nothing in the plan is implemented**, and the README's
+  roadmap says so.
 
 ## [0.1.0] - 2026-09-16
 

@@ -215,6 +215,38 @@ bundles.
 Everything after M1 is unreleased. The package on the feed reports `0.1.0`; so does the development
 build, because a coordinated version bump with the integration has not happened yet.
 
+### What 0.2.0 and 0.3.0 will carry
+
+Two days of household use produced a list of problems and a list of wants, and they are split into
+two releases. The reasoning is in
+[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md); the contract additions are in
+[docs/TOPICS.md](docs/TOPICS.md) under **Planned (not implemented yet)**. **None of it is
+implemented.**
+
+**0.2.0 — fixes.** Cut after the guided installer has been run end to end on a receiver.
+
+- `deep_standby_allowed` is echoed **read-only** in `info.settings`, so a consumer can tell „the
+  box refused this" from „the box cannot do this" and hide a control that would always fail.
+  🔴 This changes what `info.settings` means: presence no longer implies writability.
+
+**0.3.0 — features**, in this order:
+
+1. **`cmd/softcam_restart`** — restart the cam *the image selected*, resolved on the box and never
+   named over MQTT, behind a box-only permission; plus an opt-in auto-heal for a stuck decode,
+   rate-limited and counted on a new `softcam` topic.
+2. **An opt-in CEC standby workaround** for an upstream enigma2 defect that makes a standby
+   requested by the television arrive late and echo back at it. Strict allowlist of one screen
+   class, every intervention counted on a `cec` topic.
+3. **A discreet toast** — a non-modal, auto-hiding, top-right message that never takes focus and
+   never waits behind an open channel list. `cmd/message` gains `style: popup | toast`; `popup`
+   stays the default.
+4. **`cmd/epg_import`** — run the image's EPG importer, behind a box-only permission, with progress
+   on an `epg_import` topic.
+5. **`wol_arm`** — arm Wake-on-LAN at start and before deep standby, and report in `info.wol` what
+   is actually true. 🔴 Until the deep standby → magic packet drill passes, **deep standby may be
+   one-way on your box.**
+6. **`process`** — what the enigma2 process costs, already in review.
+
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) for the development loop, the test matrix and the rule

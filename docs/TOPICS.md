@@ -768,7 +768,120 @@ retained ghost nobody can find: the list is the only record that they exist.
 
 ---
 
-## 5. Worth knowing
+## 5. Planned (not implemented yet)
+
+🔴 **Nothing in this section exists on any release or on `main`.** It is here because the contract
+keeps one home: a consumer can be written against these shapes, and they will not move quietly
+between now and the release that carries them. Each is decided in
+[ADR-0003](adr/0003-control-feedback-and-household-features.md); the release that carries it is in
+the heading. Until a capability below is in `info.capabilities`, the box does not have it — that
+rule is unchanged, and it is how a consumer tells a plan from a feature.
+
+### `info.settings` gains read-only members — 0.2.0 and 0.3.0
+
+🔴 **This changes what `info.settings` means.** §1 describes it as „the complete remotely writable,
+non-secret subset". It becomes **the non-secret settings a consumer may read**, of which the
+**writable** ones are the `cmd/config` allowlist and nothing else. A consumer must not infer
+writability from presence, and one that writes back everything it reads will be refused.
+
+| Member | Release | Writable | Meaning |
+|---|---|---|---|
+| `deep_standby_allowed` | 0.2.0 | **no** | Whether `cmd/deep_standby` and `cmd/reboot` are permitted on this box. Set on the box's setup screen only |
+| `softcam_restart_allowed` | 0.3.0 | **no** | Whether `cmd/softcam_restart` is permitted |
+| `epg_import_allowed` | 0.3.0 | **no** | Whether `cmd/epg_import` is permitted |
+| `softcam_autoheal` | 0.3.0 | yes | Opt-in automatic softcam restart, default `false` |
+| `softcam_autoheal_seconds` | 0.3.0 | yes | How long a stuck decode must hold, default `90`, range 30–600 |
+
+The three read-only members exist so a consumer can **hide what the box will refuse** rather than
+offering a control that always fails. The rule behind which side of the line a setting falls on: a
+setting that **enables a command** is settable on the box only; a setting that **tunes a command
+already permitted** may be remote.
+
+### `info` gains `wol` — 0.3.0
+
+```json
+{"supported": true, "armed": false, "iface": "eth0"}
+```
+
+Read back from the system rather than assumed from the fact that a command was issued. A box that
+reports Wake-on-LAN supported and **not armed** cannot be woken from deep standby, which is worth
+knowing before enabling `deep_standby_allowed`. The `wol_arm` setting (box-only, default off) arms
+the interface at start and again immediately before deep standby.
+
+### `<base>/<node>/softcam` — 0.3.0, capability `softcam`
+
+```json
+{"selected": "oscam", "running_instances": 1, "last_restart": 1789459200,
+ "last_restart_reason": "manual", "restarts_today": 2}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `selected` | string or `null` | The cam binary the **image** has selected for autostart, resolved on the box |
+| `running_instances` | integer or `null` | How many are running now. More than one is the fault this exists for |
+| `last_restart` | integer or `null` | Unix epoch seconds, UTC |
+| `last_restart_reason` | `manual` \| `autoheal` \| `null` | |
+| `restarts_today` | integer | Reset at local midnight. This is the number that makes a restart loop visible |
+
+### `<base>/<node>/epg_import` — 0.3.0, capability `epg_import`
+
+```json
+{"state": "running", "started": 1789459200, "finished": null, "error": null}
+```
+
+`state` is `idle`, `running`, `done` or `failed`; `started` and `finished` are epoch seconds or
+`null`; `error` is a sentence written for a person, or `null`.
+
+### `<base>/<node>/cec` — 0.3.0, capability `cec_workaround`
+
+```json
+{"last_intervention": 1789459200, "kind": "closed_channel_list", "count": 3}
+```
+
+`kind` is `closed_channel_list`, `dropped_stale_standby` or `null`. `count` is since the plugin
+started. The workaround itself is opt-in (`cec_standby_workaround`, box-only, default off) and
+acts on a strict allowlist of one screen class — the channel list, never an EPG screen, a menu, the
+plugin browser, an input box or a recording dialog.
+
+### `<base>/<node>/process` — 0.3.0, capability `process`
+
+What the enigma2 process costs: `{rss_kb, hwm_kb, threads, fds, started}`. Already in review; the
+full description arrives with it.
+
+### New commands — 0.3.0
+
+| Command | Payload | Effect | Guard |
+|---|---|---|---|
+| `softcam_restart` | any (`PRESS` by convention) | Stops **every** running instance of the cam the image selected, then starts exactly one | Refused unless `softcam_restart_allowed` is on; refused while recording; at most one manual restart per minute. 🔴 **The binary is resolved on the box and no part of the command line comes from the payload** |
+| `epg_import` | any (`PRESS` by convention) | Runs the image's EPG importer, then rebuilds and republishes the grid | Refused unless `epg_import_allowed` is on; refused while recording; refused while an import is already running |
+
+### `cmd/message` gains `style` — 0.3.0, capability `toast`
+
+```json
+{"text": "…", "style": "toast", "timeout": 5}
+```
+
+`style` is `"popup"` (**the default, and exactly today's behaviour**) or `"toast"`. An existing
+payload is unaffected.
+
+A **toast** is a plugin-owned, non-modal screen in the **top right**. It auto-hides and does
+nothing else: it never takes focus, binds no action map, cannot be dismissed by the remote, and
+never enters the image's notification queue — so it cannot wait behind an open channel list the way
+a popup does. A newer message replaces the one on screen and restarts its timer; there is no queue.
+It is torn down on standby and on shutdown, and its text is capped at **200 characters**.
+
+For a toast, `timeout` is clamped to **1–30** and defaults to **5**; the popup's `0` („until
+dismissed") has no meaning for something that hides itself and is refused. `type` is accepted and
+**ignored**: a toast has one fixed appearance and always carries the plugin's own label, which is
+what stops a message being dressed up as a system dialog.
+
+The capability is claimed **only once the screen has actually instantiated**, and the box-only
+setting `osd_toast` (default on) is its kill-switch. An image where either fails keeps popups
+rather than gaining a style that silently does nothing.
+
+---
+
+## 6. Worth knowing
 
 - **A retained state topic is a snapshot, not a heartbeat.** `service` showing a channel means
   that is the last channel the box tuned — check `availability` before believing it is on.
