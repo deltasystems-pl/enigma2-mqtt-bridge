@@ -238,8 +238,19 @@ def test_the_configured_zap_delay_is_used(live_bridge, receiver, settings, tmp_p
 
 
 def test_a_new_zap_discards_an_inflight_automatic_capture(
-    live_bridge, factory, receiver, tmp_path
+    live_bridge, factory, receiver, tmp_path, monkeypatch
 ):
+    """The re-arm below is `max(delay, the rest of the rate limit)`, off the real clock.
+
+    `_arm_zap_capture` computes `max(4000, ceil((5 - (time.time() - last)) * 1000))`,
+    so the 5000 this asserts only holds while less than a millisecond has passed
+    since the first capture. On a loaded machine it is 4999 — three failures in
+    320 runs under CPU contention, and every time with a forced 2 ms gap. The
+    clock is frozen here the way its siblings freeze it; the assertion is the
+    thing being tested and is left exact.
+    """
+    now = [1000.0]
+    monkeypatch.setattr(screen_module.time, "time", lambda: now[0])
     found = publisher(live_bridge, tmp_path)
     receiver.nav.fire(1)
     found._debounce.timer.fire()

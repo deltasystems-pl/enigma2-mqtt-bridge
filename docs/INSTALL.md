@@ -98,6 +98,40 @@ From the feed: `opkg update && opkg upgrade enigma2-plugin-extensions-mqttbridge
 the GUI. Settings survive an upgrade; they live in enigma2's own settings file, not in the
 package.
 
+**The upgrade sweeps orphaned bytecode for you.** The image byte-compiles a plugin after
+installing it, so the `.pyc` files in the plugin directory were written by the receiver and are not
+in opkg's file list — opkg removes only what it installed. An upgrade that drops or moves a module
+therefore leaves that module's compiled copy behind with no source next to it, and in Python 3 a
+`.pyc` sitting beside where its source used to be is importable on its own. The old module would go
+on being imported after the upgrade that was supposed to remove it. The package's `postinst` deletes
+every `.pyc` and `.pyo` under
+`/usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge/` whose `.py` is gone — both the legacy
+same-directory form and `__pycache__/<name>.cpython-*.pyc` — and then gives back the directories
+**that sweep itself emptied**, walking upward and stopping at the first one that still holds
+something. A directory that was already empty before the upgrade is left where it is.
+
+What it refuses to do is the other half:
+
+- a compiled file whose `.py` is present is kept, including the plugin's own `plugin.pyc`;
+- nothing outside the plugin directory is read, deleted or removed — every path is checked to be
+  under it first, because a directory name may contain a newline and a naive line-by-line read
+  would hand the second half of one to `rm` as a path relative to a working directory `opkg` never
+  set;
+- a symlink is neither followed nor removed, and a bind mount under the plugin directory is not
+  crossed;
+- a plugin directory with no `plugin.py` in it is left entirely alone. That is not an orphaned
+  tree, it is a build-time packaging — OE strips sources out of a package into a separate one — and
+  "every `.pyc` whose `.py` is missing" would there be every file the plugin has;
+- nothing happens during an offline rootfs build, where the paths above would be the build host's;
+- and no error in any of it can fail the install.
+
+You do not have to do anything, and there is nothing to clean up by hand. If you want to see what it
+removed, the lines are in the `opkg` output:
+
+```
+MQTT Bridge: removing orphaned bytecode client.pyc
+```
+
 ## Uninstalling
 
 Do these in order:
