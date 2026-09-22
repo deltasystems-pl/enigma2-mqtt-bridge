@@ -9,6 +9,33 @@ version that has no section here.
 
 ## [Unreleased]
 
+### Added
+
+- **What the enigma2 process costs**, on `process`: resident set, its high-water mark, threads,
+  open file descriptors and the epoch second the process started, read from `/proc`. It answers the
+  question a box that is never restarted eventually raises — „is it leaking?" — which cannot be
+  answered by looking once, only by a curve somebody's recorder already has. Published in the
+  snapshot on every connect and then every 300 seconds — a ceiling on the gap rather than a
+  heartbeat, because like every state topic an unchanged payload is not republished — plus early
+  whenever the resident set moves by 4 MiB either way, so a jump is on the curve at the minute it
+  happened. The numbers are the
+  process's and not the plugin's: enigma2 is one process and nothing in `/proc` can attribute a
+  kilobyte to any of the things sharing it. Five diagnostic sensors in discovery mode, of which the
+  resident set is the only one enabled by default. There is no setting — the topic reveals nothing
+  about what anybody is watching — and unlike every other poll here it runs on the main loop,
+  because procfs is memory and cannot block.
+
+### Fixed
+
+- **„Next timer" has been unreadable in discovery mode since 0.2.0.** Its value template appended
+  `+00:00` to `timestamp_utc`, which already ends in the offset, so the state arrived as
+  `2026-09-10T12:08:29+00:00+00:00`. Home Assistant cannot parse that: it logs „Invalid state
+  message" and stores nothing, so the sensor read unknown for ever rather than reading wrong. One
+  character in one template. It was found by the review of the process telemetry above, which had
+  copied the same shape from it — and it was invisible to both test suites because they compared
+  the template as a string and never rendered it. The two timestamp templates are now rendered in
+  the tests and the result is parsed as a datetime.
+
 ### Documentation
 
 - **M4 is ticked in the roadmap.** The guided installer has been run end to end on a receiver that

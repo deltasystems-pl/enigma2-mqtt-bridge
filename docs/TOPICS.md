@@ -57,8 +57,8 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
                "cam_telemetry": false, "oscam_telemetry": false,
                "deep_standby_allowed": false},
   "capabilities": ["power", "service", "epg", "tuner", "recording", "timers",
-                   "volume", "hdd", "channels", "bouquet_context", "epg_grid", "keys", "screenshot",
-                   "message"]
+                   "volume", "hdd", "process", "channels", "bouquet_context", "epg_grid", "keys",
+                   "screenshot", "message"]
 }
 ```
 
@@ -95,7 +95,7 @@ reconnects the bridge and a connect publishes the snapshot.
 plugin detects what it managed to attach and names it here rather than assuming. A consumer
 hides what is missing instead of showing a dead entity. The names are the feature areas, and
 nothing else is ever in the list: `power`, `service`, `epg`, `epg_grid`, `tuner`, `recording`,
-`timers`, `volume`, `cam`, `oscam`, `keys`, `screenshot`, `message`, `hdd`, `channels`,
+`timers`, `volume`, `cam`, `oscam`, `keys`, `screenshot`, `message`, `hdd`, `process`, `channels`,
 `bouquet_context`. A build that has bound no
 feature area publishes `[]` — the connection, `info` and the commands are the plugin itself and
 are not capabilities.
@@ -443,6 +443,53 @@ that OSCam authentication is enabled. `readonly` reports OSCam's own API flag.
 `mounted` boolean, `path` string, `free_mb` integer megabytes or `null` when nothing is mounted.
 Checked on a slow timer; a recording disk that silently unmounts is the point of this topic.
 
+### `<base>/<node>/process`
+
+```json
+{"rss_kb": 164208, "hwm_kb": 187432, "threads": 22, "fds": 61, "started": 1789042109}
+```
+
+What the **enigma2 process** costs. Not the plugin: enigma2 is one process, so the image, every
+other plugin and this one share the same resident set and nothing in `/proc` can attribute a
+kilobyte to any of them. A rising line here is a question, not a verdict.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `rss_kb` | integer or `null` | `VmRSS` — resident set, in kB |
+| `hwm_kb` | integer or `null` | `VmHWM` — the high-water mark of that, in kB |
+| `threads` | integer or `null` | `Threads` |
+| `fds` | integer or `null` | Open file descriptors, including the one the count itself opens |
+| `started` | integer or `null` | Unix epoch seconds, UTC, when the enigma2 process started |
+
+All five keys are always present. A field that could not be read is `null` rather than missing,
+because an absent key renders as an empty string in a Home Assistant template — „ignore this
+message", which leaves the previous value on screen for ever — while an explicit `null` renders as
+unknown.
+
+Read from `/proc/self/status` (`VmRSS`, `VmHWM`, `Threads`), `/proc/self/fd`, and, for `started`,
+field 22 of `/proc/self/stat` (clock ticks since boot, divided by `SC_CLK_TCK`) plus `btime` from
+`/proc/stat`. `started` is deliberately not „now minus uptime": the topic is retained and a consumer
+keeps the value, so it has to be the same number on every publish rather than one that drifts by a
+second each time somebody reads it.
+
+**Cadence.** In the snapshot on every connect, then every 300 seconds. In between, the resident set
+is checked every 60 seconds and published early whenever it has moved by 4096 kB or more in either
+direction since the last publish — so a jump lands on the curve at the minute it happened rather
+than up to five minutes later.
+
+The 300-second publish obeys the publish-on-change rule of §1 like every other state topic, so it is
+a **ceiling on the gap, not a heartbeat**: a payload identical to the last one is not sent again, and
+a receiver idle enough that none of the five numbers moved can be quiet for longer. The connect
+snapshot is the deliberate exception and always goes out. Read `availability` to tell a quiet box
+from an absent one.
+
+The capability is `process`, and it is claimed only when `/proc/self/status` can actually be read.
+There is no setting: the topic reveals nothing about what anybody is watching, so it is always on.
+
+Unlike every other poll in the plugin this one runs on the main loop, because procfs is memory —
+there is no disk behind it, no network and no lock another process holds. `hdd` is the opposite
+case and runs on a thread of its own.
+
 ### `<base>/<node>/screen`
 
 Retained, QoS 0. **Not JSON** — the raw bytes of a JPEG.
@@ -653,8 +700,8 @@ It is a cleanup, not a factory reset: settings are untouched.
   "mac": "00:00:5e:00:53:01",
   "ip": "192.0.2.12",
   "capabilities": ["power", "service", "epg", "tuner", "recording", "timers",
-                   "volume", "hdd", "channels", "bouquet_context", "epg_grid", "keys", "screenshot",
-                   "message"],
+                   "volume", "hdd", "process", "channels", "bouquet_context", "epg_grid", "keys",
+                   "screenshot", "message"],
   "ha_mode": "discovery"
 }
 ```
@@ -705,6 +752,10 @@ gets no volume entity, rather than one that never moves. The unique id of each i
 | `screenshot`, `restart_gui`, `refresh_discovery` | button | — | And `deep_standby` and `reboot` **only** when `deep_standby_allowed` is on |
 | `snr`, `agc`, `ber` | sensor | `tuner` | Diagnostic, disabled by default |
 | `recording_disk` | binary_sensor | `hdd` | Diagnostic |
+| `process_memory` | sensor | `process` | Diagnostic, MiB, `data_size`, measurement — the one of these five that is **enabled** by default |
+| `process_memory_peak` | sensor | `process` | Diagnostic, MiB, `data_size`, measurement, disabled by default |
+| `process_threads`, `process_open_files` | sensor | `process` | Diagnostic, measurement, disabled by default |
+| `process_started` | sensor | `process` | Diagnostic, `timestamp`, disabled by default |
 | `uptime` | sensor | `info` | Diagnostic, seconds |
 
 The channel names in `channel_select` are **deduplicated**: `cmd/zap` by name refuses a name that
@@ -858,11 +909,6 @@ the interface at start and again immediately before deep standby.
 started. The workaround itself is opt-in (`cec_standby_workaround`, box-only, default off) and
 acts on a strict allowlist of one screen class — the channel list, never an EPG screen, a menu, the
 plugin browser, an input box or a recording dialog.
-
-### `<base>/<node>/process` — 0.3.0, capability `process`
-
-What the enigma2 process costs: `{rss_kb, hwm_kb, threads, fds, started}`. Already in review; the
-full description arrives with it.
 
 ### New commands — 0.3.0
 

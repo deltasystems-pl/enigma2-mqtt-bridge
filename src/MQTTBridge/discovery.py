@@ -141,6 +141,25 @@ def _entity_id(platform, slug, key):
     return platform + "." + slug + "_" + key
 
 
+def _kibibytes(field):
+    """A kB field rendered as MiB, and rendered as unknown when it is not there.
+
+    The arithmetic has to be guarded. A `value_template` over a JSON `null`
+    renders the literal string `None` for free — but only where the template
+    does nothing to the value first; `null / 1024` is a template *error*, and a
+    template error is not an unknown state, it is the previous reading staying
+    on screen for ever with a line in the log nobody reads.
+
+    `| default(none)` before the test so that an absent key and an explicit null
+    take the same branch: an absent key would otherwise be Undefined, which is
+    not `none` and would go down the arithmetic path after all.
+    """
+    return (
+        "{% set kb = value_json." + field + " | default(none) %}"
+        "{{ (kb / 1024) | round(1) if kb is not none else none }}"
+    )
+
+
 def build_discovery_components(node_id, friendly_name, base_topic, info, prefix="homeassistant",
                                channel_options=(), deep_standby_allowed=False, previous=None):
     """Home Assistant discovery payloads, as {topic: payload}.
@@ -306,9 +325,16 @@ class _Components:
             stat_t=self.topic("recording"),
             # A timestamp sensor will not take epoch seconds and will not take a
             # time without a zone; this renders the one shape it accepts.
+            # 🔴 Nothing follows `timestamp_utc`. The filter is
+            # `dt_util.utc_from_timestamp(value).isoformat()`, so the offset is
+            # already on the end, and a second one makes the state unparseable —
+            # Home Assistant logs „Invalid state message" and stores nothing at
+            # all, which reads as a sensor that never works rather than as an
+            # error. `tests/` renders this rather than matching it as a string,
+            # because matching it as a string is how it shipped wrong.
             val_tpl=(
                 "{% if value_json.next %}"
-                "{{ value_json.next.begin | int | timestamp_utc }}+00:00"
+                "{{ value_json.next.begin | int | timestamp_utc }}"
                 "{% else %}None{% endif %}"
             ),
             dev_cla="timestamp",
@@ -413,6 +439,73 @@ class _Components:
             val_tpl="{{ 'ON' if value_json.mounted else 'OFF' }}",
             dev_cla="connectivity",
             ent_cat="diagnostic",
+        )
+        # What the enigma2 process costs. Diagnostic, and all but the resident
+        # set disabled by default: the one a dashboard ever wants is the curve
+        # of how much memory the box is using, and the other four are what
+        # somebody enables for a fortnight when that curve turns upwards.
+        self.add(
+            "process_memory", "sensor", "process",
+            name="Process memory",
+            stat_t=self.topic("process"),
+            # kB on the wire, MiB on screen — and the division is guarded,
+            # because dividing a JSON `null` is a template error and a template
+            # error leaves the last reading on screen for ever. `| default(none)`
+            # first, so an absent key and an explicit null take the same branch.
+            val_tpl=_kibibytes("rss_kb"),
+            unit_of_meas="MiB",
+            dev_cla="data_size",
+            stat_cla="measurement",
+            ent_cat="diagnostic",
+            ic="mdi:memory",
+        )
+        self.add(
+            "process_memory_peak", "sensor", "process",
+            name="Process memory peak",
+            stat_t=self.topic("process"),
+            val_tpl=_kibibytes("hwm_kb"),
+            unit_of_meas="MiB",
+            dev_cla="data_size",
+            stat_cla="measurement",
+            ent_cat="diagnostic",
+            ic="mdi:memory",
+            en=False,
+        )
+        self.add(
+            "process_threads", "sensor", "process",
+            name="Process threads",
+            stat_t=self.topic("process"),
+            val_tpl="{{ value_json.threads | default(none) }}",
+            stat_cla="measurement",
+            ent_cat="diagnostic",
+            ic="mdi:cog-outline",
+            en=False,
+        )
+        self.add(
+            "process_open_files", "sensor", "process",
+            name="Process open files",
+            stat_t=self.topic("process"),
+            val_tpl="{{ value_json.fds | default(none) }}",
+            stat_cla="measurement",
+            ent_cat="diagnostic",
+            ic="mdi:file-multiple",
+            en=False,
+        )
+        self.add(
+            "process_started", "sensor", "process",
+            name="Process started",
+            stat_t=self.topic("process"),
+            # Same shape as `next_timer`: a timestamp sensor takes neither epoch
+            # seconds nor a time without a zone, and nothing follows
+            # `timestamp_utc`, which already ends in the offset.
+            val_tpl=(
+                "{% if value_json.started %}"
+                "{{ value_json.started | int | timestamp_utc }}"
+                "{% else %}None{% endif %}"
+            ),
+            dev_cla="timestamp",
+            ent_cat="diagnostic",
+            en=False,
         )
         self.add(
             "uptime", "sensor", None,

@@ -17,6 +17,7 @@ its source, read at the time this was built:
   silently dropped.
 """
 
+import datetime
 import json
 
 import conftest
@@ -140,6 +141,8 @@ def test_the_expected_entities_are_all_there(live_bridge, factory):
         "power", "channel", "program", "next_program", "recording", "active_recordings",
         "next_timer", "volume", "mute", "channel_select", "screen", "screenshot",
         "restart_gui", "refresh_discovery", "snr", "agc", "ber", "recording_disk", "uptime",
+        "process_memory", "process_memory_peak", "process_threads", "process_open_files",
+        "process_started",
     }
 
 
@@ -181,13 +184,28 @@ def test_the_programme_attributes_flatten_the_next_programme(live_bridge, factor
 
 
 def test_the_next_timer_is_a_timestamp_home_assistant_will_take(live_bridge, factory):
-    """🔴 A timestamp sensor refuses epoch seconds and refuses a time with no zone."""
+    """🔴 A timestamp sensor refuses epoch seconds and refuses a time with no zone.
+
+    Rendered rather than matched as a string. The string was matched for two
+    releases and said everything a reader wanted to hear — `timestamp_utc` is in
+    there, `+00:00` is in there — while the template appended a second offset to
+    a filter that already ends in one. Home Assistant answers `…+00:00+00:00`
+    with „Invalid state message" and stores nothing, so the sensor read unknown
+    for ever and no test could tell.
+    """
     sensor = components(factory)["next_timer"]
     assert sensor["dev_cla"] == "timestamp"
-    assert "timestamp_utc" in sensor["val_tpl"]
-    assert "+00:00" in sensor["val_tpl"]
-    # And the „no timer" case is the literal None, which is the unknown state.
-    assert "{% else %}None{% endif %}" in sensor["val_tpl"]
+
+    rendered = conftest.render_value_template(
+        sensor["val_tpl"], {"next": {"begin": 1789042109}}
+    )
+    assert datetime.datetime.fromisoformat(rendered) == datetime.datetime(
+        2026, 9, 10, 12, 8, 29, tzinfo=datetime.timezone.utc
+    )
+
+    # And the „no timer" case is the literal None, which Home Assistant's MQTT
+    # sensor turns into the unknown state before it tries to parse anything.
+    assert conftest.render_value_template(sensor["val_tpl"], {"next": None}) == "None"
 
 
 def test_the_volume_number_is_a_slider_from_zero_to_a_hundred(live_bridge, factory):
