@@ -175,6 +175,63 @@ def test_tls_uses_the_configured_ca(make_bridge, factory, settings):
     assert factory.client.tls == "/etc/ssl/certs/broker.pem"
 
 
+def test_a_field_the_payload_stamps_itself_is_not_a_change(connected_bridge, factory):
+    """A wall-clock stamp must not decide whether the box changed.
+
+    Without this, a topic that says when it was built republishes itself every
+    time it is built — which is exactly the recorder churn publish-on-change
+    exists to prevent.
+    """
+    topic = "enigma2/" + NODE + "/demo"
+    connected_bridge.publish_state("demo", {"generated": 1, "value": 7},
+                                   volatile=("generated",))
+    factory.client.clear()
+
+    connected_bridge.publish_state("demo", {"generated": 2, "value": 7},
+                                   volatile=("generated",))
+    assert factory.client.all_for(topic) == []
+
+    connected_bridge.publish_state("demo", {"generated": 3, "value": 8},
+                                   volatile=("generated",))
+    assert factory.client.last(topic).json() == {"generated": 3, "value": 8}
+
+
+def test_the_snapshot_records_what_the_change_test_will_compare(make_bridge, factory, settings):
+    """The connect snapshot and a later publish must measure the topic the same way.
+
+    `on_connect` sends everything whether or not it moved, because a broker that
+    lost its retained store has to be able to converge. What the snapshot
+    records as sent is then what the next publish is judged against, so a
+    snapshot that forgot which fields are volatile would make the first rebuild
+    after every connect look like a change — the same defect once per
+    connection rather than once per refresh.
+
+    This goes through `publish_snapshot` itself rather than calling the encoder
+    underneath it, because the wiring between the two is the thing that can be
+    wrong.
+    """
+    class Grid(Publisher):
+        name = "hdd"
+        volatile = ("generated",)
+
+        def snapshot(self):
+            return {"demo": {"generated": 1, "value": 7}}
+
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    bridge = make_bridge()
+    bridge.register_publisher(Grid())
+    bridge.start()
+    factory.client.fire_connect()
+
+    topic = "enigma2/" + NODE + "/demo"
+    assert factory.client.last(topic).json() == {"generated": 1, "value": 7}
+    factory.client.clear()
+
+    bridge.publisher("hdd").publish("demo", {"generated": 2, "value": 7})
+    assert factory.client.all_for(topic) == []
+
+
 def test_a_second_connect_republishes_everything(connected_bridge, factory):
     factory.client.clear()
     factory.client.fire_connect()

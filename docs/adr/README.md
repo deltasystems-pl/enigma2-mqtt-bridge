@@ -61,3 +61,4 @@ What this costs, what it rules out, and what has to change if it is ever reverse
 | [0003](0003-control-feedback-and-household-features.md) | Control feedback and household features — the 0.2.0 and 0.3.0 plan | accepted 2026-09-21, amended 2026-09-22, extended by [ADR-0004](0004-remote-uninstall.md), §3 partly superseded by [ADR-0005](0005-softcam-restart.md) |
 | [0004](0004-remote-uninstall.md) | Remote uninstall behind a box-side permission | accepted 2026-09-22, implementation pending |
 | [0005](0005-softcam-restart.md) | The softcam is restarted by collapsing its instances, counted by process roots | accepted 2026-09-22 |
+| [0006](0006-volatile-fields-and-publish-on-change.md) | A self-stamped field takes no part in publish-on-change | accepted 2026-09-22 |
