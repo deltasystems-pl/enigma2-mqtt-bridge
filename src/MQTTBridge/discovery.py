@@ -161,7 +161,8 @@ def _kibibytes(field):
 
 
 def build_discovery_components(node_id, friendly_name, base_topic, info, prefix="homeassistant",
-                               channel_options=(), deep_standby_allowed=False, previous=None):
+                               channel_options=(), deep_standby_allowed=False,
+                               softcam_restart_allowed=False, previous=None):
     """Home Assistant discovery payloads, as {topic: payload}.
 
     One device-based payload carrying every component, and eight device
@@ -183,7 +184,7 @@ def build_discovery_components(node_id, friendly_name, base_topic, info, prefix=
     root = str(base_topic).strip("/") + "/" + str(node_id)
 
     builder = _Components(node_id, slug, root, capabilities)
-    builder.add_all(channel_options, deep_standby_allowed)
+    builder.add_all(channel_options, deep_standby_allowed, softcam_restart_allowed)
     components = builder.finish(previous)
 
     payload = {
@@ -257,7 +258,7 @@ class _Components:
 
     # --------------------------------------------------------------- the entities --
 
-    def add_all(self, channel_options, deep_standby_allowed):
+    def add_all(self, channel_options, deep_standby_allowed, softcam_restart_allowed=False):
         self.add(
             "power", "switch", "power",
             name="Power",
@@ -432,6 +433,35 @@ class _Components:
             if unit:
                 fields["unit_of_meas"] = unit
             self.add(key, "sensor", "tuner", **fields)
+        self.add(
+            "softcam", "sensor", "softcam",
+            name="Softcam",
+            stat_t=self.topic("softcam"),
+            val_tpl="{{ value_json.selected | default(none) }}",
+            json_attr_t=self.topic("softcam"),
+            json_attr_tpl=(
+                "{{ {'running_instances': value_json.running_instances, "
+                "'last_restart': value_json.last_restart, "
+                "'last_restart_reason': value_json.last_restart_reason, "
+                "'restarts_today': value_json.restarts_today, "
+                "'manager_check_on_start': value_json.manager_check_on_start, "
+                "'manager_timer_minutes': value_json.manager_timer_minutes} | tojson }}"
+            ),
+            ent_cat="diagnostic",
+            ic="mdi:key-chain-variant",
+        )
+        if softcam_restart_allowed:
+            # The same rule as the deep-standby buttons: a control the box has
+            # not been told it may honour is a control somebody presses twice and
+            # then reports. The capability says the box *could*; the permission
+            # says it *may*, and both have to be true.
+            self.add(
+                "softcam_restart", "button", "softcam",
+                name="Restart the softcam",
+                cmd_t=self.topic("cmd/softcam_restart"),
+                ent_cat="config",
+                ic="mdi:key-wireless",
+            )
         self.add(
             "recording_disk", "binary_sensor", "hdd",
             name="Recording disk",

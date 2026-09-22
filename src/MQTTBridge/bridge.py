@@ -693,6 +693,9 @@ class Bridge:
             # From the same payload the announcement carries, so what is
             # announced and what is published cannot disagree about it.
             deep_standby_allowed=bool(info.get("settings", {}).get("deep_standby_allowed")),
+            softcam_restart_allowed=bool(
+                info.get("settings", {}).get("softcam_restart_allowed")
+            ),
             previous=self.state.component_keys,
         )
         if not components:

@@ -24,6 +24,24 @@ version that has no section here.
   resident set is the only one enabled by default. There is no setting — the topic reveals nothing
   about what anybody is watching — and unlike every other poll here it runs on the main loop,
   because procfs is memory and cannot block.
+- **`cmd/softcam_restart`, and an opt-in automatic restart behind the same permission.** The
+  household symptom is a channel that stops decoding; underneath it, an image whose softcam
+  manager starts the bare binary can leave several copies of the cam running and none of them
+  working. So the command is not „run the init script" and not „restart the process": it
+  **collapses the running copies to exactly one**, signalling every instance of the binary the
+  image selected, waiting up to five seconds, killing what is left, and starting one with the
+  image's own command line. 🔴 The binary is resolved on the receiver and **no part of the command
+  line comes from the payload**.
+- **A new retained `softcam` topic and capability**, carrying the selected binary, how many
+  instances are running, the last restart and its reason, the count since local midnight, and two
+  read-only facts about the image: whether its own liveness check will add a copy at every
+  interface start on this receiver, and its periodic check interval when that is switched on.
+  Those two are the difference between a receiver that needs this feature and one that does not,
+  and they save a diagnosis that would otherwise need an SSH session on somebody else's box.
+- **`softcam_restart_allowed`**, a box-only permission echoed read-only in `info.settings` beside
+  `deep_standby_allowed`, and **`softcam_autoheal`** with **`softcam_autoheal_seconds`** (default
+  90, range 30–600), which are writable through `cmd/config` because they only tune a restart the
+  receiver has already permitted.
 
 ### Fixed
 
@@ -35,6 +53,26 @@ version that has no section here.
   copied the same shape from it — and it was invisible to both test suites because they compared
   the template as a string and never rendered it. The two timestamp templates are now rendered in
   the tests and the result is parsed as a datetime.
+
+### Notes
+- **An instance is not a process.** A cam that forks a supervisor to keep its worker shows two
+  processes for one instance, so `running_instances` counts matched processes whose parent is not
+  itself matched — a plain process count reports a fault on a healthy receiver. A process is
+  matched on its `comm` **and** on `/proc/<pid>/exe`: the kernel keeps only fifteen characters of
+  a command name, so two binaries differing after the fifteenth are otherwise indistinguishable.
+  `pgrep -f` is not used anywhere, because it matches the shell running the search.
+- **The automatic restart uses the whole recording guard**, exactly as a manual one does: refused
+  while recording, with a timer due within ten minutes, and when the image will not say. A restart
+  landing close to a timer risks the opening seconds of the recording, and a scrambled recording
+  is recoverable while a truncated one is not.
+- **The decode signal is read even with `cam_telemetry` off** — a repair must not require a
+  privacy switch to be turned on — and only the modification time of `/tmp/ecm.info` is ever read.
+  Nothing else in that file reaches the broker, `last_error`, a log line or a diagnostic.
+  Absence is read as age rather than as a fault, because the cam removes the file when it stops
+  descrambling and on a free-to-air channel that is the healthy state.
+- **A restart is refused for the first sixty seconds after the plugin starts.** The image's own
+  check fires about a second after every interface start, and restarting inside that window races
+  a copy already on its way.
 
 ### Documentation
 

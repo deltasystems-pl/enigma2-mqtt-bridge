@@ -41,14 +41,23 @@ REMOTE_SETTING_NAMES = (
     "screenshot_delay",
     "cam_telemetry",
     "oscam_telemetry",
+    # Not a permission: these two only *tune* a restart the box has already been
+    # told it may perform, which is why they are here and `softcam_restart_allowed`
+    # is in the read-only list below.
+    "softcam_autoheal",
+    "softcam_autoheal_seconds",
 )
 # Published in `info.settings` and refused by `cmd/config`, like any other key
 # that is not in the allowlist above. A setting that *enables* a command is set
 # on the box's own setup screen and nowhere else; echoing it lets a consumer
 # hide a control the box would always refuse instead of offering one that fails.
-READ_ONLY_SETTING_NAMES = ("deep_standby_allowed",)
+READ_ONLY_SETTING_NAMES = ("deep_standby_allowed", "softcam_restart_allowed")
 SCREENSHOT_INTERVAL_LIMITS = (5, 3600)
 SCREENSHOT_DELAY_LIMITS = (1, 30)
+# Below thirty seconds the detector would be reading noise: a healthy encrypted
+# channel refreshes its ECM file about every ten, and the spread is nine to
+# eleven. Above ten minutes it is no longer a repair.
+SOFTCAM_AUTOHEAL_LIMITS = (30, 600)
 
 DEFAULT_BASE_TOPIC = "enigma2"
 DEFAULT_DISCOVERY_PREFIX = "homeassistant"
@@ -79,6 +88,9 @@ SETTING_NAMES = (
     "oscam_password",
     "bouquets_for_select",
     "deep_standby_allowed",
+    "softcam_restart_allowed",
+    "softcam_autoheal",
+    "softcam_autoheal_seconds",
     "log_level",
     "epg_grid_events",
 )
@@ -110,6 +122,9 @@ SETTING_KINDS = {
     "oscam_password": "text",
     "bouquets_for_select": "text",
     "deep_standby_allowed": "bool",
+    "softcam_restart_allowed": "bool",
+    "softcam_autoheal": "bool",
+    "softcam_autoheal_seconds": "int",
     "log_level": "choice",
     "epg_grid_events": "int",
 }
@@ -169,6 +184,13 @@ def _build():
     section.oscam_identity_salt = ConfigText(default="", fixed_size=False)
     section.bouquets_for_select = ConfigText(default="", fixed_size=False)
     section.deep_standby_allowed = ConfigYesNo(default=False)
+    # Permissions default off. This one gates a command that stops a running
+    # program on the receiver, so it is granted on the box and nowhere else.
+    section.softcam_restart_allowed = ConfigYesNo(default=False)
+    section.softcam_autoheal = ConfigYesNo(default=False)
+    section.softcam_autoheal_seconds = ConfigInteger(
+        default=90, limits=SOFTCAM_AUTOHEAL_LIMITS
+    )
     section.log_level = ConfigSelection(
         default="info", choices=[(level, level) for level in LOG_LEVELS]
     )
@@ -284,6 +306,10 @@ def validate_remote_settings(raw, section=None):
     delay = raw.get("screenshot_delay", value("screenshot_delay", section))
     cam_telemetry = raw.get("cam_telemetry", value("cam_telemetry", section))
     oscam_telemetry = raw.get("oscam_telemetry", value("oscam_telemetry", section))
+    autoheal = raw.get("softcam_autoheal", value("softcam_autoheal", section))
+    autoheal_seconds = raw.get(
+        "softcam_autoheal_seconds", value("softcam_autoheal_seconds", section)
+    )
     if not isinstance(publish_keys, bool):
         raise ValueError("publish_keys must be true or false")
     if not isinstance(screenshot, str) or screenshot not in SCREENSHOT_MODES:
@@ -304,6 +330,15 @@ def validate_remote_settings(raw, section=None):
         raise ValueError("cam_telemetry must be true or false")
     if not isinstance(oscam_telemetry, bool):
         raise ValueError("oscam_telemetry must be true or false")
+    if not isinstance(autoheal, bool):
+        raise ValueError("softcam_autoheal must be true or false")
+    if isinstance(autoheal_seconds, bool) or not isinstance(autoheal_seconds, int):
+        raise ValueError("softcam_autoheal_seconds must be an integer")
+    minimum, maximum = SOFTCAM_AUTOHEAL_LIMITS
+    if not minimum <= autoheal_seconds <= maximum:
+        raise ValueError(
+            f"softcam_autoheal_seconds must be between {minimum} and {maximum}"
+        )
     return {
         "publish_keys": publish_keys,
         "screenshot": screenshot,
@@ -311,6 +346,8 @@ def validate_remote_settings(raw, section=None):
         "screenshot_delay": delay,
         "cam_telemetry": cam_telemetry,
         "oscam_telemetry": oscam_telemetry,
+        "softcam_autoheal": autoheal,
+        "softcam_autoheal_seconds": autoheal_seconds,
     }
 
 

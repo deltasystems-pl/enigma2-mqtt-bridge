@@ -55,8 +55,9 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
   "settings": {"publish_keys": true, "screenshot": "on_zap",
                "screenshot_interval": 60, "screenshot_delay": 4,
                "cam_telemetry": false, "oscam_telemetry": false,
-               "deep_standby_allowed": false},
-  "capabilities": ["power", "service", "epg", "tuner", "recording", "timers",
+               "softcam_autoheal": false, "softcam_autoheal_seconds": 90,
+               "deep_standby_allowed": false, "softcam_restart_allowed": false},
+  "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
                    "volume", "hdd", "process", "channels", "bouquet_context", "epg_grid", "keys",
                    "screenshot", "message"]
 }
@@ -72,7 +73,7 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
 | `ip` | string | Current LAN address |
 | `uptime` | int | Seconds since boot |
 | `ha_mode` | string | `discovery` \| `integration` \| `off` — the acknowledgement of `cmd/ha_mode` |
-| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5–3600), `screenshot_delay` (post-zap settling seconds, 1–30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default). **Read-only**: `deep_standby_allowed` (bool, off by default). See below. |
+| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5–3600), `screenshot_delay` (post-zap settling seconds, 1–30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30–600). **Read-only**: `deep_standby_allowed` and `softcam_restart_allowed` (bools, off by default). See below. |
 | `capabilities` | list of strings | Which hooks this image actually gave the plugin |
 
 **Presence in `settings` is not permission to write it back.** Until 0.2.0 this object was „the
@@ -84,6 +85,7 @@ settings it did mean to change as well.
 | Read-only member | Since | Meaning | Where it is set |
 |---|---|---|---|
 | `deep_standby_allowed` | 0.2.0 | Whether `cmd/deep_standby` and `cmd/reboot` are permitted on this box. Always present, whichever way it is set | The box's setup screen, *Menu → Plugins → MQTT Bridge*, or the provisioning file at first install — never over MQTT, never from the OpenWebif status page |
+| `softcam_restart_allowed` | 0.3.0 | Whether `cmd/softcam_restart` is permitted, and with it the opt-in auto-heal. Always present, whichever way it is set | The same three places, and nowhere else |
 
 The rule behind which side of the line a setting falls on: one that **enables a command** is
 settable on the box only; one that **tunes a command already permitted** may be remote. A member
@@ -95,8 +97,8 @@ reconnects the bridge and a connect publishes the snapshot.
 plugin detects what it managed to attach and names it here rather than assuming. A consumer
 hides what is missing instead of showing a dead entity. The names are the feature areas, and
 nothing else is ever in the list: `power`, `service`, `epg`, `epg_grid`, `tuner`, `recording`,
-`timers`, `volume`, `cam`, `oscam`, `keys`, `screenshot`, `message`, `hdd`, `process`, `channels`,
-`bouquet_context`. A build that has bound no
+`timers`, `volume`, `cam`, `oscam`, `softcam`, `keys`, `screenshot`, `message`, `hdd`,
+`process`, `channels`, `bouquet_context`. A build that has bound no
 feature area publishes `[]` — the connection, `info` and the commands are the plugin itself and
 are not capabilities.
 
@@ -434,6 +436,39 @@ CCcam share count and is deliberately separate: it is never added to the physica
 `api_access: granted` means only that the API returned these read-only views; it does not assert
 that OSCam authentication is enabled. `readonly` reports OSCam's own API flag.
 
+### `<base>/<node>/softcam` — since 0.3.0
+
+```json
+{"selected": "OSCam_11718-r798", "running_instances": 1,
+ "last_restart": 1789459200, "last_restart_reason": "manual", "restarts_today": 2,
+ "manager_check_on_start": true, "manager_timer_minutes": null}
+```
+
+Retained, and present when `softcam` is a capability — which it is only when the image starts the
+cam through its own manager rather than through `/etc/init.d/softcam`, the autostart entry resolves
+to an executable regular file directly under `/usr/softcams/`, and the plugin knows a start line for
+that binary's family.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `selected` | string or `null` | The **basename of the binary** the image selected for autostart, for example `OSCam_11718-r798`. Not a family name, and never the protocol the cam speaks to its servers — a receiver can run an OSCam that talks `cccam` outward, and those are different things |
+| `running_instances` | integer or `null` | How many **instances** are running: matched processes whose parent is not itself matched. A healthy box reports **1**, because a cam that forks a supervisor is one instance presenting as two processes. More than one is the fault this topic exists for. `null` means the count could not be taken, which is not the same answer as `0` |
+| `last_restart` | integer or `null` | Unix epoch seconds, UTC, of the last restart this plugin performed |
+| `last_restart_reason` | `manual` \| `autoheal` \| `null` | Which path performed it |
+| `restarts_today` | integer | Restarts since **local** midnight, and the number that makes a restart loop visible. 🔴 It lives in memory while this topic is retained, so after a receiver reboot a consumer sees the last published value until the plugin's connect snapshot replaces it: it is **not** a durable total. It is recomputed from a stored local date when the topic is published rather than reset by a timer, so a clock step shortly after boot cannot strand it |
+| `manager_check_on_start` | bool | Whether the image's own liveness check will add a copy at every graphical-interface start on this receiver. That check looks the cam up by process name, and the kernel caps that name at 15 characters, so a binary with a longer basename can never be found and the check starts another one instead of leaving the running one alone. This is the difference between a receiver that needs this feature and one that does not |
+| `manager_timer_minutes` | integer or `null` | The image's periodic liveness-check interval in minutes when it is switched on, and `null` when it is not. Worth watching: on a receiver where `manager_check_on_start` is true, switching that timer on adds an instance every interval, indefinitely |
+
+`running_instances` is polled once a minute rather than only written after a restart, because it
+changes without the plugin: the image adds a copy at every interface start, and on most receivers
+the household can start and stop the cam from the extensions menu at any time. The poll reads
+`/proc/<pid>/stat` and `/proc/<pid>/exe`, and nothing else.
+
+A process is matched on **two** conditions: its `comm` equals the first 15 characters of the
+binary's basename, and `/proc/<pid>/exe` resolves to that binary's exact path. The second one is
+not optional — two binaries differing only after the fifteenth character truncate to the same
+`comm`.
+
 ### `<base>/<node>/hdd`
 
 ```json
@@ -587,8 +622,9 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `timer` | see below | Adds or deletes a recording timer | An add that overlaps an existing timer, or refers to an unknown event, is refused — and so is one the receiver quietly dropped as a duplicate of a timer it already had |
 | `record` | `start` \| `stop` | Starts or stops an instant recording of the current service | `start` records the current service for two hours; `stop` with nothing recording is a no-op with a note in `last_error` |
 | `screenshot` | any | Captures `screen` now, in standby as well | Rate-limited to one per five seconds |
+| `softcam_restart` — since 0.3.0 | any (`PRESS` by convention) | Stops **every** running instance of the cam the image selected, then starts exactly one, with the image's own command line | Refused unless `softcam_restart_allowed` is on; refused by the same recording guard as `deep_standby` — while recording, with a timer due within 10 minutes, and when the image will not say; refused for the first 60 seconds after the plugin starts, because the image's own check runs a moment after that and restarting inside that window races a copy already on its way; at most one manual restart a minute; refused while one is already running. 🔴 **The binary is resolved on the box and no part of the command line comes from the payload** |
 | `epg_grid` | any | Rebuilds and republishes **every** `epg_grid/<bouquet_slug>` topic | Refused with a note in `last_error` when `epg_grid_events` is `0` |
-| `config` | `{"publish_keys": false, "screenshot": "interval", "screenshot_interval": 90, "screenshot_delay": 4, "cam_telemetry": false, "oscam_telemetry": false}` | Atomically replaces the remotely writable settings subset and publishes fresh `info`/discovery | The original three keys remain required; newer keys are independently optional for older clients and preserve their current values when omitted. Unknown keys and coercion are refused, and a persistence failure applies none of them |
+| `config` | `{"publish_keys": false, "screenshot": "interval", "screenshot_interval": 90, "screenshot_delay": 4, "cam_telemetry": false, "oscam_telemetry": false, "softcam_autoheal": false, "softcam_autoheal_seconds": 90}` | Atomically replaces the remotely writable settings subset and publishes fresh `info`/discovery | The original three keys remain required; newer keys are independently optional for older clients and preserve their current values when omitted. Unknown keys and coercion are refused, and a persistence failure applies none of them |
 | `discovery` | any | Republishes the announcement, the channel list, and the discovery payloads in discovery mode | — |
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
 | `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
@@ -618,12 +654,14 @@ Either way, `timers` (and `recording` when it is imminent) is republished afterw
 
 This is deliberately not a general settings API. Broker credentials, TLS, identity, topic names,
 the configured bouquet filter, logging and destructive-command permission cannot be changed
-through `cmd/config`. `deep_standby_allowed` is **read** from `info.settings` (§1) and is refused
-here like any other key outside the allowlist; it is granted on the box's setup screen or in the
-provisioning file, and reading a setting and writing it are two different permissions. Home Assistant mode has its dedicated command, and active TV bouquet
+through `cmd/config`. `deep_standby_allowed` and `softcam_restart_allowed` are **read** from `info.settings` (§1) and are
+refused here like any other key outside the allowlist; they are granted on the box's setup screen
+or in the provisioning file, and reading a setting and writing it are two different permissions. Home Assistant mode has its dedicated command, and active TV bouquet
 context has `cmd/bouquet`; neither broadens this settings API. The command accepts the three original keys plus independently optional `screenshot_delay`,
-`cam_telemetry`, and `oscam_telemetry`,
-with their JSON types unchanged. The plugin validates the whole object before assigning anything,
+`cam_telemetry`, `oscam_telemetry`, `softcam_autoheal` and `softcam_autoheal_seconds`,
+with their JSON types unchanged. The two softcam keys only *tune* a restart the receiver has
+already permitted; with `softcam_restart_allowed` off they change nothing, because the
+permission is the gate. The plugin validates the whole object before assigning anything,
 persists the values through enigma2's settings store, then rebinds only the affected publishers
 so the new behaviour is immediate. A fresh `info.settings` object is the by-effect acknowledgement.
 Switching screenshots off also retracts the retained `screen` image so disabling the private
@@ -699,7 +737,7 @@ It is a cleanup, not a factory reset: settings are untouched.
   "boxtype": "vuuno4kse",
   "mac": "00:00:5e:00:53:01",
   "ip": "192.0.2.12",
-  "capabilities": ["power", "service", "epg", "tuner", "recording", "timers",
+  "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
                    "volume", "hdd", "process", "channels", "bouquet_context", "epg_grid", "keys",
                    "screenshot", "message"],
   "ha_mode": "discovery"
@@ -752,6 +790,8 @@ gets no volume entity, rather than one that never moves. The unique id of each i
 | `screenshot`, `restart_gui`, `refresh_discovery` | button | — | And `deep_standby` and `reboot` **only** when `deep_standby_allowed` is on |
 | `snr`, `agc`, `ber` | sensor | `tuner` | Diagnostic, disabled by default |
 | `recording_disk` | binary_sensor | `hdd` | Diagnostic |
+| `softcam` | sensor | `softcam` | Since 0.3.0. Diagnostic. State is `selected`; the counts and the last restart are JSON attributes |
+| `softcam_restart` | button | — | Since 0.3.0, and only when `softcam` is a capability **and** `softcam_restart_allowed` is on |
 | `process_memory` | sensor | `process` | Diagnostic, MiB, `data_size`, measurement — the one of these five that is **enabled** by default |
 | `process_memory_peak` | sensor | `process` | Diagnostic, MiB, `data_size`, measurement, disabled by default |
 | `process_threads`, `process_open_files` | sensor | `process` | Diagnostic, measurement, disabled by default |
@@ -849,17 +889,15 @@ rule is unchanged, and it is how a consumer tells a plan from a feature.
 
 ### `info.settings` gains further members — 0.3.0
 
-The object already carries read-only members and says so in §1: `deep_standby_allowed` is on
-`main` and is documented there, which is why it is not in this section. These join it on the same
-terms, rather than inventing a separate `info.permissions`.
+The object already carries read-only members and says so in §1: `deep_standby_allowed` and
+`softcam_restart_allowed` are on `main` and are documented there, which is why they are not in
+this section. These join them on the same terms, rather than inventing a separate
+`info.permissions`.
 
 | Member | Release | Writable | Meaning |
 |---|---|---|---|
-| `softcam_restart_allowed` | 0.3.0 | **no** | Whether `cmd/softcam_restart` is permitted |
 | `epg_import_allowed` | 0.3.0 | **no** | Whether `cmd/epg_import` is permitted |
 | `uninstall_allowed` | 0.3.0 | **no** | Whether `cmd/uninstall` is permitted ([ADR-0004](adr/0004-remote-uninstall.md)). Default off, and granted on the box only |
-| `softcam_autoheal` | 0.3.0 | yes | Opt-in automatic softcam restart, default `false` |
-| `softcam_autoheal_seconds` | 0.3.0 | yes | How long a stuck decode must hold, default `90`, range 30–600 |
 
 Which side of the line each one falls on is §1's rule: a setting that **enables a command** is
 settable on the box only; a setting that **tunes a command already permitted** may be remote.
@@ -874,21 +912,6 @@ Read back from the system rather than assumed from the fact that a command was i
 reports Wake-on-LAN supported and **not armed** cannot be woken from deep standby, which is worth
 knowing before enabling `deep_standby_allowed`. The `wol_arm` setting (box-only, default off) arms
 the interface at start and again immediately before deep standby.
-
-### `<base>/<node>/softcam` — 0.3.0, capability `softcam`
-
-```json
-{"selected": "oscam", "running_instances": 1, "last_restart": 1789459200,
- "last_restart_reason": "manual", "restarts_today": 2}
-```
-
-| Field | Type | Meaning |
-|---|---|---|
-| `selected` | string or `null` | The cam binary the **image** has selected for autostart, resolved on the box |
-| `running_instances` | integer or `null` | How many are running now. More than one is the fault this exists for |
-| `last_restart` | integer or `null` | Unix epoch seconds, UTC |
-| `last_restart_reason` | `manual` \| `autoheal` \| `null` | |
-| `restarts_today` | integer | Reset at local midnight. This is the number that makes a restart loop visible |
 
 ### `<base>/<node>/epg_import` — 0.3.0, capability `epg_import`
 
@@ -914,7 +937,6 @@ plugin browser, an input box or a recording dialog.
 
 | Command | Payload | Effect | Guard |
 |---|---|---|---|
-| `softcam_restart` | any (`PRESS` by convention) | Stops **every** running instance of the cam the image selected, then starts exactly one | Refused unless `softcam_restart_allowed` is on; refused while recording; at most one manual restart per minute. 🔴 **The binary is resolved on the box and no part of the command line comes from the payload** |
 | `epg_import` | any (`PRESS` by convention) | Runs the image's EPG importer, then rebuilds and republishes the grid | Refused unless `epg_import_allowed` is on; refused while recording; refused while an import is already running |
 | `uninstall` | the node id (confirmation) | Removes the plugin from the receiver: retracts every retained topic it owns, publishes a final `offline`, removes the package, and restarts the interface | Refused unless `uninstall_allowed` is on; refused unless the payload matches this node's id; refused while recording or with a timer due, like every other command that restarts the interface |
 

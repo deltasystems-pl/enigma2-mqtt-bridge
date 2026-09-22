@@ -107,6 +107,18 @@ msgstr ""
 msgid "Allow deep standby and reboot"
 msgstr ""
 
+#: src/MQTTBridge/setup.py:52
+msgid "Allow restarting the softcam"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:53
+msgid "Restart the softcam when it stops decoding"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:54
+msgid "Wait before an automatic softcam restart (seconds)"
+msgstr ""
+
 #: src/MQTTBridge/setup.py:48
 msgid "Log level"
 msgstr ""

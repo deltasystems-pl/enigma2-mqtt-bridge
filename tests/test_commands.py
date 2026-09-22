@@ -134,7 +134,10 @@ def test_config_persists_all_values_rebinds_hooks_and_publishes_info(
         "screenshot_delay": 9,
         "cam_telemetry": False,
         "oscam_telemetry": False,
+        "softcam_autoheal": False,
+        "softcam_autoheal_seconds": 90,
         "deep_standby_allowed": False,
+        "softcam_restart_allowed": False,
     }
 
 

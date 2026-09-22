@@ -23,6 +23,7 @@ from .recording import RecordingPublisher, TimersPublisher
 from .remote import KeyPublisher
 from .screen import ScreenPublisher
 from .service import EpgPublisher, ServicePublisher, TunerPublisher
+from .softcam import SoftcamPublisher
 from .volume import VolumePublisher
 
 PUBLISHER_CLASSES = (
@@ -32,6 +33,7 @@ PUBLISHER_CLASSES = (
     TunerPublisher,
     CamPublisher,
     OscamPublisher,
+    SoftcamPublisher,
     RecordingPublisher,
     TimersPublisher,
     VolumePublisher,

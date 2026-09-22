@@ -237,6 +237,9 @@ def test_valid_post_applies_only_normalized_remote_settings(monkeypatch):
             "screenshot_delay": 4,
             "cam_telemetry": True,
             "oscam_telemetry": False,
+            # Not on the form, and carried through untouched rather than reset.
+            "softcam_autoheal": False,
+            "softcam_autoheal_seconds": 90,
         }
     ]
     assert b"Publisher settings saved" in body

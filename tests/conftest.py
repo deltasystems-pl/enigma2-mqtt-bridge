@@ -720,6 +720,17 @@ config = ConfigSubsection()
 config.plugins = ConfigSubsection()
 config.misc = ConfigSubsection()
 config.misc.standbyCounter = StandbyCounter()
+
+# The image's own softcam manager, which is not this plugin's configuration and
+# is only ever read. `softcams` selects between „the manager starts the bare
+# binary" (`None`, and the only choice the measured image offers) and „an init
+# script does", and the plugin behaves very differently in the two shapes.
+config.misc.softcams = ConfigSelection(choices=["None", "oscam"], default="None")
+config.softcammanager = ConfigSubsection()
+config.softcammanager.softcams_autostart = ConfigText(default="", fixed_size=False)
+config.softcammanager.softcamtimerenabled = ConfigYesNo(default=False)
+config.softcammanager.softcamtimer = ConfigInteger(default=6)
+
 configfile = ConfigFile()
 
 config_module.ConfigElement = ConfigElement
@@ -1554,6 +1565,10 @@ def fresh_receiver():
         counter = config.misc.standbyCounter
         counter.notifiers = []
         counter._value = 0
+        config.misc.softcams.value = "None"
+        config.softcammanager.softcams_autostart.value = ""
+        config.softcammanager.softcamtimerenabled.value = False
+        config.softcammanager.softcamtimer.value = 6
         enigma2_module.forget_missing()
         keys_module.forget_image_keys()
         remote_module.forget_rate_limit()
