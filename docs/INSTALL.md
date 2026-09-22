@@ -117,8 +117,10 @@ What it refuses to do is the other half:
   under it first, because a directory name may contain a newline and a naive line-by-line read
   would hand the second half of one to `rm` as a path relative to a working directory `opkg` never
   set;
-- a symlink is neither followed nor removed, and a bind mount under the plugin directory is not
-  crossed;
+- a symlink is neither followed nor removed, and a **different filesystem** mounted under the
+  plugin directory — a USB stick, a network share — is not walked into. `find -xdev` compares device
+  numbers, so a same-filesystem `mount --bind` is descended like any other directory and this is not
+  a guard against one;
 - a plugin directory with no `plugin.py` in it is left entirely alone. That is not an orphaned
   tree, it is a build-time packaging — OE strips sources out of a package into a separate one — and
   "every `.pyc` whose `.py` is missing" would there be every file the plugin has;
@@ -155,11 +157,84 @@ entities that nothing will ever update. The `prerm` script cannot do it for you,
 time `opkg` runs it the plugin may not be connected, and a package script has no business making
 network calls.
 
+**Removal takes the compiled plugin with it.** `opkg` deletes the files it installed, which are the
+`.py` ones; the `.pyc` files beside them were written by the receiver after the install and are in
+nobody's file list. On an OpenViX 6.6 receiver that used to leave forty files behind — the whole
+plugin, still compiled, in the legacy same-directory form that Python 3 imports on its own without
+a source next to it. enigma2's plugin loader finds a plugin by module name, so the GUI restart in
+step 3 loaded the plugin that had just been removed and it reconnected to the broker, while
+`opkg status` said nothing was installed.
+
+The package's `prerm` now deletes every `.pyc` and `.pyo` under
+`/usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge/`, and the compiled copy of the OpenWebif
+hook at `…/Plugins/Extensions/WebInterface/WebChilds/External/MQTTBridge.pyc`. Then it removes every
+directory it leaves empty, deepest first and the plugin directory last, so that after `opkg` has
+taken its own files there is nothing left to load. It runs on a removal only: an **upgrade** is
+swept by `postinst` instead, after the new tree is unpacked, which is the only moment at which
+„this bytecode has no source" is a true statement.
+
+What it refuses to do, again, is the other half:
+
+- **no `.py` and nothing else that is not bytecode is ever deleted** — those are `opkg`'s files, and
+  they are all still on disk while this runs;
+- a file of your own in the plugin directory keeps the directory, and every directory above it,
+  rather than being swept up with the package. `opkg` then prints one line naming how many are
+  left, once its own files are gone;
+- a plugin directory that is a **symlink** is refused, and the refusal is printed rather than
+  silent. This is where removal is stricter than the upgrade sweep: that one only deletes files,
+  while this one removes directories, and a directory somebody deliberately put somewhere else is
+  not a package script's to take. The same holds for a symlink on **any** component of
+  `WebInterface/WebChilds/External`;
+- nothing outside the plugin directory is read, deleted or removed, no symlink is followed, and a
+  **different filesystem** mounted under the plugin directory is not walked into — though a
+  same-filesystem `mount --bind` is descended like any other directory;
+- `External/` is OpenWebif's directory and is not swept — the hook is addressed by its exact path,
+  and nothing else in there is looked at;
+- nothing happens during an offline rootfs build, and no error in any of it can fail the removal.
+
+```
+MQTT Bridge: removed 40 compiled files from the plugin directory.
+MQTT Bridge: removed the compiled OpenWebif hook MQTTBridge.pyc
+```
+
+Three more lines are worth recognising if you see them, because each one means the sweep stopped
+short and left you something to finish by hand:
+
+```
+MQTT Bridge: /usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge is a symlink to /media/usb/MQTTBridge,
+so its compiled files were left in place; removing a directory somebody linked elsewhere is not this
+package's to do.
+```
+
+The plugin directory is a link — onto a USB stick, or off a full flash. Nothing under it was
+touched. Delete the named directory yourself once `opkg remove` has finished, and restart the GUI
+afterwards.
+
+```
+MQTT Bridge: /usr/lib/enigma2/python/Plugins/Extensions/WebInterface/WebChilds is a symlink, so the
+compiled OpenWebif hook under it was left in place; delete it by hand if you want it gone.
+```
+
+The same thing, one directory over: some part of the path to OpenWebif's `External/` is a link, so
+`MQTTBridge.pyc` under it was not deleted. It is one file, and OpenWebif ignores it once its `.py`
+is gone — but it is still there.
+
+```
+MQTT Bridge: this receiver's find has no -depth, so the empty directories under
+/usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge were left for opkg.
+```
+
+Every compiled file **was** deleted; only the emptied directories were left standing, because this
+receiver's `find` cannot list a tree deepest-first safely. `opkg` removes the directories it
+installed on its way out, so this usually resolves itself; if an empty
+`…/Extensions/MQTTBridge/` is still there afterwards, `rmdir` it.
+
 If you removed the package first, retract them by hand: publish an empty retained message to each
 topic under `enigma2/<node_id>/#`, to `enigma2mqtt/discovery/<node_id>/config`, and to the
 `homeassistant/device/<node_id>/config` and `homeassistant/device_automation/<node_id>/…` topics.
 `mosquitto_sub -v -t 'enigma2/#' --retained-only` shows you what is left.
 
 Uninstalling leaves the settings in `/etc/enigma2/settings` alone, so a reinstall finds its
-configuration. Remove the `config.plugins.mqttbridge.*` lines if you want them gone — the broker
-password is one of them.
+configuration — the sweep above deletes compiled Python and nothing else, and no part of removing
+the package reads or writes that file. Remove the `config.plugins.mqttbridge.*` lines by hand if you
+want them gone; the broker password is one of them.

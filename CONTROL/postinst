@@ -136,7 +136,10 @@ sweep_orphaned_bytecode() {
     # the day it happens a no-op instead of a self-destruct.
     [ -f "$dir/plugin.py" ] || return 0
 
-    # `-xdev` so a bind mount under the plugin directory is not crossed. Probed
+    # `-xdev` so a *different filesystem* mounted under the plugin directory —
+    # a USB stick, a network share — is not walked into. It is the device
+    # number that is compared, so a same-filesystem `mount --bind` is descended
+    # like any other directory and this is not a guard against one. Probed
     # rather than assumed: busybox builds it optionally, and a busybox without
     # it must lose the hardening rather than lose the sweep. Checked at
     # `-maxdepth 0`, so the probe does not walk the tree.

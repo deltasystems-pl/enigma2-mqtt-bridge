@@ -1,6 +1,6 @@
 # ADR-0003: Control feedback and household features — the 0.2.0 and 0.3.0 plan
 
-**Status:** accepted 2026-09-21
+**Status:** accepted 2026-09-21, amended 2026-09-22
 **Date:** 2026-09-21
 **Supersedes:** — (it extends [ADR-0000](0000-prd.md) and [ADR-0002](0002-scope-after-m0.md))
 
@@ -283,3 +283,40 @@ above and none of them reverses a decision.
 - **The OpenWebif status page shows only the writable settings.** The read-only permission above is
   deliberately not surfaced there; the page is for changing things, and the permission is set on
   the setup screen or in the provisioning file.
+
+## Amendment, 2026-09-22 — removal has to remove the plugin
+
+**Observed.** `opkg remove` left the plugin loadable. It deletes the files it installed, which are
+the `.py` ones; the `.pyc` files beside them are written by the image after the install and are in
+nobody's file list. On an OpenViX 6.6 receiver forty files survived the removal, in the legacy
+same-directory form that Python 3 imports without a source next to it, and enigma2's plugin loader
+enumerates by module name — so the next GUI restart loaded the removed plugin and it reconnected to
+the broker while `opkg status` said nothing was installed. The compiled OpenWebif hook in
+`WebChilds/External/` survived the same way. This is the removal-side twin of the upgrade orphan
+that `postinst` already sweeps, and it was missed because the sweep was designed against the
+upgrade, which is the case that had actually gone wrong on hardware.
+
+**Decision.** `CONTROL/prerm` sweeps bytecode, under the guards `postinst` already establishes: the
+plugin directory's basename is checked, no symlink is followed, no different filesystem mounted
+under it is walked into, and every path is checked to be under the resolved root before anything
+happens to it, because a directory name may contain a newline. It deletes `.pyc` and `.pyo` and nothing
+else — the `.py` files are opkg's and are all still on disk while it runs — and then removes the
+directories it leaves empty, deepest first, the plugin directory last.
+
+Three things are deliberately not shared with `postinst`, and each is a consequence of the
+difference between an upgrade and a removal:
+
+- **It sweeps only when opkg says `remove`** (or when it is run by hand with no argument at all).
+  The removal half of an upgrade is `postinst`'s, after the new tree is unpacked, which is the only
+  moment at which a compiled file without a source is an orphan rather than one the new package is
+  about to reuse. An argument this script does not recognise is treated as an upgrade, because that
+  is the half of the guess that leaves files alone.
+- **A symlinked plugin directory is refused rather than resolved.** `postinst` only ever deletes
+  files, so sweeping through a link is safe; this removes directories, and the last of them is the
+  plugin directory itself.
+- **A directory that was already empty is removed too.** During an upgrade an empty `screenshots/`
+  is one the plugin means to keep; during a removal the plugin is going away.
+
+**What it still does not do.** It does not touch `/etc/enigma2/settings`, so a reinstall finds its
+configuration, and it does not retract retained topics — that is `cmd/reset`, published while the
+plugin is still connected, and a package script has no business making network calls.
