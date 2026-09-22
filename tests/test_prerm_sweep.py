@@ -516,6 +516,25 @@ def test_a_symlinked_plugin_directory_is_refused(shell, tmp_path):
     assert "left in place" in result.stdout
 
 
+def test_a_dangling_relative_symlink_is_named_as_an_absolute_path(shell, tmp_path):
+    """`readlink` gives the link's own text, and that text may be relative.
+
+    A dangling link cannot be resolved, so its text is the only thing left to
+    name — and `../a removed medium/MQTTBridge` is relative to the directory the
+    link sits in, not to anything the reader can paste into a shell.
+    """
+    link = tmp_path / PLUGIN_PARENT / PLUGIN_NAME
+    link.parent.mkdir(parents=True)
+    link.symlink_to("../a removed medium/MQTTBridge", target_is_directory=True)
+
+    result = run(shell, link)
+
+    assert result.returncode == 0, result.stderr
+    assert "is a symlink to" in result.stdout
+    assert f"{link.parent}/../a removed medium/MQTTBridge" in result.stdout
+    assert link.is_symlink()
+
+
 def test_a_symlink_inside_the_tree_is_neither_followed_nor_removed(
     shell, plugin_dir, tmp_path
 ):

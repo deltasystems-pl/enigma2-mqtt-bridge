@@ -143,7 +143,17 @@ sweep_plugin_directory() {
     # rather than left with a promise that quietly did not hold.
     if [ -L "$dir" ]; then
         target=$(cd -P "$dir" 2>/dev/null && pwd -P)
+        # A dangling link cannot be resolved that way, so its own text is the
+        # only thing left to name — and that text may be relative, in which case
+        # it is relative to the directory the link is in and not to anything the
+        # reader can paste. Made absolute here, unresolved: `../x` is left as
+        # written inside an absolute path rather than tidied away, because the
+        # point is to say where to look and not to claim the path exists.
         [ -n "$target" ] || target=$(readlink "$dir" 2>/dev/null)
+        case "$target" in
+            ""|/*) ;;
+            *) target="${dir%/*}/$target" ;;
+        esac
         [ -n "$target" ] || target="a link this receiver cannot follow"
         printf '%s\n' "MQTT Bridge: $dir is a symlink to $target, so its compiled files were left in place; removing a directory somebody linked elsewhere is not this package's to do."
         return 0

@@ -180,9 +180,11 @@ What it refuses to do, again, is the other half:
 - a file of your own in the plugin directory keeps the directory, and every directory above it,
   rather than being swept up with the package. `opkg` then prints one line naming how many are
   left, once its own files are gone;
-- a plugin directory that is a **symlink** is refused untouched. This is where removal is stricter
-  than the upgrade sweep: that one only deletes files, while this one removes directories, and a
-  directory somebody deliberately put somewhere else is not a package script's to take;
+- a plugin directory that is a **symlink** is refused, and the refusal is printed rather than
+  silent. This is where removal is stricter than the upgrade sweep: that one only deletes files,
+  while this one removes directories, and a directory somebody deliberately put somewhere else is
+  not a package script's to take. The same holds for a symlink on **any** component of
+  `WebInterface/WebChilds/External`;
 - nothing outside the plugin directory is read, deleted or removed, no symlink is followed, and a
   **different filesystem** mounted under the plugin directory is not walked into — though a
   same-filesystem `mount --bind` is descended like any other directory;
@@ -194,6 +196,38 @@ What it refuses to do, again, is the other half:
 MQTT Bridge: removed 40 compiled files from the plugin directory.
 MQTT Bridge: removed the compiled OpenWebif hook MQTTBridge.pyc
 ```
+
+Three more lines are worth recognising if you see them, because each one means the sweep stopped
+short and left you something to finish by hand:
+
+```
+MQTT Bridge: /usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge is a symlink to /media/usb/MQTTBridge,
+so its compiled files were left in place; removing a directory somebody linked elsewhere is not this
+package's to do.
+```
+
+The plugin directory is a link — onto a USB stick, or off a full flash. Nothing under it was
+touched. Delete the named directory yourself once `opkg remove` has finished, and restart the GUI
+afterwards.
+
+```
+MQTT Bridge: /usr/lib/enigma2/python/Plugins/Extensions/WebInterface/WebChilds is a symlink, so the
+compiled OpenWebif hook under it was left in place; delete it by hand if you want it gone.
+```
+
+The same thing, one directory over: some part of the path to OpenWebif's `External/` is a link, so
+`MQTTBridge.pyc` under it was not deleted. It is one file, and OpenWebif ignores it once its `.py`
+is gone — but it is still there.
+
+```
+MQTT Bridge: this receiver's find has no -depth, so the empty directories under
+/usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge were left for opkg.
+```
+
+Every compiled file **was** deleted; only the emptied directories were left standing, because this
+receiver's `find` cannot list a tree deepest-first safely. `opkg` removes the directories it
+installed on its way out, so this usually resolves itself; if an empty
+`…/Extensions/MQTTBridge/` is still there afterwards, `rmdir` it.
 
 If you removed the package first, retract them by hand: publish an empty retained message to each
 topic under `enigma2/<node_id>/#`, to `enigma2mqtt/discovery/<node_id>/config`, and to the
