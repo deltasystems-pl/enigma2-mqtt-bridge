@@ -20,6 +20,11 @@ version that has no section here.
   left its lock behind, and a receiver at default settings refused as „different" — are fixed. The
   installer lives in the companion integration, so nothing in this package changed; the roadmap
   here was simply still describing a milestone as unproven.
+- **The companion integration's 0.2.0 is released**, so the README no longer says it „follows"
+  this one. Both halves of the pair are out: the compatibility table marks 0.2.0 as current on
+  both sides, M3 is ticked, and the paragraph under the milestone list says everything after M4 is
+  unreleased rather than everything after M2. M2's own open items — the long passive soak and the
+  deep-standby drill — are unchanged, and nothing in this package changed.
 
 ## [0.2.0] - 2026-09-22
 
