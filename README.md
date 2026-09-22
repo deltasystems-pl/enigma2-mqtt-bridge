@@ -88,7 +88,7 @@ The plugin has no telemetry, no cloud component and no update check that phones 
 SHA-256 on the [releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases):
 
 ```sh
-opkg install https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/download/v0.1.0/enigma2-plugin-extensions-mqttbridge_0.1.0_all.ipk
+opkg install https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/download/v0.2.0/enigma2-plugin-extensions-mqttbridge_0.2.0_all.ipk
 ```
 
 **From the opkg feed**, which gets you updates through the normal plugin browser — write
@@ -184,8 +184,8 @@ in Home Assistant's recorder database by default. If that matters in your househ
 
 | Plugin | Integration |
 |---|---|
-| 0.1.0 (current) | 0.1.0 |
-| 0.2.0 (unreleased) | 0.2.0 (unreleased) |
+| 0.1.0 | 0.1.0 |
+| 0.2.0 (current) | 0.2.0 |
 
 The integration warns on its `update` entity when the box runs a plugin older than the one it
 bundles.
@@ -196,39 +196,49 @@ bundles.
       questions closed in [ADR-0001](docs/adr/0001-m0-decisions.md). The scope added since is
       [ADR-0002](docs/adr/0002-scope-after-m0.md)
 - [x] **M1** — repository and skeleton: the plugin loads, connects, publishes `availability`
-      and `info`, and has a setup screen. Released as **v0.1.0**, which is what the feed and the
-      releases page still serve
-- [ ] **M2** — *code complete, awaiting acceptance.* Power, service, EPG, volume, recording,
-      timers, disk, keys, screenshot, the channel list, the EPG grid, bouquet context, the optional
-      CAM and OSCam telemetry, and every `cmd/*` with its guards are implemented and running on the
-      maintainer's box. The by-effect checklist and a 60-minute active soak have passed; the **long
-      passive soak** and the **watchdog-restart interplay** have not, and **deep standby with
-      Wake-on-LAN has never been drilled**
-- [ ] **M3** — the integration's entities: *live on the maintainer's Home Assistant, not released*
-- [ ] **M4** — the guided installer and the `update` entity: *coded and reviewed; the installer has
-      never been run end to end on a receiver that did not already have the plugin, and no real
-      rollback has been exercised*
+      and `info`, and has a setup screen. Released as **v0.1.0**
+- [x] **M2** — power, service, EPG, volume, recording, timers, disk, keys, screenshot, the channel
+      list, the EPG grid, bouquet context, the optional CAM and OSCam telemetry, and every `cmd/*`
+      with its guards. Released as **v0.2.0**, which is what the feed and the releases page serve.
+      The by-effect checklist and a 60-minute active soak have passed; the **long passive soak**
+      and the **watchdog-restart interplay** have not, and **deep standby with Wake-on-LAN has
+      never been drilled**
+- [ ] **M3** — the integration's entities: *live on the maintainer's Home Assistant; the
+      integration's own 0.2.0 release follows this one*
+- [ ] **M4** — the guided installer and the `update` entity: *coded, reviewed and exercised on one
+      receiver.* The installer has been run end to end three times on a box that did not have the
+      plugin, and a rollback has been exercised for real — a deliberately wrong broker password,
+      the plugin refused, the receiver restored to the byte and the interface restarted. Four
+      defects it found are fixed on the integration's `main`: a pending discovery offer blocked
+      the installer, the success screen was lost, the rollback misjudged the restart and left its
+      lock behind, and a receiver at default settings was refused as „different". The run that
+      ticks this box is the one after those fixes
 - [ ] **M5** — public beta `v0.x`: releases, opkg feed, HACS custom repository, testers per image
 - [ ] **M6** — `v1.0.0`: third-party feed and HACS default pull requests
 - [ ] **M7** — OE-Alliance recipe, OpenPLi, broker-login auto-provisioning
 
-Everything after M1 is unreleased. The package on the feed and on the releases page reports
-`0.1.0`; the development build reports `0.2.0`, which has no tag or release behind it yet.
+The feed and the releases page serve **0.2.0**, which is what this tree builds; the companion
+integration's own 0.2.0 release follows this one. Everything after M2 is unreleased, and two
+things M2 itself promised are still open: the **long passive soak** and the **deep-standby
+drill**.
 
-### What 0.2.0 and 0.3.0 will carry
+### What 0.2.0 shipped, and what 0.3.0 will carry
 
-Two days of household use produced a list of problems and a list of wants, and they are split into
-two releases. The reasoning is in
+Two days of household use produced a list of problems and a list of wants, and they were split
+into two releases. The reasoning is in
 [ADR-0003](docs/adr/0003-control-feedback-and-household-features.md); the contract additions that
 are still ahead are in [docs/TOPICS.md](docs/TOPICS.md) under **Planned (not implemented yet)**.
-**Nothing here is released.**
 
-**0.2.0 — fixes.** Cut after the guided installer has been run end to end on a receiver.
+**0.2.0 — fixes**, released 2026-09-22. Both halves are on their `main` branches; this release is
+the plugin's, and the integration's follows. Everything M2 covers, and from that list of problems:
 
-- *Plugin half implemented on `main` and unreleased; the integration's half is in progress.*
-  `deep_standby_allowed` is echoed **read-only** in `info.settings`, so a consumer can tell „the
+- `deep_standby_allowed` is echoed **read-only** in `info.settings`, so a consumer can tell „the
   box refused this" from „the box cannot do this" and hide a control that would always fail.
   🔴 This changes what `info.settings` means: presence no longer implies writability.
+- Removing or upgrading the package no longer leaves the plugin behind as compiled bytecode the
+  receiver imports on the next graphical-interface restart.
+
+The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 **0.3.0 — features**, in this order:
 
@@ -247,6 +257,12 @@ are still ahead are in [docs/TOPICS.md](docs/TOPICS.md) under **Planned (not imp
    is actually true. 🔴 Until the deep standby → magic packet drill passes, **deep standby may be
    one-way on your box.**
 6. **`process`** — what the enigma2 process costs, already in review.
+7. **`cmd/uninstall`** — remove the plugin from the receiver on request, behind a box-only
+   permission `uninstall_allowed` echoed **read-only** in `info.settings`: every retained topic is
+   retracted, a final `offline` published, the package removed and the interface restarted, in
+   that order. The payload is the node id, so a mis-sent message removes nothing.
+   🔴 A one-way door — nothing over MQTT can put it back, only SSH or the receiver's own package
+   manager. Decided in [ADR-0004](docs/adr/0004-remote-uninstall.md).
 
 ## Contributing
 

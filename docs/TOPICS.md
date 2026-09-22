@@ -46,7 +46,7 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
 {
   "image": "OpenViX 6.6.007",
   "enigma": "2024-09-11-Release",
-  "plugin": "0.1.0",
+  "plugin": "0.2.0",
   "boxtype": "vuuno4kse",
   "mac": "00:00:5e:00:53:01",
   "ip": "192.0.2.12",
@@ -648,7 +648,7 @@ It is a cleanup, not a factory reset: settings are untouched.
   "base_topic": "enigma2",
   "image": "OpenViX 6.6.007",
   "enigma": "2024-09-11-Release",
-  "plugin": "0.1.0",
+  "plugin": "0.2.0",
   "boxtype": "vuuno4kse",
   "mac": "00:00:5e:00:53:01",
   "ip": "192.0.2.12",
@@ -792,8 +792,8 @@ retained ghost nobody can find: the list is the only record that they exist.
 🔴 **Nothing in this section exists on any release, and nothing in it is on `main`.** It is here because the contract
 keeps one home: a consumer can be written against these shapes, and they will not move quietly
 between now and the release that carries them. Each is decided in
-[ADR-0003](adr/0003-control-feedback-and-household-features.md); the release that carries it is in
-the heading. Until a capability below is in `info.capabilities`, the box does not have it — that
+[ADR-0003](adr/0003-control-feedback-and-household-features.md) — or, for the remote uninstall, in
+[ADR-0004](adr/0004-remote-uninstall.md); the release that carries it is in the heading. Until a capability below is in `info.capabilities`, the box does not have it — that
 rule is unchanged, and it is how a consumer tells a plan from a feature.
 
 ### `info.settings` gains further members — 0.3.0
@@ -806,6 +806,7 @@ terms, rather than inventing a separate `info.permissions`.
 |---|---|---|---|
 | `softcam_restart_allowed` | 0.3.0 | **no** | Whether `cmd/softcam_restart` is permitted |
 | `epg_import_allowed` | 0.3.0 | **no** | Whether `cmd/epg_import` is permitted |
+| `uninstall_allowed` | 0.3.0 | **no** | Whether `cmd/uninstall` is permitted ([ADR-0004](adr/0004-remote-uninstall.md)). Default off, and granted on the box only |
 | `softcam_autoheal` | 0.3.0 | yes | Opt-in automatic softcam restart, default `false` |
 | `softcam_autoheal_seconds` | 0.3.0 | yes | How long a stuck decode must hold, default `90`, range 30–600 |
 
@@ -869,6 +870,20 @@ full description arrives with it.
 |---|---|---|---|
 | `softcam_restart` | any (`PRESS` by convention) | Stops **every** running instance of the cam the image selected, then starts exactly one | Refused unless `softcam_restart_allowed` is on; refused while recording; at most one manual restart per minute. 🔴 **The binary is resolved on the box and no part of the command line comes from the payload** |
 | `epg_import` | any (`PRESS` by convention) | Runs the image's EPG importer, then rebuilds and republishes the grid | Refused unless `epg_import_allowed` is on; refused while recording; refused while an import is already running |
+| `uninstall` | the node id (confirmation) | Removes the plugin from the receiver: retracts every retained topic it owns, publishes a final `offline`, removes the package, and restarts the interface | Refused unless `uninstall_allowed` is on; refused unless the payload matches this node's id; refused while recording or with a timer due, like every other command that restarts the interface |
+
+The payload is the node id because a household with two boxes has two nearly identical command
+topics, and the difference is one word in a path. It is a confirmation, not a secret — the node id
+is in every topic name this plugin publishes to. The permission is the security boundary. The
+capability `uninstall` is claimed only where the plugin can resolve its own installed package, so
+a copy that was unpacked by hand or carried in a firmware image offers no such command.
+
+🔴 **`cmd/uninstall` is a one-way door.** When it has run there is no plugin left to listen, so
+nothing over MQTT can undo it — the box comes back only through SSH or the receiver's own package
+manager. That is why its permission is off by default, is granted on the box and never over MQTT,
+and is read-only in `info.settings` like the other two. The decision, and the order the steps run
+in, are in [ADR-0004](adr/0004-remote-uninstall.md). `/etc/enigma2/settings` is not touched: a
+reinstall finds its configuration where it left it.
 
 ### `cmd/message` gains `style` — 0.3.0, capability `toast`
 
