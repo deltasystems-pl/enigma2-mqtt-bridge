@@ -172,7 +172,7 @@ class Bridge:
     def __init__(self):
         self.published = []
 
-    def publish_state(self, suffix, payload, raw=False, retain=True):
+    def publish_state(self, suffix, payload, raw=False, retain=True, volatile=()):
         self.published.append((suffix, payload, raw, retain))
 
 

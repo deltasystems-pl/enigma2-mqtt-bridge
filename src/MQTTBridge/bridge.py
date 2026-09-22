@@ -26,6 +26,12 @@ to send with what went out last and drops a repeat, because a receiver that
 re-publishes the same volume every five seconds writes a row into somebody's
 recorder database every five seconds. The snapshot is the deliberate exception:
 `on_connect` forgets everything it knows and sends the lot.
+
+**A field the payload stamps from the clock is not part of that comparison.** A
+publisher names such fields in `volatile`, and they ride in every payload while
+staying out of the change test. Left in, they answer „did the code run again?"
+rather than „did the receiver change?", and a topic rebuilt by a timer would
+then republish itself for as long as the box is switched on.
 """
 
 import json
@@ -55,6 +61,33 @@ def _capped(text, limit):
     if len(text) <= limit:
         return text
     return text[: limit - 1] + "…"
+
+
+def _encoded(payload):
+    """The canonical JSON for a payload: one dictionary, always the same bytes."""
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _change_key(encoded, payload, volatile):
+    """What „has this changed?" is asked about: the payload without its own stamps.
+
+    A field a payload writes from the wall clock moves whether or not the
+    receiver did, so comparing bytes that carry one answers „did this run
+    again?" instead of „is this different?". On a retained topic rebuilt by a
+    timer that means a republish every time the timer fires however little has
+    moved — a state change delivered to every consumer and a row in somebody's
+    recorder, for a payload saying exactly what it said before — and nothing
+    bounds it, because the timer does not stop.
+
+    So the named fields are left out of the comparison and kept in what goes
+    out. A consumer still reads a stamp; what the stamp means is now when the
+    payload last differed, which is the question it was being asked anyway.
+    """
+    if not volatile or not isinstance(payload, dict):
+        return encoded
+    return _encoded(
+        dict((name, value) for name, value in payload.items() if name not in volatile)
+    )
 
 
 ONLINE = "online"
@@ -547,18 +580,25 @@ class Bridge:
 
     # ----------------------------------------------------------------- publishing --
 
-    def publish_raw(self, topic, payload, retain=True):
+    def publish_raw(self, topic, payload, retain=True, change_key=None):
         if self.client is None:
             return None
         info = self.client.publish(topic, payload, qos=STATE_QOS, retain=retain)
         if retain:
             self.state.remember(topic)
-            self._published[topic] = payload
+            # What is remembered is what the next comparison will be made
+            # against — never the bytes that went out, when the two differ. A
+            # snapshot publish and a state publish reach the same topic, and if
+            # they recorded it two different ways the first publish after every
+            # connect would look like a change.
+            self._published[topic] = payload if change_key is None else change_key
         return info
 
-    def publish_json(self, topic, payload, retain=True):
-        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        return self.publish_raw(topic, encoded, retain=retain)
+    def publish_json(self, topic, payload, retain=True, volatile=()):
+        encoded = _encoded(payload)
+        return self.publish_raw(
+            topic, encoded, retain=retain, change_key=_change_key(encoded, payload, volatile)
+        )
 
     def forget_published(self):
         """Forget what was published, so the next publish goes out regardless.
@@ -568,12 +608,16 @@ class Bridge:
         """
         self._published = {}
 
-    def publish_state(self, suffix, payload, raw=False, retain=True):
+    def publish_state(self, suffix, payload, raw=False, retain=True, volatile=()):
         """A feature area's state topic — published only when it has changed.
 
-        `sort_keys` in `publish_json` is what makes the comparison meaningful:
-        two dictionaries built in a different order encode to the same bytes, so
+        `sort_keys` in `_encoded` is what makes the comparison meaningful: two
+        dictionaries built in a different order encode to the same bytes, so
         „changed" means the box changed, not that the code walked it differently.
+        `volatile` is that argument carried one step further, and it is the
+        publisher owning the topic that names the fields — so a reader sees at
+        the call site which topic tolerates what, rather than finding a list of
+        exceptions here.
         A topic that is not retained (`key`) is never compared — every press is
         an event, including the same press twice.
         """
@@ -581,10 +625,11 @@ class Bridge:
         if raw:
             encoded = payload
         else:
-            encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        if retain and self._published.get(topic) == encoded:
+            encoded = _encoded(payload)
+        change_key = _change_key(encoded, payload, volatile)
+        if retain and self._published.get(topic) == change_key:
             return None
-        return self.publish_raw(topic, encoded, retain=retain)
+        return self.publish_raw(topic, encoded, retain=retain, change_key=change_key)
 
     def retract(self, topic):
         if self.client is None:
@@ -618,11 +663,12 @@ class Bridge:
             published = 0
             try:
                 raw = getattr(publisher, "raw", ())
+                volatile = getattr(publisher, "volatile", ())
                 for suffix, payload in publisher.snapshot().items():
                     if suffix in raw:
                         self.publish_raw(self.topic(suffix), payload)
                     else:
-                        self.publish_json(self.topic(suffix), payload)
+                        self.publish_json(self.topic(suffix), payload, volatile=volatile)
                     published += 1
                     topic_count += 1
             except Exception:

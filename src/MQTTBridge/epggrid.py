@@ -14,6 +14,14 @@ the bouquet's name so that a consumer can subscribe to one bouquet, and the
 payload carries the real name because that is what a person should read. Rename
 a bouquet and the old slug is retracted; that is the same retained-ghost trap
 the discovery payloads have, answered the same way.
+
+**A rebuild that finds the same television publishes nothing.** `generated` is
+stamped afresh on every pass and is declared `volatile` so that it cannot be the
+only thing that differs. Against a live guide a quarter of an hour usually does
+move something, so this is not a claim about most passes; it matters where the
+guide is static — a bouquet whose channels carry no EPG, an overnight window, an
+import that has failed — and there it is unbounded, because a grid is the
+largest payload here and nothing would ever stop it being rewritten.
 """
 
 import time
@@ -200,6 +208,11 @@ class EpgGridPublisher(Publisher):
     """`epg_grid/<bouquet_slug>` — one topic for each configured bouquet."""
 
     name = "epg_grid"
+
+    # When the grid was built is not whether the grid changed, and the builder
+    # runs on a timer. Comparing this would republish every bouquet on every
+    # pass with nothing on television having moved.
+    volatile = ("generated",)
 
     def __init__(self, bridge=None):
         Publisher.__init__(self, bridge)

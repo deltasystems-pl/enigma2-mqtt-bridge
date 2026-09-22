@@ -273,7 +273,7 @@ original**, and the payload is what a user should be shown.
 | Field | Type | Notes |
 |---|---|---|
 | `bouquet` | string | The bouquet's name as enigma2 spells it — not the slug |
-| `generated` | int | Epoch seconds, when this bouquet's grid was built |
+| `generated` | int | Epoch seconds, when this bouquet's grid last **changed** — see below; it is not the time of the last build |
 | `channels[].sref` | string | |
 | `channels[].name` | string | |
 | `channels[].events[]` | list | Up to `epg_grid_events` entries per channel, chronological |
@@ -296,6 +296,16 @@ television for too long. The builder therefore performs at most four channel loo
 channels have been collected; the previous retained grid stays current while that happens. The
 time each batch and completed bouquet took is in the plugin's log. A grid whose content has not
 changed is not republished.
+
+**`generated` says when the grid last changed, not when it was last built.** Every build stamps
+it from the clock, and it is deliberately left out of the comparison that decides whether to
+publish. Were it counted, it would be the only field that differed whenever a pass found exactly
+the television the previous pass found — a bouquet carrying no EPG, an overnight window, an
+import that has failed — and that bouquet would rewrite its retained topic four times an hour
+for as long as the box stayed on, giving every consumer a state change and every recorder a row
+for a payload saying what it already said. The consequence is the one worth knowing: the
+retained `generated` moves when the programmes move. A consumer that wants to know the plugin is
+still building grids should read `availability`, which is what it is for.
 
 **Slugs that stop being configured are retracted.** The plugin remembers the slugs it has
 published in its state file on the box, the same file that carries the discovery component list.

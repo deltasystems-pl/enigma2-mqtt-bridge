@@ -43,6 +43,13 @@ version that has no section here.
   90, range 30–600), which are writable through `cmd/config` because they only tune a restart the
   receiver has already permitted.
 
+### Changed
+
+- **`epg_grid/<bouquet_slug>.generated` now means when the grid last changed**, not when it was
+  last built, which follows from the fix below: an unchanged rebuild publishes nothing, so the
+  retained stamp stays where the last real change left it. `docs/TOPICS.md` says so, and the
+  reasoning is in [ADR-0006](docs/adr/0006-volatile-fields-and-publish-on-change.md).
+
 ### Fixed
 
 - **„Next timer" has been unreadable in discovery mode since 0.2.0.** Its value template appended
@@ -53,6 +60,14 @@ version that has no section here.
   copied the same shape from it — and it was invisible to both test suites because they compared
   the template as a string and never rendered it. The two timestamp templates are now rendered in
   the tests and the result is parsed as a datetime.
+- **An EPG grid that has not changed is no longer republished.** The contract has always said it
+  was not, and it was not true: every payload carries `generated`, stamped from the clock at the
+  moment the grid was built, and the change comparison is made on the encoded payload — so two
+  builds a second apart differed by those bytes alone. The refresh runs every quarter of an hour,
+  so a bouquet whose programmes did not move in that window — one carrying no EPG at all, or any
+  bouquet overnight — rewrote its retained topic for nothing, delivering a state change to every
+  consumer and a row to every recorder. A field a payload stamps from the wall clock now takes no
+  part in the change comparison; it is still published, so nothing a consumer reads has moved.
 
 ### Notes
 - **An instance is not a process.** A cam that forks a supervisor to keep its worker shows two

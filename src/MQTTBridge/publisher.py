@@ -22,6 +22,17 @@ class Publisher:
     # string and a JPEG are not improved by being wrapped in quotes.
     raw = ()
 
+    # Fields this area's payload stamps from the clock rather than reads from
+    # the receiver — `generated`, and anything else that moves on its own. They
+    # go out with every publish and take no part in the change comparison,
+    # because a field that moves by itself turns „publish when it changed" into
+    # „publish every time it was built".
+    #
+    # A tuple of names, never a bare string: membership is tested with `in`, so
+    # `volatile = "generated"` would quietly exclude every field whose name is a
+    # substring of it.
+    volatile = ()
+
     # Set by a publisher that returns False from `start()` because its feature
     # is switched off in the settings, rather than because this image could not
     # give it the hooks. The two look identical from outside and read very
@@ -69,7 +80,9 @@ class Publisher:
         """Publish this feature area's state — but only when it has changed."""
         if self.bridge is None:
             return None
-        return self.bridge.publish_state(suffix, payload, raw=suffix in self.raw)
+        return self.bridge.publish_state(
+            suffix, payload, raw=suffix in self.raw, volatile=self.volatile
+        )
 
     def report(self, command, message):
         """Say why something a publisher was asked to do could not be done."""
