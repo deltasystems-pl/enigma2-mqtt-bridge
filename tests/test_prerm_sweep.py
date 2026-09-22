@@ -133,15 +133,14 @@ def external_dir(tmp_path):
 def removed_package(plugin_dir, external_dir):
     """What opkg leaves behind: every `.py` gone, every `.pyc` still there.
 
-    The shape measured on a receiver — legacy same-directory bytecode, the
-    vendored MQTT client included, and the compiled OpenWebif hook beside where
-    opkg's own `MQTTBridge.py` was.
+    The shape measured on a receiver — forty files, 31 in the plugin directory
+    and 9 under `_vendor/paho/`, all in the legacy same-directory form, plus the
+    compiled OpenWebif hook beside where opkg's own `MQTTBridge.py` was.
     """
     for module in COMPILED_MODULES:
         write(plugin_dir / f"{module}.pyc")
     for module in VENDORED_MODULES:
         write(plugin_dir / "_vendor" / "paho" / "mqtt" / f"{module}.pyc")
-    write(plugin_dir / "_vendor" / "paho" / "__init__.pyc")
     write(external_dir / "MQTTBridge.pyc")
     return plugin_dir
 
@@ -171,7 +170,8 @@ def test_every_compiled_file_the_receiver_wrote_is_gone(shell, removed_package):
 
 def test_the_count_of_what_was_removed_is_reported(shell, removed_package):
     # The plugin directory only: the hook beside it is reported by name.
-    expected = len(COMPILED_MODULES) + len(VENDORED_MODULES) + 1  # + `_vendor/paho`
+    expected = len(COMPILED_MODULES) + len(VENDORED_MODULES)
+    assert expected == 40, "the fixture is the shape measured on the receiver"
 
     result = run(shell, removed_package)
 
@@ -258,7 +258,7 @@ def test_nothing_is_said_about_leftovers_while_opkg_still_has_files_to_remove(
 
     result = run(shell, plugin_dir)
 
-    assert "not this package's" not in result.stdout
+    assert "MQTT Bridge: keeping " not in result.stdout
 
 
 def test_a_stray_file_keeps_the_directory_and_is_counted(shell, plugin_dir):
@@ -273,7 +273,7 @@ def test_a_stray_file_keeps_the_directory_and_is_counted(shell, plugin_dir):
     assert stray.read_text(encoding="utf-8") == "mine"
     assert also_stray.exists()
     assert plugin_dir.is_dir()
-    assert "2 files in it are not this package's" in result.stdout
+    assert "2 files in it were not deleted" in result.stdout
 
 
 def test_one_stray_file_is_counted_in_the_singular(shell, plugin_dir):
@@ -282,7 +282,7 @@ def test_one_stray_file_is_counted_in_the_singular(shell, plugin_dir):
 
     result = run(shell, plugin_dir)
 
-    assert "1 file in it is not this package's" in result.stdout
+    assert "1 file in it was not deleted" in result.stdout
 
 
 # ------------------------------------------------------ the upgrade argument --
@@ -396,6 +396,10 @@ def test_a_newline_in_a_directory_name_cannot_reach_a_file_outside(
     assert result.returncode == 0, result.stderr
     assert decoy.exists()
     assert decoy.read_text(encoding="utf-8") == "the real one"
+    # And the trapped file is skipped rather than deleted, which is the design:
+    # a directory with a newline in its name cannot be a Python package, so
+    # nothing importable is left behind by declining to touch it.
+    assert (trap / "passwd.pyc").exists()
 
 
 def test_a_newline_in_a_directory_name_cannot_rmdir_a_directory_outside(
@@ -505,6 +509,11 @@ def test_a_symlinked_plugin_directory_is_refused(shell, tmp_path):
     assert compiled.exists()
     assert real.is_dir()
     assert link.is_symlink()
+    # Said out loud: the documentation promises that removing the package takes
+    # the compiled plugin with it, and on this one arrangement it does not.
+    assert "is a symlink to" in result.stdout
+    assert str(real.resolve()) in result.stdout
+    assert "left in place" in result.stdout
 
 
 def test_a_symlink_inside_the_tree_is_neither_followed_nor_removed(
@@ -534,6 +543,79 @@ def test_a_symlinked_external_directory_is_refused(shell, plugin_dir, tmp_path):
 
     assert run(shell, plugin_dir).returncode == 0
     assert hook.exists()
+
+
+@pytest.mark.parametrize("depth", [1, 2])
+def test_a_symlink_above_the_hooks_directory_is_refused(shell, plugin_dir, tmp_path, depth):
+    """🔴 `[ -d ]` is true through a symlink, and so is `rm`.
+
+    Checking only the last component leaves `WebChilds` — or `WebInterface`
+    itself — as a way through. Both are checked, and both are refused out loud.
+    """
+    real = tmp_path / "the real openwebif"
+    hook = write(real.joinpath(*WEBIF_TAIL[depth:], "MQTTBridge.pyc"))
+    link = tmp_path.joinpath(PLUGIN_PARENT, *WEBIF_TAIL[:depth])
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(real, target_is_directory=True)
+
+    result = run(shell, plugin_dir)
+
+    assert result.returncode == 0, result.stderr
+    assert hook.exists()
+    assert link.is_symlink()
+    assert "is a symlink" in result.stdout
+    assert "left in place" in result.stdout
+
+
+def test_a_find_without_depth_still_leaves_no_bytecode(
+    shell, removed_package, external_dir, tmp_path
+):
+    """A `find` that refuses `-depth` loses the directory pass, not the sweep.
+
+    The directory pass cannot be written safely without `-depth`: a listing
+    sorted by depth would have to survive a newline in a directory name. So the
+    fallback is to leave the directories to opkg, which removes its own, and to
+    say so — rather than to reach for a sorting trick nobody can review.
+    """
+    shim = tmp_path / "a shim on the path"
+    shim.mkdir()
+    real_find = shutil.which("find") or "/usr/bin/find"
+    script = shim / "find"
+    script.write_text(
+        "#!/bin/sh\n"
+        'for argument in "$@"; do\n'
+        '    [ "$argument" = "-depth" ] || continue\n'
+        '    echo "find: unrecognized option: -depth" >&2\n'
+        "    exit 1\n"
+        "done\n"
+        f'exec {real_find} "$@"\n',
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    path = f"{shim}{os.pathsep}{os.environ['PATH']}"
+
+    # A busybox built as a standalone shell runs its own `find` applet and never
+    # consults PATH, so the shim cannot reach it and there is nothing to test
+    # here. Probed rather than hard-coded by shell name: which build is
+    # installed is a property of the machine, not of the name it goes by.
+    probe = subprocess.run(
+        shell + ["-c", "find . -depth -maxdepth 0 >/dev/null 2>&1"],
+        env={**os.environ, "PATH": path},
+        cwd=str(tmp_path),
+        capture_output=True,
+        timeout=60,
+    )
+    if probe.returncode == 0:
+        pytest.skip("this shell resolves `find` itself, so PATH cannot shim it")
+
+    result = run(shell, removed_package, environment={"PATH": path})
+
+    assert result.returncode == 0, result.stderr
+    assert not list(removed_package.rglob("*.pyc"))
+    assert not (external_dir / "MQTTBridge.pyc").exists()
+    # Left standing, and said so, rather than removed by a trick.
+    assert removed_package.is_dir()
+    assert "has no -depth" in result.stdout
 
 
 def test_a_symlinked_hook_is_not_followed(shell, plugin_dir, external_dir, tmp_path):
@@ -576,6 +658,18 @@ def test_the_script_never_touches_the_settings_file():
 def test_the_real_plugin_directory_is_the_default():
     body = PRERM.read_text(encoding="utf-8")
     assert "PLUGIN_DIR=/usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge\n" in body
+
+
+def test_the_depth_support_is_probed_the_way_xdev_is():
+    """A source assertion: the probe is cheap and its absence is invisible.
+
+    A `find` that refuses `-depth` would otherwise make the directory pass fail
+    silently — the pipeline's exit status is the `while`'s, not the `find`'s —
+    and the plugin directory would be left standing with nobody told why.
+    """
+    body = PRERM.read_text(encoding="utf-8")
+    assert 'find "$dir" -xdev -maxdepth 0 >/dev/null 2>&1 || XDEV=' in body
+    assert 'find "$dir" -depth -maxdepth 0 >/dev/null 2>&1 || DEPTH=' in body
 
 
 def test_the_removal_is_gated_on_the_argument_opkg_passes():

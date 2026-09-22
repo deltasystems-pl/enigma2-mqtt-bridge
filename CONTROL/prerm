@@ -38,7 +38,13 @@
 #     keeps its directory and every directory above it;
 #   * on the removal half of an upgrade nothing is swept at all;
 #   * nothing outside the resolved plugin directory is read, deleted or
-#     rmdir'd, no symlink is followed or removed, and no mount is crossed;
+#     rmdir'd, no symlink is followed or removed, and a different filesystem
+#     mounted under the plugin directory is not walked into;
+#   * bytecode under a directory whose name contains a **newline** is skipped
+#     rather than deleted. `find` prints such a path as two lines and neither
+#     half is something this may touch, which is deliberate: a directory with a
+#     newline in its name cannot be a Python package, so nothing importable is
+#     left behind by skipping it;
 #   * nothing happens at all during an offline rootfs build;
 #   * no error here can fail an `opkg remove`.
 
@@ -74,9 +80,9 @@ PLUGIN_DIR=/usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge
 # environment to maintainer scripts verbatim — so it is reachable in production
 # whether or not that was anybody's intention. It is therefore honoured only
 # alongside a second variable that exists for no other purpose, and the guards
-# below (the basename, the resolved basename, the symlink test) apply to it
-# exactly as they do to the real path. `postinst` has the same seam under its
-# own name.
+# below (the basename, the symlink test, and every path being checked to be
+# under the resolved root) apply to it exactly as they do to the real path.
+# `postinst` has the same seam under its own name.
 if [ "${MQTTBRIDGE_PRERM_TEST:-}" = "1" ] && [ -n "${MQTTBRIDGE_PLUGIN_DIR:-}" ]; then
     PLUGIN_DIR=$MQTTBRIDGE_PLUGIN_DIR
 fi
@@ -130,26 +136,49 @@ sweep_plugin_directory() {
     # a full flash) and leave the link dangling behind it. Refusing costs the
     # owner of such a box one `rm -rf`; guessing costs them whatever else was in
     # there.
-    [ -L "$dir" ] && return 0
+    #
+    # It is refused out loud. The documentation promises that removing the
+    # package takes the compiled plugin with it, and on this one arrangement it
+    # does not — so the person removing it is told, and told where to look,
+    # rather than left with a promise that quietly did not hold.
+    if [ -L "$dir" ]; then
+        target=$(cd -P "$dir" 2>/dev/null && pwd -P)
+        [ -n "$target" ] || target=$(readlink "$dir" 2>/dev/null)
+        [ -n "$target" ] || target="a link this receiver cannot follow"
+        printf '%s\n' "MQTT Bridge: $dir is a symlink to $target, so its compiled files were left in place; removing a directory somebody linked elsewhere is not this package's to do."
+        return 0
+    fi
     [ -d "$dir" ] || return 0
 
-    # Resolved anyway, because a symlinked *parent* is ordinary on a receiver
-    # whose flash is short, and every guard below has to apply to the real path
-    # rather than to the one that was typed.
+    # Resolved for the paths below, because a symlinked *parent* is ordinary on
+    # a receiver whose flash is short. The basename is not re-checked
+    # afterwards: the last component is not a symlink — that was just refused —
+    # so resolving the ones above it cannot change what this directory is
+    # called.
     dir=$(cd -P "$dir" 2>/dev/null && pwd -P) || return 0
     [ -n "$dir" ] || return 0
-    case "$dir" in
-        */MQTTBridge) ;;
-        *) return 0 ;;
-    esac
     [ -d "$dir" ] || return 0
 
-    # `-xdev` so a bind mount under the plugin directory is not crossed. Probed
+    # `-xdev` so a *different filesystem* mounted under the plugin directory —
+    # a USB stick, a network share — is not walked into. It is the device
+    # number that is compared, so a same-filesystem `mount --bind` is descended
+    # like any other directory and this is not a guard against one. Probed
     # rather than assumed: busybox builds it optionally, and a busybox without
     # it must lose the hardening rather than lose the sweep. Checked at
     # `-maxdepth 0`, so the probe does not walk the tree.
     XDEV=-xdev
     find "$dir" -xdev -maxdepth 0 >/dev/null 2>&1 || XDEV=
+
+    # `-depth` is probed the same way and for the same reason. It is POSIX, and
+    # every `find` a receiver is likely to have supports it — but the directory
+    # pass is the half of this script that cannot be written safely without it
+    # (a listing sorted by depth would have to survive a newline in a directory
+    # name), so a `find` that refuses it loses the directory pass rather than
+    # getting a sorting trick nobody can review. Both probes go through
+    # `-maxdepth`, so a `find` without *that* loses both; that is a degradation
+    # and not a failure, because opkg removes its own directories afterwards.
+    DEPTH=-depth
+    find "$dir" -depth -maxdepth 0 >/dev/null 2>&1 || DEPTH=
 
     # `-type f` and no `-L`: a symlink inside the tree is neither followed nor
     # removed, so a link out of the plugin directory cannot become a way out.
@@ -194,15 +223,20 @@ sweep_plugin_directory() {
     # an empty `screenshots/` is a directory the plugin means to keep, and here
     # the plugin is going away. The plugin directory is the last path `-depth`
     # prints, so it is the last one removed.
-    find "$dir" -depth $XDEV -type d -print 2>/dev/null |
-    while IFS= read -r holder; do
-        # The same split, aimed at the directory removal rather than at a file.
-        case "$holder" in
-            "$dir"|"$dir"/*) ;;
-            *) continue ;;
-        esac
-        rmdir "$holder" 2>/dev/null
-    done
+    if [ -n "$DEPTH" ]; then
+        find "$dir" $DEPTH $XDEV -type d -print 2>/dev/null |
+        while IFS= read -r holder; do
+            # The same split, aimed at the directory removal rather than at a
+            # file.
+            case "$holder" in
+                "$dir"|"$dir"/*) ;;
+                *) continue ;;
+            esac
+            rmdir "$holder" 2>/dev/null
+        done
+    elif [ -d "$dir" ]; then
+        printf '%s\n' "MQTT Bridge: this receiver's find has no -depth, so the empty directories under $dir were left for opkg."
+    fi
 
     [ -d "$dir" ] || return 0
 
@@ -211,8 +245,12 @@ sweep_plugin_directory() {
     # here, because opkg deletes them after this script returns, so a count
     # taken now would be a number about files that are about to go — printed on
     # every single removal. The count is reported only once no source remains,
-    # which is the state in which nothing else is coming and a leftover really
-    # is somebody's own file.
+    # which is the state in which nothing else is coming.
+    #
+    # It says what it knows and not why. A leftover is usually somebody's own
+    # file, but it is also what a `.pyc` on a read-only filesystem, or one whose
+    # `rm` was refused, looks like from here — and „not this package's" would be
+    # the wrong thing to tell the second person.
     sources=$(
         find "$dir" $XDEV -name '*.py' -type f -print 2>/dev/null |
         while IFS= read -r _source; do printf 'x'; done
@@ -224,8 +262,8 @@ sweep_plugin_directory() {
         while IFS= read -r _leftover; do printf 'x'; done
     )
     if [ -n "$leftovers" ]; then
-        phrase=$(count_phrase ${#leftovers} 'file in it is' 'files in it are')
-        printf '%s\n' "MQTT Bridge: keeping $dir: $phrase not this package's."
+        phrase=$(count_phrase ${#leftovers} 'file in it was' 'files in it were')
+        printf '%s\n' "MQTT Bridge: keeping $dir: $phrase not deleted."
     fi
 }
 
@@ -242,7 +280,20 @@ remove_webif_hook() {
         */WebInterface/WebChilds/External) ;;
         *) return 0 ;;
     esac
-    [ -L "$external" ] && return 0
+
+    # 🔴 Every component from `WebInterface` down, not just the last one. A
+    # symlink two levels up is followed exactly as silently as a symlink on the
+    # directory itself — `[ -d ]` is true either way and `rm` would go straight
+    # through it — so the whole tail is checked, and a link anywhere in it is
+    # refused out loud for the same reason the plugin directory's is.
+    for component in "${external%/WebChilds/External}" \
+                     "${external%/External}" \
+                     "$external"; do
+        if [ -L "$component" ]; then
+            printf '%s\n' "MQTT Bridge: $component is a symlink, so the compiled OpenWebif hook under it was left in place; delete it by hand if you want it gone."
+            return 0
+        fi
+    done
     [ -d "$external" ] || return 0
 
     remove_compiled "$external/MQTTBridge.pyc"

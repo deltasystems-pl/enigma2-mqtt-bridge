@@ -117,8 +117,10 @@ What it refuses to do is the other half:
   under it first, because a directory name may contain a newline and a naive line-by-line read
   would hand the second half of one to `rm` as a path relative to a working directory `opkg` never
   set;
-- a symlink is neither followed nor removed, and a bind mount under the plugin directory is not
-  crossed;
+- a symlink is neither followed nor removed, and a **different filesystem** mounted under the
+  plugin directory — a USB stick, a network share — is not walked into. `find -xdev` compares device
+  numbers, so a same-filesystem `mount --bind` is descended like any other directory and this is not
+  a guard against one;
 - a plugin directory with no `plugin.py` in it is left entirely alone. That is not an orphaned
   tree, it is a build-time packaging — OE strips sources out of a package into a separate one — and
   "every `.pyc` whose `.py` is missing" would there be every file the plugin has;
@@ -181,14 +183,15 @@ What it refuses to do, again, is the other half:
 - a plugin directory that is a **symlink** is refused untouched. This is where removal is stricter
   than the upgrade sweep: that one only deletes files, while this one removes directories, and a
   directory somebody deliberately put somewhere else is not a package script's to take;
-- nothing outside the plugin directory is read, deleted or removed, no symlink is followed, and no
-  mount is crossed;
+- nothing outside the plugin directory is read, deleted or removed, no symlink is followed, and a
+  **different filesystem** mounted under the plugin directory is not walked into — though a
+  same-filesystem `mount --bind` is descended like any other directory;
 - `External/` is OpenWebif's directory and is not swept — the hook is addressed by its exact path,
   and nothing else in there is looked at;
 - nothing happens during an offline rootfs build, and no error in any of it can fail the removal.
 
 ```
-MQTT Bridge: removed 41 compiled files from the plugin directory.
+MQTT Bridge: removed 40 compiled files from the plugin directory.
 MQTT Bridge: removed the compiled OpenWebif hook MQTTBridge.pyc
 ```
 

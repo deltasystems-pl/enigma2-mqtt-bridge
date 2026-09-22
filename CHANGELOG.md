@@ -141,7 +141,8 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
   keeps every compiled file whose source is present; it checks that every path is under the plugin
   directory before touching it, because a directory name may contain a newline and a line-by-line
   read would otherwise hand the second half of one to `rm` as a path relative to a working
-  directory `opkg` never set; it follows no symlink and crosses no mount; it does nothing at all in
+  directory `opkg` never set; it follows no symlink and does not walk into a different filesystem
+  mounted under the plugin directory; it does nothing at all in
   a tree with no `plugin.py`, which is a build-time packaging rather than an orphaned tree, or
   during an offline rootfs build, where its absolute paths would be the build host's; and nothing
   in it can fail an install.

@@ -297,9 +297,9 @@ that `postinst` already sweeps, and it was missed because the sweep was designed
 upgrade, which is the case that had actually gone wrong on hardware.
 
 **Decision.** `CONTROL/prerm` sweeps bytecode, under the guards `postinst` already establishes: the
-plugin directory's basename is checked before and after resolution, no symlink is followed, no
-mount is crossed, and every path is checked to be under the resolved root before anything happens
-to it, because a directory name may contain a newline. It deletes `.pyc` and `.pyo` and nothing
+plugin directory's basename is checked, no symlink is followed, no different filesystem mounted
+under it is walked into, and every path is checked to be under the resolved root before anything
+happens to it, because a directory name may contain a newline. It deletes `.pyc` and `.pyo` and nothing
 else — the `.py` files are opkg's and are all still on disk while it runs — and then removes the
 directories it leaves empty, deepest first, the plugin directory last.
 
