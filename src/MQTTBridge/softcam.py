@@ -115,6 +115,11 @@ KILL = getattr(signal, "SIGKILL", 9)
 MANUAL = "manual"
 AUTOHEAL = "autoheal"
 
+NO_TIMER = (
+    "this image would not give the plugin a timer, so the softcam restart could not be "
+    "carried through"
+)
+
 # 🔴 These are the *image's* start lines, not the cams' own defaults: `-b` and
 # the stack limit come from the image. A restart that omits them starts a
 # different process from the one the receiver would have started, which is a
@@ -152,11 +157,33 @@ def _image_setting(section, name):
         return None
 
 
-def autostart_entries():
-    """What the image has been told to autostart, as a list of names.
+def _without_the_directory(entry, directory):
+    """One autostart entry as a bare name.
 
-    The setting is a single element on every image measured, but images have
-    spelled a list as a list and as a separated string, so both are accepted.
+    🔴 The setting holds **absolute paths** — `/usr/softcams/<name>` — not bare
+    names. The image's own manager begins its loop by stripping exactly that
+    prefix off, and that line exists only because the prefix is there. A
+    normalisation done anywhere later than here is a normalisation the rest of
+    this module does not know about: `selected` would publish a path where the
+    contract promises a basename, the truncated `comm` would be the first
+    fifteen characters of `/usr/softcams/…` and match no process at all, and
+    `manager_check_on_start` would read true on every receiver because a path is
+    always longer than fifteen characters.
+
+    Only this one prefix is removed, deliberately. An entry pointing somewhere
+    else keeps its separators and is refused by `resolve`'s name guard, rather
+    than being quietly reinterpreted as a name inside the softcam directory —
+    which would run a different program from the one the image was told to.
+    """
+    prefix = str(directory).rstrip("/") + "/"
+    return entry[len(prefix):] if entry.startswith(prefix) else entry
+
+
+def autostart_entries(directory=SOFTCAM_DIRECTORY):
+    """What the image has been told to autostart, as bare names.
+
+    The value is a list of locations on every image measured, but images have
+    spelled one entry as a bare string too, so both are accepted.
     """
     raw = _image_setting("softcammanager", "softcams_autostart")
     if raw is None:
@@ -165,7 +192,12 @@ def autostart_entries():
         items = list(raw)
     else:
         items = str(raw).replace(",", " ").split()
-    return [str(item).strip() for item in items if str(item).strip()]
+    names = []
+    for item in items:
+        name = _without_the_directory(str(item).strip(), directory)
+        if name:
+            names.append(name)
+    return names
 
 
 def uses_the_poller():
@@ -280,11 +312,29 @@ def _process_stat(pid, proc=PROC_DIRECTORY):
         return None
 
 
+# What the kernel appends to `/proc/<pid>/exe` once the file behind a running
+# process has been unlinked.
+DELETED_SUFFIX = " (deleted)"
+
+
 def _executable(pid, proc=PROC_DIRECTORY):
+    """Where a process was started from, with the kernel's unlinked marker removed.
+
+    🔴 Upgrading the cam replaces the binary, so every copy already running reads
+    `…/<name> (deleted)` from that moment on. Comparing the link verbatim would
+    drop exactly those processes out of the count — reporting one instance while
+    two fight over the card, and leaving the collapse button unable to collapse
+    them — at the one moment most likely to precede somebody pressing it.
+
+    A file genuinely named with that suffix would be read as its unlinked twin.
+    That is the lesser of the two wrong answers by a wide margin, and it is not a
+    name any image ships.
+    """
     try:
-        return os.readlink(os.path.join(proc, pid, "exe"))
+        link = os.readlink(os.path.join(proc, pid, "exe"))
     except OSError:
         return None
+    return link[: -len(DELETED_SUFFIX)] if link.endswith(DELETED_SUFFIX) else link
 
 
 def scan(command, executable, proc=PROC_DIRECTORY):
@@ -485,14 +535,30 @@ class SoftcamPublisher(NavPublisher):
         NavPublisher.stop(self)
 
     def _resolve(self):
-        """Work out which cam the image chose, and whether we may restart it at all."""
+        """Work out which cam the image chose, and whether we may restart it at all.
+
+        Every way out of here says, at `info`, what is actually true of this
+        receiver. 🔴 The publisher also marks itself switched off on the way out,
+        because the bridge's other branch logs „this image does not provide the
+        hooks" at warning — and a receiver with no softcam configured has
+        perfectly good hooks and nothing to point them at. A false warning on
+        every box without a cam is a support thread waiting to happen.
+        """
+        self.switched_off = True
         if not uses_the_poller():
             LOG.info(
                 "this image starts the softcam through its init script, not through its "
                 "manager; restarting the process would fight it, so it is not offered"
             )
             return False
-        for name in autostart_entries():
+        names = autostart_entries(self.directory)
+        if not names:
+            LOG.info(
+                "this receiver has no softcam set to start automatically, so there is "
+                "nothing to restart"
+            )
+            return False
+        for name in names:
             resolved = resolve(name, self.directory)
             if resolved is None:
                 LOG.info("%s is not an executable under %s; ignoring it", name,
@@ -515,7 +581,12 @@ class SoftcamPublisher(NavPublisher):
                     "cannot find it and starts another copy at every interface start",
                     name, COMM_LENGTH,
                 )
+            self.switched_off = False
             return True
+        LOG.info(
+            "none of the softcams this receiver is set to start (%s) is an executable "
+            "this plugin can restart", ", ".join(names)
+        )
         return False
 
     # ------------------------------------------------------------------- state --
@@ -627,15 +698,30 @@ class SoftcamPublisher(NavPublisher):
             return "the receiver will not say which processes are running; refusing to guess"
         LOG.info("restarting %s (%s): %d instance(s) running",
                  self.selected, reason, len(roots(found)))
+        self._phase = "terminating"
+        self._deadline = time.monotonic() + TERM_DEADLINE_SECONDS
+        # 🔴 Armed *before* anything is signalled, and refused if it cannot be.
+        # An eTimer cannot fire until this returns to the main loop, so there is
+        # no race in doing it first — and doing it second is the one path that
+        # ends with the cam stopped, nothing started, and `_busy` stuck true so
+        # that every later attempt answers „a restart is already running".
+        if not self._arm(TERM_POLL_MILLISECONDS):
+            return NO_TIMER
         self._busy = True
         self._reason = reason
         self._last_started = time.monotonic()
-        self._deadline = time.monotonic() + TERM_DEADLINE_SECONDS
         for pid in signal_order(found):
             _send(pid, TERMINATE)
-        self._phase = "terminating"
-        self._sequence.start(TERM_POLL_MILLISECONDS, single=True)
         return None
+
+    def _arm(self, milliseconds):
+        """Wait for the next turn of the sequence. False when there is no timer."""
+        if self._sequence.start(milliseconds, single=True):
+            return True
+        LOG.error("this image would not give the softcam sequence a timer; abandoning it")
+        self._phase = None
+        self._busy = False
+        return False
 
     def _survivors(self):
         """What is still running mid-sequence. A list that cannot be read is empty.
@@ -662,14 +748,16 @@ class SoftcamPublisher(NavPublisher):
             found = self._survivors()
             if found:
                 if time.monotonic() < self._deadline:
-                    self._sequence.start(TERM_POLL_MILLISECONDS, single=True)
+                    if not self._arm(TERM_POLL_MILLISECONDS):
+                        self.report("softcam_restart", NO_TIMER)
                     return
                 LOG.warning("%d %s process(es) did not stop; killing them",
                             len(found), self.selected)
                 for pid in signal_order(found):
                     _send(pid, KILL)
                 self._phase = "killing"
-                self._sequence.start(TERM_POLL_MILLISECONDS, single=True)
+                if not self._arm(TERM_POLL_MILLISECONDS):
+                    self.report("softcam_restart", NO_TIMER)
                 return
             self._start_one()
             return
@@ -685,7 +773,10 @@ class SoftcamPublisher(NavPublisher):
         if self._phase == "settling":
             self._phase = "late"
             self._publish_now()
-            self._sequence.start(LATE_SETTLE_MILLISECONDS, single=True)
+            # No refusal if this one cannot be armed: the cam is running and the
+            # topic has just been republished, so the only loss is the second
+            # recount, which the minute poll makes again anyway.
+            self._arm(LATE_SETTLE_MILLISECONDS)
             return
         if self._phase == "late":
             self._phase = None
@@ -717,7 +808,7 @@ class SoftcamPublisher(NavPublisher):
         self._restarts = self._restarts_today() + 1
         LOG.info("started one %s (%s)", self.selected, self._reason)
         self._phase = "settling"
-        self._sequence.start(SETTLE_MILLISECONDS, single=True)
+        self._arm(SETTLE_MILLISECONDS)
 
     def _release_finished_container(self):
         """Take our callback off the container whose program has ended.

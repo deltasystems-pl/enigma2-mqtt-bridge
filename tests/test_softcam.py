@@ -152,9 +152,12 @@ def softcam_bridge(lab, make_bridge, factory, settings, receiver, monkeypatch):
     every other test here would otherwise be a test of it.
     """
 
-    def build(name=CAM, post_start=0):
+    def build(name=CAM, post_start=0, absolute=True):
         monkeypatch.setattr(softcam, "POST_START_SECONDS", post_start)
-        config.softcammanager.softcams_autostart.value = name
+        # 🔴 Absolute by default, because that is what a receiver stores. A run
+        # against bare names is the one that agreed with the bug.
+        entry = os.path.join(os.path.realpath(lab.directory), name) if absolute else name
+        config.softcammanager.softcams_autostart.value = [entry]
         settings.host.value = "10.0.0.5"
         settings.node_id.value = NODE
         settings.friendly_name.value = "Living room receiver"
@@ -285,6 +288,82 @@ def test_a_name_that_would_need_shell_quoting_is_refused(lab):
     make_binary(lab.directory, "OSCam;reboot")
     assert resolve("OSCam;reboot", lab.directory) is None
     assert resolve("OSCam $(id)", lab.directory) is None
+
+
+def test_the_absolute_paths_the_image_really_stores_are_what_gets_resolved(
+    softcam_bridge, factory, lab
+):
+    """🔴 `softcams_autostart` holds `/usr/softcams/<name>`, not `<name>`.
+
+    The image's own manager strips that prefix in the first line of its loop,
+    and the line exists only because the prefix is there. Nothing downstream may
+    see a path: the contract promises a basename, the truncated command is the
+    first fifteen characters of one, and „is this name longer than fifteen
+    characters" is a question about a name.
+    """
+    bridge = softcam_bridge(absolute=True)
+    stored = config.softcammanager.softcams_autostart.value
+    assert stored == [os.path.join(os.path.realpath(lab.directory), CAM)]
+    assert stored[0].startswith("/")
+
+    assert bridge.publisher("softcam") is not None
+    assert "softcam" in bridge.capabilities()
+    payload = factory.client.last(SOFTCAM).json()
+    assert payload["selected"] == CAM
+    assert payload["running_instances"] == 1
+    assert payload["manager_check_on_start"] is True
+
+
+def test_a_bare_name_is_accepted_too(softcam_bridge, factory):
+    """An image that stores it the other way is not punished for it."""
+    softcam_bridge(absolute=False)
+    assert factory.client.last(SOFTCAM).json()["selected"] == CAM
+
+
+def test_only_the_softcam_directory_prefix_is_stripped(lab):
+    """An entry pointing elsewhere keeps its separators, and the name guard refuses it.
+
+    Taking the basename of anything would rebase `/opt/cams/<name>` onto the
+    softcam directory and run a different program from the one the image was
+    told to start.
+    """
+    inside = os.path.join(lab.directory, CAM)
+    outside = os.path.join("/opt/cams", CAM)
+    config.softcammanager.softcams_autostart.value = [inside, outside, CAM]
+
+    assert softcam.autostart_entries(lab.directory) == [CAM, outside, CAM]
+    assert resolve(outside, lab.directory) is None
+
+
+def test_a_receiver_with_nothing_set_to_autostart_says_so(softcam_bridge, plugin_log):
+    """And does not claim the image failed to give the plugin its hooks."""
+    config.softcammanager.softcams_autostart.value = []
+    bridge = softcam_bridge()
+    config.softcammanager.softcams_autostart.value = []
+    publisher = softcam.SoftcamPublisher(bridge, directory=softcam.SOFTCAM_DIRECTORY)
+    assert publisher.start() is False
+    assert publisher.switched_off is True
+    text = plugin_log()
+    assert "no softcam set to start automatically" in text
+    assert "does not provide the softcam hooks" not in text
+
+
+def test_a_binary_replaced_under_a_running_process_is_still_matched(lab):
+    """🔴 Upgrading the cam is exactly when somebody reaches for this button.
+
+    From the moment `opkg` replaces the file, every copy already running reads
+    `… (deleted)` from its `exe` link. Comparing verbatim drops them out of the
+    count — one instance reported while two fight over the card, and a collapse
+    button that cannot collapse them.
+    """
+    lab.proc.set({
+        5112: (CAM[:COMM_LENGTH], 1, lab.binary + " (deleted)"),
+        5113: (CAM[:COMM_LENGTH], 5112, lab.binary + " (deleted)"),
+        7000: (CAM[:COMM_LENGTH], 1, lab.binary),
+    })
+    found = scan(CAM[:COMM_LENGTH], lab.binary, lab.proc.path)
+    assert sorted(found) == [5112, 5113, 7000]
+    assert roots(found) == [5112, 7000]
 
 
 def test_the_family_of_the_binary_decides_the_start_line():
@@ -596,6 +675,50 @@ def test_a_start_line_that_will_not_run_is_reported(
     run_the_sequence(bridge.publisher("softcam"))
     assert error(factory) == CAM + " could not be started"
     assert factory.client.last(SOFTCAM).json()["last_restart"] is None
+
+
+def test_a_restart_that_can_get_no_timer_signals_nothing_at_all(
+    softcam_bridge, factory, settings, lab, monkeypatch
+):
+    """🔴 The one path that would otherwise end with a dead cam and no error.
+
+    The sequence is armed before anything is signalled — an `eTimer` cannot fire
+    until this returns to the main loop, so there is no race in doing it first —
+    which turns „stopped the cam, never started one, and wedged `_busy` so every
+    later attempt is refused" into an ordinary refusal that changed nothing.
+    """
+    settings.softcam_restart_allowed.value = True
+    bridge = softcam_bridge()
+    publisher = bridge.publisher("softcam")
+    monkeypatch.setattr(publisher._sequence, "start", lambda *a, **k: False)
+
+    send(factory)
+    refusal = error(factory)
+    assert refusal and "would not give the plugin a timer" in refusal
+    assert lab.proc.signals == []
+    assert lab.proc.pids() == [5112, 5113]
+    assert publisher._busy is False
+    assert publisher._phase is None
+
+
+def test_a_sequence_that_loses_its_timer_does_not_wedge(
+    softcam_bridge, factory, settings, lab, monkeypatch
+):
+    """A restart already under way must not leave `_busy` stuck true for ever."""
+    settings.softcam_restart_allowed.value = True
+    bridge = softcam_bridge()
+    publisher = bridge.publisher("softcam")
+    lab.proc.stubborn = {5112, 5113}
+    send(factory)
+    assert publisher._busy is True
+
+    monkeypatch.setattr(publisher._sequence, "start", lambda *a, **k: False)
+    publisher._sequence.timer.fire()
+
+    assert publisher._busy is False
+    assert publisher._phase is None
+    refusal = error(factory)
+    assert refusal and "would not give the plugin a timer" in refusal
 
 
 def test_a_retained_restart_command_is_discarded(softcam_bridge, factory, settings, lab):

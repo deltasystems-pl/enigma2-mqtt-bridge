@@ -73,6 +73,17 @@ version that has no section here.
 - **A restart is refused for the first sixty seconds after the plugin starts.** The image's own
   check fires about a second after every interface start, and restarting inside that window races
   a copy already on its way.
+- **The autostart setting holds absolute paths**, and the prefix is stripped where the setting is
+  read — the same place the image's own manager strips it — so that nothing downstream ever sees a
+  path. An entry pointing outside the softcam directory keeps its separators and is refused,
+  rather than being rebased onto that directory and started as a different program.
+- **An upgraded cam is still counted.** Once `opkg` replaces the binary, every copy already
+  running reads `…/<name> (deleted)` from its `exe` link; that marker is removed before the
+  comparison, so the copies an upgrade left behind are exactly the ones the button can collapse.
+- **The restart is refused rather than half-performed when the image will not give it a timer.**
+  The sequence is armed before anything is signalled, so the one failure that would otherwise end
+  with the cam stopped, nothing started and every later attempt answering „a restart is already
+  running" is now an ordinary refusal that changed nothing.
 
 ### Documentation
 

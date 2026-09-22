@@ -48,11 +48,26 @@ is not optional. An instance is then a matched process **whose parent is not its
 which makes a supervisor-and-worker pair one, two independent launches two, and an orphan whose
 parent was killed one, without any of the three being a special case. A count that could not be
 taken is `null` and never `0`. `pgrep -f`, and name matching of any kind outside these two
-conditions, are ruled out.
+conditions, are ruled out. 🔴 The `exe` link is compared with the kernel's `(deleted)` marker
+removed: from the moment an upgrade replaces the cam binary, every copy already running reads
+`…/<name> (deleted)`, and comparing verbatim would drop exactly those processes out of the count —
+reporting one instance while two fight over the card, at the one moment most likely to precede
+somebody reaching for the button.
 
-**Restarting.** The binary is resolved on the receiver from the image's own autostart setting and
-is refused unless it is an executable regular file **directly under the softcam directory** after
-symlink resolution, with a name that needs no shell quoting. It is then started with a
+**Resolving, and where the normalisation happens.** 🔴 The autostart setting holds **absolute
+paths**, `/usr/softcams/<name>`, not bare names — the image's own manager begins its loop by
+stripping exactly that prefix, and that line exists only because the prefix is there. The plugin
+strips it at the same point, where the setting is read, so that nothing downstream ever sees a
+path: `selected` publishes the basename the contract promises, the truncated command is the first
+fifteen characters of a name rather than of `/usr/softcams/…`, and "is this name longer than
+fifteen characters" stays a question about a name instead of being true for every receiver.
+Normalising later — inside the path guard, say — silently produces three wrong answers instead of
+one. Only that one prefix is removed: an entry pointing anywhere else keeps its separators and is
+refused by the name guard, rather than being quietly rebased onto the softcam directory, which
+would run a different program from the one the image was told to start.
+
+**Restarting.** The binary is refused unless it is an executable regular file **directly under the
+softcam directory** after symlink resolution, with a name that needs no shell quoting. It is then started with a
 **family-keyed, fixed command line** — the family being the lowercase prefix of the binary's
 basename, never the protocol the cam speaks outward — reproducing the image's own line including
 its stack limit and background flag. A family for which no line is known does not get the
