@@ -109,6 +109,10 @@ msgid "Allow deep standby and reboot"
 msgstr "Tiefschlaf und Neustart erlauben"
 
 #: src/MQTTBridge/setup.py:52
+msgid "Close the channel list when the TV asks for standby"
+msgstr "Senderliste schließen, wenn der Fernseher Standby anfordert"
+
+#: src/MQTTBridge/setup.py:52
 msgid "Allow restarting the softcam"
 msgstr "Neustart des Softcams erlauben"
 

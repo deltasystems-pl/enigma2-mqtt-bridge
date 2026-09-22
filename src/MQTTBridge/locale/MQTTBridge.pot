@@ -108,6 +108,10 @@ msgid "Allow deep standby and reboot"
 msgstr ""
 
 #: src/MQTTBridge/setup.py:52
+msgid "Close the channel list when the TV asks for standby"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:52
 msgid "Allow restarting the softcam"
 msgstr ""
 

@@ -96,9 +96,9 @@ reconnects the bridge and a connect publishes the snapshot.
 **`capabilities` is the honest part of the contract.** Hook names differ between images, so the
 plugin detects what it managed to attach and names it here rather than assuming. A consumer
 hides what is missing instead of showing a dead entity. The names are the feature areas, and
-nothing else is ever in the list: `power`, `service`, `epg`, `epg_grid`, `tuner`, `recording`,
-`timers`, `volume`, `cam`, `oscam`, `softcam`, `keys`, `screenshot`, `message`, `hdd`,
-`process`, `channels`, `bouquet_context`. A build that has bound no
+nothing else is ever in the list: `power`, `cec_workaround`, `service`, `epg`, `epg_grid`,
+`tuner`, `recording`, `timers`, `volume`, `cam`, `oscam`, `softcam`, `keys`, `screenshot`,
+`message`, `hdd`, `process`, `channels`, `bouquet_context`. A build that has bound no
 feature area publishes `[]` — the connection, `info` and the commands are the plugin itself and
 are not capabilities.
 
@@ -106,8 +106,8 @@ A name is in the list because it **worked on this box**, not because this versio
 has the code for it. Three things can take one out: the image did not provide the hooks
 (`volume` on a box with no `VolumeControl`), the feature is switched off in the settings
 (`keys` with `publish_keys` off, `screenshot` set to `off`, `epg_grid` with `epg_grid_events` at
-`0`), or the hook raised while it was being attached — which is logged once, with the name that
-could not be bound.
+`0`, `cec_workaround` with `cec_standby_workaround` off), or the hook raised while it was being
+attached — which is logged once, with the name that could not be bound.
 
 **A capability can also arrive late.** Some hooks can only bind once enigma2 has built the screen
 behind them, which on some images happens after the plugin has already connected. `bouquet_context`
@@ -123,6 +123,55 @@ both republish it.
 Retained. **Not JSON** — `on` or `standby`.
 
 Deep standby is not a state here: the box is off and the broker shows `availability: offline`.
+
+### `<base>/<node>/cec` — since 0.3.0
+
+```json
+{"last_intervention": 1789459200, "kind": "closed_channel_list", "count": 3, "pending": false}
+```
+
+Retained, and present only when `cec_workaround` is a capability: the box-only setting
+`cec_standby_workaround` is on (it is off by default), **and** the image has HDMI-CEC running,
+its notification queue and its standby screen. With the setting off nothing is bound and this
+topic is retracted on every connect — so switching the workaround off takes its count off the
+broker too. The setting itself is not in `info.settings`: it enables no command, and the
+capability already says whether the workaround is at work.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `last_intervention` | integer or `null` | Unix epoch seconds, UTC, of the last time the workaround did something. `null` until it has |
+| `kind` | `closed_channel_list` \| `dropped_stale_standby` \| `null` | What it did then |
+| `count` | integer | Interventions since the plugin started. In memory, so not a durable total across a receiver restart |
+| `pending` | bool | A standby **the television** asked for is queued and has not been carried out. This is what makes „the box is sitting there with a standby waiting" visible on a dashboard rather than only in a log |
+
+Every key is always present; a value that does not exist yet is `null`, never omitted.
+
+**What it works around** is an upstream enigma2 defect, not this plugin's. When the television
+switches itself off it tells the receiver over HDMI-CEC, and the image *queues* a standby that only
+the info bar carries out — so with the channel list open it waits until the list is closed, and
+then, because the image has already forgotten the standby was the television's, it sends
+`<Standby>` back to the television. The workaround:
+
+1. **`closed_channel_list`** — when that standby is queued while the **channel list** is the screen
+   in front, closes the list through its own exit (what EXIT does, including going back to the
+   channel you were on), so the standby happens now. Only the channel list: the check is an
+   allowlist of three class names — `ChannelSelection`, `ChannelSelectionRadio`,
+   `PiPZapSelection` — matched against the screen's class and its bases, and **never** the service
+   picker other dialogs embed, the channel list's context menu or bouquet selector, an EPG screen, a
+   menu, the plugin browser, an input box, a message box or a recording dialog. Anything stacked on
+   top of the list counts as „not the list", and the plugin never looks further down.
+2. **`dropped_stale_standby`** — when that standby is still queued **30 seconds** after the
+   television asked for it, removes it from the queue, so it cannot fire later — when somebody
+   closes the menu they were in — and take the television with it.
+
+🔴 **A standby the household asked for is never touched.** `cmd/power standby` and the remote's
+power button queue exactly the same notification as the television does. The workaround
+identifies the television's at the moment it is queued, by the image's own marker, and keeps that
+one entry by identity; nothing else in the queue is ever closed on or removed.
+
+While it closes the list it also keeps the image's „this standby came from the television" marker
+set until the standby has happened, or for at most five seconds, so the late standby is not echoed
+back to the television.
 
 ### `<base>/<node>/service`
 
@@ -931,17 +980,6 @@ the interface at start and again immediately before deep standby.
 
 `state` is `idle`, `running`, `done` or `failed`; `started` and `finished` are epoch seconds or
 `null`; `error` is a sentence written for a person, or `null`.
-
-### `<base>/<node>/cec` — 0.3.0, capability `cec_workaround`
-
-```json
-{"last_intervention": 1789459200, "kind": "closed_channel_list", "count": 3}
-```
-
-`kind` is `closed_channel_list`, `dropped_stale_standby` or `null`. `count` is since the plugin
-started. The workaround itself is opt-in (`cec_standby_workaround`, box-only, default off) and
-acts on a strict allowlist of one screen class — the channel list, never an EPG screen, a menu, the
-plugin browser, an input box or a recording dialog.
 
 ### New commands — 0.3.0
 

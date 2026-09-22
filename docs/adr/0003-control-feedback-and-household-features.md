@@ -1,6 +1,6 @@
 # ADR-0003: Control feedback and household features — the 0.2.0 and 0.3.0 plan
 
-**Status:** accepted 2026-09-21, amended 2026-09-22, extended by [ADR-0004](0004-remote-uninstall.md), partly superseded by [ADR-0005](0005-softcam-restart.md)
+**Status:** accepted 2026-09-21, amended 2026-09-22, extended by [ADR-0004](0004-remote-uninstall.md), partly superseded by [ADR-0005](0005-softcam-restart.md) (§3) and [ADR-0007](0007-cec-standby-workaround.md) (§5)
 **Date:** 2026-09-21
 **Supersedes:** — (it extends [ADR-0000](0000-prd.md) and [ADR-0002](0002-scope-after-m0.md))
 
@@ -215,7 +215,7 @@ that the contract keeps one home and a consumer can be written against it before
 | 0.3.0 | `info.settings.softcam_restart_allowed`, `…epg_import_allowed` | read-only members | — | Permissions, so a consumer can hide what the box will refuse |
 | 0.3.0 | `cmd/epg_import` | command | `epg_import` | Permission `epg_import_allowed`; refused while recording or running |
 | 0.3.0 | `epg_import` | retained topic | `epg_import` | `{state, started, finished, error}` |
-| 0.3.0 | `cec` | retained topic | `cec_workaround` | `{last_intervention, kind, count}` |
+| 0.3.0 | `cec` | retained topic | `cec_workaround` | `{last_intervention, kind, count, pending}` |
 | 0.3.0 | `info.wol` | object | — | `{supported, armed, iface}` |
 | 0.3.0 | `process` | retained topic | `process` | Already in review |
 

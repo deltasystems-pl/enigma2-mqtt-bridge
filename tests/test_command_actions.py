@@ -45,7 +45,8 @@ def test_power_standby_puts_it_to_sleep(live_bridge, factory, receiver):
     from Tools.Notifications import Notifications
 
     send(factory, "power", b"standby")
-    assert Notifications.notifications[-1][0] is Standby
+    # The image's five-tuple: (fnc, screen, args, kwargs, id).
+    assert Notifications.notifications[-1] == (None, Standby, (), {}, None)
 
 
 def test_power_toggle_goes_the_other_way(live_bridge, factory, receiver):

@@ -13,6 +13,7 @@ anything.
 
 from .bouquet import BouquetPublisher
 from .cam import CamPublisher
+from .cec import CecPublisher
 from .channels import ChannelsPublisher
 from .epggrid import EpgGridPublisher
 from .hdd import HddPublisher
@@ -28,6 +29,7 @@ from .volume import VolumePublisher
 
 PUBLISHER_CLASSES = (
     PowerPublisher,
+    CecPublisher,
     ServicePublisher,
     EpgPublisher,
     TunerPublisher,
