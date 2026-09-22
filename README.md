@@ -205,14 +205,15 @@ bundles.
       never been drilled**
 - [ ] **M3** — the integration's entities: *live on the maintainer's Home Assistant; the
       integration's own 0.2.0 release follows this one*
-- [ ] **M4** — the guided installer and the `update` entity: *coded, reviewed and exercised on one
-      receiver.* The installer has been run end to end three times on a box that did not have the
-      plugin, and a rollback has been exercised for real — a deliberately wrong broker password,
-      the plugin refused, the receiver restored to the byte and the interface restarted. Four
-      defects it found are fixed on the integration's `main`: a pending discovery offer blocked
-      the installer, the success screen was lost, the rollback misjudged the restart and left its
-      lock behind, and a receiver at default settings was refused as „different". The run that
-      ticks this box is the one after those fixes
+- [x] **M4** — the guided installer and the `update` entity, *exercised end to end on one
+      receiver.* The installer has been run repeatedly on a box that did not have the plugin, and
+      the rollback has been exercised for real: a deliberately wrong broker password, the plugin
+      refused, the receiver restored to the byte, the lock released, and „the receiver was
+      restored" reported truthfully rather than as a guess. The correct run then ended on the
+      success screen. Four defects those runs found — a pending discovery offer blocked the
+      installer, the success screen was lost, the rollback misjudged the restart and left its lock
+      behind, and a receiver at default settings was refused as „different" — are fixed, and the
+      run above is the one after the fixes. The integration's own 0.2.0 release follows
 - [ ] **M5** — public beta `v0.x`: releases, opkg feed, HACS custom repository, testers per image
 - [ ] **M6** — `v1.0.0`: third-party feed and HACS default pull requests
 - [ ] **M7** — OE-Alliance recipe, OpenPLi, broker-login auto-provisioning

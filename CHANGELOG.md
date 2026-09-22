@@ -9,7 +9,17 @@ version that has no section here.
 
 ## [Unreleased]
 
-Nothing yet.
+### Documentation
+
+- **M4 is ticked in the roadmap.** The guided installer has been run end to end on a receiver that
+  did not have the plugin, and its rollback exercised for real: a deliberately wrong broker
+  password, the plugin refused, the receiver restored to the byte, the lock released, and „the
+  receiver was restored" reported because it had been checked rather than assumed. The correct run
+  then ended on the success screen. The four defects the earlier runs found — a pending discovery
+  offer blocking the installer, a lost success screen, a rollback that misjudged the restart and
+  left its lock behind, and a receiver at default settings refused as „different" — are fixed. The
+  installer lives in the companion integration, so nothing in this package changed; the roadmap
+  here was simply still describing a milestone as unproven.
 
 ## [0.2.0] - 2026-09-22
 
