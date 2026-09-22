@@ -477,6 +477,12 @@ is checked every 60 seconds and published early whenever it has moved by 4096 kB
 direction since the last publish — so a jump lands on the curve at the minute it happened rather
 than up to five minutes later.
 
+The 300-second publish obeys the publish-on-change rule of §1 like every other state topic, so it is
+a **ceiling on the gap, not a heartbeat**: a payload identical to the last one is not sent again, and
+a receiver idle enough that none of the five numbers moved can be quiet for longer. The connect
+snapshot is the deliberate exception and always goes out. Read `availability` to tell a quiet box
+from an absent one.
+
 The capability is `process`, and it is claimed only when `/proc/self/status` can actually be read.
 There is no setting: the topic reveals nothing about what anybody is watching, so it is always on.
 

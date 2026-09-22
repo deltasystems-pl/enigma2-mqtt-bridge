@@ -95,7 +95,9 @@ interface remains responsive; only a slow-batch or event-loop warning indicates 
 **Watch the curve before believing anything about it.** The plugin publishes the enigma2 process's
 own counters on `<base>/<node>/process` — resident set, its high-water mark, threads, open file
 descriptors and the epoch second the process started — in the snapshot on every connect, then every
-300 seconds, and early whenever the resident set moves by 4 MiB. In discovery mode the entity to
+300 seconds, and early whenever the resident set moves by 4 MiB. The 300-second publish is a ceiling
+on the gap rather than a heartbeat: like every state topic it is only sent when something changed, so
+a flat stretch in the curve is a receiver with nothing to report, not a plugin that stopped. In discovery mode the entity to
 look at is **Process memory**, in MiB; it is the one of the five that is enabled by default, so a
 recorder is already keeping its history. **Process open files** and **Process threads** are next to
 it, disabled, and are what to enable for a fortnight if the memory line turns upwards, because a

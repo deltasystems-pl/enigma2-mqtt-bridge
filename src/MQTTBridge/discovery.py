@@ -325,9 +325,16 @@ class _Components:
             stat_t=self.topic("recording"),
             # A timestamp sensor will not take epoch seconds and will not take a
             # time without a zone; this renders the one shape it accepts.
+            # 🔴 Nothing follows `timestamp_utc`. The filter is
+            # `dt_util.utc_from_timestamp(value).isoformat()`, so the offset is
+            # already on the end, and a second one makes the state unparseable —
+            # Home Assistant logs „Invalid state message" and stores nothing at
+            # all, which reads as a sensor that never works rather than as an
+            # error. `tests/` renders this rather than matching it as a string,
+            # because matching it as a string is how it shipped wrong.
             val_tpl=(
                 "{% if value_json.next %}"
-                "{{ value_json.next.begin | int | timestamp_utc }}+00:00"
+                "{{ value_json.next.begin | int | timestamp_utc }}"
                 "{% else %}None{% endif %}"
             ),
             dev_cla="timestamp",
@@ -489,10 +496,11 @@ class _Components:
             name="Process started",
             stat_t=self.topic("process"),
             # Same shape as `next_timer`: a timestamp sensor takes neither epoch
-            # seconds nor a time without a zone.
+            # seconds nor a time without a zone, and nothing follows
+            # `timestamp_utc`, which already ends in the offset.
             val_tpl=(
                 "{% if value_json.started %}"
-                "{{ value_json.started | int | timestamp_utc }}+00:00"
+                "{{ value_json.started | int | timestamp_utc }}"
                 "{% else %}None{% endif %}"
             ),
             dev_cla="timestamp",

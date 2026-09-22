@@ -8,10 +8,11 @@ thinks about until it bites: a `comm` field with a closing parenthesis in it, a
 halfway through the life of the process.
 """
 
+import datetime
 import os
 
 import pytest
-from conftest import eTimer
+from conftest import eTimer, render_value_template
 
 from MQTTBridge import discovery, process
 
@@ -47,10 +48,13 @@ Threads:\t22
 SigQ:\t0/3597
 """
 
-# Field 2 is `(enigma2)` on a receiver; here it carries a space and a closing
-# parenthesis, which is legal and is what breaks a naive `split()[21]`.
+# Field 2 is `(enigma2)` on a receiver; here it carries a space **and** a
+# closing parenthesis, both of which are legal and neither of which is escaped.
+# The space alone breaks a naive `split()[21]`; the inner `)` is what tells
+# `rpartition(")")` apart from `partition(")")`, which agree on every `comm`
+# that does not contain one.
 STAT = (
-    "1204 (enig ma2) S 1 1204 1204 0 -1 4194560 88213 0 141 0 "
+    "1204 (enig) ma2) S 1 1204 1204 0 -1 4194560 88213 0 141 0 "
     "3271 918 0 0 20 0 22 0 "
     "4210987 "
     "407674880 164208 18446744073709551615 1 1 0 0 0 0 0 4096 16899 0 0 0 17 1 0 0 0 0 0\n"
@@ -455,13 +459,26 @@ def test_the_counts_are_measurements(live_bridge, factory):
 
 
 def test_the_start_time_is_rendered_as_a_zoned_timestamp(live_bridge, factory):
-    """A timestamp sensor takes neither epoch seconds nor a time without a zone."""
+    """A timestamp sensor takes neither epoch seconds nor a time without a zone.
+
+    Rendered, not matched as a string. The assertion this replaces checked that
+    `+00:00` was in the template, which was true and was the defect: the filter
+    before it already ends in the offset, so the state came out with two of them
+    and Home Assistant stored nothing at all.
+    """
     started = device_components(factory)["process_started"]
 
     assert started["dev_cla"] == "timestamp"
-    assert "timestamp_utc" in started["val_tpl"]
-    assert "+00:00" in started["val_tpl"]
     assert "stat_cla" not in started
+
+    rendered = render_value_template(started["val_tpl"], {"started": 1789042109})
+    assert datetime.datetime.fromisoformat(rendered) == datetime.datetime(
+        2026, 9, 10, 12, 8, 29, tzinfo=datetime.timezone.utc
+    )
+
+    # A reading that is not there is the literal None, which Home Assistant's
+    # MQTT sensor turns into the unknown state before it parses anything.
+    assert render_value_template(started["val_tpl"], {"started": None}) == "None"
 
 
 def test_a_box_without_the_capability_gets_no_process_entities():

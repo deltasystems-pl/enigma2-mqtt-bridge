@@ -20,11 +20,17 @@ loop instead of on a thread of its own — the opposite of `hdd.py`, whose one
 wrapped: a field that cannot be read is `null` and never an exception, because
 the value of this topic is that it is boring.
 
-Two cadences, one timer. Every 300 seconds unconditionally, so the curve has
-points on it even on a box where nothing happens; and a check every 60 seconds
-that publishes early when the resident set has moved by 4 MiB either way, so the
-jump that matters is on the curve at the minute it happened rather than five
-minutes later.
+Two cadences, one timer. A point every 300 seconds, so the curve has points on
+it on a box where nothing much is going on; and a check every 60 seconds that
+publishes early when the resident set has moved by 4 MiB either way, so the jump
+that matters is on the curve at the minute it happened rather than five minutes
+later.
+
+The 300-second publish goes through the bridge's publish-on-change rule like
+every other state topic, so it is a ceiling on the gap rather than a heartbeat:
+a payload identical to the last one is not sent again, and a receiver idle
+enough that not one of the five numbers moved simply stays quiet. The connect
+snapshot is the exception and always goes out.
 """
 
 import os
@@ -42,7 +48,9 @@ PROC_ROOT = "/proc"
 # microseconds on the main loop.
 POLL_MILLISECONDS = 60000
 
-# The unconditional cadence: a point on the curve every five minutes.
+# The slow cadence: at most five minutes between points on the curve, and
+# longer when nothing has changed — the publish is still subject to the
+# bridge's publish-on-change rule.
 FULL_INTERVAL_SECONDS = 300
 
 # How far the resident set has to move to earn a publish before that. 4 MiB is
