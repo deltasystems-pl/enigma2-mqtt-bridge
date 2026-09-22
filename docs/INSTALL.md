@@ -19,22 +19,20 @@ A telnet transport for the guided installer is planned for v1.1; it is not in v1
 
 ## From a GitHub release
 
-**Available from v0.1.0, which is not yet released.** Until it is, the
-[releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases) is empty and the
-URL below returns a 404 — build the package yourself with
-[the scp route](#manually-with-scp) in the meantime.
+Every release carries the IPK and its SHA-256 on the
+[releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases).
 
 One line on the box, nothing to download to your PC first:
 
 ```sh
-opkg install https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/download/v0.1.0/enigma2-plugin-extensions-mqttbridge_0.1.0_all.ipk
+opkg install https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/download/v0.2.0/enigma2-plugin-extensions-mqttbridge_0.2.0_all.ipk
 ```
 
 Every release carries the IPK's SHA-256 next to it. To check it:
 
 ```sh
 opkg download ... # or wget the IPK, then:
-sha256sum enigma2-plugin-extensions-mqttbridge_0.1.0_all.ipk
+sha256sum enigma2-plugin-extensions-mqttbridge_0.2.0_all.ipk
 ```
 
 and compare with the `.sha256` file from the same release page. The build is reproducible, so
@@ -65,8 +63,8 @@ For a box with no route to the internet, or to install a build you made yourself
 
 ```sh
 tools/build-ipk.sh --allow-unreleased          # or download the release IPK
-scp -O dist/enigma2-plugin-extensions-mqttbridge_0.1.0_all.ipk root@<box-ip>:/tmp/
-ssh root@<box-ip> 'opkg install /tmp/enigma2-plugin-extensions-mqttbridge_0.1.0_all.ipk'
+scp -O dist/enigma2-plugin-extensions-mqttbridge_0.2.0_all.ipk root@<box-ip>:/tmp/
+ssh root@<box-ip> 'opkg install /tmp/enigma2-plugin-extensions-mqttbridge_0.2.0_all.ipk'
 ```
 
 **`scp -O` is not optional.** Receivers run dropbear, which has no SFTP subsystem; OpenSSH 9 and

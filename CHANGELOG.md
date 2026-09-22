@@ -9,7 +9,49 @@ version that has no section here.
 
 ## [Unreleased]
 
-Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
+Nothing yet.
+
+## [0.2.0] - 2026-09-22
+
+The release that makes the box useful: everything it is doing, on the broker, and everything it
+can be asked to do, answered as state rather than as a return code.
+
+0.1.0 was the session and the identity. This one fills in the feature areas it promised —
+`power`, `service`, `epg`, `tuner`, `recording`, `timers`, `volume`, `hdd`, `key` and `screen`,
+each driven from the enigma2 hook that knows about it rather than from a poll — and adds the
+channel list, active bouquet context, a per-bouquet EPG grid, and every command in the contract
+with its guard. `info.capabilities` is no longer empty: it names the feature areas that actually
+bound on this box, so a consumer hides what is missing instead of offering a control nothing will
+ever update.
+
+Commands are verified by effect. The plugin reads the resulting state back rather than trusting a
+return value, and a refusal is a sentence on `last_error` written for the person who will read it
+— which is also how a consumer tells „the box refused this" from „the box cannot do this", now
+that `info.settings` echoes the read-only `deep_standby_allowed` permission.
+
+Three things are optional and off by default, because they are the ones worth thinking about:
+screenshots, remote-key reporting, and the conditional-access and OSCam telemetry. They can be
+switched on from the broker through `cmd/config`, deliberately — the companion integration's
+options flow is built on that path — which makes the broker login and its ACL the privacy
+boundary, and the README and `docs/TOPICS.md` both say so in as many words. The broker address
+and credentials, the node identity, the topic names and the destructive-command permission are
+not in that subset and cannot be changed from the broker at all.
+
+🔴 **`info.settings` no longer means „the remotely writable subset".** It is what a consumer may
+read, of which the writable keys are the `cmd/config` allowlist and nothing else. A client that
+writes back everything it reads loses the settings it did mean to change.
+
+Removing the package now removes the plugin. `opkg remove` deletes the `.py` files it installed
+and leaves the `.pyc` files the receiver compiled afterwards; on an OpenViX 6.6 box forty of them
+survived a removal, and because Python 3 imports a legacy-location `.pyc` with no source beside
+it, the next graphical-interface restart loaded the plugin that had just been removed and it
+reconnected to the broker. The maintainer scripts now sweep compiled bytecode on a removal and on
+an upgrade.
+
+Tested on a Vu+ Uno 4K SE running OpenViX 6.6: the by-effect checklist and a 60-minute active
+soak have passed. The long passive soak, the watchdog-restart interplay and deep standby with
+Wake-on-LAN have not been drilled. The code uses no syntax above Python 3.9 and is tested on 3.9,
+3.12 and 3.14.
 
 ### Added
 
@@ -204,11 +246,11 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
   bouquet context, the optional CAM and OSCam telemetry, `cmd/config` and the privacy boundary it
   moves to the broker login, the post-zap screenshot delay, the OpenWebif status page, the runtime
   diagnostics, `channels`, and the reproducible build — each with why it exists and what it costs.
-  It also states what is **not** done: there is no 0.2.0 release, there are no call-for-testers
-  issues, `.pyc` files orphaned by an upgrade are not swept, and M2's long soak and the
-  deep-standby drill are open. The README's roadmap and its claim that a call-for-testers thread
-  exists per image are corrected to match — testers are wanted, and opening the issue is the way to
-  volunteer.
+  It also states what was **not** done at the time: no 0.2.0 release, no call-for-testers issues,
+  no sweep of `.pyc` files orphaned by an upgrade, and M2's long soak and the deep-standby drill
+  open. This release closes the first and the third. The README's roadmap and its claim that a
+  call-for-testers thread exists per image are corrected to match — testers are wanted, and
+  opening the issue is the way to volunteer.
 - **[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md) records the 0.2.0 and
   0.3.0 plan** that came out of two days of household use: a read-only `deep_standby_allowed` echo
   so a consumer can hide a control the box will refuse (0.2.0), and then the discreet toast, the
@@ -221,6 +263,16 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
   implies that a setting is writable. **Only the `deep_standby_allowed` echo is implemented so
   far** — it has moved out of that section and into the contract — and the README's roadmap says
   so.
+- **[ADR-0004](docs/adr/0004-remote-uninstall.md) records the remote uninstall**, and the roadmap
+  and the contract gain it as a seventh 0.3.0 item. `cmd/uninstall` removes the plugin from the
+  receiver on request — retracting every retained topic it owns, publishing a final `offline`,
+  removing the package and restarting the interface, in that order, because after the package is
+  gone there is nothing left to ask — behind a box-only `uninstall_allowed` permission echoed
+  read-only in `info.settings`. Its payload is the node id, which confirms *which* receiver was
+  meant rather than who is asking; the permission is the security boundary. 🔴 It is a one-way
+  door: once it has run there is no plugin left to listen, so only SSH or the receiver's own
+  package manager can put it back. The command, its guard and the permission are written out in
+  [docs/TOPICS.md](docs/TOPICS.md) under **Planned (not implemented yet)**.
 
 ## [0.1.0] - 2026-09-16
 
@@ -353,5 +405,6 @@ tested on 3.9, 3.12 and 3.14.
 - Examples throughout the documentation use the documentation MAC `00:00:5e:00:53:01` and the
   node id derived from it.
 
-[Unreleased]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.1.0
