@@ -439,7 +439,7 @@ that OSCam authentication is enabled. `readonly` reports OSCam's own API flag.
 ### `<base>/<node>/softcam` — since 0.3.0
 
 ```json
-{"selected": "OSCam_11718-r798", "running_instances": 1,
+{"selected": "OSCam_00000-r000", "running_instances": 1,
  "last_restart": 1789459200, "last_restart_reason": "manual", "restarts_today": 2,
  "manager_check_on_start": true, "manager_timer_minutes": null}
 ```
@@ -451,7 +451,7 @@ that binary's family.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `selected` | string or `null` | The **basename of the binary** the image selected for autostart, for example `OSCam_11718-r798`. Not a family name, and never the protocol the cam speaks to its servers — a receiver can run an OSCam that talks `cccam` outward, and those are different things |
+| `selected` | string or `null` | The **basename of the binary** the image selected for autostart, for example `OSCam_00000-r000`. Not a family name, and never the protocol the cam speaks to its servers — a receiver can run an OSCam that talks `cccam` outward, and those are different things |
 | `running_instances` | integer or `null` | How many **instances** are running: matched processes whose parent is not itself matched. A healthy box reports **1**, because a cam that forks a supervisor is one instance presenting as two processes. More than one is the fault this topic exists for. `null` means the count could not be taken, which is not the same answer as `0` |
 | `last_restart` | integer or `null` | Unix epoch seconds, UTC, of the last restart this plugin performed |
 | `last_restart_reason` | `manual` \| `autoheal` \| `null` | Which path performed it |

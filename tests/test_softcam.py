@@ -40,8 +40,8 @@ INFO = ROOT + "/info"
 LAST_ERROR = ROOT + "/last_error"
 
 # Sixteen characters: one more than the kernel keeps, which is the whole defect.
-CAM = "OSCam_11718-r798"
-TWIN = "OSCam_11718-r799"
+CAM = "OSCam_00000-r000"
+TWIN = "OSCam_00000-r001"
 SHORT_CAM = "oscam"
 
 
@@ -212,7 +212,7 @@ def test_a_sixteen_character_name_is_matched_through_its_truncated_comm(lab):
 
 
 def test_two_binaries_that_truncate_alike_are_told_apart_by_exe(lab, tmp_path):
-    """🔴 `OSCam_11718-r798` and `OSCam_11718-r799` have the same `comm`.
+    """🔴 `OSCam_00000-r000` and `OSCam_00000-r001` have the same `comm`.
 
     Without the `exe` check this counts two instances of a cam of which exactly
     one is running, and a restart would signal somebody else's program.
