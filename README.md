@@ -185,7 +185,7 @@ in Home Assistant's recorder database by default. If that matters in your househ
 | Plugin | Integration |
 |---|---|
 | 0.1.0 | 0.1.0 |
-| 0.2.0 (current) | 0.2.0 |
+| 0.2.0 (current) | 0.2.0 (current) |
 
 The integration warns on its `update` entity when the box runs a plugin older than the one it
 bundles.
@@ -203,8 +203,7 @@ bundles.
       The by-effect checklist and a 60-minute active soak have passed; the **long passive soak**
       and the **watchdog-restart interplay** have not, and **deep standby with Wake-on-LAN has
       never been drilled**
-- [ ] **M3** — the integration's entities: *live on the maintainer's Home Assistant; the
-      integration's own 0.2.0 release follows this one*
+- [x] **M3** — the integration's entities: *released as the companion integration's **v0.2.0***
 - [x] **M4** — the guided installer and the `update` entity, *exercised end to end on one
       receiver.* The installer has been run repeatedly on a box that did not have the plugin, and
       the rollback has been exercised for real: a deliberately wrong broker password, the plugin
@@ -213,13 +212,13 @@ bundles.
       success screen. Four defects those runs found — a pending discovery offer blocked the
       installer, the success screen was lost, the rollback misjudged the restart and left its lock
       behind, and a receiver at default settings was refused as „different" — are fixed, and the
-      run above is the one after the fixes. The integration's own 0.2.0 release follows
+      run above is the one after the fixes, and the integration's **v0.2.0** carries them
 - [ ] **M5** — public beta `v0.x`: releases, opkg feed, HACS custom repository, testers per image
 - [ ] **M6** — `v1.0.0`: third-party feed and HACS default pull requests
 - [ ] **M7** — OE-Alliance recipe, OpenPLi, broker-login auto-provisioning
 
-The feed and the releases page serve **0.2.0**, which is what this tree builds; the companion
-integration's own 0.2.0 release follows this one. Everything after M2 is unreleased, and two
+The feed and the releases page serve **0.2.0**, which is what this tree builds, and the companion
+integration's **v0.2.0** is released alongside it. Everything after M4 is unreleased, and two
 things M2 itself promised are still open: the **long passive soak** and the **deep-standby
 drill**.
 
@@ -230,8 +229,8 @@ into two releases. The reasoning is in
 [ADR-0003](docs/adr/0003-control-feedback-and-household-features.md); the contract additions that
 are still ahead are in [docs/TOPICS.md](docs/TOPICS.md) under **Planned (not implemented yet)**.
 
-**0.2.0 — fixes**, released 2026-09-22. Both halves are on their `main` branches; this release is
-the plugin's, and the integration's follows. Everything M2 covers, and from that list of problems:
+**0.2.0 — fixes**, released 2026-09-22 — both halves, this plugin and the companion integration.
+Everything M2 covers, and from that list of problems:
 
 - `deep_standby_allowed` is echoed **read-only** in `info.settings`, so a consumer can tell „the
   box refused this" from „the box cannot do this" and hide a control that would always fail.
