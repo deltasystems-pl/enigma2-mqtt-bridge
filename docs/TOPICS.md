@@ -904,11 +904,6 @@ started. The workaround itself is opt-in (`cec_standby_workaround`, box-only, de
 acts on a strict allowlist of one screen class — the channel list, never an EPG screen, a menu, the
 plugin browser, an input box or a recording dialog.
 
-### `<base>/<node>/process` — 0.3.0, capability `process`
-
-What the enigma2 process costs: `{rss_kb, hwm_kb, threads, fds, started}`. Already in review; the
-full description arrives with it.
-
 ### New commands — 0.3.0
 
 | Command | Payload | Effect | Guard |
