@@ -31,10 +31,40 @@ is no separate configuration file to maintain, and settings survive a plugin upg
 | `epg_grid_events` | `4` | Events per channel in the EPG grid. `0` turns the grid off and drops it from `capabilities` |
 | `bouquets_for_select` | all TV bouquets | Which bouquets feed the channel list, the `zap`-by-name lookup and the EPG grid — which publishes **one retained topic per bouquet**, `epg_grid/<bouquet_slug>`. Narrow it if you have hundreds of services. Dropping or renaming a bouquet retracts the topic it owned |
 | `deep_standby_allowed` | `off` | Gate for `cmd/deep_standby` and `cmd/reboot`. Off by default because waking the box again needs Wake-on-LAN and that is worth testing before you rely on it |
+| `softcam_restart_allowed` | `off` | Gate for `cmd/softcam_restart` and for the automatic restart below. Off by default because it stops a running program on your receiver |
+| `softcam_autoheal` | `off` | Restart the softcam by itself when the channel you are watching is encrypted and stops decoding. Does nothing unless the permission above is on |
+| `softcam_autoheal_seconds` | `90` | How long a stuck decode has to hold before that happens, 30 to 600. A healthy encrypted channel refreshes its ECM file about every ten seconds, so anything much shorter is reading noise |
 | `log_level` | `info` | `error` / `warning` / `info` / `debug` |
+
+🔴 **`deep_standby_allowed` and `softcam_restart_allowed` are set here and nowhere else.** They
+are published in `info.settings` so that a consumer can hide a control the box would always
+refuse, but `cmd/config` rejects them like any other key outside its allowlist. The rule is the
+same for both: a setting that **enables** a command is granted at the television, and a setting
+that only **tunes** a command already permitted — `softcam_autoheal` and its delay — may be
+changed from the broker.
 
 The log is `/home/root/mqttbridge.log`, capped at 1 MB with two rotations kept, so a debug
 session cannot fill the flash.
+
+### What the softcam restart does
+
+It is not „run the init script" and not „restart the process". On the images that need it the
+script is a stub and there may be several copies of the cam running, because the image's own
+liveness check looks the cam up by process name — and the kernel keeps only the first fifteen
+characters of that name, so a longer binary name can never be found and the check starts another
+copy instead of leaving the running one alone.
+
+So the command **collapses the copies to exactly one**: it signals every running instance of the
+binary the image selected, waits up to five seconds, kills whatever is left, and starts one with
+the image's own command line. The binary is resolved on the receiver from
+`config.softcammanager.softcams_autostart`; nothing about it comes from the broker. The `softcam`
+topic then reports how many instances are running, and whether your receiver is one of the ones
+affected by that check — see [TOPICS.md](TOPICS.md).
+
+Two things it deliberately does not touch: the cam's own runtime directory, because the line the
+image's manual start screen uses would delete the live cam log with it, and the image's
+„skip this cam" marker file, because on these images the manager is the only thing that starts the
+cam at all and a marker left behind would disable it until the next interface restart.
 
 ### What a screenshot costs
 
@@ -80,7 +110,8 @@ For headless installs — and for the companion integration's guided installer �
   "ha_mode": "discovery",
   "publish_keys": true,
   "screenshot": "on zap",
-  "deep_standby_allowed": false
+  "deep_standby_allowed": false,
+  "softcam_restart_allowed": false
 }
 ```
 

@@ -32,6 +32,9 @@ EXPECTED_DEFAULTS = {
     "oscam_password": "",
     "bouquets_for_select": "",
     "deep_standby_allowed": False,
+    "softcam_restart_allowed": False,
+    "softcam_autoheal": False,
+    "softcam_autoheal_seconds": 90,
     "log_level": "info",
     "epg_grid_events": 4,
 }
@@ -97,6 +100,8 @@ def test_remote_settings_are_exact_and_strictly_typed():
         "screenshot_delay": 4,
         "cam_telemetry": False,
         "oscam_telemetry": False,
+        "softcam_autoheal": False,
+        "softcam_autoheal_seconds": 90,
     }
 
 
@@ -115,6 +120,8 @@ def test_an_omitted_key_falls_back_to_the_section_that_will_be_saved():
         screenshot_delay=_Element(19),
         cam_telemetry=_Element(True),
         oscam_telemetry=_Element(True),
+        softcam_autoheal=_Element(True),
+        softcam_autoheal_seconds=_Element(240),
     )
 
     values = settings_module.validate_remote_settings(
@@ -124,6 +131,8 @@ def test_an_omitted_key_falls_back_to_the_section_that_will_be_saved():
     assert values["screenshot_delay"] == 19
     assert values["cam_telemetry"] is True
     assert values["oscam_telemetry"] is True
+    assert values["softcam_autoheal"] is True
+    assert values["softcam_autoheal_seconds"] == 240
 
 
 @pytest.mark.parametrize("payload", [

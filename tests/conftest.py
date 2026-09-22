@@ -642,6 +642,28 @@ class ConfigYesNo(ConfigElement):
     value = property(ConfigElement._get, _set)
 
 
+class ConfigLocations(ConfigElement):
+    """A list of **absolute paths**, which is what enigma2's own element holds.
+
+    🔴 This stub was a `ConfigText` of bare names, and the plugin's own guards
+    then agreed with it: the receiver stores `/usr/softcams/<name>`, the image's
+    manager strips that prefix in its first line, and a plugin tested against
+    basenames threw the only entry a real box has away before it looked at it.
+    „Each side mocks the other", with the plugin mocking the receiver.
+    """
+
+    def __init__(self, default=None, visible_width=False):
+        ConfigElement.__init__(self, list(default or []))
+
+    def _set(self, value):
+        if isinstance(value, (list, tuple)):
+            self._value = [str(item) for item in value]
+        else:
+            self._value = [str(value)] if value else []
+
+    value = property(ConfigElement._get, _set)
+
+
 class ConfigSelection(ConfigElement):
     def __init__(self, choices=None, default=None):
         normalised = []
@@ -720,6 +742,17 @@ config = ConfigSubsection()
 config.plugins = ConfigSubsection()
 config.misc = ConfigSubsection()
 config.misc.standbyCounter = StandbyCounter()
+
+# The image's own softcam manager, which is not this plugin's configuration and
+# is only ever read. `softcams` selects between „the manager starts the bare
+# binary" (`None`, and the only choice the measured image offers) and „an init
+# script does", and the plugin behaves very differently in the two shapes.
+config.misc.softcams = ConfigSelection(choices=["None", "oscam"], default="None")
+config.softcammanager = ConfigSubsection()
+config.softcammanager.softcams_autostart = ConfigLocations(default=[])
+config.softcammanager.softcamtimerenabled = ConfigYesNo(default=False)
+config.softcammanager.softcamtimer = ConfigInteger(default=6)
+
 configfile = ConfigFile()
 
 config_module.ConfigElement = ConfigElement
@@ -727,6 +760,7 @@ config_module.ConfigText = ConfigText
 config_module.ConfigPassword = ConfigPassword
 config_module.ConfigInteger = ConfigInteger
 config_module.ConfigYesNo = ConfigYesNo
+config_module.ConfigLocations = ConfigLocations
 config_module.ConfigSelection = ConfigSelection
 config_module.ConfigSubsection = ConfigSubsection
 config_module.config = config
@@ -1554,6 +1588,10 @@ def fresh_receiver():
         counter = config.misc.standbyCounter
         counter.notifiers = []
         counter._value = 0
+        config.misc.softcams.value = "None"
+        config.softcammanager.softcams_autostart.value = []
+        config.softcammanager.softcamtimerenabled.value = False
+        config.softcammanager.softcamtimer.value = 6
         enigma2_module.forget_missing()
         keys_module.forget_image_keys()
         remote_module.forget_rate_limit()

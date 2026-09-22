@@ -100,6 +100,7 @@ class CommandDispatcher:
             "timer": self.timer,
             "record": self.record,
             "screenshot": self.screenshot,
+            "softcam_restart": self.softcam_restart,
             "epg_grid": self.epg_grid,
             "config": self.config,
             "discovery": self.discovery,
@@ -400,6 +401,20 @@ class CommandDispatcher:
         if publisher is None:
             return "screenshots are not available on this box"
         return publisher.capture(commanded=True)
+
+    def softcam_restart(self, _text):
+        """Collapse the cam to exactly one running instance.
+
+        Every guard lives in the publisher, because the automatic restart uses
+        the same ones and „one guard, one code path" is the point: a second copy
+        of the recording check here would be a second thing to keep in step.
+        🔴 The payload is ignored on purpose — nothing on the command line may
+        come from the broker.
+        """
+        publisher = self.publisher("softcam")
+        if publisher is None:
+            return "this receiver's image has no softcam this plugin can restart"
+        return publisher.restart()
 
     def epg_grid(self, _text):
         publisher = self.publisher("epg_grid")

@@ -46,7 +46,10 @@ def test_info_carries_every_documented_field(connected_bridge, factory):
         "screenshot_delay": 4,
         "cam_telemetry": False,
         "oscam_telemetry": False,
+        "softcam_autoheal": False,
+        "softcam_autoheal_seconds": 90,
         "deep_standby_allowed": False,
+        "softcam_restart_allowed": False,
     }
 
 
