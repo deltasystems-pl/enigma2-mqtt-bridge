@@ -113,6 +113,22 @@ Planned as 0.2.0. Nothing here is released or accepted on hardware yet.
 
 ### Fixed
 
+- Removing the package now removes the plugin. `opkg remove` deletes the files it installed, which
+  are the `.py` ones; the `.pyc` files beside them were written by the receiver after the install
+  and are in nobody's file list. On an OpenViX 6.6 receiver forty of them survived a removal — the
+  whole plugin, still compiled, in the legacy same-directory form that Python 3 imports on its own
+  — and because enigma2's plugin loader enumerates by module name, the next GUI restart loaded the
+  plugin that had just been removed and it reconnected to the broker while `opkg status` said
+  nothing was installed. `prerm` now deletes every `.pyc` and `.pyo` under the plugin directory and
+  the compiled OpenWebif hook beside it, then removes every directory it leaves empty, deepest
+  first and the plugin directory last. It sweeps on a removal only — the removal half of an upgrade
+  is `postinst`'s, after the new tree is unpacked, which is the only moment at which a compiled
+  file with no source is an orphan rather than one the new package is about to reuse. It deletes no
+  `.py` and nothing else that is not bytecode; a file of your own keeps the plugin directory and is
+  counted in a line of output; a plugin directory that is a symlink is refused untouched, because
+  unlike the upgrade sweep this one removes directories; `External/` is OpenWebif's and is never
+  enumerated; the settings in `/etc/enigma2/settings` are not read or written, so a reinstall still
+  finds its configuration; and nothing in it can fail an `opkg remove`.
 - An upgrade no longer leaves a removed module behind as importable bytecode. The image
   byte-compiles the plugin after opkg has installed it, so the `.pyc` files are not in opkg's file
   list and opkg — which removes only what it installed — leaves them. Moving `paho/` under
