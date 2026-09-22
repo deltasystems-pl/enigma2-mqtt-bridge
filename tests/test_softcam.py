@@ -14,10 +14,12 @@ never come back out.
 """
 
 import builtins
+import json
 import os
 import shutil
 import time
 
+import conftest
 import pytest
 from Components.config import config
 from conftest import ConsoleAppContainer, RecordTimerEntry
@@ -1130,8 +1132,65 @@ def test_the_softcam_sensor_follows_the_capability(softcam_bridge, factory, live
     assert sensor["p"] == "sensor"
     assert sensor["stat_t"] == ROOT + "/softcam"
     assert sensor["ent_cat"] == "diagnostic"
-    for field in ("running_instances", "restarts_today", "manager_check_on_start"):
-        assert "'" + field + "'" in sensor["json_attr_tpl"]
+
+
+def test_the_softcam_templates_are_rendered_rather_than_matched(softcam_bridge, factory):
+    """🔴 A template that reads right can still render something unusable.
+
+    Matching a `val_tpl` as a string is what let „next timer" ship a second
+    `+00:00` and read unknown for two releases. These are rendered against the
+    payload the box really publishes, and the result is what the entity would
+    actually receive.
+    """
+    softcam_bridge()
+    sensor = components(factory)["softcam"]
+    payload = factory.client.last(SOFTCAM).json()
+
+    assert conftest.render_value_template(sensor["val_tpl"], payload) == CAM
+
+    attributes = json.loads(
+        conftest.render_value_template(sensor["json_attr_tpl"], payload)
+    )
+    assert attributes == {
+        "running_instances": 1,
+        "last_restart": None,
+        "last_restart_reason": None,
+        "restarts_today": 0,
+        "manager_check_on_start": True,
+        "manager_timer_minutes": None,
+    }
+
+
+def test_a_missing_field_renders_as_unknown_and_not_as_an_empty_message(
+    softcam_bridge, factory
+):
+    """🔴 The case `| default(none)` is actually for: a key that is not there.
+
+    A `null` renders as `None` with or without the filter, so a test written on
+    a null value passes either way and proves nothing. An **absent** key renders
+    as an empty string, and Home Assistant reads an empty state as „ignore this
+    message" — leaving the previous value on screen for ever rather than going
+    unknown. That is what an older plugin, or a truncated payload, would send.
+    """
+    softcam_bridge()
+    sensor = components(factory)["softcam"]
+    published = factory.client.last(SOFTCAM).json()
+
+    absent = {key: value for key, value in published.items() if key != "selected"}
+    assert conftest.render_value_template(sensor["val_tpl"], absent) == "None"
+
+    # And a real null, which is what this box publishes when nothing resolved.
+    assert conftest.render_value_template(
+        sensor["val_tpl"], dict(published, selected=None)
+    ) == "None"
+    attributes = json.loads(
+        conftest.render_value_template(
+            sensor["json_attr_tpl"],
+            dict(published, running_instances=None, manager_timer_minutes=None),
+        )
+    )
+    assert attributes["running_instances"] is None
+    assert attributes["manager_timer_minutes"] is None
 
 
 def test_the_restart_button_follows_the_permission(softcam_bridge, factory, settings):
