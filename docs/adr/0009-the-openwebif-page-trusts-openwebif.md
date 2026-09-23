@@ -88,8 +88,10 @@ from the first. The page trusts the web interface that mounted it.
   body, which the page parses itself with `&` as the only separator. Twisted's `request.args`
   merges the query string in and also splits on `;`, so it is never consulted.
 
-Headers stay as they were — `no-store`, `nosniff`, `X-Frame-Options: SAMEORIGIN`, `no-referrer`,
-the CSP — with `frame-ancestors 'self'` added. The page stays **script-free**, so every confirmation
+Headers stay as they were — `no-store`, `nosniff`, `X-Frame-Options: SAMEORIGIN`, the CSP — with
+`frame-ancestors 'self'` added, and `Referrer-Policy` is `same-origin` rather than `no-referrer`: with
+`no-referrer` a browser posts a form with `Origin: null` (Fetch standard), which the origin check
+refuses. The page stays **script-free**, so every confirmation
 is a second page rendered by the server, carrying a fresh one-shot token bound to exactly that
 action and payload.
 

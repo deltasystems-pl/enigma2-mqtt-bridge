@@ -78,6 +78,8 @@ LOG = log_module.get_logger("webif")
 MAX_LOG_BYTES = 65536
 MAX_LOG_LINES = 200
 CSRF_KEY = "mqttbridge_csrf"
+RETIRED_KEY = "mqttbridge_csrf_retired"
+MAX_RETIRED_TOKENS = 8
 CONFIRM_KEY = "mqttbridge_confirm"
 # `Misdirected Request`: the request reached a server that will not answer for
 # the name it asked for. Not in every Twisted's constants, so spelled here.
@@ -272,7 +274,18 @@ def _csrf_token(request):
 
 
 def _rotate(request):
-    _session(request)[CSRF_KEY] = secrets.token_urlsafe(32)
+    """Replace the session's token, remembering the few it replaced.
+
+    The retired ones are kept only to tell a tab left open in this session —
+    which gets „the page is out of date" — from a token that was never this
+    session's, which gets the plain refusal. None of them is ever accepted.
+    """
+    session = _session(request)
+    retired = [item for item in session.get(RETIRED_KEY) or [] if isinstance(item, str)]
+    if isinstance(session.get(CSRF_KEY), str):
+        retired.append(session[CSRF_KEY])
+    session[RETIRED_KEY] = retired[-MAX_RETIRED_TOKENS:]
+    session[CSRF_KEY] = secrets.token_urlsafe(32)
 
 
 class _OutOfDate(PermissionError):
@@ -333,7 +346,10 @@ def _check_token(request):
     if not isinstance(expected, str) or len(expected) < 32 or len(supplied) < 32:
         raise PermissionError
     if not hmac.compare_digest(supplied, expected):
-        raise _OutOfDate
+        retired = _session(request).get(RETIRED_KEY) or []
+        if any(isinstance(old, str) and hmac.compare_digest(supplied, old) for old in retired):
+            raise _OutOfDate
+        raise PermissionError
 
 
 # ------------------------------------------------------------------ the form --
@@ -936,7 +952,12 @@ def _set_headers(request, content_type="text/html; charset=utf-8"):
     request.setHeader("cache-control", "no-store")
     request.setHeader("x-content-type-options", "nosniff")
     request.setHeader("x-frame-options", "SAMEORIGIN")
-    request.setHeader("referrer-policy", "no-referrer")
+    # 🔴 `same-origin`, never `no-referrer`. By the Fetch standard a browser
+    # that POSTs a form from a document whose policy is `no-referrer` sends
+    # `Origin: null` — and the same-origin check rightly refuses that, so every
+    # save and every command from a real browser was a 403. `same-origin`
+    # still sends nothing to another site.
+    request.setHeader("referrer-policy", "same-origin")
     request.setHeader(
         "content-security-policy",
         "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "

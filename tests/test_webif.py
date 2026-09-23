@@ -81,6 +81,9 @@ class _Request:
         self.content = io.BytesIO(urlencode(
             [(key, value) for key, values in body.items() for value in values]
         ).encode("ascii") if raw_body is None else raw_body)
+        # 🔴 Already read, as on a real server: Twisted has consumed the body to
+        # build `args` before the resource runs, so the file is at its end.
+        self.content.seek(0, io.SEEK_END)
         query = uri.split(b"?", 1)[1] if b"?" in uri else b""
         self.args = twisted_parse_qs(query)
         for key, values in body.items():
@@ -524,6 +527,67 @@ def test_only_the_body_is_read_even_for_ordinary_fields(connected_bridge, page, 
                           uri=b"/mqttbridge?level=30")
     assert request.response_code == 400
     assert sent == []
+
+
+def test_an_already_read_body_is_read_again_from_its_start(connected_bridge, page,
+                                                           monkeypatch):
+    """🔴 Twisted has read `content` to its end before the page runs."""
+    sent = []
+    monkeypatch.setattr(connected_bridge, "run_command",
+                        lambda name, text, origin: sent.append(name))
+    session = new_session()
+    request = _Request(session=session, args=encode(dict(
+        action_fields("discovery"), csrf=token(session))))
+    assert request.content.tell() == len(request.content.getvalue()) > 0
+
+    page(connected_bridge).render_POST(request)
+
+    assert request.response_code == 200
+    assert sent == ["discovery"]
+
+
+def test_a_body_is_unquoted_percent_after_plus(connected_bridge, page, monkeypatch):
+    """`%2B` is a literal plus and `+` a space — decoding in the other order swaps them."""
+    sent = []
+    monkeypatch.setattr(connected_bridge, "run_command",
+                        lambda name, text, origin: sent.append(text))
+    session = new_session()
+    body = ("form=action&action=key&csrf=" + token(session)
+            + "&key=a%2Bb+c&long=false").encode()
+    request = _Request(session=session, raw_body=body)
+
+    page(connected_bridge).render_POST(request)
+
+    assert request.response_code == 200
+    assert sent == ['{"key":"a+b c","long":false}']
+
+
+def test_a_body_over_the_cap_is_refused(connected_bridge, page, monkeypatch):
+    sent = []
+    monkeypatch.setattr(connected_bridge, "run_command", lambda *args: sent.append(args))
+    session = new_session()
+    # Valid in every field; only its size is wrong. Empty `&&…` parts are
+    # skipped by the parser, so without the cap this body would be accepted.
+    body = ("form=action&action=discovery&csrf=" + token(session)).encode()
+    body += b"&" * (webif.MAX_BODY_BYTES + 1 - len(body))
+    request = _Request(session=session, raw_body=body)
+
+    page(connected_bridge).render_POST(request)
+
+    assert request.response_code == 400
+    assert sent == []
+
+
+def test_another_sessions_token_gets_the_plain_refusal(connected_bridge, page):
+    """„Out of date" is for this session's own replaced token, not a stranger's."""
+    resource = page(connected_bridge)
+    session = new_session()
+    token(session)
+    request, body = post(resource, session, action_fields("discovery"),
+                         csrf=token(new_session()))
+    assert request.response_code == 403
+    assert b"Request rejected." in body
+    assert b"out of date" not in body
 
 
 def test_the_body_is_split_on_ampersands_only(connected_bridge, page, monkeypatch):
@@ -1220,6 +1284,8 @@ def test_every_answer_is_uncached_unframeable_and_script_free(live_bridge, page)
         assert request.response_headers["cache-control"] == "no-store"
         assert "frame-ancestors 'self'" in request.response_headers["content-security-policy"]
         assert request.response_headers["x-frame-options"] == "SAMEORIGIN"
+        # Never `no-referrer`: with it a browser posts the form with `Origin: null`.
+        assert request.response_headers["referrer-policy"] == "same-origin"
         assert b"<script" not in body.lower()
 
 
