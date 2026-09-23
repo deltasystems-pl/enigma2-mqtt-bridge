@@ -1,8 +1,9 @@
 # Configuring the plugin
 
 Everything lives under `config.plugins.mqttbridge.*` in enigma2's own settings file
-(`/etc/enigma2/settings`) and is edited on the box through *Menu → Plugins → MQTT Bridge*. There
-is no separate configuration file to maintain, and settings survive a plugin upgrade.
+(`/etc/enigma2/settings`) and is edited on the box through *Menu → Plugins → MQTT Bridge* or on
+the [OpenWebif page](#the-openwebif-page). There is no separate configuration file to maintain,
+and settings survive a plugin upgrade.
 
 ## Settings
 
@@ -38,21 +39,26 @@ is no separate configuration file to maintain, and settings survive a plugin upg
 | `softcam_autoheal_seconds` | `90` | How long a stuck decode has to hold before that happens, 30 to 600. A healthy encrypted channel refreshes its ECM file about every ten seconds, so anything much shorter is reading noise |
 | `log_level` | `info` | `error` / `warning` / `info` / `debug` |
 
-🔴 **`deep_standby_allowed` and `softcam_restart_allowed` are set here and nowhere else.** They
-are published in `info.settings` so that a consumer can hide a control the box would always
+🔴 **`deep_standby_allowed` and `softcam_restart_allowed` are never writable over MQTT.** They are
+set on the receiver — here, in the provisioning file, or on the [OpenWebif page](#the-openwebif-page)
+— and published in `info.settings` so that a consumer can hide a control the box would always
 refuse, but `cmd/config` rejects them like any other key outside its allowlist. The rule is the
-same for both: a setting that **enables** a command is granted at the television, and a setting
+same for both: a setting that **enables** a command is granted on the receiver, and a setting
 that only **tunes** a command already permitted — `softcam_autoheal` and its delay — may be
 changed from the broker.
 
-🔴 **`cec_standby_workaround` is set here and nowhere else, and it is not echoed at all.** It is
+🔴 **`cec_standby_workaround` is never writable over MQTT, and it is not echoed at all.** It is
 not a permission for a command — it switches on code that closes a screen you may be looking at,
-which makes it the kill-switch for that code, and a kill-switch belongs on the box. A consumer
+which makes it the kill-switch for that code, and a kill-switch belongs on the receiver. A consumer
 learns whether it is at work from the `cec_workaround` capability, not from `info.settings`.
 
-🔴 **`osd_toast` is set here and nowhere else, and it is not echoed either.** It is the kill-switch
+🔴 **`osd_toast` is never writable over MQTT, and it is not echoed either.** It is the kill-switch
 for a screen that lives inside the receiver's user interface, and a kill-switch reachable over the
 broker is not one. A consumer learns whether toasts are available from the `toast` capability.
+
+„On the receiver" includes the OpenWebif page, and that is not a loophole but a statement of fact:
+whoever OpenWebif admits can already set every one of these through OpenWebif's own settings
+endpoint. What stays true is the half that matters — **the broker can never grant itself one.**
 
 The log is `/home/root/mqttbridge.log`, capped at 1 MB with two rotations kept, so a debug
 session cannot fill the flash.
@@ -151,6 +157,82 @@ to loopback or an explicit local allowlist, and set OSCam `httpreadonly = 1`; th
 requests only the `status` and `readerlist` views, but cannot enforce OSCam's global policy. The
 login is stored by enigma in `/etc/enigma2/settings`: `ConfigPassword` masks it in the UI, not on
 disk. It is never sent to Home Assistant, MQTT, provisioning acknowledgements or the log.
+
+## The OpenWebif page
+
+If the receiver runs OpenWebif, the plugin adds a page to it: `http://<receiver-address>/mqttbridge`,
+also linked from OpenWebif's extras menu as *MQTT Bridge*, which opens it in a new browser tab. It
+is the recovery tool — it is served by the receiver's web
+interface, not by the broker session, so it keeps working when the broker settings are wrong.
+
+**What it shows.** The plugin version; whether the bridge is running, and if it is idle, why;
+whether it is connected; the broker's address and port and whether TLS is on; the node id, base
+topic, discovery prefix and Home Assistant mode; the capabilities; the current `last_error`; the
+settings as `info.settings` publishes them; the connection diagnostics; the last payload published
+on every retained topic, exactly as a subscriber received it (a raw topic such as the screenshot is
+named, not shown); and a sanitised tail of the plugin's log.
+
+**What it changes.** Every setting on this page's table above, in the setup screen's order. The
+passwords are **write-only**: their fields are always empty, an empty field keeps the stored
+password, and clearing one is done on the setup screen. Every text value refuses control characters
+and line breaks — enigma2's settings file has no escaping, so a line break would plant a second
+setting. A change to the node id, the base topic or the discovery prefix asks for a confirmation
+first, because every retained topic moves and Home Assistant sees a new device. A change inside
+`cmd/config`'s subset applies at once; any other change saves and reconnects, which can take a few
+seconds, and `info` follows when it has. Only the fields you actually changed are saved: the form
+remembers what it showed, so a page left open while a setting was changed elsewhere — over
+`cmd/config`, or a permission switched off at the television — does not write its old value back.
+Only the changed fields are checked, too, so a value stored before these rules (a longer host, say)
+does not block saving something else; it is checked when you edit it. If another tab or window
+saved first, the page says it is out of date — reload it and make the change again.
+
+**What it does.** Every command the plugin accepts over MQTT, run through the same code with the
+same household-safety guards — a recording, a timer due, the softcam's one-a-minute limit. Deep
+standby, reboot, restarting the interface, deleting a timer, stopping a recording, restarting the
+softcam, changing the Home Assistant mode and resetting the retained topics each ask for a
+confirmation that says what the household loses. The one difference from MQTT: a command from this
+page **does not need** `deep_standby_allowed` or `softcam_restart_allowed`. While the bridge is idle
+the commands are shown disabled, with the reason.
+
+**Who can open it.** Exactly whoever OpenWebif lets in — the page has no login of its own and reads
+no OpenWebif setting ([ADR-0009](adr/0009-the-openwebif-page-trusts-openwebif.md)):
+
+| OpenWebif setting | Who reaches the page |
+|---|---|
+| Authentication **off** (OpenWebif's default for HTTP) | A client in one of the receiver's own networks; any private address when OpenWebif's VPN access is on; a process on the receiver. Everybody else gets OpenWebif's own refusal |
+| Authentication **on** (OpenWebif's default for HTTPS) | A client that logged in with a system user's password, or a process on the receiver |
+
+🔴 **With authentication off, OpenWebif judges a client by the `X-Forwarded-For` header the client
+sends itself**, so its „local network" rule is advisory against anyone who can open the receiver's
+port 80. Keep that port off anything you do not trust.
+
+🔴 **The page's own checks protect the page, not the receiver.** It answers only when the address
+in the browser is the receiver's IP address, `localhost`, or the receiver's hostname (bare or with
+`.local`), which is what stops a hostile web site from reaching it through a name it controls; and
+every change must come from the page itself (its `Origin`), carrying the token the page put into
+the form. That token is kept in the browser's OpenWebif session, is accepted only from the POST
+body — never from the address; the page reads every field from the body alone — and is replaced after every change that took effect; a refused
+request leaves it as it was, so the page you are looking at still works. A confirmation step
+carries a separate token that is good for exactly one attempt at exactly that action. But while
+OpenWebif authentication is off, any web page a household member opens can already switch the
+receiver off, or grant `deep_standby_allowed`, through OpenWebif's own endpoints — this page cannot
+make the receiver safer than its web interface. If that matters, switch OpenWebif authentication on.
+
+🔴 **The same holds for the broker password.** Whoever OpenWebif admits can point `host` at a
+server of their own (or switch TLS off) on this page, and the receiver will then send its stored
+broker password there on the next connect. That is no worse than OpenWebif's own `/web/settings`,
+which prints the password to anybody it admits — but it is the reason the page is not a safe place
+to leave open to people you would not give the broker login to.
+
+**Known limitation.** Because of the address check, the page refuses to answer under a DNS name of
+your own or behind a reverse proxy, with a message naming the addresses that work. This is
+deliberate and there is no setting for it.
+
+🟡 On an image where the **original** WebInterface is installed instead of OpenWebif, the page is
+mounted under that interface's authentication, not OpenWebif's; this has not been measured.
+
+🟡 If the setup screen is open on the television while the page saves, both edit the same settings:
+the television's *Cancel* restores what the page saved, and its *Save* writes whatever it shows.
 
 ## Provisioning file
 

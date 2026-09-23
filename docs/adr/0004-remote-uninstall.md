@@ -1,6 +1,6 @@
 # ADR-0004: Remote uninstall behind a box-side permission
 
-**Status:** accepted 2026-09-22, implementation pending
+**Status:** accepted 2026-09-22, implementation pending, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) (§1: „on the receiver" includes the OpenWebif page)
 **Date:** 2026-09-22
 **Supersedes:** — (it extends [ADR-0003](0003-control-feedback-and-household-features.md))
 

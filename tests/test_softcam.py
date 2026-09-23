@@ -25,6 +25,7 @@ from Components.config import config
 from conftest import ConsoleAppContainer, RecordTimerEntry
 
 from MQTTBridge import softcam
+from MQTTBridge.origin import PAGE
 from MQTTBridge.softcam import (
     COMM_LENGTH,
     not_decoding_seconds,
@@ -503,6 +504,64 @@ def test_the_restart_is_refused_with_a_recording_due(
     send(factory)
     refusal = error(factory)
     assert refusal and "a recording starts in" in refusal
+    assert lab.proc.signals == []
+
+
+# ------------------------------------------------------------ from the page (§11 ab) --
+
+
+def test_a_restart_from_the_openwebif_page_needs_no_permission(softcam_bridge, factory, lab):
+    """The page is as open as the receiver's web interface, which can already grant it."""
+    bridge = softcam_bridge()
+    assert bridge.run_command("softcam_restart", "", PAGE) is None
+    assert lab.proc.signals == [(5112, softcam.TERMINATE), (5113, softcam.TERMINATE)]
+    assert error(factory) is None
+
+
+def test_the_same_restart_over_mqtt_is_still_refused_after_the_page_ran_one(
+    softcam_bridge, factory, lab
+):
+    """The origin is an argument, never a mode: nothing the page did carries over."""
+    bridge = softcam_bridge()
+    publisher = bridge.publisher("softcam")
+    bridge.run_command("softcam_restart", "", PAGE)
+    run_the_sequence(publisher)
+    lab.proc.signals = []
+    lab.proc.set(healthy(lab.binary))
+    # Out of the one-a-minute window, so only the permission can refuse it.
+    publisher._last_started -= softcam.MANUAL_INTERVAL_SECONDS + 1
+
+    send(factory)
+    assert "switched off in the plugin's settings" in error(factory)
+    assert lab.proc.signals == []
+
+
+def test_autoheal_is_still_refused_after_a_page_restart(
+    softcam_bridge, settings, receiver, lab, plugin_log
+):
+    """🔴 The automatic restart is nobody's request, so it stays behind the permission."""
+    settings.softcam_autoheal.value = True
+    bridge = softcam_bridge()
+    publisher = bridge.publisher("softcam")
+    bridge.run_command("softcam_restart", "", PAGE)
+    run_the_sequence(publisher)
+    lab.proc.signals = []
+    lab.proc.set(healthy(lab.binary))
+    # Out of the ten-minute window, so only the permission can refuse it.
+    publisher._last_started -= softcam.AUTOHEAL_INTERVAL_SECONDS + 1
+    receiver.info.encrypted = True
+    stuck_for(publisher, 600)
+
+    publisher._detector.timer.fire()
+    assert lab.proc.signals == []
+    assert "restarting the softcam is switched off" in plugin_log()
+
+
+def test_a_recording_refuses_a_page_restart_as_well(softcam_bridge, factory, receiver, lab):
+    bridge = softcam_bridge()
+    receiver.add_timer(state=RecordTimerEntry.StateRunning)
+    assert bridge.run_command("softcam_restart", "", PAGE) == "the receiver is recording"
+    assert error(factory) == "the receiver is recording"
     assert lab.proc.signals == []
 
 

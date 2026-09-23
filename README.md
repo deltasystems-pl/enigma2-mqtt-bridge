@@ -243,8 +243,8 @@ The full list is in [CHANGELOG.md](CHANGELOG.md).
 **0.3.0 — features**, in this order:
 
 1. **`cmd/softcam_restart`** — restart the cam *the image selected*, resolved on the box and never
-   named over MQTT, behind a box-only permission; plus an opt-in auto-heal for a stuck decode,
-   rate-limited and counted on a new `softcam` topic.
+   named over MQTT, behind a permission that is never writable over MQTT; plus an opt-in
+   auto-heal for a stuck decode, rate-limited and counted on a new `softcam` topic.
 2. **An opt-in CEC standby workaround** for an upstream enigma2 defect that makes a standby
    requested by the television arrive late and echo back at it. It closes the channel list and
    nothing else, never touches a standby the household asked for, and counts every intervention
@@ -252,14 +252,14 @@ The full list is in [CHANGELOG.md](CHANGELOG.md).
 3. **A discreet toast** — a non-modal, auto-hiding, top-right message that never takes focus and
    never waits behind an open channel list. `cmd/message` gains `style: popup | toast`; `popup`
    stays the default.
-4. **`cmd/epg_import`** — run the image's EPG importer, behind a box-only permission, with progress
-   on an `epg_import` topic.
+4. **`cmd/epg_import`** — run the image's EPG importer, behind a permission that is never
+   writable over MQTT, with progress on an `epg_import` topic.
 5. **`wol_arm`** — arm Wake-on-LAN at start and before deep standby, and report in `info.wol` what
    is actually true. 🔴 Until the deep standby → magic packet drill passes, **deep standby may be
    one-way on your box.**
 6. **`process`** — what the enigma2 process costs, already in review.
-7. **`cmd/uninstall`** — remove the plugin from the receiver on request, behind a box-only
-   permission `uninstall_allowed` echoed **read-only** in `info.settings`: every retained topic is
+7. **`cmd/uninstall`** — remove the plugin from the receiver on request, behind a permission
+   `uninstall_allowed`, never writable over MQTT and echoed **read-only** in `info.settings`: every retained topic is
    retracted, a final `offline` published, the package removed and the interface restarted, in
    that order. The payload is the node id, so a mis-sent message removes nothing.
    🔴 A one-way door — nothing over MQTT can put it back, only SSH or the receiver's own package

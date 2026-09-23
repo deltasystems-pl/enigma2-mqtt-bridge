@@ -1,6 +1,6 @@
 # ADR-0008: The discreet toast is made of widgets that bind no keys, refuses a timeout it cannot honour, and is deleted rather than closed
 
-**Status:** accepted 2026-09-23, amended 2026-09-23
+**Status:** accepted 2026-09-23, amended 2026-09-23, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) (the box-only setting)
 **Date:** 2026-09-23
 **Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §2, in part — it
 described this feature, and three parts of it were right for the wrong reason or contradicted

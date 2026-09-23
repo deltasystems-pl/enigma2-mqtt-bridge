@@ -12,6 +12,8 @@ would be a key an installer could not have written.
 
 import json
 import os
+import re
+import unicodedata
 
 from Components.config import (
     ConfigInteger,
@@ -48,9 +50,11 @@ REMOTE_SETTING_NAMES = (
     "softcam_autoheal_seconds",
 )
 # Published in `info.settings` and refused by `cmd/config`, like any other key
-# that is not in the allowlist above. A setting that *enables* a command is set
-# on the box's own setup screen and nowhere else; echoing it lets a consumer
-# hide a control the box would always refuse instead of offering one that fails.
+# that is not in the allowlist above. A setting that *enables* a command is
+# never writable over MQTT: it is set on the receiver — its setup screen, the
+# provisioning file, or the OpenWebif page, which is exactly as open as the
+# receiver's web interface (ADR-0009). Echoing it lets a consumer hide a control
+# the box would always refuse instead of offering one that fails.
 READ_ONLY_SETTING_NAMES = ("deep_standby_allowed", "softcam_restart_allowed")
 SCREENSHOT_INTERVAL_LIMITS = (5, 3600)
 SCREENSHOT_DELAY_LIMITS = (1, 30)
@@ -141,6 +145,30 @@ CHOICES = {
 
 SECRET_NAMES = ("password", "oscam_password")
 
+# The range of every integer setting, for anything that validates one before it
+# reaches the element — the OpenWebif page. `_build` states the same ranges on
+# the elements themselves, and a test holds the two to each other, so a range
+# changed in one place and not the other fails CI rather than the receiver.
+INTEGER_LIMITS = {
+    "port": (1, 65535),
+    "screenshot_interval": SCREENSHOT_INTERVAL_LIMITS,
+    "screenshot_delay": SCREENSHOT_DELAY_LIMITS,
+    "oscam_port": (1, 65535),
+    "softcam_autoheal_seconds": SOFTCAM_AUTOHEAL_LIMITS,
+    "epg_grid_events": (0, 20),
+}
+
+# Characters, not bytes. A path and a bouquet filter are allowed to be long.
+TEXT_LIMIT = 128
+TEXT_LIMITS = {"ca_file": 1024, "bouquets_for_select": 1024}
+
+# The settings whose change moves every retained topic somewhere else.
+IDENTITY_SETTING_NAMES = ("node_id", "base_topic", "ha_discovery_prefix")
+
+# What a topic segment may never hold: MQTT's two wildcards, and NUL.
+_TOPIC_FORBIDDEN = ("+", "#", "\x00")
+_NODE_ID = re.compile(r"[a-z0-9_]*")
+
 _TRUE = ("1", "on", "true", "yes")
 _FALSE = ("0", "off", "false", "no")
 
@@ -178,7 +206,7 @@ def _build():
     )
     section.screenshot_interval = ConfigInteger(default=60, limits=SCREENSHOT_INTERVAL_LIMITS)
     section.screenshot_delay = ConfigInteger(default=4, limits=SCREENSHOT_DELAY_LIMITS)
-    # On by default, and set on the box only: it is the kill-switch for a screen
+    # On by default, and never writable over MQTT: it is the kill-switch for a screen
     # that lives inside the GUI process, and a kill-switch reachable over the
     # broker is not one. In neither `cmd/config` list — it enables no command of
     # its own, and the `toast` capability already tells a consumer whether the
@@ -194,13 +222,14 @@ def _build():
     section.oscam_identity_salt = ConfigText(default="", fixed_size=False)
     section.bouquets_for_select = ConfigText(default="", fixed_size=False)
     section.deep_standby_allowed = ConfigYesNo(default=False)
-    # Off by default, and set on the box only: it is the kill-switch for code
-    # that closes a screen somebody is looking at. Deliberately in neither
+    # Off by default, and never writable over MQTT: it is the kill-switch for
+    # code that closes a screen somebody is looking at. Deliberately in neither
     # `cmd/config` list — it enables no command, and the `cec_workaround`
     # capability already tells a consumer whether it is at work.
     section.cec_standby_workaround = ConfigYesNo(default=False)
     # Permissions default off. This one gates a command that stops a running
-    # program on the receiver, so it is granted on the box and nowhere else.
+    # program on the receiver, so it is granted on the receiver and never over
+    # MQTT.
     section.softcam_restart_allowed = ConfigYesNo(default=False)
     section.softcam_autoheal = ConfigYesNo(default=False)
     section.softcam_autoheal_seconds = ConfigInteger(
@@ -298,6 +327,83 @@ def coerce(name, raw):
     return _coerce_text(raw)
 
 
+def text_refusal(name, text):
+    """Why `text` may not be stored in the text setting `name`, or None.
+
+    🔴 enigma2 writes `/etc/enigma2/settings` as `key=value` lines with no
+    escaping at all, and reads it back line by line. A newline inside a value is
+    therefore a second settings line, under a name of the writer's choosing, the
+    next time the receiver starts — `config.OpenWebif.auth=False`, or a
+    permission. So every control character is refused, and the Unicode line and
+    paragraph separators with them, since a line-splitting reader may honour
+    those too. Refused, never stripped: a value that has been silently edited is
+    not the value somebody typed.
+    """
+    limit = TEXT_LIMITS.get(name, TEXT_LIMIT)
+    if len(text) > limit:
+        return name + " is longer than " + str(limit) + " characters"
+    for character in text:
+        if unicodedata.category(character) in ("Cc", "Zl", "Zp"):
+            return name + " may not contain control characters or line breaks"
+    if name in IDENTITY_SETTING_NAMES and any(bad in text for bad in _TOPIC_FORBIDDEN):
+        return name + " may not contain +, # or NUL"
+    if name == "node_id" and not _NODE_ID.fullmatch(text):
+        return "node_id may hold only a-z, 0-9 and _"
+    return None
+
+
+def validate_setting(name, raw):
+    """One setting's new value, validated as every writer must: the value, or ValueError.
+
+    Built from what this module already declares — `SETTING_KINDS`, `CHOICES`,
+    `INTEGER_LIMITS` and the text rules — so there is one validator for every
+    setting rather than one per form. The message names the setting.
+    """
+    if name not in SETTING_NAMES:
+        raise ValueError(str(name) + " is not a setting")
+    try:
+        value = coerce(name, raw)
+    except ValueError as error:
+        raise ValueError(name + ": " + str(error)) from None
+    kind = SETTING_KINDS.get(name)
+    if kind == "int":
+        minimum, maximum = INTEGER_LIMITS[name]
+        if not minimum <= value <= maximum:
+            raise ValueError(name + " must be between " + str(minimum) + " and " + str(maximum))
+    elif kind == "text":
+        refusal = text_refusal(name, value)
+        if refusal:
+            raise ValueError(refusal)
+    return value
+
+
+def save_settings(values, section=None):
+    """Persist `values` — setting name to value — at once, restoring memory on failure.
+
+    Each element is saved and enigma2's settings file is written once. When the
+    write fails, every element named goes back to what it held, so a failed save
+    leaves the running configuration as it was rather than half-applied.
+    """
+    target = section if section is not None else settings
+    previous = {name: value(name, target) for name in values}
+    try:
+        for name, new in values.items():
+            found = element(name, target)
+            found.value = new
+            found.save()
+        configfile.save()
+    except Exception:
+        for name, old in previous.items():
+            found = element(name, target)
+            if found is None:
+                continue
+            found.value = old
+            found.save()
+        LOG.exception("could not write settings to enigma2's settings file")
+        return False
+    return True
+
+
 def validate_remote_settings(raw, section=None):
     """Validate the complete, deliberately small remotely writable subset.
 
@@ -368,22 +474,7 @@ def validate_remote_settings(raw, section=None):
 
 def save_remote_settings(values, section=None):
     """Persist one validated remote replacement, restoring memory on failure."""
-    target = section if section is not None else settings
-    previous = {name: value(name, target) for name in REMOTE_SETTING_NAMES}
-    try:
-        for name in REMOTE_SETTING_NAMES:
-            found = element(name, target)
-            found.value = values[name]
-            found.save()
-        configfile.save()
-    except Exception:
-        for name in REMOTE_SETTING_NAMES:
-            found = element(name, target)
-            found.value = previous[name]
-            found.save()
-        LOG.exception("could not write remote settings to enigma2's settings file")
-        return False
-    return True
+    return save_settings({name: values[name] for name in REMOTE_SETTING_NAMES}, section)
 
 
 # -------------------------------------------------------------- provisioning --

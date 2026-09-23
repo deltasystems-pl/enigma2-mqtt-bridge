@@ -36,6 +36,7 @@ then republish itself for as long as the box is switched on.
 
 import json
 import time
+from collections import OrderedDict
 
 from . import boxinfo, discovery
 from . import config as settings_module
@@ -120,6 +121,13 @@ LAST_ERROR_CMD_LIMIT = 64
 SLOW_SNAPSHOT_PUBLISHER_SECONDS = 0.25
 SLOW_SNAPSHOT_TOTAL_SECONDS = 1.0
 
+# What the OpenWebif page is allowed to show of what went out: the last payload
+# of each retained JSON topic, as a consumer received it. Bounded both ways,
+# because a channel select's discovery payload alone can run to tens of
+# kilobytes and the page lives in the GUI process.
+REMEMBERED_TOPICS = 256
+REMEMBERED_BYTES = 16384
+
 _DEFAULT_MONITOR = object()
 
 
@@ -143,6 +151,12 @@ class Bridge:
         self._last_error_published = False
         # topic -> the bytes last sent to it, so a repeat can be dropped.
         self._published = {}
+        # topic -> the JSON last published to it, for the OpenWebif page. Not
+        # `_published`: that holds the change key, which for a topic with
+        # volatile fields is the payload *without* its timestamps. Raw topics
+        # (`availability`, the screenshot) are only named, never kept.
+        self._last_json = OrderedDict()
+        self._raw_topics = set()
 
     # ----------------------------------------------------------------- settings --
 
@@ -169,8 +183,9 @@ class Bridge:
         """What `info.settings` carries: the non-secret settings, writable or not.
 
         Presence is not permission. The writable ones are the `cmd/config`
-        allowlist and nothing else; the rest are read-only and are set on the
-        box's setup screen, which `docs/TOPICS.md` says member by member.
+        allowlist and nothing else; the rest are read-only over MQTT and are set
+        on the receiver — its setup screen, the provisioning file or the
+        OpenWebif page — which `docs/TOPICS.md` says member by member.
         """
         values = self.remote_settings()
         for name in settings_module.READ_ONLY_SETTING_NAMES:
@@ -190,6 +205,68 @@ class Bridge:
         self.publish_json(self.topic("info"), info)
         self.publish_discovery(info)
         return None
+
+    def apply_settings(self, values):
+        """Persist settings the broker cannot write, then restart the way the setup screen does.
+
+        The setup screen's path, taken for any change outside `cmd/config`'s
+        allowlist: save, write the settings file once, `reload()`. The reconnect
+        publishes `info` — and in discovery mode the buttons a permission gates —
+        so a setting changed on the OpenWebif page reaches a consumer exactly as
+        one changed on the television does, and a kill-switch rebinds its hook
+        the same way. `values` must already be validated.
+        """
+        if not settings_module.save_settings(values, self.settings):
+            return "could not persist the plugin settings"
+        self.reload()
+        return None
+
+    def run_command(self, name, text, origin):
+        """A command from somewhere other than the broker — the dispatcher's refusal, or None."""
+        return self._commands.run(name, text, origin)
+
+    def last_payloads(self):
+        """`(topic, payload)` for every retained topic this process published, sorted.
+
+        The payload is the JSON as it went out, or None for a raw topic, which
+        the page names without showing.
+        """
+        rows = [(topic, payload) for topic, payload in self._last_json.items()]
+        rows.extend((topic, None) for topic in self._raw_topics)
+        return sorted(rows)
+
+    def last_error(self):
+        """The `last_error` payload as it stands on the broker, or None when it is clear."""
+        if not self._last_error_published:
+            return None
+        return self._last_json.get(self.topic("last_error"))
+
+    def diagnostics(self):
+        """What §3.2's runtime diagnostics measure, read from memory for the page."""
+        values = {}
+        if self.client is not None:
+            reader = getattr(self.client, "diagnostics", None)
+            if reader is not None:
+                values.update(reader())
+        if self._loop_monitor is not None:
+            reader = getattr(self._loop_monitor, "state", None)
+            if reader is not None:
+                values.update(reader())
+        return values
+
+    def _remember(self, topic, encoded):
+        """Keep the last JSON of one retained topic, within the page's bounds."""
+        self._raw_topics.discard(topic)
+        if len(encoded) > REMEMBERED_BYTES:
+            encoded = encoded[: REMEMBERED_BYTES - 1] + "…"
+        self._last_json.pop(topic, None)
+        self._last_json[topic] = encoded
+        while len(self._last_json) > REMEMBERED_TOPICS:
+            self._last_json.popitem(last=False)
+
+    def _forget(self, topic):
+        self._last_json.pop(topic, None)
+        self._raw_topics.discard(topic)
 
     def _replace_configurable_publishers(self):
         """Rebind only hooks controlled by cmd/config; preserve all other work."""
@@ -435,6 +512,7 @@ class Bridge:
         for topic in stale:
             self.client.publish(topic, "", qos=STATE_QOS, retain=True)
             self.state.forget(topic)
+            self._forget(topic)
         self.state.save()
         return len(stale)
 
@@ -601,13 +679,19 @@ class Bridge:
             # they recorded it two different ways the first publish after every
             # connect would look like a change.
             self._published[topic] = payload if change_key is None else change_key
+            self._last_json.pop(topic, None)
+            if len(self._raw_topics) < REMEMBERED_TOPICS:
+                self._raw_topics.add(topic)
         return info
 
     def publish_json(self, topic, payload, retain=True, volatile=()):
         encoded = _encoded(payload)
-        return self.publish_raw(
+        info = self.publish_raw(
             topic, encoded, retain=retain, change_key=_change_key(encoded, payload, volatile)
         )
+        if retain and self.client is not None:
+            self._remember(topic, encoded)
+        return info
 
     def forget_published(self):
         """Forget what was published, so the next publish goes out regardless.
@@ -638,7 +722,10 @@ class Bridge:
         change_key = _change_key(encoded, payload, volatile)
         if retain and self._published.get(topic) == change_key:
             return None
-        return self.publish_raw(topic, encoded, retain=retain, change_key=change_key)
+        info = self.publish_raw(topic, encoded, retain=retain, change_key=change_key)
+        if not raw and retain and self.client is not None:
+            self._remember(topic, encoded)
+        return info
 
     def retract(self, topic):
         if self.client is None:
@@ -646,6 +733,7 @@ class Bridge:
         info = self.client.publish(topic, "", qos=STATE_QOS, retain=True)
         self.state.forget(topic)
         self._published.pop(topic, None)
+        self._forget(topic)
         return info
 
     def build_info(self):
@@ -847,6 +935,8 @@ class Bridge:
         # believes it published is true any more — including the screenshot and
         # every grid.
         self.forget_published()
+        self._last_json.clear()
+        self._raw_topics.clear()
 
         info = self.build_info()
         self.publish_raw(self.topic("availability"), ONLINE)

@@ -1,6 +1,6 @@
 # ADR-0005: The softcam is restarted by collapsing its instances, counted by process roots
 
-**Status:** accepted 2026-09-22
+**Status:** accepted 2026-09-22, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) (the box-only permission)
 **Date:** 2026-09-22
 **Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §3, in part — it
 described this feature, and the parts of it corrected below turned out to be wrong when they were
