@@ -638,6 +638,10 @@ knees.
 
 It is a picture of what is on the television, retained on the broker. Decide that deliberately.
 
+The plugin's OpenWebif page shows the last payload this process published here, with the time the
+capture finished, at `<mount>/screen.jpg`. That is a view of this topic, not a change to it: the
+payload, the command and every guard above are unchanged.
+
 ### `<base>/<node>/key`
 
 **Not retained** — QoS 0, fire and forget.

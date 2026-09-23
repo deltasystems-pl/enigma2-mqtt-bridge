@@ -33,6 +33,16 @@ permission and nothing else: every household-safety guard still applies.
 
 The page is script-free (`default-src 'none'`), so every confirmation is a
 second page rendered by the server, never a dialog.
+
+**How the page is opened.** OpenWebif's menu entry loads it into its own
+content panel with jQuery (`$("#content_container").load(url)`), which injects
+whatever comes back into OpenWebif's document and runs any script in it. So a
+panel load — `X-Requested-With: XMLHttpRequest`, or `Sec-Fetch-Dest: empty` for
+a theme that uses `fetch()` — is answered with a fragment and nothing else: an
+`<iframe>` of this page and a link to open it in a new tab, with no script, no
+style element and no data. The frame is the full page, under its own headers,
+which admit OpenWebif's origin and nobody else's. Every navigation — a tab, a
+bookmark, the frame itself — gets the full page (ADR-0010).
 """
 
 import hmac
@@ -44,6 +54,7 @@ import re
 import secrets
 import socket
 import stat
+import time
 from urllib.parse import unquote_to_bytes, urlsplit
 
 try:
@@ -97,6 +108,14 @@ MAX_BODY_BYTES = 262144
 # What the page shows of one retained payload. The bridge keeps more.
 MAX_SHOWN_PAYLOAD = 4096
 SETTINGS_FORM = "settings"
+# How long a grab in flight keeps the page refreshing itself. `_busy` stays set
+# for as long as `grab` does not call back, so without a bound a hung grab
+# would refresh the page for ever.
+REFRESH_BOUND_SECONDS = 20
+REFRESH_EVERY_SECONDS = 2
+# The panel frame's presentation, inline because the fragment may carry no
+# style element: one would restyle OpenWebif around it.
+FRAME_STYLE = "display:block;width:100%;height:calc(100vh - 140px);min-height:480px;border:0"
 # The name a confirmed settings save goes by in the session. Not a command.
 SETTINGS_ACTION = "settings"
 
@@ -1125,7 +1144,43 @@ def _action_form(action, token, running):
     )
 
 
-def _actions_section(bridge, token):
+def _capture_in_flight(bridge, now=None):
+    """True while a grab started no more than the bound ago has not called back."""
+    publisher = bridge.publisher("screenshot") if bridge is not None else None
+    reader = getattr(publisher, "capture_state", None)
+    if reader is None:
+        return False
+    busy, started = reader()
+    if not busy or started is None:
+        return False
+    now = time.time() if now is None else now
+    return now - started <= REFRESH_BOUND_SECONDS
+
+
+def _screenshot_figure(request, bridge):
+    """The last picture put on `screen`, beside the action that takes one."""
+    running = bridge is not None and bool(bridge.running)
+    if running and settings_module.value("screenshot", bridge.settings) == "off":
+        text = _("Screenshots are switched off in the settings.")
+    elif not running or bridge.publisher("screenshot") is None:
+        text = _("Screenshots are not available right now.")
+    elif _capture_in_flight(bridge):
+        text = _("Taking a screenshot; this page will refresh by itself.")
+    elif bridge.last_screenshot() is None:
+        text = _("No screenshot since the plugin started.")
+    else:
+        _image, taken = bridge.last_screenshot()
+        source = _e(_mount_path(request) + "/screen.jpg?v=" + str(int(taken)))
+        caption = _("Screenshot from %s") % time.strftime("%H:%M:%S", time.localtime(taken))
+        return (
+            f"<figure class='shot'><a href='{source}'><img src='{source}' alt='' width='360'>"
+            f"</a><figcaption>{_e(caption)} · <a href='{source}'>{_e(_('Full size'))}</a>"
+            "</figcaption></figure>"
+        )
+    return f"<figure class='shot'><figcaption>{_e(text)}</figcaption></figure>"
+
+
+def _actions_section(request, bridge, token):
     running = bridge is not None and bool(bridge.running)
     note = ""
     if not running:
@@ -1133,7 +1188,9 @@ def _actions_section(bridge, token):
         why = _("Commands need a running bridge: %s") % (reason or _("the bridge is idle"))
         note = f"<p class='notice'>{_e(why)}</p>"
     forms = "".join(
-        _action_form(action, token, running) for action in actions(_bouquets(bridge))
+        _action_form(action, token, running)
+        + (_screenshot_figure(request, bridge) if action.key == "screenshot" else "")
+        for action in actions(_bouquets(bridge))
     )
     return (
         f"<section><h2>{_e(_('Commands'))}</h2>{note}"
@@ -1208,16 +1265,18 @@ button{background:#087f5b;color:#fff;cursor:pointer}
 fieldset[disabled] button{background:#89928c;cursor:not-allowed}
 .actions{display:grid;gap:12px}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#272b29;color:#f4f5f4;padding:14px}
-pre{max-height:34rem;overflow:auto}.notice{font-weight:600}
+pre{max-height:34rem;overflow:auto}
+figure.shot{margin:0}.notice{font-weight:600}
+figure.shot img{width:360px;max-width:100%;height:auto;display:block}
 @media(max-width:520px){main{padding:16px}label{grid-template-columns:1fr}}
 @media(max-width:520px){dl{grid-template-columns:120px 1fr}}
 """
 
 
-def _document(request, body):
+def _document(request, body, head=""):
     icon = _e(_mount_path(request) + "/icon")
     document = (
-        "<!doctype html><html><head><meta charset='utf-8'>"
+        f"<!doctype html><html><head><meta charset='utf-8'>{head}"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         f"<title>MQTT Bridge</title><style>{_STYLE}</style></head><body><main>"
         f"<header><img src='{icon}' alt=''><div><h1>MQTT Bridge</h1>"
@@ -1238,11 +1297,17 @@ def _page(request, message=""):
         notice
         + _status_section(bridge, section)
         + _settings_section(section, token)
-        + _actions_section(bridge, token)
+        + _actions_section(request, bridge, token)
         + _topics_section(bridge)
         + f"<section><h2>{_e(_('Sanitized log tail'))}</h2><pre>{log_tail}</pre></section>"
     )
-    return _document(request, body)
+    head = ""
+    if bridge is not None and bridge.running and _capture_in_flight(bridge):
+        # „Taking…" without script: the page reloads itself by GET, which never
+        # mutates anything, so a refresh can never repeat the command.
+        target = _e(_mount_path(request) + "/")
+        head = f"<meta http-equiv='refresh' content='{REFRESH_EVERY_SECONDS};url={target}'>"
+    return _document(request, body, head)
 
 
 def _confirmation(request, label, sentence, key, payload, token, detail=""):
@@ -1281,6 +1346,63 @@ class PluginIconResource(resource.Resource):
         return image
 
 
+class ScreenshotResource(resource.Resource):
+    """`<mount>/screen.jpg` — the last picture this process put on `screen`.
+
+    Never a fresh capture: it runs no `grab`. Whoever reaches it reaches
+    OpenWebif's own `/grab`, which takes a new picture on every request, so it
+    shows nobody anything new. A query string is ignored; the page adds one only
+    to defeat the browser's image cache.
+    """
+
+    isLeaf = True
+
+    def render_GET(self, request):
+        if not _host_allowed(request):
+            return _misdirected(request)
+        bridge = _bridge()
+        recorded = None
+        if (
+            bridge is not None
+            and bridge.running
+            and settings_module.value("screenshot", bridge.settings) != "off"
+        ):
+            recorded = bridge.last_screenshot()
+        if recorded is None:
+            request.setResponseCode(404)
+            _set_headers(request, "text/plain; charset=utf-8")
+            return _("No screenshot since the plugin started.").encode("utf-8")
+        _set_headers(request, "image/jpeg")
+        request.setHeader("content-security-policy", "default-src 'none'; frame-ancestors 'self'")
+        return recorded[0]
+
+
+def _fragment(request):
+    """What OpenWebif's panel load gets: a frame of the page and a link to a tab.
+
+    🔴 No script, no style element, no class OpenWebif styles, no token and no
+    data: jQuery runs a fragment's scripts in OpenWebif's own origin, and a
+    style element would restyle OpenWebif. Presentation is the frame's inline
+    `style` only.
+    """
+    target = _e(_mount_path(request) + "/")
+    request.setHeader("content-type", "text/html; charset=utf-8")
+    request.setHeader("cache-control", "no-store")
+    request.setHeader("x-content-type-options", "nosniff")
+    return (
+        f"<div><iframe src='{target}' title='MQTT Bridge' style='{FRAME_STYLE}'></iframe>"
+        f"<a href='{target}' target='_blank' rel='noopener'>{_e(_('Open in a new tab'))}</a>"
+        "</div>"
+    ).encode()
+
+
+def _panel_load(request):
+    """True for OpenWebif loading the page into its panel, never for a navigation."""
+    requested_with = (request.getHeader("x-requested-with") or "").strip().lower()
+    destination = (request.getHeader("sec-fetch-dest") or "").strip().lower()
+    return requested_with == "xmlhttprequest" or destination == "empty"
+
+
 class MQTTBridgeWebResource(resource.Resource):
     """The page. It trusts the web interface that mounted it."""
 
@@ -1289,14 +1411,20 @@ class MQTTBridgeWebResource(resource.Resource):
     def __init__(self):
         resource.Resource.__init__(self)
         self.putChild(b"icon", PluginIconResource())
+        self.putChild(b"screen.jpg", ScreenshotResource())
         # `/mqttbridge/` is the same page as `/mqttbridge`. Twisted resolves the
         # trailing slash to an empty child, and without this the receiver
         # answers 404 to a perfectly ordinary URL — measured on the box.
         self.putChild(b"", self)
 
     def render_GET(self, request):
+        # Fragment or page, the answer depends on these two headers, so a cache
+        # must not hand one to a request that asked for the other.
+        request.setHeader("vary", "X-Requested-With, Sec-Fetch-Dest")
         if not _host_allowed(request):
             return _misdirected(request)
+        if _panel_load(request):
+            return _fragment(request)
         return _answer(request)
 
     def render_POST(self, request):

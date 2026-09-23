@@ -610,3 +610,31 @@ msgstr "die IP-Adresse des Receivers"
 #: src/MQTTBridge/webif.py
 msgid "This page is out of date: it was changed in another tab or window since it was opened. Reload the page and try again."
 msgstr "Diese Seite ist veraltet: Seit sie geöffnet wurde, wurde in einem anderen Tab oder Fenster etwas geändert. Laden Sie die Seite neu und versuchen Sie es erneut."
+
+#: src/MQTTBridge/webif.py
+msgid "Full size"
+msgstr "Volle Größe"
+
+#: src/MQTTBridge/webif.py
+msgid "No screenshot since the plugin started."
+msgstr "Seit dem Start des Plugins kein Bildschirmfoto."
+
+#: src/MQTTBridge/webif.py
+msgid "Open in a new tab"
+msgstr "In neuem Tab öffnen"
+
+#: src/MQTTBridge/webif.py
+msgid "Screenshot from %s"
+msgstr "Bildschirmfoto von %s"
+
+#: src/MQTTBridge/webif.py
+msgid "Screenshots are not available right now."
+msgstr "Bildschirmfotos sind gerade nicht verfügbar."
+
+#: src/MQTTBridge/webif.py
+msgid "Screenshots are switched off in the settings."
+msgstr "Bildschirmfotos sind in den Einstellungen ausgeschaltet."
+
+#: src/MQTTBridge/webif.py
+msgid "Taking a screenshot; this page will refresh by itself."
+msgstr "Bildschirmfoto wird aufgenommen; die Seite aktualisiert sich selbst."

@@ -160,10 +160,11 @@ disk. It is never sent to Home Assistant, MQTT, provisioning acknowledgements or
 
 ## The OpenWebif page
 
-If the receiver runs OpenWebif, the plugin adds a page to it: `http://<receiver-address>/mqttbridge`,
-also linked from OpenWebif's extras menu as *MQTT Bridge*, which opens it in a new browser tab. It
-is the recovery tool — it is served by the receiver's web
-interface, not by the broker session, so it keeps working when the broker settings are wrong.
+If the receiver runs OpenWebif, the plugin adds a page to it: `http://<receiver-address>/mqttbridge`.
+OpenWebif's extras menu entry *MQTT Bridge* opens it **inside OpenWebif**, in a frame with a fixed
+height that scrolls, with a link under it to open it in a new tab; the address typed or bookmarked
+opens the page on its own. It is the recovery tool — it is served by the receiver's web interface,
+not by the broker session, so it keeps working when the broker settings are wrong.
 
 **What it shows.** The plugin version; whether the bridge is running, and if it is idle, why;
 whether it is connected; the broker's address and port and whether TLS is on; the node id, base
@@ -171,6 +172,13 @@ topic, discovery prefix and Home Assistant mode; the capabilities; the current `
 settings as `info.settings` publishes them; the connection diagnostics; the last payload published
 on every retained topic, exactly as a subscriber received it (a raw topic such as the screenshot is
 named, not shown); and a sanitised tail of the plugin's log.
+
+Beside *Take a screenshot* it shows the **last screenshot the plugin sent to the broker**, with the
+time the capture finished and a link to the full size (`<mount>/screen.jpg`). While a capture is
+running the page says so and reloads itself every two seconds, for at most twenty, until the new
+picture is there — no script involved. A capture that fails leaves the previous picture and its
+time, and the reason is on `last_error`. The picture is kept in memory, so after the plugin
+restarts the page has none until the next capture, while the broker still holds the retained one.
 
 **What it changes.** Every setting on this page's table above, in the setup screen's order. The
 passwords are **write-only**: their fields are always empty, an empty field keeps the stored
@@ -224,9 +232,14 @@ broker password there on the next connect. That is no worse than OpenWebif's own
 which prints the password to anybody it admits — but it is the reason the page is not a safe place
 to leave open to people you would not give the broker login to.
 
+The screenshot on the page shows nobody anything new: whoever OpenWebif admits can already take a
+fresh picture of the television at any time through OpenWebif's own `/grab`.
+
 **Known limitation.** Because of the address check, the page refuses to answer under a DNS name of
-your own or behind a reverse proxy, with a message naming the addresses that work. This is
-deliberate and there is no setting for it.
+your own or behind a reverse proxy, with a message naming the addresses that work — inside
+OpenWebif's frame too. This is deliberate and there is no setting for it. A second click on the
+menu entry does nothing until another OpenWebif panel has been opened, and reloading OpenWebif does
+not reopen the page; both are OpenWebif's behaviour for every entry.
 
 🟡 On an image where the **original** WebInterface is installed instead of OpenWebif, the page is
 mounted under that interface's authentication, not OpenWebif's; this has not been measured.

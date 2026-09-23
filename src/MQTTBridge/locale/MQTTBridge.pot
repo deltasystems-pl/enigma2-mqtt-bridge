@@ -609,3 +609,31 @@ msgstr ""
 #: src/MQTTBridge/webif.py
 msgid "This page is out of date: it was changed in another tab or window since it was opened. Reload the page and try again."
 msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Full size"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "No screenshot since the plugin started."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Open in a new tab"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Screenshot from %s"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Screenshots are not available right now."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Screenshots are switched off in the settings."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Taking a screenshot; this page will refresh by itself."
+msgstr ""

@@ -28,7 +28,7 @@ from urllib.parse import unquote_to_bytes, urlencode
 
 import pytest
 from Components.config import config, configfile
-from conftest import RecordTimerEntry
+from conftest import ConsoleAppContainer, RecordTimerEntry
 from Tools.Notifications import Notifications
 
 from MQTTBridge import config as settings_module
@@ -67,6 +67,7 @@ class _Request:
         prepath=(b"mqttbridge",),
         uri=b"/mqttbridge",
         raw_body=None,
+        headers=None,
     ):
         # What Twisted leaves behind: the path segments already consumed to
         # reach this resource, as bytes.
@@ -75,6 +76,7 @@ class _Request:
         self._secure = secure
         self._session = session if session is not None else new_session()
         self._headers = {"host": host, "origin": origin, "content-type": content_type}
+        self._headers.update(headers or {})
         # What Twisted does with a POST: the body as a file, and `args` as the
         # query string *and* the body merged, the query parsed its own way.
         body = args or {}
@@ -1267,6 +1269,308 @@ def test_the_dispatcher_run_keeps_the_brokers_size_limit(connected_bridge, facto
     assert factory.client.published == before
 
 
+# ------------------------------------------------ the page inside OpenWebif (§11 ac) --
+
+XHR = {"x-requested-with": "XMLHttpRequest"}
+FETCH = {"sec-fetch-dest": "empty"}
+
+
+@pytest.mark.parametrize("headers", [XHR, FETCH], ids=["jquery", "fetch"])
+def test_a_panel_load_gets_the_fragment_and_nothing_more(connected_bridge, page, monkeypatch,
+                                                         tmp_path, headers):
+    log = tmp_path / "bridge.log"
+    log.write_text("a log line that must not leak\n", encoding="utf-8")
+    monkeypatch.setattr(webif.log_module, "active_path", lambda: str(log))
+    session = new_session()
+
+    request, body = get(page(connected_bridge), session, headers=headers)
+    text = body.decode("utf-8")
+
+    assert request.response_code == 200
+    assert text.startswith("<div>") and text.endswith("</div>")
+    assert re.findall(r"<iframe src='([^']*)'", text) == ["/mqttbridge/"]
+    assert text.count("<iframe") == 1
+    assert "href='/mqttbridge/' target='_blank' rel='noopener'>Open in a new tab</a>" in text
+    for forbidden in ("<script", "<style", "class=", "csrf", "10.0.0.5", NODE,
+                      "a log line that must not leak"):
+        assert forbidden not in text, forbidden
+    assert webif.CSRF_KEY not in session.sessionNamespaces
+    assert request.response_headers["content-type"].startswith("text/html")
+    assert request.response_headers["cache-control"] == "no-store"
+    assert request.response_headers["x-content-type-options"] == "nosniff"
+
+
+def test_the_fragment_frames_the_mount_the_request_came_by(connected_bridge, page):
+    _request, body = get(page(connected_bridge), headers=XHR,
+                         prepath=[b"somewhere", b"else", b""])
+    assert b"<iframe src='/somewhere/else/'" in body
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [{}, {"sec-fetch-dest": "document"}, {"sec-fetch-dest": "iframe"},
+     {"x-requested-with": "somethingelse", "sec-fetch-dest": "iframe"}],
+    ids=["plain", "document", "iframe", "other-xrw"],
+)
+def test_every_navigation_gets_the_full_page(connected_bridge, page, headers):
+    request, body = get(page(connected_bridge), headers=headers)
+    assert request.response_code == 200
+    assert b"<form method='post' class='settings'>" in body
+    assert b"<iframe" not in body
+
+
+@pytest.mark.parametrize("headers", [XHR, FETCH], ids=["jquery", "fetch"])
+def test_a_post_is_never_answered_with_a_fragment(connected_bridge, page, headers):
+    request, body = post(page(connected_bridge), new_session(), action_fields("discovery"),
+                         headers=headers)
+    assert request.response_code == 200
+    assert b"Done: " in body
+    assert b"<iframe" not in body
+
+
+def test_the_host_allowlist_runs_before_the_fragment(connected_bridge, page):
+    request, body = get(page(connected_bridge), _UntouchableSession(), host="attacker.example",
+                        headers=XHR)
+    assert request.response_code == 421
+    assert b"<iframe" not in body
+
+
+@pytest.mark.parametrize("headers", [XHR, FETCH, {}], ids=["jquery", "fetch", "page"])
+def test_every_answer_of_the_pages_get_varies_on_both_headers(connected_bridge, page, headers):
+    request, _body = get(page(connected_bridge), headers=headers)
+    vary = [part.strip().lower() for part in request.response_headers["vary"].split(",")]
+    assert "x-requested-with" in vary and "sec-fetch-dest" in vary
+    assert request.response_headers["cache-control"] == "no-store"
+
+
+# ----------------------------------------------------- the screenshot on the page --
+
+PICTURE = b"\xff\xd8\xff\xe0" + b"picture" * 100
+SHOT_TOPIC = ROOT + "/screen"
+
+
+def take(bridge, tmp_path, data=PICTURE, retval=0):
+    """One commanded capture through the stubbed `grab`, finished."""
+    found = bridge.publisher("screenshot")
+    found.path = str(tmp_path / ("grab-" + str(len(ConsoleAppContainer.instances)) + ".jpg"))
+    found._last_capture -= 10  # out of the five-second window
+    assert found.capture(commanded=True) is None
+    if not retval:
+        with open(found.path, "wb") as handle:
+            handle.write(data)
+    ConsoleAppContainer.instances[-1].finish(retval)
+    return found
+
+
+def shot(bridge, host=BOX, uri=b"/mqttbridge/screen.jpg", args=None):
+    request = _Request(host=host, uri=uri, prepath=[b"mqttbridge", b"screen.jpg"],
+                       args=args)
+    body = webif.ScreenshotResource().render_GET(request)
+    return request, body
+
+
+@pytest.fixture
+def screen_page(live_bridge, page, monkeypatch):
+    monkeypatch.setattr(webif, "_bridge", lambda: live_bridge)
+    return page(live_bridge)
+
+
+def test_screen_jpg_serves_exactly_what_went_out_on_screen(live_bridge, screen_page, factory,
+                                                           tmp_path):
+    take(live_bridge, tmp_path)
+    request, body = shot(live_bridge)
+    assert request.response_code == 200
+    assert body == factory.client.last(SHOT_TOPIC).payload == PICTURE
+    headers = request.response_headers
+    assert headers["content-type"] == "image/jpeg"
+    assert headers["cache-control"] == "no-store"
+    assert headers["x-content-type-options"] == "nosniff"
+    assert headers["x-frame-options"] == "SAMEORIGIN"
+    assert headers["referrer-policy"] == "same-origin"
+    assert headers["content-security-policy"] == "default-src 'none'; frame-ancestors 'self'"
+    assert "content-disposition" not in headers
+
+
+def test_screen_jpg_ignores_a_query_string(live_bridge, screen_page, tmp_path):
+    take(live_bridge, tmp_path)
+    request, body = shot(live_bridge, uri=b"/mqttbridge/screen.jpg?v=1&after=9",
+                         args={b"v": [b"1"], b"after": [b"9"]})
+    assert request.response_code == 200
+    assert body == PICTURE
+
+
+def test_screen_jpg_is_404_before_any_capture(live_bridge, screen_page):
+    request, body = shot(live_bridge)
+    assert request.response_code == 404
+    assert not body.startswith(b"\xff\xd8")
+    assert request.response_headers["cache-control"] == "no-store"
+
+
+def test_screen_jpg_is_404_while_the_bridge_is_idle(make_bridge, page):
+    bridge = make_bridge()
+    bridge.start()
+    page(bridge)
+    assert not bridge.running
+    request, _body = shot(bridge)
+    assert request.response_code == 404
+
+
+def test_screen_jpg_refuses_a_foreign_host(live_bridge, screen_page, tmp_path):
+    take(live_bridge, tmp_path)
+    request, body = shot(live_bridge, host="attacker.example")
+    assert request.response_code == 421
+    assert body != PICTURE
+
+
+def test_the_page_mounts_screen_jpg_beside_the_icon():
+    children = webif.MQTTBridgeWebResource().children
+    assert isinstance(children[b"screen.jpg"], webif.ScreenshotResource)
+
+
+def test_the_picture_survives_every_publisher_replacement(live_bridge, screen_page, factory,
+                                                          settings, tmp_path):
+    """🔴 Every save replaces the publisher, and the picture lived on the publisher."""
+    take(live_bridge, tmp_path)
+    assert shot(live_bridge)[1] == PICTURE
+
+    values = live_bridge.remote_settings()
+    values["screenshot_delay"] = 9
+    assert live_bridge.apply_remote_settings(values) is None
+    assert shot(live_bridge)[1] == PICTURE
+
+    live_bridge.reload()
+    factory.client.fire_connect()
+    assert shot(live_bridge)[1] == PICTURE
+
+    values = live_bridge.remote_settings()
+    values["screenshot"] = "off"
+    assert live_bridge.apply_remote_settings(values) is None
+    assert factory.client.last(SHOT_TOPIC).payload in ("", b"")
+    assert shot(live_bridge)[0].response_code == 404
+
+
+def test_a_reset_clears_the_record_and_its_snapshot_sets_it_again(live_bridge, screen_page,
+                                                                  monkeypatch, tmp_path):
+    take(live_bridge, tmp_path)
+    seen = []
+    real = live_bridge.publish_snapshot
+
+    def snapshot(info=None):
+        seen.append(live_bridge.last_screenshot())
+        return real(info)
+
+    monkeypatch.setattr(live_bridge, "publish_snapshot", snapshot)
+    live_bridge.reset_retained()
+
+    assert seen == [None]
+    assert live_bridge.last_screenshot()[0] == PICTURE
+
+
+def test_retracting_screen_clears_the_record(live_bridge, screen_page, tmp_path):
+    take(live_bridge, tmp_path)
+    live_bridge.retract(SHOT_TOPIC)
+    assert live_bridge.last_screenshot() is None
+
+
+def test_screen_jpg_is_404_with_screenshots_off_even_before_a_retraction(
+    live_bridge, screen_page, settings, tmp_path
+):
+    """The setting is read on every request, not only when the topic is retracted."""
+    take(live_bridge, tmp_path)
+    settings.screenshot.value = "off"
+    assert live_bridge.last_screenshot() is not None
+    assert shot(live_bridge)[0].response_code == 404
+
+
+def test_stop_makes_screen_jpg_404(live_bridge, screen_page, tmp_path):
+    take(live_bridge, tmp_path)
+    live_bridge.stop()
+    assert shot(live_bridge)[0].response_code == 404
+
+
+def refreshes(body):
+    return re.findall(r"<meta http-equiv='refresh' content='(\d+);url=([^']*)'>", body.decode())
+
+
+def test_a_grab_in_flight_refreshes_the_page_to_its_mount(live_bridge, screen_page, tmp_path):
+    found = live_bridge.publisher("screenshot")
+    found.path = str(tmp_path / "grab.jpg")
+    assert found.capture(commanded=True) is None
+
+    _request, body = get(screen_page)
+
+    assert refreshes(body) == [("2", "/mqttbridge/")]
+    assert b"Taking a screenshot; this page will refresh by itself." in body
+    assert b"<script" not in body
+
+
+def test_a_grab_in_flight_for_21_seconds_stops_the_refresh(live_bridge, screen_page, tmp_path):
+    found = live_bridge.publisher("screenshot")
+    found.path = str(tmp_path / "grab.jpg")
+    assert found.capture(commanded=True) is None
+    found._last_capture -= 21
+
+    _request, body = get(screen_page)
+
+    assert refreshes(body) == []
+
+
+def test_the_answer_to_the_screenshot_action_itself_refreshes(live_bridge, screen_page,
+                                                              tmp_path):
+    live_bridge.publisher("screenshot").path = str(tmp_path / "grab.jpg")
+    request, body = post(screen_page, new_session(), action_fields("screenshot"))
+    assert request.response_code == 200
+    assert refreshes(body) == [("2", "/mqttbridge/")]
+
+
+def test_a_finished_capture_is_shown_with_its_time(live_bridge, screen_page, tmp_path,
+                                                   monkeypatch):
+    import time as time_module
+
+    from MQTTBridge import screen as screen_module
+
+    monkeypatch.setattr(screen_module, "time", SimpleNamespace(time=lambda: 1789459200.4))
+    found = take(live_bridge, tmp_path)
+    assert found.completed_at == 1789459200.4
+
+    _request, body = get(screen_page)
+    text = body.decode("utf-8")
+
+    assert refreshes(body) == []
+    assert "<img src='/mqttbridge/screen.jpg?v=1789459200'" in text
+    expected = time_module.strftime("%H:%M:%S", time_module.localtime(1789459200.4))
+    assert "Screenshot from " + expected in text
+    assert "href='/mqttbridge/screen.jpg?v=1789459200'>Full size</a>" in text
+    assert "<script" not in text
+
+
+def test_with_screenshots_off_the_figure_says_so(connected_bridge, page, settings):
+    settings.screenshot.value = "off"
+    _request, body = get(page(connected_bridge))
+    assert b"Screenshots are switched off in the settings." in body
+    assert b"screen.jpg" not in body
+
+
+def test_before_any_capture_the_figure_says_there_is_none(live_bridge, screen_page):
+    _request, body = get(screen_page)
+    assert b"No screenshot since the plugin started." in body
+    assert b"screen.jpg" not in body
+
+
+def test_a_failed_capture_keeps_the_previous_picture_and_reports(live_bridge, screen_page,
+                                                                 factory, tmp_path):
+    first = take(live_bridge, tmp_path)
+    taken = first.completed_at
+    take(live_bridge, tmp_path, retval=1)
+
+    assert live_bridge.last_screenshot() == (PICTURE, taken)
+    assert shot(live_bridge)[1] == PICTURE
+    assert "exited with code 1" in error(factory)
+    _request, body = get(screen_page)
+    assert ("screen.jpg?v=" + str(int(taken))).encode() in body
+    assert refreshes(body) == []
+
+
 # ------------------------------------------------------------------ the answers --
 
 
@@ -1441,10 +1745,10 @@ def test_the_openwebif_hook_registers_what_upstream_expects(monkeypatch):
     link, child, name, version, has_gui, target = entry
     assert link == "mqttbridge" and type(link) is str
     assert isinstance(name, str) and isinstance(version, int) and has_gui is True
-    # 🔴 `"_self"` makes OpenWebif's menu inject the page into its own content
-    # panel by script instead of linking to it; anything else is a new-tab link.
-    assert target != "_self"
-    assert target == "_blank"
+    # 🔴 `"_self"`: OpenWebif loads the page into its own panel, and the page
+    # answers that load with a fragment framing itself (ADR-0010). Anything else
+    # would be a new-tab link and no panel at all.
+    assert target == "_self"
     assert hasattr(child, "render_GET") and hasattr(child, "putChild")
     # Twisted 22 on these images refuses a str key here.
     assert child.children and all(type(key) is bytes for key in child.children)

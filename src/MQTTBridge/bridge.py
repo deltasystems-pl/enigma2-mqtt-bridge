@@ -157,6 +157,12 @@ class Bridge:
         # (`availability`, the screenshot) are only named, never kept.
         self._last_json = OrderedDict()
         self._raw_topics = set()
+        # The last picture this process put on `screen`, and when it was taken,
+        # for the OpenWebif page. Held here and not on the publisher, because
+        # the publisher is replaced by every settings save while the retained
+        # picture on the broker outlives all of them. The same bytes object the
+        # publisher sent — no copy.
+        self._screenshot = None
 
     # ----------------------------------------------------------------- settings --
 
@@ -682,7 +688,23 @@ class Bridge:
             self._last_json.pop(topic, None)
             if len(self._raw_topics) < REMEMBERED_TOPICS:
                 self._raw_topics.add(topic)
+            if topic == self.topic("screen") and payload:
+                self._record_screenshot(payload)
         return info
+
+    def _record_screenshot(self, payload):
+        """Remember the picture just sent on `screen`, with the time it was taken.
+
+        The time is the publisher's — when `grab` finished — so a snapshot that
+        republishes an older picture keeps that picture's time.
+        """
+        publisher = self.publisher("screenshot")
+        taken = getattr(publisher, "completed_at", None) if publisher is not None else None
+        self._screenshot = (payload, taken if taken is not None else time.time())
+
+    def last_screenshot(self):
+        """`(jpeg bytes, completed_at)` of the last picture put on `screen`, or None."""
+        return self._screenshot
 
     def publish_json(self, topic, payload, retain=True, volatile=()):
         encoded = _encoded(payload)
@@ -728,6 +750,10 @@ class Bridge:
         return info
 
     def retract(self, topic):
+        if topic == self.topic("screen"):
+            # Whether or not the broker can be told: switching screenshots off
+            # means the page must not keep showing the last one either.
+            self._screenshot = None
         if self.client is None:
             return None
         info = self.client.publish(topic, "", qos=STATE_QOS, retain=True)
@@ -937,6 +963,7 @@ class Bridge:
         self.forget_published()
         self._last_json.clear()
         self._raw_topics.clear()
+        self._screenshot = None
 
         info = self.build_info()
         self.publish_raw(self.topic("availability"), ONLINE)

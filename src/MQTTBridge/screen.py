@@ -97,6 +97,9 @@ class ScreenPublisher(Publisher):
         self._commanded = False
         self._last_capture = 0.0
         self._last_image = None
+        # When the last published picture was taken — `grab` finishing, not
+        # starting. `_last_capture` is the start, and is set for failed grabs too.
+        self.completed_at = None
         self._debounce = Ticker(self._debounced, "screenshot debounce")
         self._interval = Ticker(self._on_interval, "screenshot interval")
         self._nav = None
@@ -257,6 +260,13 @@ class ScreenPublisher(Publisher):
         self._last_capture = time.time()
         return None
 
+    def capture_state(self):
+        """`(in flight, started)` — read-only, for the OpenWebif page.
+
+        `started` is when the grab in flight began, or None when none is.
+        """
+        return self._busy, (self._last_capture if self._busy else None)
+
     def _release_finished_container(self):
         """Take our callback off the container whose program has ended.
 
@@ -342,6 +352,7 @@ class ScreenPublisher(Publisher):
                     LOG.warning(message)
                 return
             self._last_image = data
+            self.completed_at = time.time()
             # A screenshot is also the acknowledgement of cmd/screenshot. Even
             # two byte-identical captures are two completed commands, so this
             # topic deliberately bypasses the state de-duplication used by the
