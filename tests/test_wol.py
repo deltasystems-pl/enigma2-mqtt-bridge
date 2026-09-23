@@ -148,9 +148,16 @@ def test_a_key_the_image_never_set_is_unknown(interfaces, monkeypatch):
 
 
 @pytest.mark.parametrize("value", [True, 1, None, ["/proc/stb/fp/wol"]])
-def test_a_value_the_image_s_probe_never_produces_is_unknown(interfaces, monkeypatch, value):
+def test_a_value_the_image_s_probe_never_produces_is_unknown(
+    interfaces, monkeypatch, usage, settings, value
+):
     monkeypatch.setitem(SystemInfo, "WakeOnLAN", value)
     assert wol.report() == UNKNOWN
+    # Nor is it a switch to act on, even beside an element of the image's name.
+    usage.wakeOnLAN = ConfigYesNo(default=False)
+    settings.wol_arm.value = True
+    assert wol.arm(settings) is False
+    assert usage.wakeOnLAN.value is False
 
 
 def test_a_failure_while_reading_is_unknown_and_keeps_the_interface(
