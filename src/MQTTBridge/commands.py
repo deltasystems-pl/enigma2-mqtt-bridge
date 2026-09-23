@@ -333,6 +333,18 @@ class CommandDispatcher:
         from . import osd
 
         payload = parse(text)
+        # 🔴 The style is decided before any default is filled in. The popup's
+        # ten seconds applied first would give every toast without a `timeout`
+        # ten seconds instead of five.
+        if isinstance(payload, dict) and payload.get("style") is not None:
+            style = str(payload.get("style")).strip().lower()
+            if style == "toast":
+                return self._toast(payload)
+            if style != "popup":
+                return (
+                    "unknown message style '" + _echo(payload.get("style"))
+                    + "'; expected popup or toast"
+                )
         if isinstance(payload, dict):
             body = payload.get("text")
             kind = str(payload.get("type") or "info").strip().lower()
@@ -346,6 +358,18 @@ class CommandDispatcher:
         except (TypeError, ValueError):
             return "'" + _echo(timeout) + "' is not a number of seconds"
         return osd.show(body, kind, timeout)
+
+    def _toast(self, payload):
+        """`style: toast`. The timeout is parsed exactly as the popup's is."""
+        from . import toast
+
+        kind = str(payload.get("type") or "info").strip().lower()
+        timeout = payload.get("timeout", toast.DEFAULT_TIMEOUT)
+        try:
+            timeout = int(timeout)
+        except (TypeError, ValueError):
+            return "'" + _echo(timeout) + "' is not a number of seconds"
+        return toast.request(self.bridge, payload.get("text"), kind, timeout)
 
     def timer(self, text):
         from . import recording

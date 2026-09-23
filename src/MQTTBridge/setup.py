@@ -42,6 +42,7 @@ def setting_labels():
         ("screenshot", _("Screenshots")),
         ("screenshot_interval", _("Screenshot interval (seconds)")),
         ("screenshot_delay", _("Screenshot delay after a zap (seconds)")),
+        ("osd_toast", _("Show discreet on-screen messages")),
         ("cam_telemetry", _("Publish conditional-access telemetry")),
         ("oscam_telemetry", _("Publish OSCam server telemetry")),
         ("oscam_port", _("OSCam WebIf port")),

@@ -96,6 +96,10 @@ msgid "Screenshot delay after a zap (seconds)"
 msgstr "Opóźnienie zrzutu po zmianie kanału (sekundy)"
 
 #: src/MQTTBridge/setup.py:45
+msgid "Show discreet on-screen messages"
+msgstr "Pokazuj dyskretne komunikaty na ekranie"
+
+#: src/MQTTBridge/setup.py:45
 msgid "Publish conditional-access telemetry"
 msgstr "Publikuj telemetrię dostępu warunkowego"
 

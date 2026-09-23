@@ -59,7 +59,7 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
                "deep_standby_allowed": false, "softcam_restart_allowed": false},
   "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
                    "volume", "hdd", "process", "channels", "bouquet_context", "epg_grid", "keys",
-                   "screenshot", "message"]
+                   "screenshot", "toast", "message"]
 }
 ```
 
@@ -98,7 +98,7 @@ plugin detects what it managed to attach and names it here rather than assuming.
 hides what is missing instead of showing a dead entity. The names are the feature areas, and
 nothing else is ever in the list: `power`, `cec_workaround`, `service`, `epg`, `epg_grid`,
 `tuner`, `recording`, `timers`, `volume`, `cam`, `oscam`, `softcam`, `keys`, `screenshot`,
-`message`, `hdd`, `process`, `channels`, `bouquet_context`. A build that has bound no
+`toast`, `message`, `hdd`, `process`, `channels`, `bouquet_context`. A build that has bound no
 feature area publishes `[]` — the connection, `info` and the commands are the plugin itself and
 are not capabilities.
 
@@ -106,7 +106,7 @@ A name is in the list because it **worked on this box**, not because this versio
 has the code for it. Three things can take one out: the image did not provide the hooks
 (`volume` on a box with no `VolumeControl`), the feature is switched off in the settings
 (`keys` with `publish_keys` off, `screenshot` set to `off`, `epg_grid` with `epg_grid_events` at
-`0`, `cec_workaround` with `cec_standby_workaround` off), or the hook raised while it was being
+`0`, `cec_workaround` with `cec_standby_workaround` off, `toast` with `osd_toast` off), or the hook raised while it was being
 attached — which is logged once, with the name that could not be bound.
 
 **A capability can also arrive late.** Some hooks can only bind once enigma2 has built the screen
@@ -698,7 +698,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `volume` | `0`–`100`, or `{"level": 42}` | Sets the volume, with the on-screen bar | Out-of-range values are clamped and noted in the log |
 | `mute` | `ON` \| `OFF` | Sets mute | Never a blind toggle: the state is read first, and read back afterwards. A receiver refuses to mute at volume 0, and that refusal is reported |
 | `key` | `KEY_OK` \| `{"key": "KEY_OK", "long": true}` | Injects a remote key | Unknown key names are refused with the name in `last_error`; at most 20 a second |
-| `message` | `{"text": "…", "type": "info", "timeout": 10}` — or a bare string | Shows an on-screen popup | `text` is required and truncated to 500 characters; `type` is `info`, `warning` or `error` (default `info`); `timeout` is seconds (default 10, `0` until dismissed). A new message replaces the previous one rather than queueing behind it |
+| `message` | `{"text": "…", "type": "info", "timeout": 10}` — or a bare string; `"style": "toast"` since 0.3.0 | Shows an on-screen popup, or a discreet toast | `text` is required and truncated to 500 characters; `type` is `info`, `warning` or `error` (default `info`); `timeout` is seconds (default 10, `0` until dismissed). A new message replaces the previous one rather than queueing behind it. The toast's rules differ — see below |
 | `timer` | see below | Adds or deletes a recording timer | An add that overlaps an existing timer, or refers to an unknown event, is refused — and so is one the receiver quietly dropped as a duplicate of a timer it already had |
 | `record` | `start` \| `stop` | Starts or stops an instant recording of the current service | `start` records the current service for two hours; `stop` with nothing recording is a no-op with a note in `last_error` |
 | `screenshot` | any | Captures `screen` now, in standby as well | Rate-limited to one per five seconds |
@@ -710,6 +710,54 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
 
 Every one of them is refused when it arrives retained, as above.
+
+### `cmd/message` styles — `toast` since 0.3.0, capability `toast`
+
+```json
+{"text": "…", "style": "toast", "timeout": 5}
+```
+
+`style` is optional. **Absent or `null` is the popup, exactly as before 0.3.0**, and so is a payload
+that is not a JSON object. The style is decided before any default is applied.
+
+| Field | Type | Popup (unchanged) | Toast |
+|---|---|---|---|
+| `text` | string | required; empty refused; truncated at 500 | required; empty refused; truncated at **200**; every `\c` followed by eight characters is removed |
+| `style` | string, optional | absent, `null` or `"popup"` | `"toast"` (trimmed, case-insensitive). Any other value is refused: „unknown message style '…'; expected popup or toast" |
+| `timeout` | integer seconds, optional | default **10**; `0` or less = until dismissed | default **5**; **`0` or less is refused** („a toast hides itself; timeout must be 1–30 seconds"); more than `30` becomes `30`, with a note in the log |
+| `type` | `info` \| `warning` \| `error`, optional | chooses the box's icon | **validated exactly as for a popup** — an unknown value is refused, so a payload is valid or invalid whatever its style — and then **ignored** |
+
+`timeout` is read as the popup reads it, with `int()`: `"5"` is 5, `5.9` is 5 and `0.5` is 0, which a
+toast refuses; `null` or a non-number is refused with „'…' is not a number of seconds".
+
+A **toast** is a plugin-owned, non-modal screen in the **top right**, above the channel list, the
+info bar and the popup. It has one fixed appearance — a dark, slightly transparent box and light
+text — under a header that always reads „MQTT Bridge" in the receiver's language, whatever the
+payload says. It auto-hides and does nothing else: it never becomes the current dialog, cannot be
+dismissed by the remote, and never enters the image's notification queue, so it cannot wait behind
+an open channel list the way a popup does. A newer toast replaces the one on screen and restarts
+its timer; there is no queue. A toast and a popup are independent: neither removes the other.
+
+🔴 **It cannot take a key press because of what it is made of, not only because it binds no action
+map.** A never-executed screen binds no action map, but some of enigma2's widgets bind keys natively
+in their own constructors — every list does — with no action map and no exec. The toast holds two
+text labels and nothing else, so nothing in it can bind a key, and a test enforces that.
+
+It is **hidden when the receiver enters standby**, and a toast that arrives while the receiver is in
+standby, or while the receiver's own „really shut down / restart?" question is on screen, is
+**refused** on `last_error` with „the receiver is in standby" rather than kept for later. That
+question appears only when there is a reason to ask — a recording, a running job, timeshift, a
+stream — and is gone before the receiver actually quits, so an ordinary shutdown or interface restart
+is not covered by this refusal. It is deleted — not merely hidden — when the
+plugin stops, so a toast on screen does not survive into the frame a restarting receiver leaves
+behind. A toast requested while the capability is absent is refused with „the discreet toast is
+switched off on this receiver" (`osd_toast` off) or „the discreet toast could not be created on this
+receiver".
+
+The capability `toast` is claimed **only once the screen has actually been created**, and is taken
+back — with `info` republished — if a skin reload cannot create it again. The box-only setting
+`osd_toast` (default on) is its kill-switch. An image where either fails keeps popups rather than
+gaining a style that silently does nothing.
 
 ### `cmd/timer` payload forms
 
@@ -819,7 +867,7 @@ It is a cleanup, not a factory reset: settings are untouched.
   "ip": "192.0.2.12",
   "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
                    "volume", "hdd", "process", "channels", "bouquet_context", "epg_grid", "keys",
-                   "screenshot", "message"],
+                   "screenshot", "toast", "message"],
   "ha_mode": "discovery"
 }
 ```
@@ -1021,30 +1069,6 @@ manager. That is why its permission is off by default, is granted on the box and
 and is read-only in `info.settings` like the other two. The decision, and the order the steps run
 in, are in [ADR-0004](adr/0004-remote-uninstall.md). `/etc/enigma2/settings` is not touched: a
 reinstall finds its configuration where it left it.
-
-### `cmd/message` gains `style` — 0.3.0, capability `toast`
-
-```json
-{"text": "…", "style": "toast", "timeout": 5}
-```
-
-`style` is `"popup"` (**the default, and exactly today's behaviour**) or `"toast"`. An existing
-payload is unaffected.
-
-A **toast** is a plugin-owned, non-modal screen in the **top right**. It auto-hides and does
-nothing else: it never takes focus, binds no action map, cannot be dismissed by the remote, and
-never enters the image's notification queue — so it cannot wait behind an open channel list the way
-a popup does. A newer message replaces the one on screen and restarts its timer; there is no queue.
-It is torn down on standby and on shutdown, and its text is capped at **200 characters**.
-
-For a toast, `timeout` is clamped to **1–30** and defaults to **5**; the popup's `0` („until
-dismissed") has no meaning for something that hides itself and is refused. `type` is accepted and
-**ignored**: a toast has one fixed appearance and always carries the plugin's own label, which is
-what stops a message being dressed up as a system dialog.
-
-The capability is claimed **only once the screen has actually instantiated**, and the box-only
-setting `osd_toast` (default on) is its kill-switch. An image where either fails keeps popups
-rather than gaining a style that silently does nothing.
 
 ---
 

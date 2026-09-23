@@ -59,8 +59,10 @@ def test_a_second_standby_cycle_is_still_observed(live_bridge, factory, receiver
 def test_stopping_detaches_from_the_counter(live_bridge, receiver):
     from Components.config import config
 
-    live_bridge.publisher("power").stop()
-    assert config.misc.standbyCounter.notifiers == []
+    publisher = live_bridge.publisher("power")
+    publisher.stop()
+    # Only its own listener: the toast holds one on the same counter.
+    assert publisher._entered_standby not in config.misc.standbyCounter.notifiers
 
 
 def test_the_publisher_does_not_start_without_a_standby_counter(live_bridge, monkeypatch):

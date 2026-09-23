@@ -81,6 +81,7 @@ SETTING_NAMES = (
     "screenshot",
     "screenshot_interval",
     "screenshot_delay",
+    "osd_toast",
     "cam_telemetry",
     "oscam_telemetry",
     "oscam_port",
@@ -116,6 +117,7 @@ SETTING_KINDS = {
     "screenshot": "choice",
     "screenshot_interval": "int",
     "screenshot_delay": "int",
+    "osd_toast": "bool",
     "cam_telemetry": "bool",
     "oscam_telemetry": "bool",
     "oscam_port": "int",
@@ -176,6 +178,12 @@ def _build():
     )
     section.screenshot_interval = ConfigInteger(default=60, limits=SCREENSHOT_INTERVAL_LIMITS)
     section.screenshot_delay = ConfigInteger(default=4, limits=SCREENSHOT_DELAY_LIMITS)
+    # On by default, and set on the box only: it is the kill-switch for a screen
+    # that lives inside the GUI process, and a kill-switch reachable over the
+    # broker is not one. In neither `cmd/config` list — it enables no command of
+    # its own, and the `toast` capability already tells a consumer whether the
+    # style is available.
+    section.osd_toast = ConfigYesNo(default=True)
     section.cam_telemetry = ConfigYesNo(default=False)
     section.oscam_telemetry = ConfigYesNo(default=False)
     section.oscam_port = ConfigInteger(default=8888, limits=(1, 65535))

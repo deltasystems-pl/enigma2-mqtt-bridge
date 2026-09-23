@@ -96,6 +96,10 @@ msgid "Screenshot delay after a zap (seconds)"
 msgstr ""
 
 #: src/MQTTBridge/setup.py:45
+msgid "Show discreet on-screen messages"
+msgstr ""
+
+#: src/MQTTBridge/setup.py:45
 msgid "Publish conditional-access telemetry"
 msgstr ""
 
