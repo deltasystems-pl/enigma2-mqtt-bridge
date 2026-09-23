@@ -137,15 +137,15 @@ with every key, `null` for what could not be read, and read from the image at ev
 
 | Field | Type | Meaning |
 |---|---|---|
-| `supported` | bool | The image found its own Wake-on-LAN switch: a front-processor file, `/proc/stb/fp/wol` (or `/proc/stb/power/wol` on the machines that have that one). 🔴 **`false` means the receiver cannot be woken over the network from deep standby** — only by its remote, its front button or a timer. Never derived from `ethtool`'s `Supports Wake-on`, which describes a Linux suspend that enigma2 images do not use |
+| `supported` | bool or `null` | The image found its own Wake-on-LAN switch: a front-processor file, `/proc/stb/fp/wol` (or `/proc/stb/power/wol` on the machines that have that one). 🔴 **`false` means the receiver cannot be woken over the network from deep standby** — only by its remote, its front button or a timer — and it is published only when the image itself answered „no switch". `null` when the image could not be asked or gave no usable answer: unknown, not „no". Never derived from `ethtool`'s `Supports Wake-on`, which describes a Linux suspend that enigma2 images do not use |
 | `armed` | bool or `null` | Whether that switch is on: the file read back — `enable` or `on` is `true`, `disable` or `off` is `false`. Where the file cannot be read or says neither, the image's own setting („Wake On LAN"), whose notifier is what writes the file. `null` when not supported, or when neither answers. 🟡 The file's read format is unmeasured: no receiver this project has seen has one |
 | `iface` | string or `null` | The interface `mac` is read from — `eth0` when it has an address, otherwise the first other interface that does; `null` with none. Informational: the image's switch takes no interface |
-| `mechanism` | string or `null` | `fp` or `power`, by the file the image found; `null` when not supported |
+| `mechanism` | string or `null` | `fp` or `power`, by the file the image found; `null` when not supported or unknown |
 
 `armed` is never inferred from `wol_arm`, the setting that asks the plugin to switch the image's
 Wake-on-LAN on: that is a request made on the receiver, and the image's switch can be changed in its
-own menu as well. A consumer that wants to warn before deep standby reads `supported`; an older
-plugin publishes no `wol` at all, which is silence, not `false`. And `supported: true` says the
+own menu as well. A consumer that wants to warn before deep standby reads `supported`, and treats `null`
+like an older plugin that publishes no `wol` at all: silence, not `false`. And `supported: true` says the
 image has a switch — it is not evidence that a magic packet wakes the receiver, which no drill has
 shown on any image yet.
 

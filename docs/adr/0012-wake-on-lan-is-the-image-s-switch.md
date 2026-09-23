@@ -40,7 +40,9 @@ retained on a topic.
 ## Decision
 
 - **`info.wol` is `{supported, armed, iface, mechanism}`, read from the image at every `info`
-  publish.** `supported` is `SystemInfo.get("WakeOnLAN")` being a path. `armed` is that file read
+  publish.** `supported` is `SystemInfo.get("WakeOnLAN")` being a path — `false` only when the
+  image answered `False`, and `null` when it could not be asked or gave anything else, because
+  `false` is what a consumer turns into „this receiver cannot be woken". `armed` is that file read
   back — `enable`/`on` true, `disable`/`off` false, either vocabulary from either file — and, where
   the file cannot be read or says neither, the image's own `config.usage.wakeOnLAN`, since its
   notifier is what writes the file; `null` when not supported or when neither answers. `iface` is

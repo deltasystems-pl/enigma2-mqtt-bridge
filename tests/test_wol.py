@@ -124,9 +124,55 @@ def test_a_receiver_without_the_file_reports_not_supported(interfaces, usage):
     }
 
 
-def test_an_image_without_system_info_reports_not_supported(interfaces, monkeypatch):
+UNKNOWN = {"supported": None, "armed": None, "iface": "eth0", "mechanism": None}
+
+
+def test_an_image_without_system_info_is_unknown_not_unsupported(interfaces, monkeypatch):
+    """`false` is the image's answer; no `SystemInfo` to ask is no answer at all."""
     monkeypatch.setattr(wol, "_system_info", lambda: None)
-    assert wol.report()["supported"] is False
+    assert wol.report() == UNKNOWN
+
+
+def test_a_system_info_that_raises_is_unknown(interfaces, monkeypatch):
+    class Broken:
+        def get(self, item, default=None):
+            raise RuntimeError("BoxInfo is not ready")
+
+    monkeypatch.setattr(wol, "_system_info", lambda: Broken())
+    assert wol.report() == UNKNOWN
+
+
+def test_a_key_the_image_never_set_is_unknown(interfaces, monkeypatch):
+    monkeypatch.delitem(SystemInfo, "WakeOnLAN")
+    assert wol.report() == UNKNOWN
+
+
+@pytest.mark.parametrize("value", [True, 1, None, ["/proc/stb/fp/wol"]])
+def test_a_value_the_image_s_probe_never_produces_is_unknown(interfaces, monkeypatch, value):
+    monkeypatch.setitem(SystemInfo, "WakeOnLAN", value)
+    assert wol.report() == UNKNOWN
+
+
+def test_a_failure_while_reading_is_unknown_and_keeps_the_interface(
+    interfaces, image_wol, monkeypatch
+):
+    image_wol()
+
+    def broken(path):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(wol, "armed", broken)
+    assert wol.report() == UNKNOWN
+
+
+def test_an_unknown_image_is_never_armed(interfaces, usage, settings, monkeypatch):
+    monkeypatch.setattr(wol, "_system_info", lambda: None)
+    usage.wakeOnLAN = ConfigYesNo(default=False)
+    settings.wol_arm.value = True
+
+    assert wol.arm(settings) is False
+    assert usage.wakeOnLAN.value is False
+    assert configfile.save_calls == 0
 
 
 def test_arming_where_the_image_has_no_switch_changes_and_writes_nothing(

@@ -62,23 +62,33 @@ def _system_info():
 
 
 def switch_path():
-    """The image's Wake-on-LAN file, or "" when the image found none.
+    """The image's Wake-on-LAN file; "" when the image says it has none; None when unknown.
 
-    Asked with `SystemInfo.get`, because an image that never set the key would
-    raise on a subscript — and „the image does not know" is „not supported".
+    🔴 Three answers, not two. `False` in `SystemInfo["WakeOnLAN"]` is the
+    image's own statement that its probe found no switch, and only that becomes
+    "" — „this receiver cannot be woken over the network". Everything else that
+    is not a path — no `SystemInfo` to import, a `get` that raises, a key the
+    image never set, a value of a type its probe never produces — is a question
+    that went unanswered, and a consumer that read it as „no switch" would tell
+    a household something nobody measured.
     """
     info = _system_info()
     if info is None:
-        return ""
+        return None
     try:
         found = info.get("WakeOnLAN")
     except Exception:
         LOG.debug("SystemInfo could not be asked for WakeOnLAN")
+        return None
+    if found is False or found == "":
         return ""
-    return found if isinstance(found, str) else ""
+    if isinstance(found, str):
+        return found
+    return None
 
 
 def supported():
+    """True only when the image named its switch. Unknown is not a switch to act on."""
     return bool(switch_path())
 
 
@@ -147,18 +157,29 @@ def armed(path):
 
 
 def report():
-    """`info.wol`: every key, always, and None for what could not be read."""
+    """`info.wol`: every key, always, and None for what could not be read.
+
+    `supported` is `false` only when the image said so; a failure anywhere on
+    the way is `null`, because `false` is what a consumer turns into „this
+    receiver cannot be woken". The interface is resolved on its own, so a
+    failure reading the image does not also cost the part that was read.
+    """
+    try:
+        iface = boxinfo.mac_interface() or None
+    except Exception:
+        LOG.exception("the Wake-on-LAN interface could not be resolved")
+        iface = None
     try:
         path = switch_path()
         return {
-            "supported": bool(path),
+            "supported": None if path is None else bool(path),
             "armed": armed(path),
-            "iface": boxinfo.mac_interface() or None,
+            "iface": iface,
             "mechanism": mechanism(path),
         }
     except Exception:
         LOG.exception("Wake-on-LAN could not be read")
-        return {"supported": False, "armed": None, "iface": None, "mechanism": None}
+        return {"supported": None, "armed": None, "iface": iface, "mechanism": None}
 
 
 def arm(section=None):
