@@ -424,6 +424,13 @@ class EpgImportPublisher(Publisher):
         if state is None:
             return UNKNOWN_RUNNING
         if state:
+            if not self._tracking:
+                # Follow it now rather than at the next idle poll, so the
+                # refusal and the topic say the same thing at the same moment.
+                LOG.info("an EPG import the plugin did not start is running")
+                self._baseline = self._importer.last_result
+                self._begin_tracking()
+                self._publish()
             return ALREADY_RUNNING
         refusal = recording.guard(self.session)
         if refusal:
@@ -478,7 +485,11 @@ class EpgImportPublisher(Publisher):
 
     def _failed_to_start(self, error):
         sentence = "EPG-Importer could not start: " + type(error).__name__
-        self._power_lapsed = True
+        # Only a failure that left the importer saying „running" lapses the
+        # power block. One that came first — the settings, the sources, or a
+        # start that raised before marking itself — leaves nothing stuck, and a
+        # lapse set then would cover whatever import starts next.
+        self._power_lapsed = self._running() is True
         self._state = FAILED
         self._started = int(time.time())
         self._finished = None

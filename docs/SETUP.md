@@ -151,10 +151,11 @@ scheduled ones included:
 - **With the importer's „clear old EPG" setting on**, the guide is empty until the import finishes.
 - **The importer's own deep-standby settings apply**, to an import started from Home Assistant as
   to a scheduled one: after **every** import, whoever started it, the importer checks whether to put the receiver into
-  deep standby, and does so when the receiver is in standby, is not recording and is not already
-  shutting down, **and** either its „shutdown" setting is on with deep standby set to „wake up", or
-  its „deep standby after import" setting is on and a timer woke the receiver. All of these are off
-  by default. That is the importer, not this plugin.
+  deep standby. It does so only when **all four** of its own conditions hold — its „shutdown"
+  setting is on, its deep-standby setting is „wake up", its „deep standby after import" setting is
+  on, and a timer woke the receiver — and then only if the receiver is in standby, nothing is
+  recording and it is not already shutting down. The settings are all off by default. That is the
+  importer, not this plugin.
 - **A network recording mount can hold the press up.** Before its first download the importer reads
   `/proc/mounts` and asks the recording mount for its free space, on the main loop, to choose
   where to put the file. If that mount is a network share that has stopped answering, pressing the

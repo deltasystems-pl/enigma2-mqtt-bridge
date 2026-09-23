@@ -450,10 +450,11 @@ something the plugin can change:
   the grid is empty until it finishes.
 - **The importer's own deep-standby settings apply** to an import started from here exactly as to a
   scheduled one: after **every** import, whoever started it, the importer checks whether to put the receiver into
-  deep standby, and does so when the receiver is in standby, is not recording and is not already
-  shutting down, **and** either its „shutdown" setting is on with deep standby set to „wake up", or
-  its „deep standby after import" setting is on and a timer woke the receiver. All of these are off
-  by default. That is the importer, not this plugin.
+  deep standby. It does so only when **all four** of its own conditions hold — its „shutdown"
+  setting is on, its deep-standby setting is „wake up", its „deep standby after import" setting is
+  on, and a timer woke the receiver — and then only if the receiver is in standby, nothing is
+  recording and it is not already shutting down. The settings are all off by default. That is the
+  importer, not this plugin.
 - **A network recording mount can hold the press up.** Before its first download the importer reads
   `/proc/mounts` and asks the recording mount for its free space, on the main loop, to choose
   where to put the file. If that mount is a network share that has stopped answering, pressing the
@@ -464,12 +465,20 @@ reports `started` as the moment it first saw the import.
 
 **The power commands wait for an import, but not for ever.** Deep standby, reboot and the
 interface restart are refused while an import runs, because a restart mid-import loses the run.
-That refusal lapses when this plugin's own start failed, or when the watchdog has fired for the
-current run: the importer marks itself running before its first download, so a start that fails
-part-way can leave it saying „running" until its next scheduled run — up to a day of refused
-reboots for an import that is not happening. The topic keeps reporting what the importer says, and
-a second `cmd/epg_import` is still refused as already running. The refusal returns once the
-importer has been seen idle, or with the next import that starts normally.
+That refusal lapses when this plugin's own start failed **and left the importer saying it is
+running**, or when the watchdog has fired for the current run: the importer marks itself running
+before its first download, so a start that fails part-way can leave it saying „running" until its
+next scheduled run — up to a day of refused reboots for an import that is not happening. A start
+that failed before that point leaves nothing stuck and lapses nothing. The topic keeps reporting
+what the importer says, and a second `cmd/epg_import` is still refused as already running. The
+refusal returns once the importer has been seen idle, or with the next import this plugin starts.
+One residual is accepted: if a stuck start is followed by the importer's next scheduled run
+without the importer ever being seen idle in between, the lapse covers that run too — about a
+minute and a half.
+
+A press refused because an import is already running also starts following that import at once:
+the topic says `running`, with `started` the moment of the press, rather than waiting for the next
+once-a-minute look.
 
 ### `<base>/<node>/tuner`
 

@@ -24,8 +24,9 @@ version that has no section here.
   and, with the permission on, a button in discovery mode.
 - **Deep standby, reboot and the user-interface restart are refused while an EPG import runs**,
   whoever started it: a restart mid-import loses the run. The refusal lapses once the plugin's own
-  start of the import failed or the 30-minute watchdog fired, because the importer can go on
-  saying „running" after a failed start until its next scheduled run.
+  start of the import failed and left the importer saying „running", or once the 30-minute
+  watchdog fired, because the importer can go on saying „running" after a failed start until its
+  next scheduled run.
 
 - **What the enigma2 process costs**, on `process`: resident set, its high-water mark, threads,
   open file descriptors and the epoch second the process started, read from `/proc`. It answers the
@@ -163,6 +164,10 @@ version that has no section here.
   minute otherwise, and never replaces the importer's completion callback.
 - **The importer has no failure signal**, so `epg_import` can say only that an import did not run,
   finished with no events, or has not finished after 30 minutes — never which source failed.
+- **The importer's own deep-standby behaviour applies to every import**, including one started from
+  here, but only when all four of its conditions hold: its „shutdown" setting on, deep standby set
+  to „wake up", „deep standby after import" on, and a timer wake-up — and then only in standby, with
+  nothing recording. All four settings are off by default.
 - **An instance is not a process.** A cam that forks a supervisor to keep its worker shows two
   processes for one instance, so `running_instances` counts matched processes whose parent is not
   itself matched — a plain process count reports a fault on a healthy receiver. A process is

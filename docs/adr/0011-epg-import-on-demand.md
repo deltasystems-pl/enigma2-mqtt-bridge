@@ -63,8 +63,14 @@ with a dialog whose default is yes and whose timeout presses it.
   this plugin's own start raised, or once the watchdog has fired for the current run. The importer
   marks itself running before its first download, so a start that fails part-way can leave it
   „running" until its next scheduled run; the power block lapses then, while the topic keeps
-  reporting what the importer says and a second import is still refused. It comes back once the
-  importer has been seen idle.
+  reporting what the importer says and a second import is still refused. It lapses only when the
+  importer still says it is running at the moment the start failed — an earlier failure leaves
+  nothing stuck, and a lapse set then would cover whatever import started next. It comes back once
+  the importer has been seen idle, or with the next import this plugin starts. Accepted residual:
+  after a stuck start, if the importer's next scheduled run begins without the importer ever being
+  seen idle, the lapse covers that run too (about ninety seconds).
+- **A press refused as „already running" starts following that import immediately**, so the topic
+  and the refusal agree at the same moment.
 
 ## Consequences
 
@@ -78,9 +84,11 @@ with a dialog whose default is yes and whose timeout presses it.
 - A settings save that restarts the bridge mid-import loses the original `started`.
 - The importer's own `clear_oldepg` and deep-standby behaviour apply to an import started here as to
   a scheduled one; the plugin neither reproduces nor suppresses them. The deep-standby check runs
-  after every import and acts on a receiver in standby, not recording and not already shutting down,
-  when either the importer's „shutdown" setting is on with deep standby set to „wake up", or its
-  „deep standby after import" setting is on and a timer woke the receiver.
+  after every import and acts only when all four of the importer's conditions hold — „shutdown" on,
+  deep standby set to „wake up", „deep standby after import" on, and a timer wake-up — and then only
+  on a receiver in standby, with nothing recording and not already shutting down. (The first
+  reading of the importer took this for an „either … or"; its code is four nested tests, each of
+  which returns when false.)
 - Before its first download the importer reads `/proc/mounts` and the free space of the recording
   mount on the main loop, so a network mount that has stopped answering can freeze the picture on
   the press itself. The plugin cannot avoid it without not starting the import.

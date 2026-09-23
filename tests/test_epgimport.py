@@ -901,3 +901,78 @@ def test_a_start_that_raised_before_running_does_not_lapse_the_next_import(
     tick(bridge)
     assert state(factory)["state"] == "running"
     assert bridge.run_command("restart_gui", "", PAGE) == "an EPG import is running"
+
+
+# ------------------------------------------------------ review round 2 (#27) --
+
+
+def test_an_early_start_failure_does_not_lapse_a_foreign_import_that_follows(
+    importer, epg_bridge, factory, settings
+):
+    """🔴 No idle poll in between: the lapse must not cover the image's own import."""
+    bridge = epg_bridge()
+    settings.deep_standby_allowed.value = True
+
+    def broken(*_arguments, **_keywords):
+        raise OSError("settings unreadable")
+
+    real_settings = importer.EPGConfig.loadUserSettings
+    importer.EPGConfig.loadUserSettings = broken
+    send(factory)
+    assert state(factory)["state"] == "failed"
+    importer.EPGConfig.loadUserSettings = real_settings
+
+    # The importer's own „Manual" button, before the plugin polls again.
+    importer.epgimport.sources = [FakeEpgSource("Polska - Podstawowy")]
+    importer.startImport()
+    assert bridge.run_command("restart_gui", "", PAGE) == "an EPG import is running"
+    factory.client.fire_message(ROOT + "/cmd/reboot", b"PRESS")
+    assert error(factory) == "an EPG import is running"
+
+
+def test_a_successful_start_re_arms_the_power_block(importer, epg_bridge, factory):
+    bridge = epg_bridge()
+    real_start = importer.startImport
+    _start_that_raises_part_way(importer)
+    send(factory)
+    assert bridge.run_command("restart_gui", "", PAGE) != "an EPG import is running"
+
+    # The stuck run clears without a poll seeing it, and the next press works.
+    importer.epgimport.source = None
+    importer.startImport = real_start
+    send(factory)
+    assert state(factory)["state"] == "running"
+    assert bridge.run_command("restart_gui", "", PAGE) == "an EPG import is running"
+
+
+def test_a_press_refused_as_already_running_follows_that_import_at_once(
+    importer, epg_bridge, factory
+):
+    """The refusal is never unexplained: the topic says `running` at the same moment."""
+    bridge = epg_bridge()
+    importer.epgimport.sources = [FakeEpgSource("Polska - Podstawowy")]
+    importer.startImport()  # the image's schedule, between two idle polls
+    assert state(factory)["state"] == "idle"
+    before = int(time.time())
+    send(factory)
+    assert error(factory) == epgimport.ALREADY_RUNNING
+    payload = state(factory)
+    assert payload["state"] == "running"
+    assert before <= payload["started"] <= int(time.time())
+    assert bridge.publisher("epg_import")._poll.timer.started == (2000, False)
+
+
+def test_a_stuck_start_seen_idle_by_a_poll_re_arms_the_block(importer, epg_bridge, factory):
+    """The lapse ends at the first poll that finds the importer idle."""
+    bridge = epg_bridge()
+    real_start = importer.startImport
+    _start_that_raises_part_way(importer)
+    send(factory)
+    importer.epgimport.source = None  # the stuck run clears between two polls
+    tick(bridge)
+
+    importer.epgimport.sources = [FakeEpgSource("Polska - Podstawowy")]
+    real_start()  # the image's own schedule, later
+    tick(bridge)
+    assert state(factory)["state"] == "running"
+    assert bridge.run_command("restart_gui", "", PAGE) == "an EPG import is running"
