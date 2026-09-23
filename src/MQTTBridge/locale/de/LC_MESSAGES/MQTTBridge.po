@@ -615,9 +615,6 @@ msgstr "Diese Seite ist veraltet: Seit sie geöffnet wurde, wurde in einem ander
 msgid "Full size"
 msgstr "Volle Größe"
 
-#: src/MQTTBridge/webif.py
-msgid "No screenshot since the plugin started."
-msgstr "Seit dem Start des Plugins kein Bildschirmfoto."
 
 #: src/MQTTBridge/webif.py
 msgid "Open in a new tab"
@@ -638,3 +635,7 @@ msgstr "Bildschirmfotos sind in den Einstellungen ausgeschaltet."
 #: src/MQTTBridge/webif.py
 msgid "Taking a screenshot; this page will refresh by itself."
 msgstr "Bildschirmfoto wird aufgenommen; die Seite aktualisiert sich selbst."
+
+#: src/MQTTBridge/webif.py
+msgid "No screenshot to show yet."
+msgstr "Noch kein Bildschirmfoto vorhanden."

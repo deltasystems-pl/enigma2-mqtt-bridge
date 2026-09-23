@@ -163,6 +163,7 @@ class Bridge:
         # picture on the broker outlives all of them. The same bytes object the
         # publisher sent — no copy.
         self._screenshot = None
+        self._screenshot_topic = None
 
     # ----------------------------------------------------------------- settings --
 
@@ -519,6 +520,8 @@ class Bridge:
             self.client.publish(topic, "", qos=STATE_QOS, retain=True)
             self.state.forget(topic)
             self._forget(topic)
+            if topic == self._screenshot_topic:
+                self._screenshot = None
         self.state.save()
         return len(stale)
 
@@ -701,9 +704,17 @@ class Bridge:
         publisher = self.publisher("screenshot")
         taken = getattr(publisher, "completed_at", None) if publisher is not None else None
         self._screenshot = (payload, taken if taken is not None else time.time())
+        self._screenshot_topic = self.topic("screen")
 
     def last_screenshot(self):
-        """`(jpeg bytes, completed_at)` of the last picture put on `screen`, or None."""
+        """`(jpeg bytes, completed_at)` of the last picture put on `screen`, or None.
+
+        Only while `screen` is still the topic it went out on: after a rename of
+        the node or the base topic the old picture is somebody else's retained
+        topic, and is retracted as such.
+        """
+        if self._screenshot is None or self._screenshot_topic != self.topic("screen"):
+            return None
         return self._screenshot
 
     def publish_json(self, topic, payload, retain=True, volatile=()):

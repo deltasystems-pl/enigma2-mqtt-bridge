@@ -38,7 +38,8 @@ second page rendered by the server, never a dialog.
 content panel with jQuery (`$("#content_container").load(url)`), which injects
 whatever comes back into OpenWebif's document and runs any script in it. So a
 panel load — `X-Requested-With: XMLHttpRequest`, or `Sec-Fetch-Dest: empty` for
-a theme that uses `fetch()` — is answered with a fragment and nothing else: an
+a theme that uses `fetch()` — is answered, before the `Host` check, with a
+fragment and nothing else: an
 `<iframe>` of this page and a link to open it in a new tab, with no script, no
 style element and no data. The frame is the full page, under its own headers,
 which admit OpenWebif's origin and nobody else's. Every navigation — a tab, a
@@ -1154,7 +1155,8 @@ def _capture_in_flight(bridge, now=None):
     if not busy or started is None:
         return False
     now = time.time() if now is None else now
-    return now - started <= REFRESH_BOUND_SECONDS
+    # A clock stepped back behind a hung grab is not a grab that just began.
+    return 0 <= now - started <= REFRESH_BOUND_SECONDS
 
 
 def _screenshot_figure(request, bridge):
@@ -1167,7 +1169,7 @@ def _screenshot_figure(request, bridge):
     elif _capture_in_flight(bridge):
         text = _("Taking a screenshot; this page will refresh by itself.")
     elif bridge.last_screenshot() is None:
-        text = _("No screenshot since the plugin started.")
+        text = _("No screenshot to show yet.")
     else:
         _image, taken = bridge.last_screenshot()
         source = _e(_mount_path(request) + "/screen.jpg?v=" + str(int(taken)))
@@ -1362,16 +1364,17 @@ class ScreenshotResource(resource.Resource):
             return _misdirected(request)
         bridge = _bridge()
         recorded = None
-        if (
-            bridge is not None
-            and bridge.running
-            and settings_module.value("screenshot", bridge.settings) != "off"
-        ):
+        if bridge is None or not bridge.running:
+            reason = _("Screenshots are not available right now.")
+        elif settings_module.value("screenshot", bridge.settings) == "off":
+            reason = _("Screenshots are switched off in the settings.")
+        else:
             recorded = bridge.last_screenshot()
+            reason = _("No screenshot to show yet.")
         if recorded is None:
             request.setResponseCode(404)
             _set_headers(request, "text/plain; charset=utf-8")
-            return _("No screenshot since the plugin started.").encode("utf-8")
+            return reason.encode("utf-8")
         _set_headers(request, "image/jpeg")
         request.setHeader("content-security-policy", "default-src 'none'; frame-ancestors 'self'")
         return recorded[0]
@@ -1421,10 +1424,16 @@ class MQTTBridgeWebResource(resource.Resource):
         # Fragment or page, the answer depends on these two headers, so a cache
         # must not hand one to a request that asked for the other.
         request.setHeader("vary", "X-Requested-With, Sec-Fetch-Dest")
-        if not _host_allowed(request):
-            return _misdirected(request)
+        # 🔴 The fragment goes out before the Host check. OpenWebif's jQuery
+        # `.load()` injects nothing at all on a non-2xx answer, so a 421 here
+        # would be a menu entry that does nothing under a DNS name or a proxy.
+        # The fragment holds no token and no data, and its mount comes from the
+        # path, never from `Host`; the frame it opens is a navigation, which
+        # meets the Host check below and shows the 421 inside the frame.
         if _panel_load(request):
             return _fragment(request)
+        if not _host_allowed(request):
+            return _misdirected(request)
         return _answer(request)
 
     def render_POST(self, request):

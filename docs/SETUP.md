@@ -236,8 +236,8 @@ The screenshot on the page shows nobody anything new: whoever OpenWebif admits c
 fresh picture of the television at any time through OpenWebif's own `/grab`.
 
 **Known limitation.** Because of the address check, the page refuses to answer under a DNS name of
-your own or behind a reverse proxy, with a message naming the addresses that work — inside
-OpenWebif's frame too. This is deliberate and there is no setting for it. A second click on the
+your own or behind a reverse proxy, with a message naming the addresses that work. Opened from
+OpenWebif's menu under such a name, the frame still appears and shows that message inside it. This is deliberate and there is no setting for it. A second click on the
 menu entry does nothing until another OpenWebif panel has been opened, and reloading OpenWebif does
 not reopen the page; both are OpenWebif's behaviour for every entry.
 

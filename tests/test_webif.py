@@ -1328,11 +1328,56 @@ def test_a_post_is_never_answered_with_a_fragment(connected_bridge, page, header
     assert b"<iframe" not in body
 
 
-def test_the_host_allowlist_runs_before_the_fragment(connected_bridge, page):
-    request, body = get(page(connected_bridge), _UntouchableSession(), host="attacker.example",
-                        headers=XHR)
+@pytest.mark.parametrize("host", ["receiver.home.example", "proxy.example:8443"])
+def test_a_panel_load_under_a_foreign_host_still_gets_the_fragment(connected_bridge, page, host):
+    """🔴 jQuery's `.load()` injects nothing on a 421: the menu entry would do nothing.
+
+    The fragment carries no token and no data, and nothing from `Host`; the
+    frame it opens is a navigation, and that one meets the Host check.
+    """
+    request, body = get(page(connected_bridge), _UntouchableSession(), host=host,
+                        headers=XHR, prepath=[b"mqttbridge"])
+    assert request.response_code == 200
+    assert re.findall(rb"<iframe src='([^']*)'", body) == [b"/mqttbridge/"]
+    assert host.split(":")[0].encode() not in body
+
+
+@pytest.mark.parametrize(
+    "headers", [{}, {"sec-fetch-dest": "iframe"}, {"sec-fetch-dest": "document"}],
+    ids=["plain", "iframe", "document"],
+)
+def test_the_framed_page_under_a_foreign_host_is_still_421(connected_bridge, page, headers):
+    request, body = get(page(connected_bridge), _UntouchableSession(),
+                        host="receiver.home.example", headers=headers,
+                        prepath=[b"mqttbridge", b""])
     assert request.response_code == 421
-    assert b"<iframe" not in body
+    assert b"<form" not in body
+
+
+def test_a_post_carrying_the_panel_header_under_a_foreign_host_is_421(connected_bridge, page):
+    request = _Request(session=_UntouchableSession(), host="receiver.home.example",
+                       origin="http://receiver.home.example", headers=XHR,
+                       args=encode({"form": "action"}))
+    page(connected_bridge).render_POST(request)
+    assert request.response_code == 421
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [{"x-requested-with": "xmlhttprequest"}, {"x-requested-with": " XMLHttpRequest "},
+     {"sec-fetch-dest": "Empty"}, {"sec-fetch-dest": " empty "}],
+    ids=["xrw-lower", "xrw-spaced", "dest-capital", "dest-spaced"],
+)
+def test_the_panel_signal_ignores_case_and_surrounding_space(connected_bridge, page, headers):
+    _request, body = get(page(connected_bridge), headers=headers)
+    assert body.startswith(b"<div><iframe")
+
+
+def test_the_421_varies_on_both_headers_too(connected_bridge, page):
+    request, _body = get(page(connected_bridge), _UntouchableSession(), host="attacker.example")
+    assert request.response_code == 421
+    vary = [part.strip().lower() for part in request.response_headers["vary"].split(",")]
+    assert "x-requested-with" in vary and "sec-fetch-dest" in vary
 
 
 @pytest.mark.parametrize("headers", [XHR, FETCH, {}], ids=["jquery", "fetch", "page"])
@@ -1553,8 +1598,82 @@ def test_with_screenshots_off_the_figure_says_so(connected_bridge, page, setting
 
 def test_before_any_capture_the_figure_says_there_is_none(live_bridge, screen_page):
     _request, body = get(screen_page)
-    assert b"No screenshot since the plugin started." in body
+    assert b"No screenshot to show yet." in body
     assert b"screen.jpg" not in body
+
+
+def test_screen_jpg_says_why_there_is_nothing(live_bridge, make_bridge, page, screen_page,
+                                               settings, tmp_path):
+    request, body = shot(live_bridge)
+    assert (request.response_code, body) == (404, b"No screenshot to show yet.")
+
+    settings.screenshot.value = "off"
+    request, body = shot(live_bridge)
+    assert (request.response_code, body) == (404, b"Screenshots are switched off in the settings.")
+
+    settings.screenshot.value = "on_zap"
+    live_bridge.stop()
+    request, body = shot(live_bridge)
+    assert (request.response_code, body) == (404, b"Screenshots are not available right now.")
+
+
+def test_after_a_save_and_a_reset_the_page_does_not_claim_a_restart(live_bridge, screen_page,
+                                                                    tmp_path):
+    """The replaced publisher has no picture to republish, so the record stays empty."""
+    take(live_bridge, tmp_path)
+    values = live_bridge.remote_settings()
+    values["screenshot_delay"] = 9
+    live_bridge.apply_remote_settings(values)
+    live_bridge.reset_retained()
+    assert live_bridge.last_screenshot() is None
+    _request, body = get(screen_page)
+    assert b"No screenshot to show yet." in body
+    assert b"since the plugin started" not in body
+
+
+def test_a_base_topic_rename_drops_the_old_picture(live_bridge, screen_page, factory, settings,
+                                                   tmp_path):
+    """The old picture is retracted with the rest of the old name, and not shown."""
+    take(live_bridge, tmp_path)
+    settings.base_topic.value = "renamed"
+    assert live_bridge.last_screenshot() is None
+    live_bridge.retract_stale()
+    assert live_bridge._screenshot is None
+    settings.base_topic.value = "enigma2"
+    assert live_bridge.last_screenshot() is None
+
+
+def test_an_empty_screen_payload_is_not_a_picture(live_bridge, screen_page, tmp_path):
+    take(live_bridge, tmp_path)
+    live_bridge.publish_raw(SHOT_TOPIC, b"")
+    assert live_bridge.last_screenshot()[0] == PICTURE
+    live_bridge.retract(SHOT_TOPIC)
+    live_bridge.publish_raw(SHOT_TOPIC, "")
+    assert live_bridge.last_screenshot() is None
+
+
+def test_a_grab_that_seems_to_start_in_the_future_does_not_refresh(live_bridge, screen_page,
+                                                                   tmp_path):
+    """A clock stepped back behind a hung grab must not refresh the page for ever."""
+    found = live_bridge.publisher("screenshot")
+    found.path = str(tmp_path / "grab.jpg")
+    assert found.capture(commanded=True) is None
+    found._last_capture += 60
+
+    _request, body = get(screen_page)
+
+    assert refreshes(body) == []
+
+
+def test_the_refresh_stops_when_the_bridge_is_not_running(live_bridge, screen_page, tmp_path):
+    found = live_bridge.publisher("screenshot")
+    found.path = str(tmp_path / "grab.jpg")
+    assert found.capture(commanded=True) is None
+    live_bridge.running = False
+
+    _request, body = get(screen_page)
+
+    assert refreshes(body) == []
 
 
 def test_a_failed_capture_keeps_the_previous_picture_and_reports(live_bridge, screen_page,

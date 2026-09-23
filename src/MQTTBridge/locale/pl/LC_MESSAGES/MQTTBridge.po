@@ -614,9 +614,6 @@ msgstr "Ta strona jest nieaktualna: od jej otwarcia coś zmieniono w innej karci
 msgid "Full size"
 msgstr "Pełny rozmiar"
 
-#: src/MQTTBridge/webif.py
-msgid "No screenshot since the plugin started."
-msgstr "Brak zrzutu ekranu od uruchomienia wtyczki."
 
 #: src/MQTTBridge/webif.py
 msgid "Open in a new tab"
@@ -637,3 +634,7 @@ msgstr "Zrzuty ekranu są wyłączone w ustawieniach."
 #: src/MQTTBridge/webif.py
 msgid "Taking a screenshot; this page will refresh by itself."
 msgstr "Trwa robienie zrzutu ekranu; strona odświeży się sama."
+
+#: src/MQTTBridge/webif.py
+msgid "No screenshot to show yet."
+msgstr "Nie ma jeszcze zrzutu ekranu do pokazania."

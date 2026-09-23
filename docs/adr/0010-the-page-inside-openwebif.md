@@ -33,8 +33,13 @@ There was also no record of when a picture was taken, only of when a capture sta
 
 **1. The hook registers `"_self"` again, and the page answers a panel load with a fragment.** A
 `GET` of the page that carries `X-Requested-With: XMLHttpRequest`, or `Sec-Fetch-Dest: empty` for a
-theme that uses `fetch()`, is answered — after the `Host` allowlist and before anything else — with
-one `<div>` holding an `<iframe>` of the page and a link to open it in a new tab. The fragment has
+theme that uses `fetch()`, is answered — **before** the `Host` allowlist and before anything else —
+with one `<div>` holding an `<iframe>` of the page and a link to open it in a new tab. Before the
+`Host` check because OpenWebif's jQuery `.load()` injects nothing at all on a non-2xx answer: a `421`
+there would be a menu entry that does nothing under a DNS name or a reverse proxy. That is safe
+because the fragment carries nothing the check protects — no token, no data, and a mount path taken
+from the request's path, never from `Host`. The frame it opens is a navigation, which meets the
+`Host` check like every other request to the page, `screen.jpg` and every `POST`. The fragment has
 **no script, no style element and no class OpenWebif styles**; its presentation is the frame's
 inline `style`, a fixed height that scrolls, because sizing the frame to its content would need
 script. It carries no token and no data. Every navigation gets the full page as before, and every
@@ -44,7 +49,9 @@ ADR-0009's earlier reason for `"_blank"` no longer applies.
 
 **2. The bridge holds the last picture it put on `screen`, with the time the capture finished.**
 It is recorded where it is published, is the same bytes object, is cleared when `screen` is
-retracted or the retained topics are reset, and is set again by the snapshot. It survives a
+retracted — by `retract` or with the rest of an old name after a rename — or the retained topics
+are reset, and is set again by the snapshot; it is only ever served for the `screen` topic it went
+out on. It survives a
 publisher replacement, a remote save and a reload, as the retained topic does, and is lost when the
 process restarts.
 
@@ -66,6 +73,7 @@ for a meta refresh, so `default-src 'none'` is unchanged.
   kept as the fallback: a second, GUI-only external child registered only for the panel.
 - The frame's height is a fixed allowance for OpenWebif's header, measured on one layout; it is a
   number to tune, not a guarantee.
-- Under a DNS name or a reverse proxy the frame shows the page's `421`, as ADR-0009 accepted.
+- Under a DNS name or a reverse proxy the panel still shows the frame, and the frame shows the
+  page's `421` with the addresses to use, as ADR-0009 accepted.
 - The picture on the page is what this process last sent, not what the broker holds; after a restart
   the page has none until the next capture.
