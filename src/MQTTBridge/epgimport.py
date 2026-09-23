@@ -90,9 +90,10 @@ def importer_module():
 def running():
     """True only when the image's importer says an import is running.
 
-    For the power commands' guard. A broken or absent importer answers False,
-    because refusing every reboot for a plugin that is not there would be a
-    worse failure than the one the guard prevents.
+    For the power commands' guard when no publisher is following the importer
+    (`blocks_power` is the answer when one is). A broken or absent importer
+    answers False, because refusing every reboot for a plugin that is not there
+    would be a worse failure than the one the guard prevents.
     """
     module = importer_module()
     importer = getattr(module, "epgimport", None) if module is not None else None
@@ -220,6 +221,11 @@ class EpgImportPublisher(Publisher):
         self._deadline = 0.0
         self._watchdog_fired = False
         self._baseline = None
+        # Set when this plugin's own start raised or the watchdog fired, and
+        # cleared once the importer says nothing is running. While it is set the
+        # power commands are not held back by this import — see `blocks_power`.
+        self._power_lapsed = False
+        self._running_error_logged = False
         self._poll = Ticker(self._tick, "epg import")
 
     # ---------------------------------------------------------------- lifecycle --
@@ -265,12 +271,37 @@ class EpgImportPublisher(Publisher):
         self.publish("epg_import", self._payload())
 
     def _running(self):
-        """True, False, or None when the importer would not say."""
+        """True, False, or None when the importer would not say.
+
+        A broken importer answers the same way on every poll, so the traceback
+        is written once and every repeat goes to debug: a minute's poll must
+        not fill the receiver's flash with one sentence.
+        """
         try:
-            return self._importer.is_running()
+            answer = self._importer.is_running()
         except Exception:
-            LOG.exception("isImportRunning() raised")
+            if self._running_error_logged:
+                LOG.debug("isImportRunning() raised again")
+            else:
+                self._running_error_logged = True
+                LOG.exception("isImportRunning() raised; repeats are logged at debug")
             return None
+        self._running_error_logged = False
+        return answer
+
+    def blocks_power(self):
+        """Whether deep standby, reboot and the interface restart must wait for an import.
+
+        ✅ Not once this plugin's own start raised, and not once the watchdog has
+        fired for the current run. The image's importer marks itself running
+        before its first download, so a start that failed part-way can leave it
+        saying „running" until its next scheduled run — up to a day of refused
+        reboots for an import that is not happening. The topic still reports
+        what the importer says; only this guard lapses.
+        """
+        if self._power_lapsed:
+            return False
+        return self._running() is True
 
     def _begin_tracking(self, started=None):
         self._state = RUNNING
@@ -295,14 +326,18 @@ class EpgImportPublisher(Publisher):
                 return
             if not self._watchdog_fired and time.monotonic() >= self._deadline:
                 # The importer cannot be cancelled. The poll carries on, and the
-                # running guard keeps refusing for as long as it really runs.
+                # running guard keeps refusing a second import for as long as it
+                # really runs; the power commands stop waiting for it.
                 self._watchdog_fired = True
+                self._power_lapsed = True
                 self._state = FAILED
                 self._error = NOT_FINISHED
                 LOG.warning("EPG-Importer has not finished after %d minutes",
                             WATCHDOG_SECONDS // 60)
                 self._publish()
             return
+        if now_running is False:
+            self._power_lapsed = False
         if now_running is True:
             LOG.info("an EPG import the plugin did not start is running")
             self._baseline = self._importer.last_result
@@ -318,6 +353,7 @@ class EpgImportPublisher(Publisher):
     def _conclude(self):
         """The import is over: read its result and say so."""
         self._tracking = False
+        self._power_lapsed = False
         self._poll.start(IDLE_POLL_MILLISECONDS)
         result = self._importer.last_result
         if result is None or result == self._baseline:
@@ -434,6 +470,7 @@ class EpgImportPublisher(Publisher):
             LOG.exception("EPG-Importer could not start")
             return self._failed_to_start(error)
         self._baseline = baseline
+        self._power_lapsed = False
         LOG.info("EPG import started with %d source(s)", len(sources))
         self._begin_tracking()
         self._publish()
@@ -441,6 +478,7 @@ class EpgImportPublisher(Publisher):
 
     def _failed_to_start(self, error):
         sentence = "EPG-Importer could not start: " + type(error).__name__
+        self._power_lapsed = True
         self._state = FAILED
         self._started = int(time.time())
         self._finished = None

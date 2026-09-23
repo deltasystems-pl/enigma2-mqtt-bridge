@@ -59,7 +59,12 @@ with a dialog whose default is yes and whose timeout presses it.
 - **The guards are the permission (not needed on the OpenWebif page, ADR-0009), a resolved
   importer, an import already running, the whole recording guard, the importer's own scheduled run
   within ten minutes, and at least one selected source**, in that order. The plugin's own deep
-  standby, reboot and user-interface restart are refused while an import runs.
+  standby, reboot and user-interface restart are refused while an import runs — **except** once
+  this plugin's own start raised, or once the watchdog has fired for the current run. The importer
+  marks itself running before its first download, so a start that fails part-way can leave it
+  „running" until its next scheduled run; the power block lapses then, while the topic keeps
+  reporting what the importer says and a second import is still refused. It comes back once the
+  importer has been seen idle.
 
 ## Consequences
 
@@ -72,7 +77,15 @@ with a dialog whose default is yes and whose timeout presses it.
   between two idle polls is reported with `started` `null`.
 - A settings save that restarts the bridge mid-import loses the original `started`.
 - The importer's own `clear_oldepg` and deep-standby behaviour apply to an import started here as to
-  a scheduled one; the plugin neither reproduces nor suppresses them.
+  a scheduled one; the plugin neither reproduces nor suppresses them. The deep-standby check runs
+  after every import and acts on a receiver in standby, not recording and not already shutting down,
+  when either the importer's „shutdown" setting is on with deep standby set to „wake up", or its
+  „deep standby after import" setting is on and a timer woke the receiver.
+- Before its first download the importer reads `/proc/mounts` and the free space of the recording
+  mount on the main loop, so a network mount that has stopped answering can freeze the picture on
+  the press itself. The plugin cannot avoid it without not starting the import.
+- While an import the importer wrongly believes is running is stuck after a failed start, the
+  receiver can be restarted, but a new import is refused until the importer says it is idle.
 - An image whose importer differs in any resolved name offers nothing: the resolution fails closed.
   Supporting another importer means adding its names here and a test for them, not loosening the
   check.

@@ -149,14 +149,25 @@ scheduled ones included:
   why the import is refused while recording, with a timer due within ten minutes, and within ten
   minutes of the importer's own scheduled run.
 - **With the importer's „clear old EPG" setting on**, the guide is empty until the import finishes.
-- **The importer's own deep-standby settings apply.** If you have told it to shut the receiver down
-  after an import, an import started from Home Assistant does that too.
+- **The importer's own deep-standby settings apply**, to an import started from Home Assistant as
+  to a scheduled one: after **every** import, whoever started it, the importer checks whether to put the receiver into
+  deep standby, and does so when the receiver is in standby, is not recording and is not already
+  shutting down, **and** either its „shutdown" setting is on with deep standby set to „wake up", or
+  its „deep standby after import" setting is on and a timer woke the receiver. All of these are off
+  by default. That is the importer, not this plugin.
+- **A network recording mount can hold the press up.** Before its first download the importer reads
+  `/proc/mounts` and asks the recording mount for its free space, on the main loop, to choose
+  where to put the file. If that mount is a network share that has stopped answering, pressing the
+  button can freeze the picture until the mount gives up — as the importer's scheduled run would.
 
 A normal run takes a minute or two. The `epg_import` topic says `running` from the moment it starts —
 whoever started it, including the importer's own schedule — and `done` with the number of events,
 or `failed` with a sentence. The importer does not say which source failed, so neither can the
 plugin. While an import runs the plugin also refuses its own deep standby, reboot and
-user-interface restart, because a restart mid-import loses the run.
+user-interface restart, because a restart mid-import loses the run — except once its own start of
+the import has failed, or the import has run past its 30-minute watchdog. The importer can go on
+saying „running" after a start that failed part-way, until its next scheduled run, and a receiver
+that cannot be restarted for a day because of it is the worse outcome.
 
 ### What a screenshot costs
 

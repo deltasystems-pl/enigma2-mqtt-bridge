@@ -739,3 +739,165 @@ def test_the_cache_stub_starts_without_either_import_method():
     cache = EPGCache.getInstance()
     assert not hasattr(cache, "importEvents")
     assert not hasattr(cache, "importEvent")
+
+
+# -------------------------------------------- the power block lapses (✅ review) --
+
+
+def _start_that_raises_part_way(importer):
+    """What the image's `nextImport` does: mark itself running, then fail to fetch."""
+
+    def start():
+        importer.epgimport.source = object()
+        raise OSError("fetch failed")
+
+    importer.startImport = start
+
+
+def test_the_power_block_lapses_after_our_own_start_raised(
+    importer, epg_bridge, factory, receiver
+):
+    """✅ The importer can say „running" for a day after a start that failed part-way."""
+    bridge = epg_bridge()
+    _start_that_raises_part_way(importer)
+    send(factory)
+    assert state(factory)["state"] == "failed"
+    assert importer.epgimport.isImportRunning() is True
+
+    factory.client.fire_message(ROOT + "/cmd/restart_gui", b"PRESS")
+    assert error(factory) is None
+    assert receiver.session.opened
+
+    # The idle poll still reports what the importer says, and a second import
+    # is still refused — only the power guard has lapsed.
+    tick(bridge)
+    assert state(factory)["state"] == "running"
+    send(factory)
+    assert error(factory) == epgimport.ALREADY_RUNNING
+    assert bridge.run_command("reboot", "", PAGE) != "an EPG import is running"
+
+
+def test_the_power_block_returns_once_the_stuck_import_has_ended(
+    importer, epg_bridge, factory
+):
+    bridge = epg_bridge()
+    _start_that_raises_part_way(importer)
+    send(factory)
+    tick(bridge)
+    importer.epgimport.source = None
+    tick(bridge)
+    # A later import, started by the image, blocks the power commands again.
+    importer.epgimport.source = object()
+    tick(bridge)
+    assert bridge.run_command("restart_gui", "", PAGE) == "an EPG import is running"
+
+
+def test_the_power_block_lapses_once_the_watchdog_fired(importer, epg_bridge, factory, receiver):
+    bridge = epg_bridge()
+    publisher = bridge.publisher("epg_import")
+    send(factory)
+    assert bridge.run_command("restart_gui", "", PAGE) == "an EPG import is running"
+    publisher._deadline = time.monotonic() - 1
+    tick(bridge)
+    assert state(factory)["state"] == "failed"
+
+    factory.client.fire_message(ROOT + "/cmd/restart_gui", b"PRESS")
+    assert error(factory) is None
+    assert receiver.session.opened
+    send(factory)
+    assert error(factory) == epgimport.ALREADY_RUNNING
+
+
+# ------------------------------------------------------ pinned by review (#27) --
+
+
+def test_an_unreadable_schedule_setting_is_not_read_as_off(
+    importer, epg_bridge, factory, monkeypatch
+):
+    """`getWakeTime()` answers -1 by itself when the schedule is off; ask it."""
+    epg_bridge()
+    monkeypatch.delattr(config.plugins.epgimport, "enabled")
+    importer.autoStartTimer.wake = int(time.time()) + 300
+    send(factory)
+    assert error(factory).startswith("EPG-Importer's own scheduled import starts in")
+    assert importer.started == 0
+
+
+def test_already_running_is_refused_before_recording(importer, epg_bridge, factory, receiver):
+    """The documented order: the running import is the reason, not the recording."""
+    epg_bridge()
+    importer.epgimport.source = object()
+    receiver.add_timer(state=RecordTimerEntry.StateRunning)
+    send(factory)
+    assert error(factory) == epgimport.ALREADY_RUNNING
+
+
+def test_a_restart_after_a_finished_import_does_not_announce_it_again(
+    monkeypatch, epg_bridge, factory
+):
+    """`start()` takes a baseline: a settings save must not re-report the last import."""
+    module = install_epg_importer(monkeypatch)
+    module.lastImportResult = (time.time() - 600, 99)
+    bridge = epg_bridge()
+    grid = bridge.publisher("epg_grid")
+    calls = []
+    monkeypatch.setattr(grid, "regenerate", lambda: calls.append(1))
+    tick(bridge)
+    assert state(factory)["state"] == "idle"
+    assert calls == []
+
+
+def test_the_watchdog_fires_once(importer, epg_bridge, factory, plugin_log):
+    bridge = epg_bridge()
+    send(factory)
+    bridge.publisher("epg_import")._deadline = time.monotonic() - 1
+    tick(bridge)
+    tick(bridge)
+    tick(bridge)
+    assert plugin_log().count("has not finished after 30 minutes") == 1
+
+
+def test_an_unreadable_running_state_mid_run_is_not_the_end(importer, epg_bridge, factory):
+    bridge = epg_bridge()
+    send(factory)
+    importer.epgimport.raises = True
+    tick(bridge)
+    assert state(factory)["state"] == "running"
+    assert state(factory)["error"] is None
+    importer.epgimport.raises = False
+    importer.epgimport.finish(5)
+    tick(bridge)
+    assert state(factory)["state"] == "done"
+
+
+def test_a_broken_importer_logs_its_traceback_once(importer, epg_bridge, plugin_log, settings):
+    settings.log_level.value = "debug"
+    bridge = epg_bridge()
+    importer.epgimport.raises = True
+    for _ in range(4):
+        tick(bridge)
+    log = plugin_log()
+    assert log.count("Traceback") == 1
+    assert log.count("isImportRunning() raised again") == 3
+
+
+def test_a_start_that_raised_before_running_does_not_lapse_the_next_import(
+    importer, epg_bridge, factory
+):
+    """The lapse ends at the first poll that finds nothing running."""
+    bridge = epg_bridge()
+
+    def broken():
+        raise OSError("no network")
+
+    real_start = importer.startImport
+    importer.startImport = broken
+    send(factory)
+    assert state(factory)["state"] == "failed"
+    tick(bridge)  # nothing is running
+
+    importer.epgimport.sources = [FakeEpgSource("Polska - Podstawowy")]
+    real_start()  # the image's own schedule, later
+    tick(bridge)
+    assert state(factory)["state"] == "running"
+    assert bridge.run_command("restart_gui", "", PAGE) == "an EPG import is running"

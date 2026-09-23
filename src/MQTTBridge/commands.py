@@ -245,8 +245,11 @@ class CommandDispatcher:
         from . import epgimport
 
         # The image does not guard against it, and a restart mid-import loses
-        # the run while the guide it was building is half written.
-        if epgimport.running():
+        # the run while the guide it was building is half written. The
+        # publisher knows when the block has lapsed; without one, only the
+        # importer can be asked.
+        follower = self.publisher("epg_import")
+        if follower.blocks_power() if follower is not None else epgimport.running():
             return "an EPG import is running"
         refusal = recording.guard(self.session)
         if refusal:

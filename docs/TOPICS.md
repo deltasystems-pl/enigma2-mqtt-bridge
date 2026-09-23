@@ -449,11 +449,27 @@ something the plugin can change:
 - **`clear_oldepg`**: with that importer setting on, every import empties the whole guide first, so
   the grid is empty until it finishes.
 - **The importer's own deep-standby settings apply** to an import started from here exactly as to a
-  scheduled one: with its „shutdown after import" behaviour switched on, a receiver in standby that
-  a timer woke goes into deep standby when the import ends. That is the importer, not this plugin.
+  scheduled one: after **every** import, whoever started it, the importer checks whether to put the receiver into
+  deep standby, and does so when the receiver is in standby, is not recording and is not already
+  shutting down, **and** either its „shutdown" setting is on with deep standby set to „wake up", or
+  its „deep standby after import" setting is on and a timer woke the receiver. All of these are off
+  by default. That is the importer, not this plugin.
+- **A network recording mount can hold the press up.** Before its first download the importer reads
+  `/proc/mounts` and asks the recording mount for its free space, on the main loop, to choose
+  where to put the file. If that mount is a network share that has stopped answering, pressing the
+  button can freeze the picture until the mount gives up — as the importer's scheduled run would.
 
 A settings save on the receiver while an import runs restarts the bridge, and the new session
 reports `started` as the moment it first saw the import.
+
+**The power commands wait for an import, but not for ever.** Deep standby, reboot and the
+interface restart are refused while an import runs, because a restart mid-import loses the run.
+That refusal lapses when this plugin's own start failed, or when the watchdog has fired for the
+current run: the importer marks itself running before its first download, so a start that fails
+part-way can leave it saying „running" until its next scheduled run — up to a day of refused
+reboots for an import that is not happening. The topic keeps reporting what the importer says, and
+a second `cmd/epg_import` is still refused as already running. The refusal returns once the
+importer has been seen idle, or with the next import that starts normally.
 
 ### `<base>/<node>/tuner`
 
@@ -758,9 +774,9 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | Command | Payload | Effect | Guard |
 |---|---|---|---|
 | `power` | `on` \| `standby` \| `toggle` | Leaves or enters standby | Idempotent: asking for the state the box is already in does nothing |
-| `deep_standby` | any (`PRESS` by convention) | Shuts the box down completely | Refused while recording, or with a timer due within 10 minutes; refused while an EPG import runs (since 0.3.0); also refused unless `deep_standby_allowed` is on |
+| `deep_standby` | any (`PRESS` by convention) | Shuts the box down completely | Refused while recording, or with a timer due within 10 minutes; refused while an EPG import runs (since 0.3.0, and see below for when that lapses); also refused unless `deep_standby_allowed` is on |
 | `reboot` | any | Reboots the receiver | Same as `deep_standby` |
-| `restart_gui` | any | Restarts enigma2 only | Refused while recording or with a timer due within 10 minutes, and while an EPG import runs (since 0.3.0): a restart mid-import loses the run |
+| `restart_gui` | any | Restarts enigma2 only | Refused while recording or with a timer due within 10 minutes, and while an EPG import runs (since 0.3.0): a restart mid-import loses the run. That refusal **lapses** once this plugin's own start of the import failed, or once the 30-minute watchdog has fired for the current run, and returns with the next import; the `epg_import` topic still says what the importer says |
 | `zap` | `<sref>` \| `{"sref": "…"}` \| `{"name": "…"}` | Tunes to a service, waking the box from standby first | By name: refused unless exactly one service in the configured bouquets matches — the error names the count. A zap that does not show up on `service` within 5 s is reported there too |
 | `bouquet` | `{"sref": "…"}` | Makes one published TV bouquet the active channel-list context | Exact allowlist match only. The current channel is preserved when it belongs to the bouquet; otherwise the first playable channel is tuned. Empty/marker-only bouquets and unavailable service-list APIs are refused without changing context |
 | `volume` | `0`–`100`, or `{"level": 42}` | Sets the volume, with the on-screen bar | Out-of-range values are clamped and noted in the log |

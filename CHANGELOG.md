@@ -23,7 +23,9 @@ version that has no section here.
   already loaded the importer and the image's guide can take imported events. A diagnostic sensor
   and, with the permission on, a button in discovery mode.
 - **Deep standby, reboot and the user-interface restart are refused while an EPG import runs**,
-  whoever started it: a restart mid-import loses the run.
+  whoever started it: a restart mid-import loses the run. The refusal lapses once the plugin's own
+  start of the import failed or the 30-minute watchdog fired, because the importer can go on
+  saying „running" after a failed start until its next scheduled run.
 
 - **What the enigma2 process costs**, on `process`: resident set, its high-water mark, threads,
   open file descriptors and the epoch second the process started, read from `/proc`. It answers the
