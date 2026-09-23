@@ -111,11 +111,11 @@ msgstr "Bukiety na liście kanałów"
 msgid "Allow deep standby and reboot"
 msgstr "Zezwalaj na głębokie uśpienie i restart"
 
-#: src/MQTTBridge/setup.py
+#: src/MQTTBridge/setup.py:33
 msgid "Switch on the receiver's Wake-on-LAN"
 msgstr "Włącz Wake-on-LAN dekodera"
 
-#: src/MQTTBridge/setup.py
+#: src/MQTTBridge/setup.py:41
 msgid "Wake-on-LAN is not available on this receiver"
 msgstr "ten dekoder nie obsługuje Wake-on-LAN"
 

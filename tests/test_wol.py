@@ -34,8 +34,14 @@ class ImageWakeOnLan(ConfigYesNo):
     """`config.usage.wakeOnLAN` as the image builds it: a yes/no whose notifier writes the file.
 
     The notifier is the image's `wakeOnLANChanged`: `enable`/`disable` when the
-    path has `fp` in it, `on`/`off` otherwise. Called on every change, as
-    enigma2's own elements call theirs.
+    path has `fp` in it, `on`/`off` otherwise.
+
+    🔴 Unlike the shared `ConfigYesNo` stub, this one stores **the object it is
+    given**, because OpenViX 6.6's `ConfigElement.setValue` does: it keeps
+    `value` as assigned and calls the notifiers only when it differs from the
+    previous one. A stub that turned `1` into `True` would hide an `arm()` that
+    wrote `1` — which the image keeps, writes `enable` for, and which then
+    fails an `is True` test on every start until a reboot loads a real bool.
     """
 
     def __init__(self, path, default=False):
@@ -43,7 +49,12 @@ class ImageWakeOnLan(ConfigYesNo):
         ConfigYesNo.__init__(self, default=default)
 
     def _set(self, value):
-        self._value = bool(value)
+        previous = self._value
+        self._value = value
+        if previous != value:
+            self._notify()
+
+    def _notify(self):
         with open(self.path, "w", encoding="ascii") as handle:
             if "fp" in self.path:
                 handle.write("enable" if self._value else "disable")
@@ -89,10 +100,13 @@ def image_wol(monkeypatch, tmp_path, usage):
         monkeypatch.setitem(SystemInfo, "WakeOnLAN", str(path))
         setting = None
         if element:
-            setting = ImageWakeOnLan(str(path), default=value)
+            setting = ImageWakeOnLan(str(path), default=False)
+            # What a start loads from the settings file: a real bool.
+            setting.value = value
+            setting.saved_value = value
             # The image's `addNotifier` calls the notifier at once, so the file
             # holds the setting from the moment the image has started.
-            setting.value = value
+            setting._notify()
             usage.wakeOnLAN = setting
         if content is not None:
             path.write_text(content, encoding="ascii")
@@ -223,12 +237,26 @@ def test_arming_sets_and_saves_the_image_s_setting_exactly_once(
     assert wol.arm(settings) is True
     assert wol.arm(settings) is False
 
+    # Exactly `True`, not something truthy: the image keeps what it is given.
     assert setting.value is True
+    # What reaches the settings file is the new value — saved after it was set.
+    assert setting.saved_value is True
     assert setting.save_calls == 1
     assert configfile.save_calls == 1
     # The image's notifier wrote its file, and the report reads it back.
     assert path.read_text(encoding="ascii") == ("enable" if mechanism == "fp" else "on")
     assert wol.report()["armed"] is True
+
+
+def test_a_setting_loaded_on_after_a_start_is_left_alone(image_wol, settings):
+    """After a reboot the image loads a real `True`; arming again writes nothing."""
+    path, setting = image_wol(value=True)
+    settings.wol_arm.value = True
+
+    assert wol.arm(settings) is False
+    assert setting.save_calls == 0
+    assert configfile.save_calls == 0
+    assert path.read_text(encoding="ascii") == "enable"
 
 
 @pytest.mark.parametrize("value", [True, False])
@@ -268,6 +296,7 @@ def test_the_bridge_arms_at_start_and_publishes_what_the_image_says(
     factory.client.fire_connect()
 
     assert setting.value is True
+    assert setting.saved_value is True
     assert setting.save_calls == 1
     assert factory.client.last(INFO).json()["wol"] == {
         "supported": True, "armed": True, "iface": "eth0", "mechanism": "fp",

@@ -57,7 +57,9 @@ retained on a topic.
   setting. A setting that is already on is left alone. It is not in `info.settings`: it is a
   request, and `info.wol` already says what the receiver is.
 - **Switching `wol_arm` off never switches the image's setting off.** Somebody may have switched it
-  on in the image's own menu; the plugin arms, it does not disarm.
+  on in the image's own menu; the plugin arms, it does not disarm. The other direction follows from
+  arming at every start: with `wol_arm` on, switching the image's own „Wake On LAN" off is undone at
+  the next start or settings save, so `wol_arm` is switched off first.
 - **Where the image has no switch, `wol_arm` is inert, and says so.** Its label on the setup screen
   and on the OpenWebif page carries „Wake-on-LAN is not available on this receiver".
 - **No `ethtool`, and no process of any kind.** Nothing in this feature spawns a command; a test
