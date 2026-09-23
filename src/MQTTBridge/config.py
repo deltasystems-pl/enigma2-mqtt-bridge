@@ -95,6 +95,7 @@ SETTING_NAMES = (
     "oscam_password",
     "bouquets_for_select",
     "deep_standby_allowed",
+    "wol_arm",
     "cec_standby_workaround",
     "softcam_restart_allowed",
     "softcam_autoheal",
@@ -132,6 +133,7 @@ SETTING_KINDS = {
     "oscam_password": "text",
     "bouquets_for_select": "text",
     "deep_standby_allowed": "bool",
+    "wol_arm": "bool",
     "cec_standby_workaround": "bool",
     "softcam_restart_allowed": "bool",
     "softcam_autoheal": "bool",
@@ -226,6 +228,14 @@ def _build():
     section.oscam_identity_salt = ConfigText(default="", fixed_size=False)
     section.bouquets_for_select = ConfigText(default="", fixed_size=False)
     section.deep_standby_allowed = ConfigYesNo(default=False)
+    # Off by default, and never writable over MQTT: it changes one of the
+    # image's own settings, so it is asked for on the receiver. It switches the
+    # image's Wake-on-LAN on where the image has one and does nothing where it
+    # has not; switched off, it leaves the image's setting as it is (`wol.py`).
+    # In neither `cmd/config` list — it enables no command, and `info.wol`
+    # already says what the receiver's switch is, which is what a consumer
+    # needs rather than what somebody asked for.
+    section.wol_arm = ConfigYesNo(default=False)
     # Off by default, and never writable over MQTT: it is the kill-switch for
     # code that closes a screen somebody is looking at. Deliberately in neither
     # `cmd/config` list — it enables no command, and the `cec_workaround`

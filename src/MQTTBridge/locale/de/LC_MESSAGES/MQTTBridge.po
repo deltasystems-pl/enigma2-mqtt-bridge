@@ -112,6 +112,14 @@ msgstr "Bouquets für die Senderliste"
 msgid "Allow deep standby and reboot"
 msgstr "Tiefschlaf und Neustart erlauben"
 
+#: src/MQTTBridge/setup.py
+msgid "Switch on the receiver's Wake-on-LAN"
+msgstr "Wake-on-LAN des Receivers einschalten"
+
+#: src/MQTTBridge/setup.py
+msgid "Wake-on-LAN is not available on this receiver"
+msgstr "dieser Receiver unterstützt kein Wake-on-LAN"
+
 #: src/MQTTBridge/setup.py:52
 msgid "Close the channel list when the TV asks for standby"
 msgstr "Senderliste schließen, wenn der Fernseher Standby anfordert"

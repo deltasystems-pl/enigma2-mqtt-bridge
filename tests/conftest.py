@@ -1027,6 +1027,30 @@ config_module.configfile = configfile
 config_module.getConfigListEntry = getConfigListEntry
 
 
+# ------------------------------------------------------- Components.SystemInfo --
+
+system_info_module = _module("Components.SystemInfo")
+
+
+class SystemInformation(dict):
+    """The image's `SystemInfo`: a dict whose `get` answers for a key never set.
+
+    Shaped after OpenViX 6.6's bytecode, read from a receiver: a `dict`
+    subclass whose `get(item, default=None)` delegates to `BoxInfo`, and in
+    which `WakeOnLAN` is always set — to the path of `/proc/stb/fp/wol` (or
+    `/proc/stb/power/wol` on two machines) when the driver created it, and to
+    `False` otherwise, which is what that receiver holds. `config.usage` is
+    left as the rest of this file has it, with no `wakeOnLAN`, because the
+    image builds that element only when the file exists.
+    """
+
+
+SystemInfo = SystemInformation()
+SystemInfo["WakeOnLAN"] = False
+system_info_module.SystemInfo = SystemInfo
+components.SystemInfo = system_info_module
+
+
 # ---------------------------------------------- Components / Screens / Plugins --
 
 action_map_module = _module("Components.ActionMap")

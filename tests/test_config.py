@@ -33,6 +33,7 @@ EXPECTED_DEFAULTS = {
     "oscam_password": "",
     "bouquets_for_select": "",
     "deep_standby_allowed": False,
+    "wol_arm": False,
     "cec_standby_workaround": False,
     "softcam_restart_allowed": False,
     "softcam_autoheal": False,

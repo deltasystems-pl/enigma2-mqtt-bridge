@@ -111,6 +111,14 @@ msgstr ""
 msgid "Allow deep standby and reboot"
 msgstr ""
 
+#: src/MQTTBridge/setup.py
+msgid "Switch on the receiver's Wake-on-LAN"
+msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "Wake-on-LAN is not available on this receiver"
+msgstr ""
+
 #: src/MQTTBridge/setup.py:52
 msgid "Close the channel list when the TV asks for standby"
 msgstr ""

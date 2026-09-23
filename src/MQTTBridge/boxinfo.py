@@ -104,11 +104,11 @@ def _looks_like_a_mac(value):
     return bool(_MAC.match(value or "")) and value != _NULL_MAC
 
 
-def mac_address():
-    """The Wake-on-LAN target: `eth0` if it exists, otherwise the first real interface."""
+def _interface_and_mac():
+    """`(name, mac)` of the Wake-on-LAN target, or `("", "")` when there is none."""
     candidate = _read_text("/sys/class/net/eth0/address").lower()
     if _looks_like_a_mac(candidate):
-        return candidate
+        return "eth0", candidate
     try:
         names = sorted(os.listdir("/sys/class/net"))
     except OSError:
@@ -118,8 +118,18 @@ def mac_address():
             continue
         candidate = _read_text("/sys/class/net/" + name + "/address").lower()
         if _looks_like_a_mac(candidate):
-            return candidate
-    return ""
+            return name, candidate
+    return "", ""
+
+
+def mac_address():
+    """The Wake-on-LAN target: `eth0` if it exists, otherwise the first real interface."""
+    return _interface_and_mac()[1]
+
+
+def mac_interface():
+    """The interface `mac_address()` read — one rule, so `info.mac` and `info.wol` agree."""
+    return _interface_and_mac()[0]
 
 
 def mac_suffix(mac=None):

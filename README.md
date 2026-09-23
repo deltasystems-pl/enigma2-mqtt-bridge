@@ -256,9 +256,15 @@ The full list is in [CHANGELOG.md](CHANGELOG.md).
    writable over MQTT, with progress on an `epg_import` topic that follows every import, whoever
    started it. The import is the image's: its end freezes the menus for two or three seconds.
    Decided in [ADR-0011](docs/adr/0011-epg-import-on-demand.md).
-5. **`wol_arm`** — arm Wake-on-LAN at start and before deep standby, and report in `info.wol` what
-   is actually true. 🔴 Until the deep standby → magic packet drill passes, **deep standby may be
-   one-way on your box.**
+5. **`info.wol`** — what the image says about Wake-on-LAN: whether it has a switch for it, whether
+   that is on, the interface and the mechanism — plus a box-only **`wol_arm`** that switches on the
+   image's own Wake-on-LAN setting where the image has one. No `ethtool`: the flag it sets is read by
+   nothing on an enigma2 image's way into deep standby, which powers the box off rather than
+   suspending it. Decided in [ADR-0012](docs/adr/0012-wake-on-lan-is-the-image-s-switch.md).
+   🔴 **A receiver that reports `supported: false` cannot be woken over the network from deep
+   standby** — only by its remote, its front button or a timer. The maintainer's Uno 4K SE is one.
+   On any other receiver, **deep standby may still be one-way** until a deep standby → magic packet
+   drill has passed on that image.
 6. **`process`** — what the enigma2 process costs, already in review.
 7. **`cmd/uninstall`** — remove the plugin from the receiver on request, behind a permission
    `uninstall_allowed`, never writable over MQTT and echoed **read-only** in `info.settings`: every retained topic is

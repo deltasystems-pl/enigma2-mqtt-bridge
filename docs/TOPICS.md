@@ -51,6 +51,7 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
   "mac": "00:00:5e:00:53:01",
   "ip": "192.0.2.12",
   "uptime": 384210,
+  "wol": {"supported": false, "armed": null, "iface": "eth0", "mechanism": null},
   "ha_mode": "discovery",
   "settings": {"publish_keys": true, "screenshot": "on_zap",
                "screenshot_interval": 60, "screenshot_delay": 4,
@@ -73,6 +74,7 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
 | `mac` | string | Lowercase, colon-separated; the Wake-on-LAN target |
 | `ip` | string | Current LAN address |
 | `uptime` | int | Seconds since boot |
+| `wol` | object | Since 0.3.0. What the **image** says about Wake-on-LAN — whether it has a switch for it and whether that is on. See below |
 | `ha_mode` | string | `discovery` \| `integration` \| `off` — the acknowledgement of `cmd/ha_mode` |
 | `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5–3600), `screenshot_delay` (post-zap settling seconds, 1–30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30–600). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed` and `epg_import_allowed` (bools, off by default). See below. |
 | `capabilities` | list of strings | Which hooks this image actually gave the plugin |
@@ -128,6 +130,24 @@ capability nor the `bouquet` topic. When a capability appears after the connect,
 announcement are published again with it — a consumer that acts on `info` therefore has to accept
 it more than once per connection, which it has to do anyway because `cmd/config` and `cmd/ha_mode`
 both republish it.
+
+**`wol` says what the image says about Wake-on-LAN, and nothing else.** Since 0.3.0, always present
+with every key, `null` for what could not be read, and read from the image at every `info` publish
+([ADR-0012](adr/0012-wake-on-lan-is-the-image-s-switch.md)).
+
+| Field | Type | Meaning |
+|---|---|---|
+| `supported` | bool | The image found its own Wake-on-LAN switch: a front-processor file, `/proc/stb/fp/wol` (or `/proc/stb/power/wol` on the machines that have that one). 🔴 **`false` means the receiver cannot be woken over the network from deep standby** — only by its remote, its front button or a timer. Never derived from `ethtool`'s `Supports Wake-on`, which describes a Linux suspend that enigma2 images do not use |
+| `armed` | bool or `null` | Whether that switch is on: the file read back — `enable` or `on` is `true`, `disable` or `off` is `false`. Where the file cannot be read or says neither, the image's own setting („Wake On LAN"), whose notifier is what writes the file. `null` when not supported, or when neither answers. 🟡 The file's read format is unmeasured: no receiver this project has seen has one |
+| `iface` | string or `null` | The interface `mac` is read from — `eth0` when it has an address, otherwise the first other interface that does; `null` with none. Informational: the image's switch takes no interface |
+| `mechanism` | string or `null` | `fp` or `power`, by the file the image found; `null` when not supported |
+
+`armed` is never inferred from `wol_arm`, the setting that asks the plugin to switch the image's
+Wake-on-LAN on: that is a request made on the receiver, and the image's switch can be changed in its
+own menu as well. A consumer that wants to warn before deep standby reads `supported`; an older
+plugin publishes no `wol` at all, which is silence, not `false`. And `supported: true` says the
+image has a switch — it is not evidence that a magic packet wakes the receiver, which no drill has
+shown on any image yet.
 
 ### `<base>/<node>/power`
 
@@ -1135,17 +1155,6 @@ why they are not in this section. These join them on the same terms, rather than
 
 Which side of the line each one falls on is §1's rule: a setting that **enables a command** is
 never writable over MQTT; a setting that **tunes a command already permitted** may be remote.
-
-### `info` gains `wol` — 0.3.0
-
-```json
-{"supported": true, "armed": false, "iface": "eth0"}
-```
-
-Read back from the system rather than assumed from the fact that a command was issued. A box that
-reports Wake-on-LAN supported and **not armed** cannot be woken from deep standby, which is worth
-knowing before enabling `deep_standby_allowed`. The `wol_arm` setting (never writable over MQTT, default off) arms
-the interface at start and again immediately before deep standby.
 
 ### New commands — 0.3.0
 

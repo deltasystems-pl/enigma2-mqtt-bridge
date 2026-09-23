@@ -23,6 +23,24 @@ from .log import get_logger
 LOG = get_logger("setup")
 
 
+def _wol_arm_label():
+    """The Wake-on-LAN setting's label, which says so where it can do nothing.
+
+    Asked every time the labels are, not once at import: it reads the image's
+    own probe, and a label that promised a switch the receiver does not have
+    would be a setting somebody turns on and then waits for.
+    """
+    label = _("Switch on the receiver's Wake-on-LAN")
+    try:
+        from .wol import supported
+
+        if supported():
+            return label
+    except Exception:
+        LOG.debug("the image's Wake-on-LAN could not be asked about")
+    return label + " (" + _("Wake-on-LAN is not available on this receiver") + ")"
+
+
 def setting_labels():
     """Setting name, and the label a household sees. The order is the screen's."""
     return (
@@ -50,6 +68,7 @@ def setting_labels():
         ("oscam_password", _("OSCam WebIf password")),
         ("bouquets_for_select", _("Bouquets for the channel list")),
         ("deep_standby_allowed", _("Allow deep standby and reboot")),
+        ("wol_arm", _wol_arm_label()),
         ("cec_standby_workaround", _("Close the channel list when the TV asks for standby")),
         ("softcam_restart_allowed", _("Allow restarting the softcam")),
         ("softcam_autoheal", _("Restart the softcam when it stops decoding")),

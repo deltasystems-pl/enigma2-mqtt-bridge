@@ -764,9 +764,34 @@ def test_every_setting_is_placed_in_exactly_one_group():
 def test_the_permissions_and_kill_switches_are_one_group():
     groups = dict(webif.SETTING_GROUPS)
     assert set(groups["permissions"]) == {
-        "deep_standby_allowed", "softcam_restart_allowed", "epg_import_allowed",
+        "deep_standby_allowed", "wol_arm", "softcam_restart_allowed", "epg_import_allowed",
         "cec_standby_workaround", "osd_toast",
     }
+
+
+def test_the_page_says_wake_on_lan_is_not_available_here(connected_bridge, page):
+    """The label is the setup screen's, and on a receiver without the image's
+    switch it says the setting does nothing, on the page as on the television."""
+    _request, body = get(page(connected_bridge))
+    assert "Wake-on-LAN is not available on this receiver" in settings_form(body)
+
+
+def test_wol_arm_saved_on_the_page_restarts_the_bridge_and_is_applied(
+    connected_bridge, page, factory, monkeypatch
+):
+    """Not `cmd/config`'s path: the setup screen's, whose restart is what arms."""
+    from MQTTBridge import wol
+
+    armed = []
+    monkeypatch.setattr(wol, "arm", lambda section=None: armed.append(section) or False)
+    request, _body = post(
+        page(connected_bridge), new_session(),
+        settings_fields(connected_bridge.settings, wol_arm=True),
+    )
+
+    assert request.response_code == 200
+    assert connected_bridge.settings.wol_arm.saved_value is True
+    assert armed == [connected_bridge.settings]
 
 
 def test_no_secret_is_ever_rendered(connected_bridge, page, settings, monkeypatch, tmp_path):
