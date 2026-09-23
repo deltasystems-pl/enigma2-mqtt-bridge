@@ -25,7 +25,7 @@ def test_a_bridge_with_a_session_registers_every_feature_area(live_bridge):
     names = [publisher.name for publisher in live_bridge._publishers]
     assert names == [
         "power", "service", "epg", "tuner", "recording", "timers", "volume", "hdd",
-        "process", "channels", "bouquet_context", "epg_grid", "keys", "screenshot",
+        "process", "channels", "bouquet_context", "epg_grid", "keys", "screenshot", "toast",
     ]
 
 
@@ -37,7 +37,7 @@ def test_capabilities_name_the_areas_that_bound(live_bridge, factory):
     # list yet and a bouquet that cannot be read is not a capability.
     assert capabilities == [
         "power", "service", "epg", "tuner", "recording", "timers", "volume", "hdd",
-        "process", "channels", "epg_grid", "keys", "screenshot", "message",
+        "process", "channels", "epg_grid", "keys", "screenshot", "toast", "message",
     ]
     assert live_bridge.publisher("bouquet_context") is not None
 
@@ -184,7 +184,7 @@ def test_the_default_registry_is_the_documented_order():
     assert [cls.name for cls in publishers.PUBLISHER_CLASSES] == [
         "power", "cec_workaround", "service", "epg", "tuner", "cam", "oscam", "softcam",
         "recording", "timers", "volume", "hdd", "process", "channels", "bouquet_context",
-        "epg_grid", "keys", "screenshot",
+        "epg_grid", "keys", "screenshot", "toast",
     ]
 
 

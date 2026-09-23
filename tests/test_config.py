@@ -25,6 +25,7 @@ EXPECTED_DEFAULTS = {
     "screenshot": "on_zap",
     "screenshot_interval": 60,
     "screenshot_delay": 4,
+    "osd_toast": True,
     "cam_telemetry": False,
     "oscam_telemetry": False,
     "oscam_port": 8888,

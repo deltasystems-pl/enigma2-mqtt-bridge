@@ -184,6 +184,216 @@ enigma.ePythonMessagePump = ePythonMessagePump
 enigma.getEnigmaVersionString = lambda: "2024-09-11-Release"
 
 
+# ---------------------------------------------------- the desktop and its widgets --
+#
+# 🔴 Modelled on the C++ in `lib/gui/` at the commit the receiver's enigma2
+# package was built from (OpenViX `cd4f9bc4ee`, named in the installed package
+# version). The binary itself cannot be disassembled, so this is the source it
+# was built from rather than a measurement of it. The details the discreet toast
+# depends on, each read there:
+#
+# - `eWindow(desktop, z)` sets its z **before** `addRootWidget`, so a window's z is
+#   fixed when it is created (`ewindow.cpp:28-34`).
+# - `eWidgetDesktop::addRootWidget` keeps the root windows front to back in
+#   descending z, and walks past every window whose z is not lower than the new
+#   one's: **a new window of equal z goes behind every existing one**, so a tie
+#   is won by the older window (`ewidgetdesktop.cpp:8-27`, immediate composition,
+#   which is what the receiver runs).
+# - A root window starts hidden and a child widget starts shown
+#   (`ewidget.cpp:8, 16`).
+# - `eListbox` binds `ListboxActions` at priority 0 **in its constructor**, with
+#   no action map and no exec (`elistbox.cpp:26, 95`); `eLabel`, `ePixmap` and
+#   `eWindow` bind nothing. `KeyActionMap.native` records those bindings.
+# - `eLabel::calculateSize()` lays the text out in the label's **current** size
+#   (`elabel.cpp:234-247`). The glyph metrics below are a model, not the font
+#   renderer: half the font size per character and 1.2 lines, which is enough to
+#   make a longer text taller and a wider label shorter.
+#
+# Destruction is not modelled — a window here lives as long as the test — so
+# what a test can see is whether a window is *visible*, which is also what a
+# household sees.
+
+
+class eSize:
+    def __init__(self, width=0, height=0):
+        self._width = int(width)
+        self._height = int(height)
+
+    def width(self):
+        return self._width
+
+    def height(self):
+        return self._height
+
+    def __eq__(self, other):
+        return (self.width(), self.height()) == (other.width(), other.height())
+
+    def __repr__(self):
+        return f"eSize({self._width}, {self._height})"
+
+
+class ePoint:
+    def __init__(self, x=0, y=0):
+        self._x = int(x)
+        self._y = int(y)
+
+    def x(self):
+        return self._x
+
+    def y(self):
+        return self._y
+
+    def __repr__(self):
+        return f"ePoint({self._x}, {self._y})"
+
+
+class eWidget:
+    def __init__(self, parent):
+        self.parent = parent
+        self.children = []
+        self._position = ePoint(0, 0)
+        self._size = eSize(0, 0)
+        self.z = 0
+        self.attributes = {}
+        self.visible = parent is not None
+        if parent is not None:
+            parent.children.append(self)
+
+    def show(self):
+        self.visible = True
+
+    def hide(self):
+        self.visible = False
+
+    def isVisible(self):
+        return self.visible and (self.parent is None or self.parent.isVisible())
+
+    def move(self, point):
+        self._position = point
+
+    def resize(self, size):
+        self._size = size
+
+    def position(self):
+        return self._position
+
+    def size(self):
+        return self._size
+
+    def setZPosition(self, z):
+        # A root window is not re-sorted by this: its place was decided when it
+        # was added to the desktop.
+        self.z = int(z)
+
+    def setFont(self, font):
+        self.font = font
+
+    def widgets(self):
+        """This widget and everything under it."""
+        found = [self]
+        for child in self.children:
+            found.extend(child.widgets())
+        return found
+
+
+class eWindow(eWidget):
+    def __init__(self, desktop, z=0):
+        eWidget.__init__(self, None)
+        self.z = int(z)
+        self.animation_mode = 0x11
+        self.title = ""
+        self.desktop = desktop
+        desktop.addRootWidget(self)
+
+    def setAnimationMode(self, mode):
+        self.animation_mode = mode
+
+    def setTitle(self, title):
+        self.title = title
+
+
+class eLabel(eWidget):
+    def __init__(self, parent):
+        eWidget.__init__(self, parent)
+        self.text = ""
+        self.font = ("Regular", 20)
+
+    def setText(self, text):
+        self.text = text
+
+    def calculateSize(self):
+        size = self.font[1]
+        glyph = max(1, size // 2)
+        line = int(size * 1.2)
+        per_line = max(1, self._size.width() // glyph)
+        lines = 0
+        longest = 0
+        for part in str(self.text).split("\n"):
+            lines += max(1, -(-len(part) // per_line))
+            longest = max(longest, min(len(part), per_line))
+        return eSize(longest * glyph, lines * line)
+
+
+class ePixmap(eWidget):
+    def setPixmap(self, pixmap):
+        self.pixmap = pixmap
+
+
+class eListbox(eWidget):
+    def __init__(self, parent):
+        eWidget.__init__(self, parent)
+        # `allowNativeKeys(true)`: bound here, exec or no exec.
+        KeyActionMap.getInstance().native.append(("ListboxActions", 0, self))
+
+
+class Desktop:
+    """`eWidgetDesktop`, as far as the order of its root windows goes."""
+
+    def __init__(self, width=1920, height=1080):
+        self._size = eSize(width, height)
+        self.roots = []
+
+    def size(self):
+        return self._size
+
+    def resize(self, size):
+        self._size = size
+
+    def addRootWidget(self, root):
+        for index, existing in enumerate(self.roots):
+            if existing.z < root.z:
+                self.roots.insert(index, root)
+                return
+        self.roots.append(root)
+
+    def removeRootWidget(self, root):
+        if root in self.roots:
+            self.roots.remove(root)
+
+    def front_to_back(self):
+        """The visible root windows, the frontmost first."""
+        return [root for root in self.roots if root.visible]
+
+
+DESKTOP = Desktop()
+
+
+def getDesktop(which):
+    # Only the main frame buffer is modelled; the front display is another desktop.
+    assert which == 0
+    return DESKTOP
+
+
+enigma.eSize = eSize
+enigma.ePoint = ePoint
+enigma.eWidget = eWidget
+enigma.eWindow = eWindow
+enigma.eLabel = eLabel
+enigma.ePixmap = ePixmap
+enigma.eListbox = eListbox
+enigma.getDesktop = getDesktop
+
+
 # ------------------------------------------------------- services and references --
 
 
@@ -509,6 +719,9 @@ class KeyActionMap:
     def __init__(self):
         self.bound = []
         self.pressed = []
+        # The bindings a C++ widget makes for itself, with no action map: see
+        # `eListbox` above.
+        self.native = []
 
     @classmethod
     def getInstance(cls):
@@ -820,10 +1033,21 @@ action_map_module = _module("Components.ActionMap")
 
 
 class ActionMap:
+    """Binds nothing until executed, which is the real one's rule and the toast's premise."""
+
     def __init__(self, contexts, actions=None, prio=0):
         self.contexts = contexts
         self.actions = actions or {}
         self.prio = prio
+
+    def execBegin(self):
+        pass
+
+    def execEnd(self):
+        pass
+
+    def destroy(self):
+        pass
 
 
 action_map_module.ActionMap = ActionMap
@@ -835,6 +1059,9 @@ config_list_module = _module("Components.ConfigList")
 class ConfigList:
     def __init__(self, entries=None):
         self.list = list(entries or [])
+
+    def destroy(self):
+        pass
 
 
 class ConfigListScreen:
@@ -854,49 +1081,419 @@ class ConfigListScreen:
 config_list_module.ConfigList = ConfigList
 config_list_module.ConfigListScreen = ConfigListScreen
 
+
+# ------------------------------------------- GUI components, sources and screens --
+#
+# 🔴 Modelled on the receiver's own `Components/GUIComponent.pyc`, `Label.pyc`,
+# `Pixmap.pyc`, `MenuList.pyc`, `Sources/Source.pyc`, `Sources/StaticText.pyc` and
+# `Screens/Screen.pyc`, each of which compiles byte for byte from OpenViX
+# `cd4f9bc4ee` (every code object compared), and on `StartEnigma.py`, which the
+# image ships as source and which is identical to that commit's. The details the
+# discreet toast depends on:
+#
+# - A `GUIComponent` has no widget until `GUIcreate(parent)` makes one from its
+#   `GUI_WIDGET`, and `destroy()` clears its `__dict__`.
+# - `Label` is a `GUIComponent` whose widget is `eLabel`; `getSize()` is the
+#   widget's `calculateSize()`. `Pixmap` is `ePixmap`. `MenuList` is `eListbox`,
+#   which is the whole reason it may not be in the toast.
+# - `StaticText` is a **source**, not a `GUIComponent`. `Screen.__init__` puts three
+#   of them into every screen (`Title`, `ScreenPath`, `title`).
+# - `Screen` is a `dict`. `show()` returns early when the screen is already shown
+#   and has been shown once, or has no window; `hide()` when it is not shown.
+#   `doClose()` hides, runs `onClose`, destroys every item and then sets **every
+#   attribute to `None`**. `close()` on a screen that is not executing only
+#   records `close_on_next_exec`.
+# - `applySkin()` takes the `zPosition` from the skin, creates the `eWindow` with
+#   it, applies the rest, and creates every component's widget in the window.
+#   `setAnimationMode` passes through to the window.
+#
+# `setTitle` and `setImage` are simplified: the first records the title, the
+# second is not modelled (an image the skin names for a screen would add a
+# `Pixmap`, which the toast's widget rule allows anyway).
+
+gui_component_module = _module("Components.GUIComponent")
+
+
+class GUIComponent:
+    def __init__(self):
+        self.instance = None
+        self.onVisibilityChange = []
+        self.skinAttributes = []
+        self.deprecationInfo = None
+
+    def execBegin(self):
+        pass
+
+    def execEnd(self):
+        pass
+
+    def onShow(self):
+        pass
+
+    def onHide(self):
+        pass
+
+    def destroy(self):
+        self.__dict__.clear()
+
+    def applySkin(self, desktop, parent):
+        if self.skinAttributes:
+            skin_module.applyAllAttributes(self.instance, desktop, self.skinAttributes,
+                                           parent.scale)
+            return True
+        return False
+
+    def move(self, x, y=None):
+        if y is None:
+            self.instance.move(x)
+        else:
+            self.instance.move(ePoint(int(x), int(y)))
+
+    def resize(self, x, y=None):
+        self.width = x
+        self.height = y
+        if y is None:
+            self.instance.resize(x)
+        else:
+            self.instance.resize(eSize(int(x), int(y)))
+
+    def GUIcreate(self, parent):
+        self.instance = self.createWidget(parent)
+        self.postWidgetCreate(self.instance)
+
+    def GUIdelete(self):
+        self.preWidgetRemove(self.instance)
+        self.instance = None
+
+    def createWidget(self, parent):
+        return self.GUI_WIDGET(parent)
+
+    def postWidgetCreate(self, instance):
+        pass
+
+    def preWidgetRemove(self, instance):
+        pass
+
+
+gui_component_module.GUIComponent = GUIComponent
+
 label_module = _module("Components.Label")
 
 
-class Label:
+class Label(GUIComponent):
+    GUI_WIDGET = eLabel
+
     def __init__(self, text=""):
+        GUIComponent.__init__(self)
+        self.message = ""
+        self.onChanged = []
+        self.setText(text)
+
+    def setText(self, text):
+        self.message = text
+        if self.instance:
+            self.instance.setText(self.message or "")
+        for function in self.onChanged:
+            function()
+
+    def getText(self):
+        return self.message
+
+    text = property(getText, setText)
+
+    def postWidgetCreate(self, instance):
+        instance.setText(str(self.message) or "")
+
+    def getSize(self):
+        size = self.instance.calculateSize()
+        return size.width(), size.height()
+
+
+label_module.Label = Label
+
+pixmap_module = _module("Components.Pixmap")
+
+
+class Pixmap(GUIComponent):
+    GUI_WIDGET = ePixmap
+
+
+pixmap_module.Pixmap = Pixmap
+
+menu_list_module = _module("Components.MenuList")
+
+
+class MenuList(GUIComponent):
+    GUI_WIDGET = eListbox
+
+    def __init__(self, entries=None, enableWrapAround=True, content=None):
+        GUIComponent.__init__(self)
+        self.list = list(entries or [])
+
+
+menu_list_module.MenuList = MenuList
+
+source_module = _module("Components.Sources.Source")
+
+
+class Source:
+    def __init__(self):
+        self.downstream_elements = []
+
+    def execBegin(self):
+        pass
+
+    def execEnd(self):
+        pass
+
+    def onShow(self):
+        pass
+
+    def onHide(self):
+        pass
+
+    def destroy(self):
+        pass
+
+
+source_module.Source = Source
+
+static_text_module = _module("Components.Sources.StaticText")
+
+
+class StaticText(Source):
+    def __init__(self, text=""):
+        Source.__init__(self)
         self.text = text
 
     def setText(self, text):
         self.text = text
 
+    def getText(self):
+        return self.text
 
-label_module.Label = Label
 
-static_text_module = _module("Components.Sources.StaticText")
-static_text_module.StaticText = Label
+static_text_module.StaticText = StaticText
 
 screens = _module("Screens", package=True)
 screen_module = _module("Screens.Screen")
 
 
-class Screen:
-    def __init__(self, session):
+class Screen(dict):
+    def __init__(self, session, parent=None, mandatoryWidgets=None):
+        dict.__init__(self)
+        self.skinName = self.__class__.__name__
         self.session = session
-        self.widgets = {}
-        self.title = ""
-        self.closed_with = None
-        self.onLayoutFinish = []
+        self.parent = parent
+        self.mandatoryWidgets = mandatoryWidgets
         self.onClose = []
+        self.onFirstExecBegin = []
+        self.onExecBegin = []
+        self.onExecEnd = []
+        self.onLayoutFinish = []
+        self.onShown = []
+        self.onShow = []
+        self.onHide = []
+        self.execing = False
+        self.shown = True
+        self.already_shown = False
+        self.renderer = []
+        self.close_on_next_exec = None
+        self.stand_alone = False
+        self.desktop = None
+        self.instance = None
+        self.title = ""
+        # Not the image's: what the setup-screen tests read back.
+        self.closed_with = None
+        self["Title"] = StaticText()
+        self["ScreenPath"] = StaticText()
+        self["title"] = StaticText()
 
-    def __setitem__(self, name, widget):
-        self.widgets[name] = widget
-
-    def __getitem__(self, name):
-        return self.widgets[name]
+    @property
+    def widgets(self):
+        """The screen's items. The setup-screen tests predate the dict model."""
+        return self
 
     def setTitle(self, title):
         self.title = title
 
-    def close(self, *args):
-        self.closed_with = args
+    def close(self, *retval):
+        self.closed_with = retval
+        if not self.execing:
+            self.close_on_next_exec = retval
+        else:
+            self.session.close(self, *retval)
+
+    def show(self):
+        if (self.shown and self.already_shown) or not self.instance:
+            return
+        self.shown = True
+        self.already_shown = True
+        self.instance.show()
+        for function in self.onShow:
+            function()
+        for value in list(self.values()) + self.renderer:
+            if isinstance(value, (GUIComponent, Source)):
+                value.onShow()
+
+    def hide(self):
+        if not self.shown or not self.instance:
+            return
+        self.shown = False
+        self.instance.hide()
+        for function in self.onHide:
+            function()
+        for value in list(self.values()) + self.renderer:
+            if isinstance(value, (GUIComponent, Source)):
+                value.onHide()
+
+    def doClose(self):
+        self.hide()
+        for function in self.onClose:
+            function()
+        self.deleteGUIScreen()
+        del self.session
+        for name, value in list(self.items()):
+            value.destroy()
+            del self[name]
+        self.renderer = []
+        for name in self.__dict__:
+            setattr(self, name, None)
+
+    def setDesktop(self, desktop):
+        self.desktop = desktop
+
+    def setAnimationMode(self, mode):
+        if self.instance:
+            self.instance.setAnimationMode(mode)
+
+    def applySkin(self):
+        z_position = 0
+        for key, value in self.skinAttributes:
+            if key == "zPosition":
+                z_position = int(value)
+        self.scale = ((720, 720), (576, 576))
+        if not self.instance:
+            self.instance = eWindow(self.desktop, z_position)
+        skin_module.applyAllAttributes(self.instance, self.desktop, self.skinAttributes,
+                                       self.scale)
+        self.createGUIScreen(self.instance, self.desktop)
+
+    def createGUIScreen(self, parent, desktop):
+        for key in self:
+            value = self[key]
+            if isinstance(value, GUIComponent):
+                value.GUIcreate(parent)
+                value.applySkin(desktop, self)
+        for function in self.onLayoutFinish:
+            function()
+
+    def deleteGUIScreen(self):
+        for _name, value in list(self.items()):
+            if isinstance(value, GUIComponent):
+                value.GUIdelete()
 
 
 screen_module.Screen = Screen
+
+
+# ------------------------------------------------------------------------ skin --
+#
+# 🔴 From the receiver's `skin.pyc`, which compiles from `cd4f9bc4ee` except for
+# three `assert`s the image strips. `addOnLoadCallback`/`removeOnLoadCallback` are
+# membership-guarded appends and removes on the module's `onLoadCallbacks`, and
+# `InitSkins(booting=False)` — a skin reload without a restart — resizes the
+# desktop **before** it calls every callback (a test resizes `DESKTOP` first).
+# `readSkin` prefers a screen the skin defines under the screen's `skinName`,
+# falls back to the embedded `skin` string, and refuses a named widget the screen
+# does not have.
+#
+# The model reads plain integers only for `position` and `size`: the toast
+# promises to format them itself, so a coordinate expression here is a failure.
+
+skin_module = _module("skin")
+skin_module.GUI_SKIN_ID = 0
+skin_module.onLoadCallbacks = []
+# name -> the XML of a screen the active skin defines.
+skin_module.domScreens = {}
+
+
+class SkinError(Exception):
+    pass
+
+
+def addOnLoadCallback(callback):
+    if callback not in skin_module.onLoadCallbacks:
+        skin_module.onLoadCallbacks.append(callback)
+
+
+def removeOnLoadCallback(callback):
+    if callback in skin_module.onLoadCallbacks:
+        skin_module.onLoadCallbacks.remove(callback)
+
+
+def InitSkins(booting=True):
+    if not booting:
+        for method in skin_module.onLoadCallbacks:
+            if method:
+                method()
+
+
+def _pair(value):
+    first, second = str(value).split(",")
+    return int(first), int(second)
+
+
+def applyAllAttributes(guiObject, desktop, attributes, scale):
+    for attribute, value in attributes:
+        if attribute == "position":
+            guiObject.move(ePoint(*_pair(value)))
+        elif attribute == "size":
+            guiObject.resize(eSize(*_pair(value)))
+        elif attribute == "font":
+            face, size = str(value).split(";")
+            guiObject.setFont((face, int(size)))
+        elif attribute == "zPosition":
+            guiObject.setZPosition(int(value))
+        else:
+            guiObject.attributes[attribute] = value
+
+
+def readSkin(screen, skin, names, desktop):
+    import xml.etree.ElementTree as ElementTree
+
+    if not isinstance(names, list):
+        names = [names]
+    source = None
+    for name in names:
+        if name in skin_module.domScreens:
+            source = skin_module.domScreens[name]
+            break
+    if source is None:
+        source = getattr(screen, "skin", None) or "<screen></screen>"
+    element = ElementTree.fromstring(source)
+    screen.skinAttributes = [
+        (key, value) for key, value in element.attrib.items() if key != "name"
+    ]
+    screen.additionalWidgets = []
+    screen.renderer = []
+    for widget in element:
+        if widget.tag != "widget" or "name" not in widget.attrib:
+            raise SkinError(f"the model reads named widgets only, not <{widget.tag}>")
+        name = widget.attrib["name"]
+        if name not in screen:
+            raise SkinError(f"Component with name '{name}' was not found in skin")
+        screen[name].skinAttributes = [
+            (key, value) for key, value in widget.attrib.items() if key != "name"
+        ]
+
+
+skin_module.SkinError = SkinError
+skin_module.addOnLoadCallback = addOnLoadCallback
+skin_module.removeOnLoadCallback = removeOnLoadCallback
+skin_module.InitSkins = InitSkins
+skin_module.applyAllAttributes = applyAllAttributes
+skin_module.readSkin = readSkin
 
 message_box_module = _module("Screens.MessageBox")
 
@@ -1255,6 +1852,9 @@ class TryQuitMainloop:
 
 
 standby_module.inStandby = None
+# A module-level boolean on the receiver's `Screens/Standby.pyc`, set while the
+# shutdown screen is on its way out of the main loop.
+standby_module.inTryQuitMainloop = False
 standby_module.Standby = Standby
 standby_module.StandbyScreen = StandbyScreen
 standby_module.TryQuitMainloop = TryQuitMainloop
@@ -1822,9 +2422,21 @@ class Navigation:
 
 
 class Session:
+    """`StartEnigma.Session` as far as the tests need it.
+
+    `instantiateDialog` and `deleteDialog` are the real ones, from the source the
+    image ships (`StartEnigma.py`, identical to OpenViX `cd4f9bc4ee`):
+    construct, `readSkin`, `setDesktop`, `applySkin` — and never the dialog stack;
+    and `hide()` then `doClose()`. `open` only records, and `execDialog` is not
+    here, so a dialog handed to either is visible to a test.
+    """
+
     def __init__(self, nav):
         self.nav = nav
         self.opened = []
+        self.desktop = getDesktop(0)
+        self.instantiated = []
+        self.deleted = []
 
     def open(self, screen, *arguments):
         self.opened.append((screen, arguments))
@@ -1833,6 +2445,24 @@ class Session:
     def openWithCallback(self, callback, screen, *arguments):
         self.opened.append((screen, arguments))
         return screen
+
+    def instantiateDialog(self, screen, *arguments, **kwargs):
+        return self.doInstantiateDialog(screen, arguments, kwargs, self.desktop)
+
+    def deleteDialog(self, screen):
+        self.deleted.append(screen)
+        screen.hide()
+        screen.doClose()
+
+    def doInstantiateDialog(self, screen, arguments, kwargs, desktop):
+        dialog = screen(self, *arguments, **kwargs)
+        if dialog is None:
+            return None
+        skin_module.readSkin(dialog, None, dialog.skinName, desktop)
+        dialog.setDesktop(desktop)
+        dialog.applySkin()
+        self.instantiated.append(dialog)
+        return dialog
 
 
 BOUQUET_ROOT = (
@@ -1953,6 +2583,11 @@ def fresh_receiver():
         VolumeControl.instance = None
         InfoBar.instance = None
         standby_module.inStandby = None
+        standby_module.inTryQuitMainloop = False
+        DESKTOP.resize(eSize(1920, 1080))
+        DESKTOP.roots = []
+        del skin_module.onLoadCallbacks[:]
+        skin_module.domScreens = {}
         ServiceReference.names = {}
         ConsoleAppContainer.instances = []
         eTimer.instances = []

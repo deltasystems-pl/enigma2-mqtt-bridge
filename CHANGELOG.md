@@ -60,6 +60,18 @@ version that has no section here.
   (`last_intervention`, `kind`, `count`, `pending`), retracted when the workaround is switched off;
   each television standby counts at most once. The decisions are in
   [ADR-0007](docs/adr/0007-cec-standby-workaround.md).
+- **A discreet toast, as a second message style.** `cmd/message` takes an optional
+  `"style": "toast"`: a small box in the top-right corner, headed „MQTT Bridge", that hides itself
+  after 5 seconds (1–30 on request), never takes focus, never waits behind the channel list the way
+  the popup does, and is replaced by the next toast rather than queued. It holds two text labels and
+  nothing else, because some of enigma2's widgets bind keys natively without being executed and a
+  toast built from one would eat the channel list's arrow keys. It is hidden when the receiver enters
+  standby, a toast sent in standby is refused on `last_error`, and it is deleted — never merely
+  closed — whenever the plugin stops. Its text is capped at 200 characters with colour escapes
+  removed; `type` is validated as for a popup and then ignored. New capability `toast`, claimed only
+  once the screen has been created, and the box-only setting `osd_toast` (on by default, not in
+  `info.settings` or `cmd/config`). **Payloads without `style` behave exactly as before.** The
+  decisions are in [ADR-0008](docs/adr/0008-discreet-toast.md).
 
 ### Changed
 

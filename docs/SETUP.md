@@ -23,6 +23,7 @@ is no separate configuration file to maintain, and settings survive a plugin upg
 | `publish_keys` | `on` | Remote-key events on the `key` topic. Off if you do not automate on them — it is a log of what is pressed |
 | `screenshot` | `on zap` | `off`, `on zap`, or `interval N s`. At most one capture per five seconds whatever this says. Each capture costs the receiver about 22 kB of memory it does not give back — see below |
 | `screenshot_delay` | `4` | Seconds to wait after a zap before capturing. Another zap restarts the wait |
+| `osd_toast` | `on` | Lets a sender ask `cmd/message` for a **discreet toast** instead of the popup: a small box in the top-right corner, headed „MQTT Bridge", that hides itself after a few seconds, never takes a key press and is not shown in standby. Off means the toast is never created, the `toast` capability is absent and a toast is refused; popups are unaffected. See below |
 | `cam_telemetry` | `off` | Publish bounded current-service conditional-access status from `/tmp/ecm.info` |
 | `oscam_telemetry` | `off` | Publish privacy-reduced OSCam software and reader/server health |
 | `oscam_port` | `8888` | Receiver-local OSCam WebIf port; the host is fixed to `127.0.0.1` |
@@ -48,6 +49,10 @@ changed from the broker.
 not a permission for a command — it switches on code that closes a screen you may be looking at,
 which makes it the kill-switch for that code, and a kill-switch belongs on the box. A consumer
 learns whether it is at work from the `cec_workaround` capability, not from `info.settings`.
+
+🔴 **`osd_toast` is set here and nowhere else, and it is not echoed either.** It is the kill-switch
+for a screen that lives inside the receiver's user interface, and a kill-switch reachable over the
+broker is not one. A consumer learns whether toasts are available from the `toast` capability.
 
 The log is `/home/root/mqttbridge.log`, capped at 1 MB with two rotations kept, so a debug
 session cannot fill the flash.
@@ -80,6 +85,25 @@ off the image never queues the television's standby, so the plugin does not star
 and does not claim the `cec_workaround` capability. Both are read when the plugin starts, so after
 changing them restart the receiver's interface. Each intervention is logged at `info` and counted
 on the `cec` topic — see [TOPICS.md](TOPICS.md).
+
+### What the discreet toast does
+
+A message from Home Assistant normally arrives as the receiver's own popup: it opens in the middle
+of the screen, takes the remote until somebody dismisses it or it times out, and — because it goes
+through the same queue as the image's other notifications — waits while the channel list is open
+and then appears when you close it. A sender that asks for `"style": "toast"` gets something else:
+
+- **A small box in the top-right corner**, above the channel list and the info bar, headed
+  „MQTT Bridge" so that it cannot be mistaken for a message from the receiver itself. It has one
+  appearance whatever the message says.
+- **It hides itself** after 5 seconds, or the 1 to 30 the sender asks for. The remote cannot dismiss
+  it, because nothing on it can take a key press — which is also why the channel list keeps moving
+  normally while it is on screen.
+- **A newer toast replaces the one on screen.** There is no queue.
+- **It is not shown in standby.** It is hidden when the receiver goes to standby, and one sent
+  while it is in standby is refused on `last_error` rather than kept for later.
+
+A skin may define a screen called `MQTTBridgeToast` to restyle it, as it can any other screen.
 
 ### What the softcam restart does
 

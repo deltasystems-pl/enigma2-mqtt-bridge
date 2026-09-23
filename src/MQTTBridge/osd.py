@@ -1,4 +1,7 @@
-"""The popup on the television — `cmd/message`.
+"""The popup on the television — `cmd/message`, and its default style.
+
+The other style, `toast`, is `toast.py`: a screen of the plugin's own rather than
+the image's message box.
 
 The text is not translated here. It arrives from whatever sent the command,
 already in the language of the household that sent it; a plugin that ran it
@@ -63,6 +66,17 @@ def box_type(kind):
     return getattr(message_box, attribute, getattr(message_box, "TYPE_INFO", 1))
 
 
+def type_refusal(kind):
+    """Why `kind` is not a message type, or None when it is.
+
+    Shared with the toast, which validates `type` exactly as the popup does and
+    then ignores it, so that a payload is valid or invalid whatever its style.
+    """
+    if kind not in TYPES:
+        return "unknown message type '" + str(kind) + "'; expected one of " + ", ".join(TYPES)
+    return None
+
+
 def show(text, kind="info", timeout=DEFAULT_TIMEOUT):
     """Put `text` on the screen. None on success, otherwise the refusal."""
     text = str(text or "")
@@ -72,8 +86,9 @@ def show(text, kind="info", timeout=DEFAULT_TIMEOUT):
         LOG.info("message truncated from %d to %d characters", len(text), MAX_TEXT)
         text = text[:MAX_TEXT]
 
-    if kind not in TYPES:
-        return "unknown message type '" + str(kind) + "'; expected one of " + ", ".join(TYPES)
+    refusal = type_refusal(kind)
+    if refusal:
+        return refusal
 
     notifications = _notifications()
     if notifications is None or getattr(notifications, "AddPopup", None) is None:

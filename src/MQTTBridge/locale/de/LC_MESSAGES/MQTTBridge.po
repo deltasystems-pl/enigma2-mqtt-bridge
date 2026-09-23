@@ -97,6 +97,10 @@ msgid "Screenshot delay after a zap (seconds)"
 msgstr "Verzögerung nach Senderwechsel (Sekunden)"
 
 #: src/MQTTBridge/setup.py:45
+msgid "Show discreet on-screen messages"
+msgstr "Dezente Bildschirmmeldungen anzeigen"
+
+#: src/MQTTBridge/setup.py:45
 msgid "Publish conditional-access telemetry"
 msgstr "Telemetrie für Zugangsberechtigung veröffentlichen"
 
