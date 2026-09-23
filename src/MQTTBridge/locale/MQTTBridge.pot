@@ -638,3 +638,15 @@ msgstr ""
 #: src/MQTTBridge/webif.py
 msgid "No screenshot to show yet."
 msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "Allow starting an EPG import"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Import the EPG now"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "EPG-Importer downloads the guide now. When it finishes, the menus freeze for two or three seconds while the guide is saved."
+msgstr ""

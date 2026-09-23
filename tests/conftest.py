@@ -2784,3 +2784,147 @@ def live_bridge(make_bridge, factory, settings, receiver):
     bridge.start()
     factory.client.fire_connect()
     return settle(bridge)
+
+
+# ------------------------------------------------- the image's EPG importer --
+#
+# EPG-Importer as enigma2's plugin loader leaves it: a module in `sys.modules`
+# under `Plugins.Extensions.EPGImport.plugin`, holding a singleton importer, the
+# scheduler, `startImport()` and `lastImportResult`. Shaped on the bytecode of
+# the OpenViX 6.6 build (`1.0+git286`), and deliberately **not** installed by
+# default: most receivers do not have it, and a test that wants it says so with
+# `install_epg_importer()`, which is also how it is kept out of every capability
+# list the other tests assert.
+
+EPG_IMPORTER_MODULE = "Plugins.Extensions.EPGImport.plugin"
+
+
+class FakeEpgImporter:
+    """`EPGImport.EPGImport`: running while `source` is set, as the image's own test says."""
+
+    def __init__(self, epgcache):
+        self.epgcache = epgcache
+        self.sources = []
+        self.source = None
+        self.onDone = None
+        self.eventCount = None
+        self.longDescUntil = None
+        self.raises = False
+        self.began = []
+
+    def isImportRunning(self):
+        if self.raises:
+            raise RuntimeError("the importer is broken")
+        return self.source is not None
+
+    def beginImport(self, longDescUntil=None):
+        self.eventCount = 0
+        self.longDescUntil = longDescUntil
+        self.began.append([getattr(source, "description", source) for source in self.sources])
+        self.nextImport()
+
+    def nextImport(self):
+        if not self.sources:
+            self.closeImport()
+            return
+        self.source = self.sources.pop()
+
+    def finish(self, events):
+        """What the end of the download chain does: clear, save, call back — one turn."""
+        self.sources = []
+        self.eventCount = events
+        self.closeImport()
+
+    def closeImport(self):
+        self.source = None
+        if self.eventCount is not None:
+            if self.onDone:
+                self.onDone(reboot=False, epgfile=None)
+            self.eventCount = None
+
+
+class FakeEpgSource:
+    def __init__(self, description):
+        self.description = description
+
+
+class FakeAutoStartTimer:
+    """The importer's scheduler: `getWakeTime()` answers today's clock time, or -1."""
+
+    def __init__(self, wake=-1):
+        self.wake = wake
+        self.prev_onlybouquet = False
+        self.prev_multibouquet = True
+
+    def getWakeTime(self):
+        if isinstance(self.wake, Exception):
+            raise self.wake
+        return self.wake
+
+
+def install_epg_importer(monkeypatch, import_events=True, import_event=False,
+                         sources=("Polska - Podstawowy", "Deutschland - Basis"),
+                         scheduler=True):
+    """Put a fake EPG-Importer where enigma2's plugin loader would have, and return it."""
+    import time as time_module
+
+    module = types.ModuleType(EPG_IMPORTER_MODULE)
+    cache = EPGCache.getInstance()
+    for name, wanted in (("importEvents", import_events), ("importEvent", import_event)):
+        if wanted:
+            setattr(cache, name, lambda *arguments: None)
+        elif name in cache.__dict__:
+            delattr(cache, name)
+
+    module.epgimport = FakeEpgImporter(cache)
+    module.lastImportResult = None
+    module.CONFIG_PATH = "/etc/epgimport"
+    module.started = 0
+
+    selection = {"sources": list(sources)}
+    epg_config = types.SimpleNamespace(channelCache={"cached": True})
+    epg_config.loaded = 0
+
+    def loadUserSettings(filename="/etc/enigma2/epgimport.conf"):
+        epg_config.loaded += 1
+        return {"sources": list(selection["sources"])}
+
+    def enumSources(path, filter=None, categories=False):
+        for name in filter or ():
+            yield FakeEpgSource(name)
+
+    epg_config.loadUserSettings = loadUserSettings
+    epg_config.enumSources = enumSources
+    epg_config.selection = selection
+    module.EPGConfig = epg_config
+
+    def doneImport(reboot=False, epgfile=None):
+        now = time_module.time()
+        count = module.epgimport.eventCount
+        module.lastImportResult = (now, count)
+        stamp = time_module.asctime(time_module.localtime(now))
+        config.plugins.extra_epgimport.last_import.value = f"{stamp}, {count}"
+
+    def startImport():
+        module.started += 1
+        module.epgimport.onDone = doneImport
+        module.epgimport.beginImport(longDescUntil=time_module.time() + 5 * 24 * 3600)
+
+    module.doneImport = doneImport
+    module.startImport = startImport
+    module.autoStartTimer = FakeAutoStartTimer() if scheduler else None
+
+    # The image's own settings for it, taken away again with the module.
+    importer_settings = ConfigSubsection()
+    importer_settings.enabled = ConfigYesNo(default=True)
+    importer_settings.import_onlybouquet = ConfigYesNo(default=False)
+    extra = ConfigSubsection()
+    extra.last_import = ConfigText(default="none")
+    usage = ConfigSubsection()
+    usage.multibouquet = ConfigYesNo(default=True)
+    monkeypatch.setattr(config.plugins, "epgimport", importer_settings, raising=False)
+    monkeypatch.setattr(config.plugins, "extra_epgimport", extra, raising=False)
+    monkeypatch.setattr(config, "usage", usage, raising=False)
+
+    monkeypatch.setitem(sys.modules, EPG_IMPORTER_MODULE, module)
+    return module

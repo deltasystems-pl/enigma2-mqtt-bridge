@@ -110,6 +110,7 @@ class CommandDispatcher:
             "screenshot": self.screenshot,
             "softcam_restart": self.softcam_restart,
             "epg_grid": self.epg_grid,
+            "epg_import": self.epg_import,
             "config": self.config,
             "discovery": self.discovery,
             "ha_mode": self.ha_mode,
@@ -241,6 +242,12 @@ class CommandDispatcher:
             return (
                 "deep standby and reboot are switched off in the plugin's settings"
             )
+        from . import epgimport
+
+        # The image does not guard against it, and a restart mid-import loses
+        # the run while the guide it was building is half written.
+        if epgimport.running():
+            return "an EPG import is running"
         refusal = recording.guard(self.session)
         if refusal:
             return refusal
@@ -478,6 +485,22 @@ class CommandDispatcher:
             return "the EPG grid is switched off"
         publisher.regenerate()
         return None
+
+    def epg_import(self, _text, origin=MQTT):
+        """Ask the image's EPG importer for an import now.
+
+        🔴 The payload is ignored: nothing from the broker reaches the importer.
+        The permission is asked first even where the importer is missing, so the
+        refusals come in the order the contract documents them.
+        """
+        from . import epgimport
+
+        publisher = self.publisher("epg_import")
+        if publisher is None:
+            if not granted(self.bridge.value, "epg_import_allowed", origin):
+                return epgimport.PERMISSION
+            return epgimport.NOT_RESOLVED
+        return publisher.request(origin=origin)
 
     def config(self, text, origin=MQTT):
         from .config import validate_remote_settings

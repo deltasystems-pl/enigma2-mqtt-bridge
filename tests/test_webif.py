@@ -764,7 +764,8 @@ def test_every_setting_is_placed_in_exactly_one_group():
 def test_the_permissions_and_kill_switches_are_one_group():
     groups = dict(webif.SETTING_GROUPS)
     assert set(groups["permissions"]) == {
-        "deep_standby_allowed", "softcam_restart_allowed", "cec_standby_workaround", "osd_toast",
+        "deep_standby_allowed", "softcam_restart_allowed", "epg_import_allowed",
+        "cec_standby_workaround", "osd_toast",
     }
 
 

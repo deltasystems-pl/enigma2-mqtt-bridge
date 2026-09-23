@@ -56,7 +56,8 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
                "screenshot_interval": 60, "screenshot_delay": 4,
                "cam_telemetry": false, "oscam_telemetry": false,
                "softcam_autoheal": false, "softcam_autoheal_seconds": 90,
-               "deep_standby_allowed": false, "softcam_restart_allowed": false},
+               "deep_standby_allowed": false, "softcam_restart_allowed": false,
+               "epg_import_allowed": false},
   "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
                    "volume", "hdd", "process", "channels", "bouquet_context", "epg_grid", "keys",
                    "screenshot", "toast", "message"]
@@ -73,7 +74,7 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
 | `ip` | string | Current LAN address |
 | `uptime` | int | Seconds since boot |
 | `ha_mode` | string | `discovery` \| `integration` \| `off` — the acknowledgement of `cmd/ha_mode` |
-| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5–3600), `screenshot_delay` (post-zap settling seconds, 1–30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30–600). **Read-only**: `deep_standby_allowed` and `softcam_restart_allowed` (bools, off by default). See below. |
+| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5–3600), `screenshot_delay` (post-zap settling seconds, 1–30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30–600). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed` and `epg_import_allowed` (bools, off by default). See below. |
 | `capabilities` | list of strings | Which hooks this image actually gave the plugin |
 
 **Presence in `settings` is not permission to write it back.** Until 0.2.0 this object was „the
@@ -86,6 +87,7 @@ settings it did mean to change as well.
 |---|---|---|---|
 | `deep_standby_allowed` | 0.2.0 | Whether `cmd/deep_standby` and `cmd/reboot` are permitted over MQTT. Always present, whichever way it is set | On the receiver: the setup screen, *Menu → Plugins → MQTT Bridge*, the provisioning file at first install, or the plugin's OpenWebif page — never over MQTT |
 | `softcam_restart_allowed` | 0.3.0 | Whether `cmd/softcam_restart` is permitted over MQTT, and with it the opt-in auto-heal. Always present, whichever way it is set | The same places, and never over MQTT |
+| `epg_import_allowed` | 0.3.0 | Whether `cmd/epg_import` is permitted over MQTT. Always present, whichever way it is set | The same places, and never over MQTT |
 
 The rule behind which side of the line a setting falls on: one that **enables a command** is never
 writable over MQTT — it is set on the receiver (the setup screen, the provisioning file, or the
@@ -107,7 +109,7 @@ plugin detects what it managed to attach and names it here rather than assuming.
 hides what is missing instead of showing a dead entity. The names are the feature areas, and
 nothing else is ever in the list: `power`, `cec_workaround`, `service`, `epg`, `epg_grid`,
 `tuner`, `recording`, `timers`, `volume`, `cam`, `oscam`, `softcam`, `keys`, `screenshot`,
-`toast`, `message`, `hdd`, `process`, `channels`, `bouquet_context`. A build that has bound no
+`toast`, `message`, `hdd`, `process`, `channels`, `bouquet_context`, `epg_import`. A build that has bound no
 feature area publishes `[]` — the connection, `info` and the commands are the plugin itself and
 are not capabilities.
 
@@ -399,6 +401,59 @@ The companion integration exposes it through an action that returns a response i
 
 Full EPG search, and browsing timers that the plugin did not create, stay on OpenWebif. This is
 a grid, not a database.
+
+### `<base>/<node>/epg_import` — since 0.3.0
+
+```json
+{"state": "done", "started": 1789459200, "finished": 1789459291, "events": 120074, "error": null}
+```
+
+Retained, and present when `epg_import` is a capability. That capability is claimed only where the
+image's EPG-Importer is **already loaded** by enigma2's own plugin loader — the plugin looks it up
+under `Plugins.Extensions.EPGImport.plugin` and never imports it itself, because a second import
+would build a second importer and a second scheduler — where every name the plugin needs from it
+is there, and where the image's EPG cache can take imported events (`importEvents` or
+`importEvent`). Without those the importer writes a file instead and ends by asking for a
+graphical-interface restart, with a dialog that answers yes by itself after fifteen seconds, so
+the capability is not claimed there. The reason is logged once at start.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `state` | `idle` \| `running` \| `done` \| `failed` | |
+| `started` | integer or `null` | Unix epoch seconds, UTC: when the plugin started the import, or when it first saw one somebody else started. `null` for an import that began and ended between two of the plugin's looks, and after a start-up |
+| `finished` | integer or `null` | Unix epoch seconds, UTC: the importer's own finish time |
+| `events` | integer or `null` | The importer's event count for the run. It counts events **processed**, not events **new** to the guide |
+| `error` | string or `null` | Why it failed, for a person. Never a source name or a URL: the importer does not say which source failed, so neither does this |
+
+**It follows every import**, not only the ones asked for over MQTT or on the page. While nothing
+runs the plugin asks the importer once a minute whether an import is running, so an import the
+image's own schedule or the importer's own screen started shows up as `running`, and „already
+running" is never an unexplained refusal. While one runs it asks every two seconds — the same test
+at the same period the importer's own screen uses — and when the answer turns false it reads the
+importer's result: events → `done`, and the EPG grid is rebuilt (each bouquet is **published only
+if it changed**, so after most imports nothing on `epg_grid/*` moves); no events → `failed`, „…its
+sources may be unreachable". At start-up the topic is `idle`, carrying `finished` and `events` from
+the importer's own record of its last run, or `running` if one is under way.
+
+Three things can go wrong, and only three can be told apart: the import did not start (or never
+ran), it finished with no events, or it is still running after **30 minutes** — a normal run takes
+one and a half minutes. The plugin cannot cancel the importer: after the watchdog it keeps asking,
+keeps refusing a second start, and publishes the real result if one arrives.
+
+Worth knowing before you press the button, all of it the image's behaviour and none of it
+something the plugin can change:
+
+- 🔴 **The picture's menus freeze for two to three seconds at the end.** The importer downloads and
+  parses off the main loop, but saves the guide on the thread that draws the picture. Measured on
+  the receiver this was written against: 2.3 and 2.6 seconds.
+- **`clear_oldepg`**: with that importer setting on, every import empties the whole guide first, so
+  the grid is empty until it finishes.
+- **The importer's own deep-standby settings apply** to an import started from here exactly as to a
+  scheduled one: with its „shutdown after import" behaviour switched on, a receiver in standby that
+  a timer woke goes into deep standby when the import ends. That is the importer, not this plugin.
+
+A settings save on the receiver while an import runs restarts the bridge, and the new session
+reports `started` as the moment it first saw the import.
 
 ### `<base>/<node>/tuner`
 
@@ -703,9 +758,9 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | Command | Payload | Effect | Guard |
 |---|---|---|---|
 | `power` | `on` \| `standby` \| `toggle` | Leaves or enters standby | Idempotent: asking for the state the box is already in does nothing |
-| `deep_standby` | any (`PRESS` by convention) | Shuts the box down completely | Refused while recording, or with a timer due within 10 minutes; also refused unless `deep_standby_allowed` is on |
+| `deep_standby` | any (`PRESS` by convention) | Shuts the box down completely | Refused while recording, or with a timer due within 10 minutes; refused while an EPG import runs (since 0.3.0); also refused unless `deep_standby_allowed` is on |
 | `reboot` | any | Reboots the receiver | Same as `deep_standby` |
-| `restart_gui` | any | Restarts enigma2 only | Refused while recording or with a timer due within 10 minutes |
+| `restart_gui` | any | Restarts enigma2 only | Refused while recording or with a timer due within 10 minutes, and while an EPG import runs (since 0.3.0): a restart mid-import loses the run |
 | `zap` | `<sref>` \| `{"sref": "…"}` \| `{"name": "…"}` | Tunes to a service, waking the box from standby first | By name: refused unless exactly one service in the configured bouquets matches — the error names the count. A zap that does not show up on `service` within 5 s is reported there too |
 | `bouquet` | `{"sref": "…"}` | Makes one published TV bouquet the active channel-list context | Exact allowlist match only. The current channel is preserved when it belongs to the bouquet; otherwise the first playable channel is tuned. Empty/marker-only bouquets and unavailable service-list APIs are refused without changing context |
 | `volume` | `0`–`100`, or `{"level": 42}` | Sets the volume, with the on-screen bar | Out-of-range values are clamped and noted in the log |
@@ -717,6 +772,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `screenshot` | any | Captures `screen` now, in standby as well | Rate-limited to one per five seconds |
 | `softcam_restart` — since 0.3.0 | any (`PRESS` by convention) | Stops **every** running instance of the cam the image selected, then starts exactly one, with the image's own command line | Refused unless `softcam_restart_allowed` is on; refused by the same recording guard as `deep_standby` — while recording, with a timer due within 10 minutes, and when the image will not say; refused for the first 60 seconds after the plugin starts, because the image's own check runs a moment after that and restarting inside that window races a copy already on its way; at most one manual restart a minute; refused while one is already running. 🔴 **The binary is resolved on the box and no part of the command line comes from the payload** |
 | `epg_grid` | any | Rebuilds and republishes **every** `epg_grid/<bouquet_slug>` topic | Refused with a note in `last_error` when `epg_grid_events` is `0` |
+| `epg_import` — since 0.3.0 | any (`PRESS` by convention) | Starts the image's EPG importer, the way its own „Manual" button does, and reports on `epg_import`; the grid is rebuilt afterwards and each bouquet is published only if it changed | Refused, in this order: unless `epg_import_allowed` is on; when the importer is not available (no capability); while an import is already running, whoever started it; by the same recording guard as `deep_standby`; within 10 minutes of the importer's own scheduled run, which the image starts without checking whether one is running, and when that time cannot be read; when the importer has no sources selected. A start that fails is `failed` on `epg_import` **and** the same sentence on `last_error`. 🔴 **The payload is ignored**: nothing from the broker reaches the importer |
 | `config` | `{"publish_keys": false, "screenshot": "interval", "screenshot_interval": 90, "screenshot_delay": 4, "cam_telemetry": false, "oscam_telemetry": false, "softcam_autoheal": false, "softcam_autoheal_seconds": 90}` | Atomically replaces the remotely writable settings subset and publishes fresh `info`/discovery | The original three keys remain required; newer keys are independently optional for older clients and preserve their current values when omitted. Unknown keys and coercion are refused, and a persistence failure applies none of them |
 | `discovery` | any | Republishes the announcement, the channel list, and the discovery payloads in discovery mode | — |
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
@@ -934,6 +990,8 @@ gets no volume entity, rather than one that never moves. The unique id of each i
 | `recording_disk` | binary_sensor | `hdd` | Diagnostic |
 | `softcam` | sensor | `softcam` | Since 0.3.0. Diagnostic. State is `selected`; the counts and the last restart are JSON attributes |
 | `softcam_restart` | button | — | Since 0.3.0, and only when `softcam` is a capability **and** `softcam_restart_allowed` is on |
+| `epg_import` | sensor | `epg_import` | Since 0.3.0. Diagnostic. State is `state`; `started`, `finished`, `events` and `error` are JSON attributes |
+| `epg_import_start` | button | — | Since 0.3.0, and only when `epg_import` is a capability **and** `epg_import_allowed` is on. Publishes `cmd/epg_import` |
 | `process_memory` | sensor | `process` | Diagnostic, MiB, `data_size`, measurement — the one of these five that is **enabled** by default |
 | `process_memory_peak` | sensor | `process` | Diagnostic, MiB, `data_size`, measurement, disabled by default |
 | `process_threads`, `process_open_files` | sensor | `process` | Diagnostic, measurement, disabled by default |
@@ -1031,14 +1089,13 @@ rule is unchanged, and it is how a consumer tells a plan from a feature.
 
 ### `info.settings` gains further members — 0.3.0
 
-The object already carries read-only members and says so in §1: `deep_standby_allowed` and
-`softcam_restart_allowed` are on `main` and are documented there, which is why they are not in
-this section. These join them on the same terms, rather than inventing a separate
+The object already carries read-only members and says so in §1: `deep_standby_allowed`,
+`softcam_restart_allowed` and `epg_import_allowed` are on `main` and are documented there, which is
+why they are not in this section. These join them on the same terms, rather than inventing a separate
 `info.permissions`.
 
 | Member | Release | Writable | Meaning |
 |---|---|---|---|
-| `epg_import_allowed` | 0.3.0 | **no** | Whether `cmd/epg_import` is permitted |
 | `uninstall_allowed` | 0.3.0 | **no** | Whether `cmd/uninstall` is permitted ([ADR-0004](adr/0004-remote-uninstall.md)). Default off, and granted on the receiver, never over MQTT |
 
 Which side of the line each one falls on is §1's rule: a setting that **enables a command** is
@@ -1055,20 +1112,10 @@ reports Wake-on-LAN supported and **not armed** cannot be woken from deep standb
 knowing before enabling `deep_standby_allowed`. The `wol_arm` setting (never writable over MQTT, default off) arms
 the interface at start and again immediately before deep standby.
 
-### `<base>/<node>/epg_import` — 0.3.0, capability `epg_import`
-
-```json
-{"state": "running", "started": 1789459200, "finished": null, "error": null}
-```
-
-`state` is `idle`, `running`, `done` or `failed`; `started` and `finished` are epoch seconds or
-`null`; `error` is a sentence written for a person, or `null`.
-
 ### New commands — 0.3.0
 
 | Command | Payload | Effect | Guard |
 |---|---|---|---|
-| `epg_import` | any (`PRESS` by convention) | Runs the image's EPG importer, then rebuilds and republishes the grid | Refused unless `epg_import_allowed` is on; refused while recording; refused while an import is already running |
 | `uninstall` | the node id (confirmation) | Removes the plugin from the receiver: retracts every retained topic it owns, publishes a final `offline`, removes the package, and restarts the interface | Refused unless `uninstall_allowed` is on; refused unless the payload matches this node's id; refused while recording or with a timer due, like every other command that restarts the interface |
 
 The payload is the node id because a household with two boxes has two nearly identical command

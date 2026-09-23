@@ -639,3 +639,15 @@ msgstr "Bildschirmfoto wird aufgenommen; die Seite aktualisiert sich selbst."
 #: src/MQTTBridge/webif.py
 msgid "No screenshot to show yet."
 msgstr "Noch kein Bildschirmfoto vorhanden."
+
+#: src/MQTTBridge/setup.py
+msgid "Allow starting an EPG import"
+msgstr "EPG-Import auf Anforderung erlauben"
+
+#: src/MQTTBridge/webif.py
+msgid "Import the EPG now"
+msgstr "EPG jetzt importieren"
+
+#: src/MQTTBridge/webif.py
+msgid "EPG-Importer downloads the guide now. When it finishes, the menus freeze for two or three seconds while the guide is saved."
+msgstr "EPG-Importer lädt die Programmzeitschrift jetzt herunter. Am Ende stehen die Menüs zwei bis drei Sekunden still, während sie gespeichert wird."

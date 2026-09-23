@@ -1,0 +1,78 @@
+# ADR-0011: The EPG import uses the importer enigma2 loaded, and is followed by polling, never hooked
+
+**Status:** accepted 2026-09-23
+**Date:** 2026-09-23
+**Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §4, in part — „runs
+off the main loop", „refused while recording" and „rebuilt and republished" did not survive a
+reading of the importer the feature was written against. The command, the permission, the topic
+and the capability stand.
+
+## Context
+
+ADR-0003 §4 planned `cmd/epg_import` before anybody had read the importer it would drive. Reading
+the bytecode of EPG-Importer as one image ships it (OpenViX 6.6, `1.0+git286`), and the plugin's
+own stall monitor during that image's scheduled imports, changed five things.
+
+**The importer is a singleton in a module enigma2 already loaded.** The plugin loader imports it as
+`Plugins.Extensions.EPGImport.plugin`, and that module holds the importer object and the
+scheduler's state. Importing it again under any other name builds a second module, a second
+importer and a second scheduler, and neither pair would know about the other.
+
+**An import does not run entirely off the main loop, and nothing the plugin does can change that.**
+Downloads run on a thread pool and parsing on a worker, but the import ends by saving the guide on
+the main loop: the stall monitor caught it at 2.3 and 2.6 seconds on two mornings, with the
+importer's own save at the top of the stack.
+
+**The importer has no failure signal.** Its completion callback is called on every run, with a
+count of zero when every download failed, and its per-source errors go to a standard output that
+is `/dev/null` on that image.
+
+**The completion callback is not the plugin's to take.** The importer's `startImport()` sets it on
+every run — the scheduler's runs included — so a replacement would be overwritten by the next
+scheduled import, and patching the module's completion function would change what the image does
+for everyone else.
+
+**The image's scheduler starts an import without asking whether one is running**, so an import
+started close to its time would be restarted underneath itself. And on an image whose guide cannot
+take imported events, the importer writes a file and ends by asking for a user-interface restart
+with a dialog whose default is yes and whose timeout presses it.
+
+## Decision
+
+- **The importer is looked up, never imported.** The plugin reads `sys.modules` for the module the
+  loader left. Every name it needs — the importer and its `isImportRunning()` and `sources`,
+  `startImport()`, the source configuration's `loadUserSettings()` and `enumSources()`,
+  `CONFIG_PATH`, `lastImportResult` — must be there, and the image's EPG cache must have
+  `importEvents` or `importEvent`; otherwise there is no capability, no command and no button, and
+  the reason is logged once. A test holds the „never imported" part.
+- **The import starts the way the importer's own „Manual" button starts it**, without its dialogs,
+  on the main loop where every command runs: the channel cache reset on the scheduler's own test
+  (the scheduler's state is read, never written), the selected sources enumerated and handed over
+  reversed, `startImport()`. Nothing from the broker reaches it.
+- **Completion is observed by polling, never hooked.** Every two seconds while an import runs — the
+  test and the period the importer's own screen uses — and once a minute otherwise, the plugin asks
+  `isImportRunning()`. When it turns false the result is already in `lastImportResult`. Events mean
+  `done` and a grid rebuild that publishes only what changed (ADR-0006); none mean `failed`. A
+  30-minute watchdog says `failed` and keeps polling, because the importer cannot be cancelled.
+- **The topic follows every import**, whoever started it, so a refusal because one is running is
+  never unexplained.
+- **The guards are the permission (not needed on the OpenWebif page, ADR-0009), a resolved
+  importer, an import already running, the whole recording guard, the importer's own scheduled run
+  within ten minutes, and at least one selected source**, in that order. The plugin's own deep
+  standby, reboot and user-interface restart are refused while an import runs.
+
+## Consequences
+
+- **The menus freeze for two to three seconds at the end of every import**, and the documentation
+  says so rather than promising otherwise. The recording guard is the whole guard — a timer due
+  within ten minutes refuses too — because that freeze lands on the loop that starts recordings.
+- The topic can report only three failures — did not run, no events, not finished in 30 minutes —
+  and never which source failed. A consumer must not expect more.
+- A consumer sees `running` for imports it did not ask for, and an import that starts and ends
+  between two idle polls is reported with `started` `null`.
+- A settings save that restarts the bridge mid-import loses the original `started`.
+- The importer's own `clear_oldepg` and deep-standby behaviour apply to an import started here as to
+  a scheduled one; the plugin neither reproduces nor suppresses them.
+- An image whose importer differs in any resolved name offers nothing: the resolution fails closed.
+  Supporting another importer means adding its names here and a test for them, not loosening the
+  check.

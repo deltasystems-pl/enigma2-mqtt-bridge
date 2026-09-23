@@ -37,6 +37,7 @@ EXPECTED_DEFAULTS = {
     "softcam_restart_allowed": False,
     "softcam_autoheal": False,
     "softcam_autoheal_seconds": 90,
+    "epg_import_allowed": False,
     "log_level": "info",
     "epg_grid_events": 4,
 }
