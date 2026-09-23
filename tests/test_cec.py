@@ -527,6 +527,63 @@ def test_a_household_standby_during_the_hold_is_not_taken_for_the_televisions(wo
     assert payload["kind"] == "dropped_stale_standby"
 
 
+def test_a_second_close_inside_one_hold_keeps_the_value_to_put_back(world):
+    """🔴 A hold already in place never records its own marker as the value to restore.
+
+    Otherwise the marker would be put back at the end — and stay in the flag
+    for the rest of the session, which is exactly the leak the deadline exists
+    to prevent.
+    """
+    box = world(base=Screen)
+    box.show(ChannelSelection)
+    box.tv_standby()
+    MainLoop.advance(0)
+    assert box.held is cec.HELD
+
+    box.publisher._start_hold()
+    assert box.held is cec.HELD
+    MainLoop.advance(cec.HOLD_SECONDS * 1000)
+
+    assert box.held is False
+
+
+def test_two_closes_inside_one_hold_both_keep_the_echo_suppressed(world):
+    """The television's second standby writes `False` over the hold; the second close re-holds.
+
+    The list is closed for the first standby, but a popup queued ahead is shown
+    first. Within the hold somebody opens the list again and the television
+    asks again, so the list is closed a second time. When the popup is then
+    dismissed, the first standby finally runs — and must still not be echoed.
+    """
+    box = world()
+    first = box.show(ChannelSelection)
+    notifications_module.AddNotification(MessageBox, "a timer message")
+    box.tv_standby()
+    MainLoop.advance(0)
+    assert first.cancelled == [True]
+    popup = box.session.current_dialog
+    assert isinstance(popup, MessageBox)
+
+    MainLoop.advance(1000)
+    again = box.show(ChannelSelection)
+    second = box.tv_standby()
+    assert box.held is False  # the image's own bracket has just ended the hold
+    MainLoop.advance(0)
+    assert again.cancelled == [True]
+    assert box.held is cec.HELD
+
+    popup.close()
+    MainLoop.advance(0)
+    assert isinstance(standby_module.inStandby, standby_module.Standby)
+    assert box.hdmi.sent == ["sourceinactive"]
+
+    MainLoop.advance(cec.SETTLE_MILLISECONDS)
+    assert box.held is False
+    assert not queued(second)
+    assert box.cec()["count"] == 1
+    assert box.cec()["kind"] == "closed_channel_list"
+
+
 def test_the_hold_is_truthy_but_is_not_true(world):
     """Truthy, so the image still does not echo; not `True`, so it is not the bracket."""
     box = world(base=Screen)
@@ -662,6 +719,59 @@ def test_without_the_standby_counter_a_close_is_counted_at_the_deadline(world):
     assert payload["count"] == 1
     assert payload["kind"] == "closed_channel_list"
     assert payload["pending"] is False
+
+
+@pytest.mark.parametrize("closed", (True, False), ids=("list-closed", "behind-a-menu"))
+def test_a_television_standby_overtaken_by_the_remote_is_counted_once_as_a_drop(world, closed):
+    """The receiver goes to standby some other way while the television's standby waits.
+
+    Either the list was closed for it but a popup queued ahead is showing, or it
+    sits behind a menu. The remote's power button opens the standby screen
+    directly; none of the television's standbys ran. Removing it is the plugin
+    throwing it away — a drop, counted once, and not a close, which released
+    nothing.
+    """
+    box = world()
+    if closed:
+        channel_list = box.show(ChannelSelection)
+        notifications_module.AddNotification(MessageBox, "a timer message")
+    else:
+        box.show(Menu)
+    television = box.tv_standby()
+    MainLoop.advance(0)
+    if closed:
+        assert channel_list.cancelled == [True]
+    assert queued(television)
+
+    MainLoop.advance(1000)
+    box.session.open(standby_module.Standby)  # the remote's power button
+    MainLoop.advance(0)
+    assert isinstance(standby_module.inStandby, standby_module.Standby)
+    MainLoop.advance(cec.SETTLE_MILLISECONDS)
+
+    assert not queued(television)
+    payload = box.cec()
+    assert payload["count"] == 1
+    assert payload["kind"] == "dropped_stale_standby"
+    assert payload["pending"] is False
+    MainLoop.advance(cec.STALE_SECONDS * 1000)
+    assert box.cec()["count"] == 1
+
+
+def test_without_the_standby_counter_a_standby_drained_without_a_close_is_not_counted(world):
+    """The deadline's fallback counts a close; with no close there is nothing to count."""
+    box = world()
+    config.misc.standbyCounter.removeNotifier(box.publisher._counter_moved)
+    menu = box.show(Menu)
+    box.tv_standby()
+    MainLoop.advance(0)
+
+    menu.close()  # the household leaves the menu; the queue drains as it always did
+    MainLoop.advance(0)
+    assert isinstance(standby_module.inStandby, standby_module.Standby)
+    MainLoop.advance(cec.STALE_SECONDS * 1000)
+
+    assert box.cec() == {"last_intervention": None, "kind": None, "count": 0, "pending": False}
 
 
 def test_a_repeated_television_standby_is_removed_once_the_receiver_sleeps(world):

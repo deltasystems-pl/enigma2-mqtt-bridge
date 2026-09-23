@@ -110,14 +110,21 @@ that was drained normally is not touched and its record is discarded. The power-
 in a feature whose failure mode is „a standby somebody asked for was cancelled".
 
 **Once the receiver is in standby, the television's request is done.** When the standby counter
-moves, any identified standby still queued — a television that sent `<Standby>` twice, and the info
-bar carries out one entry per turn — is removed by identity, uncounted, so that waking the receiver
-does not put it straight back to sleep. Nothing that was not identified is touched.
+moves, any identified standby still queued is removed by identity, so that waking the receiver does
+not put it straight back to sleep. Nothing that was not identified is touched. If one of the
+television's standbys ran, the leftovers are repeats (a television that sent `<Standby>` twice,
+while the info bar carries out one entry per turn) and their removal is not counted. If none ran —
+the receiver went to standby some other way, typically the remote's power button, which opens the
+standby screen directly — the plugin has thrown the television's standby away, and that is counted
+once as `dropped_stale_standby`.
 
 **One television standby, at most one intervention.** A close is counted when the standby it
 released has happened — the counter moved and the entry is gone — or, where the counter cannot be
-watched, when the entry is found drained at its deadline. A close that released nothing is not a
-success: that standby is counted once, as `dropped_stale_standby`, when its deadline drops it.
+watched, when the entry is found drained at its deadline (and only if there was a close). A close
+that released nothing is not a success: that standby is counted once, as `dropped_stale_standby`,
+when its deadline drops it or when the receiver goes to standby some other way first. The kind is
+a drop rather than a close because the television's own request is not what put the receiver to
+standby.
 
 **Box-only, and not echoed.** `cec_standby_workaround` defaults off, is set on the receiver's setup
 screen or in the provisioning file, and is in neither `cmd/config` list: it enables no command, it is
@@ -153,6 +160,11 @@ The topic is retracted on every connect on which the capability is absent.
 - **A second `<Standby>` inside one main-loop turn can end the hold.** If the television repeats
   itself after the close but before the pop, the image's own bracket writes `False` over the hold and
   the standby that follows is echoed. Whether any television does this has not been measured.
+- **A second close inside one hold re-asserts the marker and keeps the recorded value.** The
+  television's bracket around its second standby writes `False` over the hold before the second
+  close; the marker is written again, and the value put back at the end is still the one recorded
+  when the hold began — never the marker itself, which would otherwise stay in the flag for the
+  rest of the session.
 - **The hold also changes what the image sends for a standby from the remote during it.** The
   remote's power button opens the standby screen directly; with the flag held, the image sends
   „source inactive" instead of `<Standby>`. It matters only if the television was switched back on

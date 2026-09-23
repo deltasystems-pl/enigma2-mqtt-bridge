@@ -97,13 +97,17 @@ guesses nothing.
 television that says `<Standby>` twice queues two entries, and the info bar
 carries out one per turn. Whatever is still queued and identified when the
 standby counter moves is removed then, by identity, so that waking the receiver
-does not run the second one and put it straight back to sleep.
+does not run the second one and put it straight back to sleep. The same happens
+when none of the television's standbys ran because the receiver went to standby
+some other way — the remote's power button — and then the removal is a drop.
 
 **One standby, at most one intervention.** A close is counted when the standby
 it released has actually happened, not when the close is issued: a close that
 released nothing — something else was queued ahead, or the screen underneath does
 not drain the queue — is not a success, and the standby it failed to release is
-counted once, as dropped, at its deadline.
+counted once, as dropped: at its deadline, or when the receiver goes to standby
+some other way first, whichever comes first. Removing a repeat of a standby that
+did run is not counted.
 
 **The capability means the hook can fire.** It is claimed only when the image
 has HDMI-CEC switched on and is set to follow the television into standby
@@ -498,7 +502,16 @@ class CecPublisher(Publisher):
         """Hold `handlingStandbyFromTV` asserted across the close. See the module."""
         if self._hold is not None:
             # Already held for an earlier close: the value to put back is the one
-            # recorded then, not the `HELD` this module wrote.
+            # recorded then, never the `HELD` this module wrote. But the
+            # television's own bracket around the standby that caused this
+            # second close has written `False` over the hold since, so the
+            # marker goes back in, or the standby this close releases echoes.
+            instance, _previous = self._hold
+            try:
+                instance.handlingStandbyFromTV = HELD
+            except Exception:
+                LOG.exception("could not hold the television's standby flag again; the "
+                              "receiver may echo the standby back")
             self._hold_deadline.start(HOLD_SECONDS * 1000, True)
             return
         try:
@@ -543,22 +556,34 @@ class CecPublisher(Publisher):
     def _after_standby(self):
         """The receiver went to standby and the image has read the flag."""
         self._release_hold()
-        closed_at = None
+        carried = []
+        waiting = []
         for queued in list(self._queued):
-            if self._still_queued(queued.entry):
-                # The television asked again before the first was carried out.
-                # That request is done now: removed, by identity, so waking the
-                # receiver does not put it straight back to sleep.
-                self._remove_from_queue(queued.entry)
-                LOG.info("removed a repeated standby from the television; the receiver is "
-                         "already in standby")
-            elif queued.closed_at is not None:
-                closed_at = max(closed_at or 0, queued.closed_at)
+            (waiting if self._still_queued(queued.entry) else carried).append(queued)
             self._forget(queued)
-        if closed_at is not None:
+        # Whatever is still queued is removed, by identity: the receiver is in
+        # standby, so no television standby is still owed, and running one after
+        # a wake would put the receiver straight back to sleep.
+        removed = [queued for queued in waiting if self._remove_from_queue(queued.entry)]
+        closes = [queued.closed_at for queued in carried if queued.closed_at is not None]
+        if closes:
             # One close, one intervention, however many entries it released.
-            self._count_intervention(KIND_CLOSED, closed_at)
+            self._count_intervention(KIND_CLOSED, max(closes))
             LOG.info("the television's standby went ahead after the channel list was closed")
+        if removed and carried:
+            # The television asked again before the first was carried out; the
+            # first was, so these complete a request already done. Not counted.
+            LOG.info("removed %d repeated standby(s) from the television; the receiver is "
+                     "already in standby", len(removed))
+        elif removed:
+            # None of the television's standbys ran: the receiver went to
+            # standby some other way (the remote's power button opens the
+            # standby screen directly). The plugin threw the television's
+            # standby away, closed list or not, so this is a drop — counted
+            # once, as the deadline would have counted it.
+            self._count_intervention(KIND_DROPPED, int(time.time()))
+            LOG.info("dropped a standby the television asked for; the receiver went to "
+                     "standby some other way first")
         self._publish()
 
     # ------------------------------------------------------------ part 2: stale --

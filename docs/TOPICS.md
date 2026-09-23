@@ -173,9 +173,15 @@ then, because the image has already forgotten the standby was the television's, 
    closes the menu they were in — and take the television with it. A standby the list was closed
    for and which still did not happen is counted here, once, and not also as a close.
 
-When the receiver has entered standby, any television standby still queued — a television that
-said `<Standby>` twice — is removed too, so that waking the receiver does not put it straight back
-to sleep. That completes a request already carried out and is not counted.
+When the receiver has entered standby, any television standby still queued is removed too, so that
+waking the receiver does not put it straight back to sleep:
+
+- if one of the television's standbys did run, the rest are repeats — a television that said
+  `<Standby>` twice — and removing them completes a request already carried out: **not counted**;
+- if none of them ran — the receiver went to standby some other way, say the remote's power button,
+  while the television's standby waited behind a popup or a menu — the television's standby was
+  thrown away, so it is counted **once, as `dropped_stale_standby`**, exactly as the 30-second
+  deadline would have counted it, and never as a close, whether or not the list was closed for it.
 
 🔴 **A standby the household asked for is never touched.** `cmd/power standby` queues exactly the
 same notification as the television does. The workaround identifies the television's at the moment
