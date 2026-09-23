@@ -584,6 +584,64 @@ def test_two_closes_inside_one_hold_both_keep_the_echo_suppressed(world):
     assert box.cec()["kind"] == "closed_channel_list"
 
 
+def test_a_second_close_restarts_the_hold_deadline(world):
+    """🔴 The hold ends five seconds after the *last* close, not the first.
+
+    The list is closed at 0 s for a standby that then waits behind a popup, and
+    closed again at 4 s for the television's second standby. The popup is
+    dismissed at 6 s — after the first close's deadline, inside the second's —
+    and the standby that finally runs must still not be echoed. A deadline that
+    kept counting from the first close would have put the flag back at 5 s.
+    """
+    box = world()
+    box.show(ChannelSelection)
+    notifications_module.AddNotification(MessageBox, "a timer message")
+    box.tv_standby()
+    MainLoop.advance(0)
+    popup = box.session.current_dialog
+    assert isinstance(popup, MessageBox)
+
+    MainLoop.advance(4000)
+    again = box.show(ChannelSelection)
+    box.tv_standby()
+    MainLoop.advance(0)
+    assert again.cancelled == [True]
+    assert box.held is cec.HELD
+
+    # Past the first close's five seconds: still held.
+    MainLoop.advance(cec.HOLD_SECONDS * 1000 - 4000 + 1000)
+    assert box.held is cec.HELD
+
+    popup.close()
+    MainLoop.advance(0)
+    assert isinstance(standby_module.inStandby, standby_module.Standby)
+    assert "standby" not in box.hdmi.sent
+    assert box.hdmi.sent == ["sourceinactive"]
+
+    MainLoop.advance(cec.SETTLE_MILLISECONDS)
+    assert box.held is False
+
+
+def test_without_a_standby_the_hold_ends_five_seconds_after_the_last_close(world):
+    """The deadline itself, to the millisecond, when nothing ever drains the queue."""
+    box = world(base=Screen)
+    box.show(ChannelSelection)
+    box.tv_standby()
+    MainLoop.advance(0)
+    assert box.held is cec.HELD
+
+    MainLoop.advance(3000)
+    box.show(ChannelSelection)
+    box.tv_standby()
+    MainLoop.advance(0)
+    assert box.held is cec.HELD
+
+    MainLoop.advance(cec.HOLD_SECONDS * 1000 - 1)
+    assert box.held is cec.HELD
+    MainLoop.advance(1)
+    assert box.held is False
+
+
 def test_the_hold_is_truthy_but_is_not_true(world):
     """Truthy, so the image still does not echo; not `True`, so it is not the bracket."""
     box = world(base=Screen)
