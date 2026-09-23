@@ -460,3 +460,48 @@ def test_a_box_without_grab_has_no_screenshots(make_bridge, factory, settings, r
     bridge.start()
     factory.client.fire_connect()
     assert "screenshot" not in bridge.capabilities()
+
+
+# ------------------------------------------------ what the OpenWebif page reads (§11 ac) --
+
+
+def test_completed_at_is_when_grab_finished_not_when_it_started(live_bridge, tmp_path,
+                                                                 monkeypatch):
+    found = publisher(live_bridge, tmp_path)
+    assert found.completed_at is None
+    monkeypatch.setattr(screen_module.time, "time", lambda: 1000.0)
+    found._last_capture = 0.0
+    found.capture(commanded=True)
+    monkeypatch.setattr(screen_module.time, "time", lambda: 1003.5)
+    write_a_picture(found.path)
+    ConsoleAppContainer.instances[-1].finish(0)
+    assert found.completed_at == 1003.5
+    assert live_bridge.last_screenshot() == (JPEG, 1003.5)
+
+
+def test_a_failed_grab_leaves_completed_at_alone(live_bridge, tmp_path):
+    found = publisher(live_bridge, tmp_path)
+    found.capture(commanded=True)
+    ConsoleAppContainer.instances[-1].finish(1)
+    assert found.completed_at is None
+    assert live_bridge.last_screenshot() is None
+
+
+def test_capture_state_says_whether_a_grab_is_in_flight_and_since_when(live_bridge, tmp_path):
+    found = publisher(live_bridge, tmp_path)
+    assert found.capture_state() == (False, None)
+    found.capture(commanded=True)
+    busy, started = found.capture_state()
+    assert busy is True and started == found._last_capture
+    write_a_picture(found.path)
+    ConsoleAppContainer.instances[-1].finish(0)
+    assert found.capture_state() == (False, None)
+
+
+def test_the_recorded_picture_is_the_published_object_not_a_copy(live_bridge, factory,
+                                                                  tmp_path):
+    found = publisher(live_bridge, tmp_path)
+    found.capture(commanded=True)
+    write_a_picture(found.path)
+    ConsoleAppContainer.instances[-1].finish(0)
+    assert live_bridge.last_screenshot()[0] is factory.client.last(SCREEN).payload

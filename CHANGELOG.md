@@ -102,10 +102,16 @@ version that has no section here.
   already change every setting through OpenWebif itself. Switch OpenWebif authentication on if that
   is not what you want. The page also refuses to answer under a DNS name of your own or behind a
   reverse proxy; open it by the receiver's address or `<hostname>.local`.
-- **OpenWebif's menu opens the page in a new tab.** The hook registered its link with the target
-  `_self`, which OpenWebif turns into a script call that injects the response into its own content
-  panel — so the entry appeared to do nothing, and a page that did load would have leaked its styles
-  into OpenWebif's and navigated the whole window on submit. The link is now a plain new-tab link.
+- **OpenWebif's menu opens the page inside OpenWebif.** OpenWebif loads a menu entry into its own
+  content panel by script and injects whatever comes back into its document, so a whole page there
+  would leak its styles into OpenWebif and navigate the whole window on submit. The page answers that
+  load with a small fragment instead — a frame of itself, of fixed height and scrolling, and a link to
+  open it in a new tab — with no script and no styles of its own. The page opened directly is
+  unchanged. The decision is in [ADR-0010](docs/adr/0010-the-page-inside-openwebif.md).
+- **The OpenWebif page shows the last screenshot.** Beside *Take a screenshot*, the last picture
+  sent on `screen`, with the time the capture finished, at `<mount>/screen.jpg`; while a capture is
+  running the page reloads itself every two seconds for at most twenty. The picture now survives a
+  settings save, which used to drop it together with the publisher that held it.
 - **„Box-only" now reads „never writable over MQTT".** A setting that enables a command is set on
   the receiver — the setup screen, the provisioning file or the OpenWebif page — and the broker can
   still never grant one: `cmd/config`'s allowlist and `info.settings` are unchanged.

@@ -1,6 +1,6 @@
 # ADR-0009: The OpenWebif page trusts OpenWebif, and exposes every setting and command
 
-**Status:** accepted 2026-09-23
+**Status:** accepted 2026-09-23, amended by [ADR-0010](0010-the-page-inside-openwebif.md) (how OpenWebif opens the page)
 **Date:** 2026-09-23
 **Supersedes:** [ADR-0002](0002-scope-after-m0.md) §5, in part — the clause that the page „is
 authenticated by OpenWebif, and it fails closed when OpenWebif authentication is off", and the
