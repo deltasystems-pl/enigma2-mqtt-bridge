@@ -627,6 +627,36 @@ def test_a_page_left_open_after_another_tab_saved_says_it_is_out_of_date(
     assert settings.screenshot_delay.value == 4
 
 
+def test_only_the_last_eight_replaced_tokens_are_out_of_date(connected_bridge, page,
+                                                             monkeypatch):
+    """The memory of replaced tokens is bounded: the ninth one back is a stranger's.
+
+    Eight is the number, written out rather than read from the module, so that
+    changing the bound is a decision this test has to be told about. The session
+    lives as long as the browser keeps its cookie; an unbounded list would grow
+    by one token for every action anybody ever took on the page.
+    """
+    monkeypatch.setattr(connected_bridge, "run_command", lambda *args: None)
+    resource = page(connected_bridge)
+    session = new_session()
+    replaced = []
+    for _ in range(9):
+        replaced.append(token(session))
+        request, _body = post(resource, session, action_fields("discovery"))
+        assert request.response_code == 200
+    assert token(session) not in replaced
+
+    request, body = post(resource, session, action_fields("discovery"), csrf=replaced[0])
+    assert request.response_code == 403
+    assert b"Request rejected." in body
+    assert b"out of date" not in body
+
+    for old in replaced[1:]:
+        request, body = post(resource, session, action_fields("discovery"), csrf=old)
+        assert request.response_code == 403
+        assert b"out of date" in body
+
+
 def test_an_invalid_value_stored_before_does_not_block_other_saves(connected_bridge, page,
                                                                     settings):
     """A 200-character host from before the page's rules, and a save that leaves it alone."""
