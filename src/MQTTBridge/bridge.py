@@ -38,7 +38,7 @@ import json
 import time
 from collections import OrderedDict
 
-from . import boxinfo, discovery
+from . import boxinfo, discovery, wol
 from . import config as settings_module
 from .cec import TOPIC as CEC_TOPIC
 from .cec import CecPublisher
@@ -380,6 +380,11 @@ class Bridge:
         if not self.value("enabled"):
             self._idle("the plugin is switched off in its settings")
             return
+        # A setting of the receiver's, not of the connection: honoured before
+        # the broker is asked about, so a box with no broker yet still does what
+        # its own setup screen says. Every start, because the setup screen and
+        # the OpenWebif page both apply a change by restarting the bridge.
+        wol.arm(self.settings)
         host = (self.value("host") or "").strip()
         if not host:
             self._idle("no broker address is configured")
@@ -782,6 +787,9 @@ class Bridge:
             "mac": boxinfo.mac_address(),
             "ip": boxinfo.local_ip(self.value("host")),
             "uptime": boxinfo.uptime_seconds(),
+            # Read from the image at every publish, never from what `wol_arm`
+            # asked for — the image's switch can be changed in its own menu.
+            "wol": wol.report(),
             "ha_mode": self.value("ha_mode"),
             "settings": self.published_settings(),
             "capabilities": self.capabilities(),

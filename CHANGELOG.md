@@ -11,6 +11,14 @@ version that has no section here.
 
 ### Added
 
+- **`info.wol`: what the image says about Wake-on-LAN** — `supported`, `armed`, `iface` and
+  `mechanism`, read from the image at every `info` publish and never inferred from anything the
+  plugin did. `supported` is the image's own probe for its front-processor switch; a receiver that
+  reports `false` cannot be woken over the network from deep standby, only by its remote, its front
+  button or a timer. A box-only setting **`wol_arm`**, off by default, switches on the image's own
+  Wake-on-LAN setting where the image has one, never switches it off, and is marked „not available"
+  where it has none. No `ethtool` and no process of any kind: on an image that powers off into deep
+  standby rather than suspending, the flag it sets is read by nothing (ADR-0012).
 - **`cmd/epg_import`: ask the image's EPG-Importer for an import now**, behind the permission
   `epg_import_allowed` — off by default, echoed read-only in `info.settings`, never writable over
   MQTT, and not needed on the OpenWebif page, which gains the action and the setting. The import

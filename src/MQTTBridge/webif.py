@@ -149,6 +149,7 @@ SETTING_GROUPS = (
         "permissions",
         (
             "deep_standby_allowed",
+            "wol_arm",
             "softcam_restart_allowed",
             "epg_import_allowed",
             "cec_standby_workaround",
