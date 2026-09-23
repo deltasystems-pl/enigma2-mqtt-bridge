@@ -42,6 +42,24 @@ version that has no section here.
   `deep_standby_allowed`, and **`softcam_autoheal`** with **`softcam_autoheal_seconds`** (default
   90, range 30–600), which are writable through `cmd/config` because they only tune a restart the
   receiver has already permitted.
+- **An opt-in workaround for a standby the television asks for and the receiver sits on**,
+  behind the box-only setting `cec_standby_workaround` (off by default, and not in `info.settings`
+  or `cmd/config`). The defect is upstream enigma2's: a standby requested over HDMI-CEC is queued,
+  only the info bar carries the queue out, so with the channel list open the receiver stays on —
+  and when the list is finally closed it goes to standby and sends `<Standby>` back to the
+  television, because the image forgot the standby was the television's. With the setting on, the
+  plugin closes the **channel list and nothing else** through its own exit, holding the image's
+  „this came from the television" marker set until the standby has happened (at most five
+  seconds) so it is not echoed; and a television standby still waiting after thirty seconds behind
+  any other screen is dropped from the queue rather than left to fire later. 🔴 A standby the
+  household asked for is never touched: `cmd/power standby` queues the identical notification, so
+  the television's is identified at the moment it is queued and kept by identity (the remote's
+  power button opens the standby screen directly and never reaches the queue at all). The
+  workaround is active only when the receiver has HDMI-CEC switched on and is set to follow the
+  television into standby. New capability `cec_workaround` and retained topic `cec`
+  (`last_intervention`, `kind`, `count`, `pending`), retracted when the workaround is switched off;
+  each television standby counts at most once. The decisions are in
+  [ADR-0007](docs/adr/0007-cec-standby-workaround.md).
 
 ### Changed
 

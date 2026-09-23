@@ -90,11 +90,16 @@ class eTimer:
     """
 
     instances = []
+    # Only `MainLoop` reads these: when a started timer falls due, and in which
+    # order two timers due at the same moment were started.
+    _sequence = 0
 
     def __init__(self):
         self.callback = []
         self.started = None
         self.stopped = False
+        self.due = None
+        self.sequence = 0
         eTimer.instances.append(self)
 
     @property
@@ -104,6 +109,9 @@ class eTimer:
     def start(self, interval, single=False):
         self.started = (interval, single)
         self.stopped = False
+        self.due = MainLoop.now + int(interval)
+        eTimer._sequence += 1
+        self.sequence = eTimer._sequence
 
     def stop(self):
         self.stopped = True
@@ -111,6 +119,44 @@ class eTimer:
     def fire(self):
         for function in list(self.callback):
             function()
+
+
+class MainLoop:
+    """enigma2's main loop, as far as its timers go: a clock a test moves by hand.
+
+    Most tests fire one timer they know about, which is enough. The CEC tests
+    need the real thing, because what they test is **which turn of the loop**
+    something happens on: `Session.close()` does not pop a screen, it starts a
+    0 ms timer and returns, and the standby the screen was holding up runs on
+    the turn that timer fires. `advance(0)` runs every timer that is already
+    due — including ones started while it runs, as the real loop would — in
+    the order they fall due, and a single-shot timer stops before its callback
+    runs, as enigma2's does.
+    """
+
+    now = 0
+
+    @classmethod
+    def advance(cls, milliseconds=0, limit=1000):
+        target = cls.now + int(milliseconds)
+        for _ in range(limit):
+            due = [
+                timer for timer in eTimer.instances
+                if timer.running and timer.due is not None and timer.due <= target
+            ]
+            if not due:
+                break
+            timer = min(due, key=lambda item: (item.due, item.sequence))
+            cls.now = max(cls.now, timer.due)
+            interval, single = timer.started
+            if single:
+                timer.stopped = True
+            else:
+                timer.due = cls.now + max(int(interval), 1)
+            timer.fire()
+        else:
+            raise AssertionError("the main loop did not settle")
+        cls.now = target
 
 
 class _Signal:
@@ -908,12 +954,36 @@ directories_module.resolveFilename = resolveFilename
 notifications_module = _module("Tools.Notifications")
 
 
+# 🔴 The queue is modelled on the receiver's own `Tools/Notifications.pyc`
+# (OpenViX 6.6, disassembled under Python 3.12, which is what that image runs),
+# not on what a queue ought to look like — the CEC workaround is tested against
+# exactly these details and would pass against a kinder stub while doing nothing
+# on a real box:
+#
+# - `notifications` and `notificationAdded` are **module-level lists** that are
+#   only ever mutated in place (the info bar does `del notifications[0]`), so a
+#   reference taken once stays the queue.
+# - An entry is the five-tuple `(fnc, screen, args, kwargs, id)`, and
+#   `AddNotification(screen)` queues `(None, screen, (), {}, None)`.
+# - `__AddNotification` appends **first** and then calls every entry of
+#   `notificationAdded` with **no arguments**, iterating the live list.
+# - `RemovePopup(id)` skips every entry whose id is falsy — which is why a
+#   queued standby cannot be removed through it.
+notifications = []
+notificationAdded = []
+current_notifications = []
+
+
 class Notifications:
-    """What was put on the screen, and in which order."""
+    """What was put on the screen, and in which order.
+
+    `notifications` is the module's queue itself, not a copy: the tests that
+    predate the model read it from here.
+    """
 
     popups = []
     removed = []
-    notifications = []
+    notifications = notifications
     raises = False
 
 
@@ -925,15 +995,38 @@ def AddPopup(text, type=1, timeout=10, id=None):
 
 def RemovePopup(id):
     Notifications.removed.append(id)
+    for entry in list(notifications):
+        if entry[4] and entry[4] == id:
+            notifications.remove(entry)
 
 
-def AddNotification(screen, *arguments):
-    Notifications.notifications.append((screen, arguments))
+def _add_notification(fnc, screen, id, *args, **kwargs):
+    """`__AddNotification`: append, then tell every listener, with no arguments."""
+    notifications.append((fnc, screen, args, kwargs, id))
+    for listener in notificationAdded:
+        listener()
 
 
+def AddNotificationWithCallback(fnc, screen, *args, **kwargs):
+    _add_notification(fnc, screen, None, *args, **kwargs)
+
+
+def AddNotification(screen, *args, **kwargs):
+    AddNotificationWithCallback(None, screen, *args, **kwargs)
+
+
+def AddNotificationWithID(id, screen, *args, **kwargs):
+    _add_notification(None, screen, id, *args, **kwargs)
+
+
+notifications_module.notifications = notifications
+notifications_module.notificationAdded = notificationAdded
+notifications_module.current_notifications = current_notifications
 notifications_module.AddPopup = AddPopup
 notifications_module.RemovePopup = RemovePopup
 notifications_module.AddNotification = AddNotification
+notifications_module.AddNotificationWithCallback = AddNotificationWithCallback
+notifications_module.AddNotificationWithID = AddNotificationWithID
 notifications_module.Notifications = Notifications
 
 
@@ -956,8 +1049,205 @@ class StandbyScreen:
             function()
 
 
-class Standby:
-    """The class enigma2 hands to `AddNotification` to *enter* standby."""
+# ------------------------------------------------- the session, as StartEnigma --
+#
+# 🔴 `ModalSession` and `ModelScreen` follow `/usr/lib/enigma2/python/StartEnigma.py`
+# and `Screens/Screen.pyc` on the receiver (StartEnigma is the one file that image
+# ships as source). The details the CEC workaround depends on, each read there:
+#
+# - `Session.close(screen)` returns silently when `in_exec` is false, **asserts**
+#   `screen == current_dialog`, then starts `delay_timer` at 0 ms single-shot and
+#   calls `execEnd()`. It does **not** pop the dialog: `processDelay` does, on the
+#   turn that timer fires, and it is that pop — `execBegin(first=False)` on the
+#   screen underneath — which lets the info bar drain the notification queue.
+# - `execDialog` (how the info bar shows the channel list) makes a non-temporary
+#   dialog; `open` makes a temporary one and refuses a modal open from a screen
+#   that is not executing.
+# - `Screen.close()` hands itself to `session.close` only while `execing`, and
+#   otherwise remembers the close for the next `execBegin`.
+# - `Screen.execBegin` runs `onExecBegin` and then the one-off `onFirstExecBegin`,
+#   returns early if one of them opened another dialog, and only then sets
+#   `execing` — so the info bar is *not* executing while it drains its queue.
+
+
+class ModelScreen:
+    def __init__(self, session, *args, **kwargs):
+        self.session = session
+        self.execing = False
+        self.onExecBegin = []
+        self.onFirstExecBegin = []
+        self.onClose = []
+        self.shown = True
+        self.returnValue = None
+        self.callback = None
+        self.isTmp = False
+        self.close_on_next_exec = None
+        self.stand_alone = False
+
+    def execBegin(self):
+        if self.close_on_next_exec is not None:
+            pending = self.close_on_next_exec
+            self.close_on_next_exec = None
+            self.execing = True
+            self.close(*pending)
+            return
+        single = self.onFirstExecBegin
+        self.onFirstExecBegin = []
+        for function in self.onExecBegin + single:
+            function()
+            if not self.stand_alone and self.session.current_dialog != self:
+                return
+        self.execing = True
+
+    def execEnd(self):
+        self.execing = False
+
+    def doClose(self):
+        for function in list(self.onClose):
+            function()
+
+    def close(self, *retval):
+        if not self.execing:
+            self.close_on_next_exec = retval
+            return
+        self.session.close(self, *retval)
+
+
+class ModalSession:
+    """`StartEnigma.Session`: a dialog stack, one dialog executing, deferred pops."""
+
+    def __init__(self, nav=None):
+        self.nav = nav
+        self.delay_timer = enigma.eTimer()
+        self.delay_timer.callback.append(self.processDelay)
+        self.current_dialog = None
+        self.dialog_stack = []
+        self.in_exec = False
+
+    def processDelay(self):
+        callback = self.current_dialog.callback
+        retval = self.current_dialog.returnValue
+        if self.current_dialog.isTmp:
+            self.current_dialog.doClose()
+        else:
+            self.current_dialog.callback = None
+        self.popCurrent()
+        if callback is not None:
+            callback(*retval)
+
+    def execBegin(self, first=True, do_show=True):
+        assert not self.in_exec
+        self.in_exec = True
+        self.current_dialog.execBegin()
+
+    def execEnd(self, last=True):
+        assert self.in_exec
+        self.in_exec = False
+        self.current_dialog.execEnd()
+
+    def instantiateDialog(self, screen, *arguments, **kwargs):
+        return screen(self, *arguments, **kwargs)
+
+    def pushCurrent(self):
+        if self.current_dialog is not None:
+            self.dialog_stack.append((self.current_dialog, self.current_dialog.shown))
+            self.execEnd(last=False)
+
+    def popCurrent(self):
+        if self.dialog_stack:
+            (self.current_dialog, do_show) = self.dialog_stack.pop()
+            self.execBegin(first=False, do_show=do_show)
+        else:
+            self.current_dialog = None
+
+    def execDialog(self, dialog):
+        self.pushCurrent()
+        self.current_dialog = dialog
+        self.current_dialog.isTmp = False
+        self.current_dialog.callback = None
+        self.execBegin()
+
+    def open(self, screen, *arguments, **kwargs):
+        if self.dialog_stack and not self.in_exec:
+            raise RuntimeError("Modal open are allowed only from a screen which is modal!")
+        self.pushCurrent()
+        dialog = self.current_dialog = self.instantiateDialog(screen, *arguments, **kwargs)
+        dialog.isTmp = True
+        dialog.callback = None
+        self.execBegin()
+        return dialog
+
+    def openWithCallback(self, callback, screen, *arguments, **kwargs):
+        dialog = self.open(screen, *arguments, **kwargs)
+        dialog.callback = callback
+        return dialog
+
+    def close(self, screen, *retval):
+        if not self.in_exec:
+            return
+        assert screen == self.current_dialog
+        self.current_dialog.returnValue = retval
+        self.delay_timer.start(0, 1)
+        self.execEnd()
+
+
+class NotifiableInfoBar(ModelScreen):
+    """The info bar's `InfoBarNotifications` mixin — the only thing that drains the queue.
+
+    From `Screens/InfoBarGenerics.pyc`: it registers `checkNotificationsIfExecing`
+    on `notificationAdded` (which does nothing unless the info bar is executing)
+    and `checkNotifications` on `onExecBegin`, and `checkNotifications` takes
+    **one** entry off the front of the queue per call and opens its screen.
+    """
+
+    def __init__(self, session, *args, **kwargs):
+        ModelScreen.__init__(self, session)
+        self.onExecBegin.append(self.checkNotifications)
+        notificationAdded.append(self.checkNotificationsIfExecing)
+        self.onClose.append(self._remove_notification)
+
+    def _remove_notification(self):
+        if self.checkNotificationsIfExecing in notificationAdded:
+            notificationAdded.remove(self.checkNotificationsIfExecing)
+
+    def checkNotificationsIfExecing(self):
+        if self.execing:
+            self.checkNotifications()
+
+    def checkNotifications(self):
+        if notifications:
+            entry = notifications[0]
+            del notifications[0]
+            callback = entry[0]
+            if callback:
+                self.session.openWithCallback(callback, entry[1], *entry[2], **entry[3])
+            else:
+                self.session.open(entry[1], *entry[2], **entry[3])
+
+
+class Standby(ModelScreen):
+    """The class enigma2 hands to `AddNotification` to *enter* standby.
+
+    As `Screens/Standby.pyc` has it: on its first `execBegin` the screen becomes
+    `inStandby` and increments `config.misc.standbyCounter` — which is the
+    moment everything listening for „the receiver entered standby" hears it,
+    `HdmiCec` included.
+    """
+
+    def __init__(self, session=None, *args, **kwargs):
+        ModelScreen.__init__(self, session)
+        self.power_calls = 0
+        self.onFirstExecBegin.append(self._first_exec)
+
+    def _first_exec(self):
+        standby_module.inStandby = self
+        config.misc.standbyCounter.increment()
+
+    def Power(self):
+        self.power_calls += 1
+        standby_module.inStandby = None
+        for function in list(self.onClose):
+            function()
 
 
 class TryQuitMainloop:
@@ -968,6 +1258,93 @@ standby_module.inStandby = None
 standby_module.Standby = Standby
 standby_module.StandbyScreen = StandbyScreen
 standby_module.TryQuitMainloop = TryQuitMainloop
+
+
+# --------------------------------------------------------- Components.HdmiCec --
+#
+# 🔴 Modelled on the receiver's `Components/HdmiCec.pyc` (source lines in
+# brackets), and only as far as the standby path goes:
+#
+# - `HdmiCec.instance` is a **class attribute**, set in `__init__` [342]; the
+#   image builds the singleton once, from `StartEnigma.py`. Until then it is None.
+# - `__init__` registers `onEnterStandby` on `config.misc.standbyCounter` with
+#   `initial_call=False` [368], and starts with `useStandby = True` and
+#   `handlingStandbyFromTV = False` [353–354].
+# - `messageReceived` does nothing unless `config.hdmicec.enabled` is on [385],
+#   and for `<Standby>` (0x36) with `handle_tv_standby` on it is exactly
+#   `handlingStandbyFromTV = True; self.standby(); … = False` [454–457]. With
+#   either setting off the television's standby is never queued at all. The
+#   singleton is built either way: `__init__` sets `instance` [342] before it
+#   looks at `enabled` [355].
+# - The flag is read only as a truth test [618], never compared with `True`.
+# - `standby()` queues `AddNotification(Screens.Standby.Standby)` unless already
+#   in standby [635–637].
+# - `onEnterStandby` appends to the standby screen's `onClose` and calls
+#   `standbyMessages` [598–601]; that sends at once, unless `next_boxes_detect` is
+#   on, in which case it waits a second on its own timer [607–613].
+# - `sendStandbyMessages` sends `standby` to the television when `useStandby and
+#   not handlingStandbyFromTV`, and `sourceinactive` otherwise [615–622] — the
+#   flag is read there and nowhere else. `sent` records what went out.
+
+config.hdmicec = ConfigSubsection()
+config.hdmicec.enabled = ConfigYesNo(default=True)
+config.hdmicec.handle_tv_standby = ConfigYesNo(default=True)
+config.hdmicec.control_tv_standby = ConfigYesNo(default=True)
+config.hdmicec.next_boxes_detect = ConfigYesNo(default=False)
+
+hdmi_cec_module = _module("Components.HdmiCec")
+
+STANDBY_OPCODE = 0x36
+
+
+class HdmiCec:
+    instance = None
+
+    def __init__(self):
+        HdmiCec.instance = self
+        self.useStandby = True
+        self.handlingStandbyFromTV = False
+        self.sent = []
+        self.delay = enigma.eTimer()
+        self.delay.callback.append(self.sendStandbyMessages)
+        config.misc.standbyCounter.addNotifier(self.onEnterStandby, initial_call=False)
+
+    def messageReceived(self, cmd):
+        if not config.hdmicec.enabled.value:
+            return
+        if cmd == STANDBY_OPCODE and config.hdmicec.handle_tv_standby.value:
+            self.handlingStandbyFromTV = True
+            self.standby()
+            self.handlingStandbyFromTV = False
+
+    def standby(self):
+        if not standby_module.inStandby:
+            notifications_module.AddNotification(standby_module.Standby)
+
+    def onEnterStandby(self, configelement=None):
+        standby_module.inStandby.onClose.append(self.onLeaveStandby)
+        self.standbyMessages()
+
+    def onLeaveStandby(self):
+        pass
+
+    def standbyMessages(self):
+        if config.hdmicec.enabled.value:
+            if config.hdmicec.next_boxes_detect.value:
+                self.delay.start(1000, True)
+            else:
+                self.sendStandbyMessages()
+
+    def sendStandbyMessages(self):
+        if config.hdmicec.control_tv_standby.value:
+            if self.useStandby and not self.handlingStandbyFromTV:
+                self.sent.append("standby")
+            else:
+                self.sent.append("sourceinactive")
+                self.useStandby = True
+
+
+hdmi_cec_module.HdmiCec = HdmiCec
 
 
 infobar_module = _module("Screens.InfoBar")
@@ -1581,8 +1958,17 @@ def fresh_receiver():
         eTimer.instances = []
         Notifications.popups = []
         Notifications.removed = []
-        Notifications.notifications = []
+        # Emptied in place: the queue is one list for the life of the image.
+        del notifications[:]
+        del notificationAdded[:]
+        del current_notifications[:]
         Notifications.raises = False
+        HdmiCec.instance = None
+        config.hdmicec.enabled.value = True
+        config.hdmicec.handle_tv_standby.value = True
+        config.hdmicec.control_tv_standby.value = True
+        config.hdmicec.next_boxes_detect.value = False
+        MainLoop.now = 0
         record_timer_module.margin_before = 0
         record_timer_module.margin_after = 0
         counter = config.misc.standbyCounter

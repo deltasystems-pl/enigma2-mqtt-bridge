@@ -246,8 +246,9 @@ The full list is in [CHANGELOG.md](CHANGELOG.md).
    named over MQTT, behind a box-only permission; plus an opt-in auto-heal for a stuck decode,
    rate-limited and counted on a new `softcam` topic.
 2. **An opt-in CEC standby workaround** for an upstream enigma2 defect that makes a standby
-   requested by the television arrive late and echo back at it. Strict allowlist of one screen
-   class, every intervention counted on a `cec` topic.
+   requested by the television arrive late and echo back at it. It closes the channel list and
+   nothing else, never touches a standby the household asked for, and counts every intervention
+   on a `cec` topic.
 3. **A discreet toast** — a non-modal, auto-hiding, top-right message that never takes focus and
    never waits behind an open channel list. `cmd/message` gains `style: popup | toast`; `popup`
    stays the default.

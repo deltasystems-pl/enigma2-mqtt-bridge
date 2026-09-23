@@ -49,6 +49,7 @@ def setting_labels():
         ("oscam_password", _("OSCam WebIf password")),
         ("bouquets_for_select", _("Bouquets for the channel list")),
         ("deep_standby_allowed", _("Allow deep standby and reboot")),
+        ("cec_standby_workaround", _("Close the channel list when the TV asks for standby")),
         ("softcam_restart_allowed", _("Allow restarting the softcam")),
         ("softcam_autoheal", _("Restart the softcam when it stops decoding")),
         ("softcam_autoheal_seconds", _("Wait before an automatic softcam restart (seconds)")),

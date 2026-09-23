@@ -88,6 +88,7 @@ SETTING_NAMES = (
     "oscam_password",
     "bouquets_for_select",
     "deep_standby_allowed",
+    "cec_standby_workaround",
     "softcam_restart_allowed",
     "softcam_autoheal",
     "softcam_autoheal_seconds",
@@ -122,6 +123,7 @@ SETTING_KINDS = {
     "oscam_password": "text",
     "bouquets_for_select": "text",
     "deep_standby_allowed": "bool",
+    "cec_standby_workaround": "bool",
     "softcam_restart_allowed": "bool",
     "softcam_autoheal": "bool",
     "softcam_autoheal_seconds": "int",
@@ -184,6 +186,11 @@ def _build():
     section.oscam_identity_salt = ConfigText(default="", fixed_size=False)
     section.bouquets_for_select = ConfigText(default="", fixed_size=False)
     section.deep_standby_allowed = ConfigYesNo(default=False)
+    # Off by default, and set on the box only: it is the kill-switch for code
+    # that closes a screen somebody is looking at. Deliberately in neither
+    # `cmd/config` list — it enables no command, and the `cec_workaround`
+    # capability already tells a consumer whether it is at work.
+    section.cec_standby_workaround = ConfigYesNo(default=False)
     # Permissions default off. This one gates a command that stops a running
     # program on the receiver, so it is granted on the box and nowhere else.
     section.softcam_restart_allowed = ConfigYesNo(default=False)

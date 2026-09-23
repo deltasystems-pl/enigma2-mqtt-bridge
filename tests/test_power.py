@@ -87,7 +87,8 @@ def test_entering_standby_goes_through_the_notification_queue(receiver):
     from Tools.Notifications import Notifications
 
     assert power.enter_standby() is None
-    assert Notifications.notifications[-1][0] is Standby
+    # The image's five-tuple: (fnc, screen, args, kwargs, id).
+    assert Notifications.notifications[-1] == (None, Standby, (), {}, None)
 
 
 def test_entering_standby_twice_does_nothing_the_second_time(receiver):

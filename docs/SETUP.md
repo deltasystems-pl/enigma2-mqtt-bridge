@@ -31,6 +31,7 @@ is no separate configuration file to maintain, and settings survive a plugin upg
 | `epg_grid_events` | `4` | Events per channel in the EPG grid. `0` turns the grid off and drops it from `capabilities` |
 | `bouquets_for_select` | all TV bouquets | Which bouquets feed the channel list, the `zap`-by-name lookup and the EPG grid — which publishes **one retained topic per bouquet**, `epg_grid/<bouquet_slug>`. Narrow it if you have hundreds of services. Dropping or renaming a bouquet retracts the topic it owned |
 | `deep_standby_allowed` | `off` | Gate for `cmd/deep_standby` and `cmd/reboot`. Off by default because waking the box again needs Wake-on-LAN and that is worth testing before you rely on it |
+| `cec_standby_workaround` | `off` | When the television switches itself off while the channel list is open, close the list so the receiver follows it into standby at once — and drop a television standby that is still waiting thirty seconds later behind any other screen, so it cannot fire when you next close that screen. Off by default; see below |
 | `softcam_restart_allowed` | `off` | Gate for `cmd/softcam_restart` and for the automatic restart below. Off by default because it stops a running program on your receiver |
 | `softcam_autoheal` | `off` | Restart the softcam by itself when the channel you are watching is encrypted and stops decoding. Does nothing unless the permission above is on |
 | `softcam_autoheal_seconds` | `90` | How long a stuck decode has to hold before that happens, 30 to 600. A healthy encrypted channel refreshes its ECM file about every ten seconds, so anything much shorter is reading noise |
@@ -43,8 +44,42 @@ same for both: a setting that **enables** a command is granted at the television
 that only **tunes** a command already permitted — `softcam_autoheal` and its delay — may be
 changed from the broker.
 
+🔴 **`cec_standby_workaround` is set here and nowhere else, and it is not echoed at all.** It is
+not a permission for a command — it switches on code that closes a screen you may be looking at,
+which makes it the kill-switch for that code, and a kill-switch belongs on the box. A consumer
+learns whether it is at work from the `cec_workaround` capability, not from `info.settings`.
+
 The log is `/home/root/mqttbridge.log`, capped at 1 MB with two rotations kept, so a debug
 session cannot fill the flash.
+
+### What the CEC standby workaround does
+
+It works around an enigma2 defect, not a defect of this plugin. When the television switches itself
+off it tells the receiver over HDMI-CEC, and the image queues a standby that only the info bar
+carries out. With the channel list open, the receiver therefore stays on — and when you later close
+the list it goes to standby after all, and tells the television to switch off as well, because by
+then the image has forgotten that the standby was the television's idea.
+
+With the setting on:
+
+- **The channel list, and only the channel list, is closed** when the television's standby arrives
+  behind it — through the list's own exit, so you are back on the channel you were watching. A
+  menu, the EPG, an input box, a message, a recording dialog, the service picker inside another
+  dialog, or anything opened on top of the channel list is left exactly as it is.
+- **A standby the television asked for that is still waiting after thirty seconds is dropped**, so
+  that closing the menu you were in half an hour later does not put the receiver — and the
+  television — to sleep.
+- **A standby you asked for is never touched.** `cmd/power standby` from Home Assistant queues
+  exactly the same thing as the television does; the plugin tells the two apart at the moment they
+  are queued and only ever acts on the television's. The remote's power button does not go through
+  the queue at all — it opens the standby screen directly — so the workaround never sees it.
+
+It needs HDMI-CEC switched on in the image's own settings, with the image set to follow the
+television into standby (on OpenViX 6.6 that second one is on by default). With either of them
+off the image never queues the television's standby, so the plugin does not start the workaround
+and does not claim the `cec_workaround` capability. Both are read when the plugin starts, so after
+changing them restart the receiver's interface. Each intervention is logged at `info` and counted
+on the `cec` topic — see [TOPICS.md](TOPICS.md).
 
 ### What the softcam restart does
 

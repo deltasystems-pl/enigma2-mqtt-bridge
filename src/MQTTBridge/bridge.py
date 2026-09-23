@@ -39,6 +39,8 @@ import time
 
 from . import boxinfo, discovery
 from . import config as settings_module
+from .cec import TOPIC as CEC_TOPIC
+from .cec import CecPublisher
 from .commands import CommandDispatcher
 from .diagnostics import LoopMonitor
 from .log import configure as configure_logging
@@ -555,6 +557,13 @@ class Bridge:
             self.retract(self.topic("cam"))
         if not self.value("oscam_telemetry"):
             self.retract(self.topic("oscam"))
+        # The standby workaround's count outlives the workaround on the broker.
+        # Switching it off on the setup screen reconnects without it, and a
+        # retained `cec` left behind would tell a consumer it is still at work.
+        # Keyed on the publisher rather than the setting, because the capability
+        # also goes when HDMI-CEC does.
+        if self.publisher(CecPublisher.name) is None:
+            self.retract(self.topic(CEC_TOPIC))
         # Every payload goes out on every connect, so what was published before
         # this connection is not what is on the broker now.
         self.forget_published()
