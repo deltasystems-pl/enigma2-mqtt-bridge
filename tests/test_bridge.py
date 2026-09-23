@@ -444,6 +444,70 @@ def test_reload_retracts_topics_the_new_node_id_orphans(connected_bridge, factor
     assert INFO in [e.topic for e in retractions]
 
 
+def _retained_on_the_broker(factory, topic):
+    """What a broker holds for `topic` once every session here has ended cleanly.
+
+    Sessions in the order they were opened, publishes in the order each made
+    them. A clean disconnect discards the will, so the will never counts.
+    """
+    held = None
+    for client in factory.clients:
+        for entry in client.published:
+            if entry.topic == topic and entry.retain:
+                held = entry.text
+    return held
+
+
+def _record_disconnect_order(client):
+    """Note how many publishes the client had made when it was told to disconnect."""
+    seen = []
+    disconnect = client.disconnect
+
+    def recorded():
+        seen.append(len(client.published))
+        disconnect()
+
+    client.disconnect = recorded
+    return seen
+
+
+def test_a_reload_whose_reconnect_fails_leaves_offline_retained(connected_bridge, factory,
+                                                                 settings):
+    """The clean disconnect drops the will, so the old session says `offline` itself."""
+    old = factory.client
+    assert _retained_on_the_broker(factory, AVAILABILITY) == "online"
+    seen = _record_disconnect_order(old)
+
+    settings.host.value = "10.0.0.9"
+    connected_bridge.reload()
+    # The new session never connects: a wrong address, a changed password.
+
+    assert factory.client is not old
+    assert factory.client.published == []
+    assert _retained_on_the_broker(factory, AVAILABILITY) == "offline"
+    offline = [i for i, e in enumerate(old.published) if e.topic == AVAILABILITY
+               and e.text == "offline" and e.retain]
+    # Before the DISCONNECT, which is what a broker would still deliver.
+    assert offline and offline[-1] < seen[0]
+
+
+def test_a_reload_that_switches_the_plugin_off_leaves_offline_retained(connected_bridge,
+                                                                       factory, settings):
+    settings.enabled.value = False
+    connected_bridge.reload()
+
+    assert connected_bridge.running is False
+    assert _retained_on_the_broker(factory, AVAILABILITY) == "offline"
+
+
+def test_a_reload_that_reconnects_ends_online(connected_bridge, factory, settings):
+    settings.host.value = "10.0.0.9"
+    connected_bridge.reload()
+    factory.client.fire_connect()
+
+    assert _retained_on_the_broker(factory, AVAILABILITY) == "online"
+
+
 def test_the_default_state_path_sits_beside_enigma2s_settings(monkeypatch):
     monkeypatch.setattr(discovery.os.path, "isdir", lambda path: path == "/etc/enigma2")
     monkeypatch.setattr(discovery.os, "access", lambda path, mode: True)

@@ -38,7 +38,10 @@ Retained, QoS 0. **Not JSON** — the literal string `online` or `offline`.
 
 `offline` is registered as the connection's last will, so the broker publishes it when the box
 vanishes without saying goodbye. The plugin publishes `online` in `on_connect` and a clean
-`offline` on a graceful shutdown. `cmd/uninstall` ends on `offline` too, published at QoS 1 as the
+`offline` on a graceful shutdown — and before every reconnect it makes on purpose, when a setting
+changed on the receiver or on the OpenWebif page restarts the session: a clean disconnect discards
+the will, so `offline` stays retained until the new session connects, and for good if it never
+does. `cmd/uninstall` ends on `offline` too, published at QoS 1 as the
 node's last message, after every other retained topic of the node has been emptied — which is what
 tells a removed plugin from a switched-off receiver: a switched-off one leaves `info` and the
 announcement retained.

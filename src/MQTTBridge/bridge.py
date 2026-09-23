@@ -517,11 +517,30 @@ class Bridge:
             self._loop_monitor.stop()
 
     def reload(self):
-        """Apply changed settings. Called by the setup screen after a save."""
+        """Apply changed settings. Called by the setup screen after a save.
+
+        🔴 The old session ends with a clean disconnect, and a clean disconnect
+        is exactly what tells the broker to throw the will away. So, as `stop`
+        does, the session says `offline` itself first. Without it the retained
+        `availability` stays `online` from the old session, and if the new one
+        never connects — a mistyped broker, a password that is now wrong, or the
+        plugin switched off on the same screen — a consumer sees a receiver that
+        is online with nothing connected, for as long as nobody looks. The new
+        session's own `online` replaces it the moment it connects.
+
+        Unlike `stop`, this does not wait for the publish to leave: the process
+        goes on running, paho's network thread writes its queue in order and
+        does not end before the queue is empty, so the `offline` reaches the
+        socket ahead of the DISCONNECT — and a reload runs on enigma2's main
+        thread, where waiting on a broker is what the user would feel.
+        """
         try:
             self._stop_loop_monitor()
             if self.connected:
                 self.retract_stale()
+                self.client.publish(
+                    self.topic("availability"), OFFLINE, qos=STATE_QOS, retain=True
+                )
             if self.client is not None:
                 self.client.stop()
                 self.client = None

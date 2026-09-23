@@ -199,6 +199,14 @@ version that has no section here.
   bouquet overnight — rewrote its retained topic for nothing, delivering a state change to every
   consumer and a row to every recorder. A field a payload stamps from the wall clock now takes no
   part in the change comparison; it is still published, so nothing a consumer reads has moved.
+- **A settings change whose reconnect fails no longer leaves the box „online".** Saving the setup
+  screen, or a setting on the OpenWebif page that restarts the session, ended the old session with
+  a clean disconnect — which tells the broker to discard the last will — without saying `offline`
+  first, as a shutdown does. When the new session then never connected (a mistyped broker address,
+  a password that no longer matches, or the plugin switched off on the same screen), the retained
+  `availability` stayed `online` with nothing connected, and a consumer showed a live receiver
+  until somebody looked. The old session now publishes a retained `offline` before it disconnects;
+  the new one replaces it with `online` the moment it connects.
 
 ### Notes
 - **An EPG import freezes the menus for two to three seconds at its end**, whoever starts it. The
