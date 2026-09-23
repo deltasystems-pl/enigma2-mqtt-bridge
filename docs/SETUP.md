@@ -39,14 +39,15 @@ and settings survive a plugin upgrade.
 | `softcam_autoheal` | `off` | Restart the softcam by itself when the channel you are watching is encrypted and stops decoding. Does nothing unless the permission above is on |
 | `softcam_autoheal_seconds` | `90` | How long a stuck decode has to hold before that happens, 30 to 600. A healthy encrypted channel refreshes its ECM file about every ten seconds, so anything much shorter is reading noise |
 | `epg_import_allowed` | `off` | Gate for `cmd/epg_import`, which starts the image's EPG importer now. Off by default because the end of every import freezes the menus for two or three seconds; see below |
+| `uninstall_allowed` | `off` | Gate for `cmd/uninstall`, which removes the plugin from the receiver. Off by default because it is a one-way door: afterwards only the receiver's own plugin menu or SSH can put the plugin back. See below |
 | `log_level` | `info` | `error` / `warning` / `info` / `debug` |
 
-🔴 **`deep_standby_allowed`, `softcam_restart_allowed` and `epg_import_allowed` are never writable
-over MQTT.** They are
+🔴 **`deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed` and
+`uninstall_allowed` are never writable over MQTT.** They are
 set on the receiver — here, in the provisioning file, or on the [OpenWebif page](#the-openwebif-page)
 — and published in `info.settings` so that a consumer can hide a control the box would always
 refuse, but `cmd/config` rejects them like any other key outside its allowlist. The rule is the
-same for all three: a setting that **enables** a command is granted on the receiver, and a setting
+same for all four: a setting that **enables** a command is granted on the receiver, and a setting
 that only **tunes** a command already permitted — `softcam_autoheal` and its delay — may be
 changed from the broker.
 
@@ -171,6 +172,45 @@ the import has failed, or the import has run past its 30-minute watchdog. The im
 saying „running" after a start that failed part-way, until its next scheduled run, and a receiver
 that cannot be restarted for a day because of it is the worse outcome.
 
+### What removing the plugin remotely does
+
+With `uninstall_allowed` on, `cmd/uninstall` — with this receiver's node id as its payload, so that
+a message meant for another receiver removes nothing — takes the plugin off the receiver. The
+companion integration offers it from 0.3.0 in the entry's options, behind a confirmation, and only
+while the receiver says both that it may and that it can; the OpenWebif page offers it too, behind
+its own confirmation. Deleting the integration's entry never removes anything. It is refused while a recording runs or is
+due within ten minutes, and on a plugin that the package manager did not install (the `uninstall`
+capability says which).
+
+It first stops everything that publishes, then empties every retained topic the plugin put on the
+broker and ends with `offline`, waits until the broker has confirmed all of it, disconnects, removes
+the package with `opkg remove`, and restarts the user interface. In Home Assistant the receiver then
+looks switched off: its entities stay, unavailable.
+
+**It can fail, and then nothing is lost.** If the broker does not confirm within 15 seconds, the
+connection drops, or `opkg` refuses — it holds a lock that the image's own update check and plugin
+browser take as well — the plugin reconnects, publishes everything again as after any restart, and
+`last_error` says which step stopped it. Try again a minute later.
+
+🟡 **The restart can wait for you.** If something is streaming from the receiver, a background job
+is running or timeshift is active, the receiver asks on the television whether to restart now, and
+waits for an answer. The plugin is already disconnected and removed by then; answering either way
+is fine, and the next restart finishes the job.
+
+What stays on the receiver, on purpose:
+
+| Left behind | Why |
+|---|---|
+| `config.plugins.mqttbridge.*` in `/etc/enigma2/settings` — **including the broker password** | So that a reinstall finds its configuration. Remove the lines by hand if you want them gone |
+| `/etc/enigma2/mqttbridge-state.json`, emptied | It says nothing is published, so a reinstall has nothing to retract |
+| `/home/root/mqttbridge.log*` | The only record of what the removal did |
+| `/home/root/mqttbridge-backups/` | Snapshots made by the guided installer or by you. 🔴 They hold copies of the settings, so of the broker password too |
+| `/etc/opkg/enigma2-mqtt-bridge.conf` | The feed. It is what lets the receiver's own plugin menu install the plugin again |
+
+Reinstalling from the receiver's own menu (*Plugins → Download plugins → Extensions*) with the feed
+still configured brings the plugin back on its kept broker, node id and Home Assistant mode, and an
+integration entry that was kept picks it up again with every entity as it was.
+
 ### What a screenshot costs
 
 **Every capture leaves about 22 kB in enigma2 that it does not give back, whoever takes it.**
@@ -237,9 +277,11 @@ saved first, the page says it is out of date — reload it and make the change a
 **What it does.** Every command the plugin accepts over MQTT, run through the same code with the
 same household-safety guards — a recording, a timer due, the softcam's one-a-minute limit. Deep
 standby, reboot, restarting the interface, deleting a timer, stopping a recording, restarting the
-softcam, changing the Home Assistant mode and resetting the retained topics each ask for a
-confirmation that says what the household loses. The one difference from MQTT: a command from this
-page **does not need** `deep_standby_allowed` or `softcam_restart_allowed`. While the bridge is idle
+softcam, changing the Home Assistant mode, resetting the retained topics and removing the plugin
+each ask for a confirmation that says what the household loses; for the removal the page fills in
+the node id itself. The one difference from MQTT: a command from this
+page **does not need** `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed` or
+`uninstall_allowed`. While the bridge is idle
 the commands are shown disabled, with the reason.
 
 **Who can open it.** Exactly whoever OpenWebif lets in — the page has no login of its own and reads
@@ -306,7 +348,8 @@ For headless installs — and for the companion integration's guided installer �
   "screenshot": "on zap",
   "deep_standby_allowed": false,
   "softcam_restart_allowed": false,
-  "epg_import_allowed": false
+  "epg_import_allowed": false,
+  "uninstall_allowed": false
 }
 ```
 

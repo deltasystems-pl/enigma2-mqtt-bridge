@@ -115,7 +115,13 @@ class CommandDispatcher:
             "discovery": self.discovery,
             "ha_mode": self.ha_mode,
             "reset": self.reset,
+            "uninstall": self.uninstall,
         }
+        # Command topics of this node that somebody left a retained message on,
+        # this session. Discarding one is not clearing it: the broker hands it
+        # out again on every subscribe. `cmd/uninstall` retracts them with
+        # everything else the node owns, so nothing of this node is left behind.
+        self.discarded_retained = set()
 
     def handle(self, topic, payload, retain=False):
         name = self.bridge.command_name(topic)
@@ -128,6 +134,7 @@ class CommandDispatcher:
                 "discarding a RETAINED cmd/%s: a retained command re-fires on every reconnect",
                 name,
             )
+            self.discarded_retained.add(topic)
             return False
 
         size = len(payload) if payload is not None else 0
@@ -538,3 +545,13 @@ class CommandDispatcher:
     def reset(self, _text, origin=MQTT):
         self.bridge.reset_retained()
         return None
+
+    def uninstall(self, text, origin=MQTT):
+        """Remove the plugin from the receiver: validated here, done on the next turn.
+
+        🔴 The payload is this receiver's node id and nothing else — a
+        confirmation of *which* receiver was meant, not a secret. Every guard
+        and the ordered teardown are in `uninstall.py`; this handler returns
+        before anything changes, so the dispatcher clears `last_error` first.
+        """
+        return self.bridge.uninstaller.request(text, origin=origin)

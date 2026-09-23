@@ -11,6 +11,28 @@ version that has no section here.
 
 ### Added
 
+- **`cmd/uninstall`: the plugin removes itself from the receiver**, behind the permission
+  `uninstall_allowed` — off by default, echoed read-only in `info.settings`, never writable over
+  MQTT, set on the receiver (the setup screen, the provisioning file or the OpenWebif page, which
+  gains the action behind a confirmation that states the one-way door). The payload must be this
+  receiver's node id, exactly, after surrounding whitespace is stripped. Refused without the
+  permission, with any other payload, without the new **`uninstall`** capability — claimed only
+  where opkg is on the box and its file list for this package names the running `plugin.py` — by the
+  recording guard, where the image cannot restart, and while a removal is already running. Once
+  accepted, on the next turn of the main loop: every publisher is stopped and command intake
+  closed; every retained topic in the state file, and every command topic somebody left a retained
+  message on, is retracted **at QoS 1**, then `availability: offline` retained at QoS 1 as the last
+  message; the broker's acknowledgements are polled for (never waited on the main loop, 15 s at
+  most, in batches below paho's queue bound); the state file is saved empty; the session is closed
+  cleanly; `opkg remove enigma2-plugin-extensions-mqttbridge` runs through `eConsoleAppContainer`
+  with its output in the plugin's log; and the user interface is asked to restart. **A removal
+  that fails** — no acknowledgement in time, a dropped connection, opkg refusing (its lock is also
+  taken by the image's own update check) — removes nothing further, opens a fresh session that
+  republishes everything, and says which step stopped it on `last_error`. No discovery button, on
+  purpose: a core MQTT button cannot ask for a confirmation (ADR-0013, amending ADR-0004).
+- **`prerm` no longer advises a `cmd/reset` when the plugin is removing itself.** The plugin sets
+  `MQTTBRIDGE_UNINSTALL=1` in opkg's environment; the advice still appears for a removal by hand.
+
 - **`info.wol`: what the image says about Wake-on-LAN** — `supported`, `armed`, `iface` and
   `mechanism`, read from the image at every `info` publish and never inferred from anything the
   plugin did. `supported` is the image's own probe for its front-processor switch; a receiver that

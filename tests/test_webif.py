@@ -765,7 +765,7 @@ def test_the_permissions_and_kill_switches_are_one_group():
     groups = dict(webif.SETTING_GROUPS)
     assert set(groups["permissions"]) == {
         "deep_standby_allowed", "wol_arm", "softcam_restart_allowed", "epg_import_allowed",
-        "cec_standby_workaround", "osd_toast",
+        "uninstall_allowed", "cec_standby_workaround", "osd_toast",
     }
 
 
@@ -1170,6 +1170,49 @@ def test_a_shutdown_from_the_page_runs_without_the_permission(
     assert request.response_code == 200
     assert b"Sent: " in body
     assert receiver.session.opened[-1] == (TryQuitMainloop, (mode,))
+
+
+def test_uninstall_from_the_page_states_the_one_way_door_and_sends_the_node_id(
+    live_bridge, page, monkeypatch
+):
+    sent = []
+    monkeypatch.setattr(live_bridge, "run_command",
+                        lambda name, text, origin: sent.append((name, text, origin)))
+    resource = page(live_bridge)
+    session = new_session()
+
+    request, body = post(resource, session, action_fields("uninstall"))
+    assert request.response_code == 200
+    assert sent == []
+    text = html.unescape(body.decode("utf-8"))
+    assert "There is no way back from here or from Home Assistant" in text
+    assert "Its settings stay on the receiver." in text
+    fields = confirmation(body)
+    assert fields["payload"] == NODE
+
+    request, body = post(resource, session, fields, csrf=None)
+    assert request.response_code == 200
+    assert sent == [("uninstall", NODE, PAGE)]
+    assert b"Sent: " in body
+
+
+def test_uninstall_from_the_page_runs_without_the_permission_and_mqtt_stays_refused(
+    live_bridge, page, factory, settings, monkeypatch
+):
+    assert settings.uninstall_allowed.value is False
+    monkeypatch.setattr(live_bridge.uninstaller, "claimed", True)
+    resource = page(live_bridge)
+    session = new_session()
+
+    _request, body = post(resource, session, action_fields("uninstall"))
+    post(resource, session, confirmation(body), csrf=None)
+    assert live_bridge.uninstaller.phase == "scheduled"
+
+    live_bridge.uninstaller.abandon()
+    live_bridge.uninstaller.phase = None
+    send(factory, "uninstall", NODE.encode())
+    assert error(factory) == "uninstall is switched off in the plugin's settings"
+    assert live_bridge.uninstaller.phase is None
 
 
 def test_the_page_bypass_is_not_inherited_by_the_next_mqtt_command(

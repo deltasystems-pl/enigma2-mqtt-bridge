@@ -48,6 +48,8 @@ from .log import configure as configure_logging
 from .log import get_logger, register_secret
 from .mqttclient import BrokerSettings, MqttClient
 from .publisher import Publisher
+from .uninstall import RUNNING as UNINSTALL_RUNNING
+from .uninstall import Uninstaller
 from .version import __version__
 
 # `Publisher` is re-exported: it is part of this module's interface — every
@@ -113,6 +115,10 @@ CORE_CAPABILITIES = ()
 # what makes it real is the popup machinery being importable, not a hook.
 MESSAGE_CAPABILITY = "message"
 
+# Claimed where the package manager installed this very copy of the plugin
+# (`uninstall.py`), and by nothing else — there is no publisher behind it.
+UNINSTALL_CAPABILITY = "uninstall"
+
 SHUTDOWN_FLUSH_SECONDS = 1.0
 
 # A command name comes off the topic, so its length is the publisher's choice.
@@ -148,6 +154,12 @@ class Bridge:
         self._loop_monitor = LoopMonitor() if loop_monitor is _DEFAULT_MONITOR else loop_monitor
         self._publishers = []
         self._commands = CommandDispatcher(self)
+        # Built with the bridge, so that nothing the removal runs is a first
+        # import after the package has gone.
+        self._uninstaller = Uninstaller(self)
+        # A refusal that has to wait for a session to be published on: the
+        # reason a removal failed, reported once the fresh session is up.
+        self._pending_error = None
         self._last_error_published = False
         # topic -> the bytes last sent to it, so a repeat can be dropped.
         self._published = {}
@@ -204,6 +216,8 @@ class Bridge:
 
     def apply_remote_settings(self, values):
         """Persist one validated replacement, then apply its publisher lifecycle."""
+        if self._uninstaller.closed:
+            return UNINSTALL_RUNNING
         if not settings_module.save_remote_settings(values, self.settings):
             return "could not persist the plugin settings"
 
@@ -223,14 +237,31 @@ class Bridge:
         one changed on the television does, and a kill-switch rebinds its hook
         the same way. `values` must already be validated.
         """
+        if self._uninstaller.closed:
+            return UNINSTALL_RUNNING
         if not settings_module.save_settings(values, self.settings):
             return "could not persist the plugin settings"
         self.reload()
         return None
 
     def run_command(self, name, text, origin):
-        """A command from somewhere other than the broker — the dispatcher's refusal, or None."""
+        """A command from somewhere other than the broker — the dispatcher's refusal, or None.
+
+        Nothing runs while the plugin is removing itself, and the refusal is not
+        published: `last_error` would be a retained topic created after the
+        retraction, which is the one thing the removal must not leave behind.
+        """
+        if self._uninstaller.closed:
+            return UNINSTALL_RUNNING
         return self._commands.run(name, text, origin)
+
+    @property
+    def uninstaller(self):
+        return self._uninstaller
+
+    def discarded_retained_commands(self):
+        """This node's command topics somebody left a retained message on, this session."""
+        return set(self._commands.discarded_retained)
 
     def last_payloads(self):
         """`(topic, payload)` for every retained topic this process published, sorted.
@@ -424,6 +455,7 @@ class Bridge:
         self._last_error_published = self.state.knows(self.topic("last_error"))
         self.register_default_publishers()
         self._start_publishers()
+        self._uninstaller.probe()
 
         self.idle_reason = None
         self.running = True
@@ -445,6 +477,7 @@ class Bridge:
         """Say goodbye properly: a clean disconnect suppresses the will."""
         try:
             self.running = False
+            self._uninstaller.abandon()
             self._stop_loop_monitor()
             if self.client is None:
                 self._stop_publishers()
@@ -616,6 +649,8 @@ class Bridge:
 
             if popups_available():
                 names.append(MESSAGE_CAPABILITY)
+        if self._uninstaller.claimed:
+            names.append(UNINSTALL_CAPABILITY)
         return names
 
     def announce_capabilities(self):
@@ -672,8 +707,16 @@ class Bridge:
         self.publish_discovery(info)
         self.client.subscribe(self.command_root + "/#", qos=COMMAND_QOS)
         self.state.save()
+        if self._pending_error is not None:
+            command, message = self._pending_error
+            self._pending_error = None
+            self.publish_last_error(command, message)
 
     def on_message(self, topic, payload, retain):
+        if self._uninstaller.closed:
+            # Asked first: from here on nothing may re-create a topic.
+            LOG.info("discarding a message on %s: the plugin is removing itself", topic)
+            return
         self._commands.handle(topic, payload, retain)
 
     def on_disconnect(self, reason_code):
@@ -682,7 +725,9 @@ class Bridge:
     # ----------------------------------------------------------------- publishing --
 
     def publish_raw(self, topic, payload, retain=True, change_key=None):
-        if self.client is None:
+        if self.client is None or self._uninstaller.closed:
+            # Closed: a publisher's timer or event that fires after the
+            # retraction would re-create a retained topic for good.
             return None
         info = self.client.publish(topic, payload, qos=STATE_QOS, retain=retain)
         if retain:
@@ -770,7 +815,7 @@ class Bridge:
             # Whether or not the broker can be told: switching screenshots off
             # means the page must not keep showing the last one either.
             self._screenshot = None
-        if self.client is None:
+        if self.client is None or self._uninstaller.closed:
             return None
         info = self.client.publish(topic, "", qos=STATE_QOS, retain=True)
         self.state.forget(topic)
@@ -993,3 +1038,39 @@ class Bridge:
         self.publish_discovery(info)
         self.state.save()
         return len(topics)
+
+    # ----------------------------------------------------------------- uninstall --
+    # The bridge's half of `uninstall.py`: what only the bridge can reach.
+
+    def forget_everything_published(self):
+        """Step 5 of the removal: nothing this process published is on the broker any more."""
+        self.state.forget_all()
+        self.forget_published()
+        self._last_json.clear()
+        self._raw_topics.clear()
+        self._screenshot = None
+        self._last_error_published = False
+
+    def disconnect_for_uninstall(self):
+        """Step 6: a clean disconnect, so the will stays unsent and `offline` stays retained.
+
+        The shutdown hook runs later, when the interface restarts; it finds no
+        session and publishes nothing.
+        """
+        self.running = False
+        self.idle_reason = "the plugin is being removed"
+        self._stop_loop_monitor()
+        if self.client is not None:
+            self.client.stop()
+            self.client = None
+
+    def restart_after_failed_uninstall(self, command, message):
+        """A removal that stopped ends where a reset ends: everything back, and why.
+
+        `reload()` opens a fresh session, whose connect republishes availability,
+        the snapshot, the announcement and discovery. The reason goes on
+        `last_error` after that, on the new session — before it there is nobody
+        to publish it to.
+        """
+        self._pending_error = (command, message)
+        self.reload()

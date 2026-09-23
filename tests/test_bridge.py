@@ -52,6 +52,7 @@ def test_info_carries_every_documented_field(connected_bridge, factory):
         "deep_standby_allowed": False,
         "softcam_restart_allowed": False,
         "epg_import_allowed": False,
+        "uninstall_allowed": False,
     }
 
 

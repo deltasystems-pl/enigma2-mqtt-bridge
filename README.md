@@ -178,7 +178,8 @@ in Home Assistant's recorder database by default. If that matters in your househ
   counts; raw reader names, addresses, users, card identifiers and WebIf credentials stay on the
   receiver;
 - remember that retained topics outlive the plugin: `cmd/reset` retracts everything, and it is
-  the documented step before uninstalling.
+  the documented step before uninstalling by hand. `cmd/uninstall` (0.3.0) does it for you, and
+  in the right order.
 
 ## Compatibility
 
@@ -267,11 +268,16 @@ The full list is in [CHANGELOG.md](CHANGELOG.md).
    drill has passed on that image.
 6. **`process`** — what the enigma2 process costs, already in review.
 7. **`cmd/uninstall`** — remove the plugin from the receiver on request, behind a permission
-   `uninstall_allowed`, never writable over MQTT and echoed **read-only** in `info.settings`: every retained topic is
-   retracted, a final `offline` published, the package removed and the interface restarted, in
-   that order. The payload is the node id, so a mis-sent message removes nothing.
+   `uninstall_allowed`, never writable over MQTT and echoed **read-only** in `info.settings`, and a
+   capability `uninstall` claimed only where opkg installed this very copy. Everything that
+   publishes is stopped first; every retained topic is retracted and a final `offline` published,
+   at QoS 1, and the broker's acknowledgements are awaited before the package is removed and the
+   interface restarted. A removal that fails — opkg's lock held, no acknowledgement, a dropped
+   connection — puts everything back and says why on `last_error`. The payload is the node id, so a
+   mis-sent message removes nothing. The settings stay on the receiver.
    🔴 A one-way door — nothing over MQTT can put it back, only SSH or the receiver's own package
-   manager. Decided in [ADR-0004](docs/adr/0004-remote-uninstall.md).
+   manager. Decided in [ADR-0004](docs/adr/0004-remote-uninstall.md); the order, the QoS and the
+   failure path in [ADR-0013](docs/adr/0013-the-uninstall-closes-the-doors-and-waits-for-the-broker.md).
 
 ## Contributing
 

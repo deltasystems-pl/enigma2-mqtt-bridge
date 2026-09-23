@@ -152,6 +152,7 @@ SETTING_GROUPS = (
             "wol_arm",
             "softcam_restart_allowed",
             "epg_import_allowed",
+            "uninstall_allowed",
             "cec_standby_workaround",
             "osd_toast",
         ),
@@ -510,12 +511,15 @@ def _message_payload(values):
     })
 
 
-def actions(bouquets=()):
+def actions(bouquets=(), node_id=""):
     """Every page action, in the order the page shows them.
 
     Built per request, so every label is in the language of the moment. Every
     command in the dispatcher's table is here except `config`, whose page
     action is the settings form; a test holds the two lists to each other.
+    `node_id` is `uninstall`'s payload, which the page fills in: the node id is
+    the confirmation a broker client has to type, and on the page the second,
+    server-rendered step is that confirmation.
     """
     on_off = (("on", _("On")), ("off", _("Off")))
     sref = Field("sref", "text", _("Service reference"))
@@ -670,6 +674,17 @@ def actions(bouquets=()):
                 "Assistant sees the receiver disappear for a moment."
             ),
         ),
+        Action(
+            "uninstall", "uninstall", _("Remove the plugin from this receiver"),
+            build=lambda _values: node_id,
+            confirm=lambda _values: _(
+                "The plugin is removed from this receiver and the user interface "
+                "restarts. There is no way back from here or from Home Assistant: "
+                "only the receiver's own plugin menu or SSH can install it again. "
+                "Its settings stay on the receiver."
+            ),
+            ends_session=True,
+        ),
     )
 
 
@@ -682,6 +697,11 @@ def _bouquets(bridge):
         if reference:
             found.append((reference, str(bouquet.get("name") or reference)))
     return found
+
+
+def _node_id(bridge):
+    """The node id `uninstall` confirms, as the bridge resolves it, or "" without one."""
+    return str(getattr(bridge, "node_id", "") or "") if bridge is not None else ""
 
 
 def _field_value(request, field):
@@ -890,7 +910,7 @@ def _running_bridge():
 
 
 def _action(key, bridge=None):
-    for action in actions(_bouquets(bridge)):
+    for action in actions(_bouquets(bridge), _node_id(bridge)):
         if action.key == key:
             return action
     raise ValueError("unknown action")
@@ -1201,7 +1221,7 @@ def _actions_section(request, bridge, token):
     forms = "".join(
         _action_form(action, token, running)
         + (_screenshot_figure(request, bridge) if action.key == "screenshot" else "")
-        for action in actions(_bouquets(bridge))
+        for action in actions(_bouquets(bridge), _node_id(bridge))
     )
     return (
         f"<section><h2>{_e(_('Commands'))}</h2>{note}"

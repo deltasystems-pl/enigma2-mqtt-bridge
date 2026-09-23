@@ -134,7 +134,15 @@ MQTT Bridge: removing orphaned bytecode client.pyc
 
 ## Uninstalling
 
-Do these in order:
+**From Home Assistant or the OpenWebif page (since 0.3.0).** Switch on *Allow removing the plugin
+remotely* (`uninstall_allowed`) on the receiver, then use the integration's options or the
+OpenWebif page — or publish this receiver's node id to `enigma2/<node_id>/cmd/uninstall`. The
+plugin retracts its own retained topics, ends on `offline`, removes its package and restarts the
+interface; if any step fails it puts everything back and says why on `last_error`. What it leaves
+behind, and why, is in [SETUP.md](SETUP.md#what-removing-the-plugin-remotely-does).
+
+**By hand**, over SSH — for a plugin that cannot reach its broker, or with the permission off. Do
+these in order:
 
 ```sh
 # 1. while the plugin is still running and connected, retract its retained topics

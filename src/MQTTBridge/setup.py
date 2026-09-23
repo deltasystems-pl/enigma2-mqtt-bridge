@@ -74,6 +74,7 @@ def setting_labels():
         ("softcam_autoheal", _("Restart the softcam when it stops decoding")),
         ("softcam_autoheal_seconds", _("Wait before an automatic softcam restart (seconds)")),
         ("epg_import_allowed", _("Allow starting an EPG import")),
+        ("uninstall_allowed", _("Allow removing the plugin remotely")),
         ("log_level", _("Log level")),
         ("epg_grid_events", _("EPG grid events per channel")),
     )

@@ -57,6 +57,7 @@ REMOTE_SETTING_NAMES = (
 # the box would always refuse instead of offering one that fails.
 READ_ONLY_SETTING_NAMES = (
     "deep_standby_allowed", "softcam_restart_allowed", "epg_import_allowed",
+    "uninstall_allowed",
 )
 SCREENSHOT_INTERVAL_LIMITS = (5, 3600)
 SCREENSHOT_DELAY_LIMITS = (1, 30)
@@ -101,6 +102,7 @@ SETTING_NAMES = (
     "softcam_autoheal",
     "softcam_autoheal_seconds",
     "epg_import_allowed",
+    "uninstall_allowed",
     "log_level",
     "epg_grid_events",
 )
@@ -139,6 +141,7 @@ SETTING_KINDS = {
     "softcam_autoheal": "bool",
     "softcam_autoheal_seconds": "int",
     "epg_import_allowed": "bool",
+    "uninstall_allowed": "bool",
     "log_level": "choice",
     "epg_grid_events": "int",
 }
@@ -253,6 +256,10 @@ def _build():
     # end freezes the picture's menus for seconds, so it is granted on the
     # receiver and never over MQTT.
     section.epg_import_allowed = ConfigYesNo(default=False)
+    # Permissions default off, and this one most of all: `cmd/uninstall` takes
+    # the plugin off the receiver, and after it has run nothing is left to take
+    # a command that could undo it. Granted on the receiver, never over MQTT.
+    section.uninstall_allowed = ConfigYesNo(default=False)
     section.log_level = ConfigSelection(
         default="info", choices=[(level, level) for level in LOG_LEVELS]
     )

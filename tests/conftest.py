@@ -2262,12 +2262,27 @@ class Published:
 
 
 class FakeMessageInfo:
-    def __init__(self, rc=0):
+    """paho's `MQTTMessageInfo`: `is_published()` is the broker's acknowledgement.
+
+    As in paho, a QoS 0 publish counts as published once it is handed over, and
+    a QoS 1 publish only when its PUBACK is in — which here is when a test says
+    so, with `FakeMQTTClient.acknowledge()`. A rejected publish raises from
+    `is_published()`, as paho's does.
+    """
+
+    def __init__(self, rc=0, qos=0):
         self.waited = None
         self.rc = rc
+        self.qos = qos
+        self.acknowledged = qos == 0
 
     def wait_for_publish(self, timeout=None):
         self.waited = timeout
+
+    def is_published(self):
+        if self.rc:
+            raise RuntimeError("Message publish failed: rc=" + str(self.rc))
+        return self.acknowledged
 
 
 class FakeMessage:
@@ -2291,6 +2306,7 @@ class FakeMQTTClient:
         self.connect_calls = []
         self.subscriptions = []
         self.published = []
+        self.infos = []
         self.loop_started = False
         self.disconnect_calls = 0
         self.max_queued = None
@@ -2340,7 +2356,15 @@ class FakeMQTTClient:
 
     def publish(self, topic, payload=None, qos=0, retain=False):
         self.published.append(Published(topic, payload, qos, retain))
-        return FakeMessageInfo(rc=self.publish_rc)
+        info = FakeMessageInfo(rc=self.publish_rc, qos=qos)
+        self.infos.append(info)
+        return info
+
+    def acknowledge(self, count=None):
+        """The broker's PUBACKs, oldest first: `count` of them, or all outstanding."""
+        waiting = [info for info in self.infos if not info.acknowledged]
+        for info in waiting if count is None else waiting[:count]:
+            info.acknowledged = True
 
     # --- what paho's network thread would do --------------------------------
 
@@ -2640,6 +2664,19 @@ def isolated_log(tmp_path, monkeypatch):
     yield tmp_path / "mqttbridge.log"
     log_module.close()
     log_module.forget_secrets()
+
+
+@pytest.fixture(autouse=True)
+def no_package_manager(tmp_path, monkeypatch):
+    """The `uninstall` capability reads opkg's files: none here, unless a test builds them.
+
+    Without this the capability would depend on the machine the suite runs on —
+    a developer's box with an `/usr/bin/opkg` would claim it and every
+    capability list asserted anywhere would change.
+    """
+    from MQTTBridge.uninstall import Uninstaller
+
+    monkeypatch.setattr(Uninstaller, "root", str(tmp_path / "no-package-manager"))
 
 
 @pytest.fixture(autouse=True)
