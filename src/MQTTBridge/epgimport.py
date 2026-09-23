@@ -227,6 +227,9 @@ class EpgImportPublisher(Publisher):
         self._power_lapsed = False
         self._running_error_logged = False
         self._poll = Ticker(self._tick, "epg import")
+        # One main-loop turn after a refused press, so the refusal is on
+        # `last_error` before the topic says `running` — see `_refusal`.
+        self._announce = Ticker(self._publish, "epg import announce")
 
     # ---------------------------------------------------------------- lifecycle --
 
@@ -251,6 +254,7 @@ class EpgImportPublisher(Publisher):
 
     def stop(self):
         self._poll.stop()
+        self._announce.stop()
         self._tracking = False
 
     # -------------------------------------------------------------------- state --
@@ -334,7 +338,9 @@ class EpgImportPublisher(Publisher):
                 self._error = NOT_FINISHED
                 LOG.warning("EPG-Importer has not finished after %d minutes",
                             WATCHDOG_SECONDS // 60)
-                self._publish()
+            # Published on change only, so this costs nothing while an import
+            # runs, and it delivers a follow whose own announcement never went.
+            self._publish()
             return
         if now_running is False:
             self._power_lapsed = False
@@ -426,11 +432,15 @@ class EpgImportPublisher(Publisher):
         if state:
             if not self._tracking:
                 # Follow it now rather than at the next idle poll, so the
-                # refusal and the topic say the same thing at the same moment.
+                # refusal is never unexplained. 🔴 The topic goes out on the next
+                # main-loop turn, never here: the dispatcher writes `last_error`
+                # after this returns, and a consumer that reads a new `running`
+                # as its press having worked must see the refusal first. If no
+                # timer can be had, the two-second poll publishes it instead.
                 LOG.info("an EPG import the plugin did not start is running")
                 self._baseline = self._importer.last_result
                 self._begin_tracking()
-                self._publish()
+                self._announce.start(0, single=True)
             return ALREADY_RUNNING
         refusal = recording.guard(self.session)
         if refusal:

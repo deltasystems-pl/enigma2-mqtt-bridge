@@ -956,10 +956,67 @@ def test_a_press_refused_as_already_running_follows_that_import_at_once(
     before = int(time.time())
     send(factory)
     assert error(factory) == epgimport.ALREADY_RUNNING
+    bridge.publisher("epg_import")._announce.timer.fire()  # the next main-loop turn
     payload = state(factory)
     assert payload["state"] == "running"
     assert before <= payload["started"] <= int(time.time())
     assert bridge.publisher("epg_import")._poll.timer.started == (2000, False)
+
+
+def _foreign_import_between_polls(importer):
+    importer.epgimport.sources = [FakeEpgSource("Polska - Podstawowy")]
+    importer.startImport()
+
+
+def test_a_refused_press_puts_the_refusal_out_before_the_running_topic(
+    importer, epg_bridge, factory
+):
+    """🔴 A consumer reads the first new `running` as its press having worked."""
+    bridge = epg_bridge()
+    _foreign_import_between_polls(importer)
+    mark = len(factory.client.published)
+    send(factory)
+    publisher = bridge.publisher("epg_import")
+    assert publisher._announce.timer.started == (0, True)
+    publisher._announce.timer.fire()
+
+    order = []
+    for entry in factory.client.published[mark:]:
+        if entry.topic == LAST_ERROR and entry.text and "already running" in entry.text:
+            order.append("last_error")
+        elif entry.topic == TOPIC and entry.json()["state"] == "running":
+            order.append("epg_import")
+    assert order == ["last_error", "epg_import"]
+
+
+def test_the_follow_reaches_the_topic_by_the_poll_when_no_turn_is_given(
+    importer, epg_bridge, factory
+):
+    """No announcement timer: the two-second poll publishes it, still after the refusal."""
+    bridge = epg_bridge()
+    _foreign_import_between_polls(importer)
+    publisher = bridge.publisher("epg_import")
+    publisher._announce.start = lambda *_arguments, **_keywords: False
+    send(factory)
+    assert state(factory)["state"] == "idle"
+    tick(bridge)
+    assert state(factory)["state"] == "running"
+
+
+def test_a_second_refused_press_does_not_restart_the_follow(importer, epg_bridge, factory):
+    """`started` and the watchdog belong to the import, not to the latest press."""
+    bridge = epg_bridge()
+    _foreign_import_between_polls(importer)
+    send(factory)
+    publisher = bridge.publisher("epg_import")
+    publisher._announce.timer.fire()
+    publisher._started -= 120
+    started, deadline = publisher._started, publisher._deadline
+
+    send(factory)
+    assert error(factory) == epgimport.ALREADY_RUNNING
+    assert publisher._started == started
+    assert publisher._deadline == deadline
 
 
 def test_a_stuck_start_seen_idle_by_a_poll_re_arms_the_block(importer, epg_bridge, factory):

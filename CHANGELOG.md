@@ -166,8 +166,9 @@ version that has no section here.
   finished with no events, or has not finished after 30 minutes — never which source failed.
 - **The importer's own deep-standby behaviour applies to every import**, including one started from
   here, but only when all four of its conditions hold: its „shutdown" setting on, deep standby set
-  to „wake up", „deep standby after import" on, and a timer wake-up — and then only in standby, with
-  nothing recording. All four settings are off by default.
+  to „wake up", „deep standby after import" on, and the receiver woken by a timer — and then only in
+  standby, with nothing recording and not already shutting down. The three settings are off by
+  default.
 - **An instance is not a process.** A cam that forks a supervisor to keep its worker shows two
   processes for one instance, so `running_instances` counts matched processes whose parent is not
   itself matched — a plain process count reports a fault on a healthy receiver. A process is
