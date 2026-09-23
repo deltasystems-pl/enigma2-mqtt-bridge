@@ -20,12 +20,20 @@ Every handler returns `None` when it worked and a sentence when it did not, and
 that sentence is written for the person who will read it on `last_error` at
 eleven at night — it says what was refused and why, not which function returned
 what.
+
+**The OpenWebif page runs the same handlers**, through `run()`, with its origin
+passed down the call (`origin.py`). It is not a second implementation of any
+command: the page builds the payload a broker client would have sent, the
+handler runs exactly as it does for MQTT — every household-safety guard
+included — and `last_error` is published or cleared exactly as it is for MQTT.
+The one difference is the box-side permission, which the page does not need.
 """
 
 import json
 
 from .config import HA_MODES
 from .log import get_logger, redact
+from .origin import MQTT, PAGE, granted
 
 LOG = get_logger("commands")
 
@@ -133,23 +141,46 @@ class CommandDispatcher:
             self.bridge.publish_last_error(name, "unknown command")
             return False
 
-        text = decode(payload)
-        LOG.info("cmd/%s", name)
+        return self._execute(name, handler, decode(payload), MQTT) is None
+
+    def run(self, name, text, origin):
+        """One command from somewhere other than the broker; the refusal, or None.
+
+        The page calls this with the payload a broker client would have sent.
+        The size limit is the broker's, applied the same way; the retained-
+        command rule has no meaning off the broker and is not asked. An unknown
+        name is refused exactly as it is over MQTT, on `last_error`.
+        """
+        text = str(text or "")
+        if len(text.encode("utf-8")) > MAX_PAYLOAD_BYTES:
+            LOG.warning("refusing cmd/%s: over the %d byte limit", name, MAX_PAYLOAD_BYTES)
+            return "the command is over the " + str(MAX_PAYLOAD_BYTES) + " byte limit"
+        handler = self.handlers.get(name)
+        if handler is None:
+            self.bridge.publish_last_error(name, "unknown command")
+            return "unknown command"
+        return self._execute(name, handler, text, origin)
+
+    def _execute(self, name, handler, text, origin):
+        """Run one handler, and say how it went on `last_error`. The refusal, or None."""
+        if origin == PAGE:
+            LOG.info("cmd/%s from the OpenWebif page", name)
+        else:
+            LOG.info("cmd/%s", name)
         try:
-            error = handler(text)
+            error = handler(text, origin=origin)
         except Exception as exception:
             LOG.exception("cmd/%s raised", name)
-            self.bridge.publish_last_error(
-                name, type(exception).__name__ + ": " + redact(str(exception))
-            )
-            return False
+            error = type(exception).__name__ + ": " + redact(str(exception))
+            self.bridge.publish_last_error(name, error)
+            return error
 
         if error:
             self.bridge.publish_last_error(name, error)
-            return False
+            return error
 
         self.bridge.clear_last_error()
-        return True
+        return None
 
     # ------------------------------------------------------------------ helpers --
 
@@ -178,7 +209,7 @@ class CommandDispatcher:
     # ------------------------------------------------------------------ handlers --
     # A handler returns None on success, or the reason it refused.
 
-    def power(self, text):
+    def power(self, text, origin=MQTT):
         from . import power as power_module
 
         mode = str(text or "").strip().lower()
@@ -195,17 +226,18 @@ class CommandDispatcher:
         self._refresh("power")
         return None
 
-    def _shutdown(self, command, retvalue, needs_permission):
+    def _shutdown(self, command, retvalue, needs_permission, origin=MQTT):
         """Deep standby, reboot and a user-interface restart, with their guards.
 
         The guard is the whole of this method's reason to exist: all three end
         the process that is writing somebody's recording, and none of them can
-        be taken back once the screen goes black.
+        be taken back once the screen goes black. The permission is asked for
+        this command's origin; the guards below it are asked whatever the origin.
         """
         from . import power as power_module
         from . import recording
 
-        if needs_permission and not self.bridge.value("deep_standby_allowed"):
+        if needs_permission and not granted(self.bridge.value, "deep_standby_allowed", origin):
             return (
                 "deep standby and reboot are switched off in the plugin's settings"
             )
@@ -222,22 +254,22 @@ class CommandDispatcher:
             self.bridge.stop()
         return power_module.quit_mainloop(self.session, retvalue)
 
-    def deep_standby(self, _text):
+    def deep_standby(self, _text, origin=MQTT):
         from .power import QUIT_SHUTDOWN
 
-        return self._shutdown("deep_standby", QUIT_SHUTDOWN, True)
+        return self._shutdown("deep_standby", QUIT_SHUTDOWN, True, origin)
 
-    def reboot(self, _text):
+    def reboot(self, _text, origin=MQTT):
         from .power import QUIT_REBOOT
 
-        return self._shutdown("reboot", QUIT_REBOOT, True)
+        return self._shutdown("reboot", QUIT_REBOOT, True, origin)
 
-    def restart_gui(self, _text):
+    def restart_gui(self, _text, origin=MQTT):
         from .power import QUIT_RESTART
 
-        return self._shutdown("restart_gui", QUIT_RESTART, False)
+        return self._shutdown("restart_gui", QUIT_RESTART, False, origin)
 
-    def zap(self, text):
+    def zap(self, text, origin=MQTT):
         from .service import zap as zap_to
 
         payload = parse(text)
@@ -267,7 +299,7 @@ class CommandDispatcher:
             service.expect(sref)
         return None
 
-    def bouquet(self, text):
+    def bouquet(self, text, origin=MQTT):
         """Switch the active channel-list context to one published bouquet."""
         try:
             payload = json.loads(text)
@@ -283,7 +315,7 @@ class CommandDispatcher:
             return "active bouquet selection is unavailable on this image"
         return publisher.select(sref)
 
-    def volume(self, text):
+    def volume(self, text, origin=MQTT):
         from . import volume as volume_module
 
         raw = str(text or "").strip()
@@ -303,7 +335,7 @@ class CommandDispatcher:
         self._refresh("volume")
         return None
 
-    def mute(self, text):
+    def mute(self, text, origin=MQTT):
         from . import volume as volume_module
 
         wanted = _boolean(text)
@@ -315,7 +347,7 @@ class CommandDispatcher:
         self._refresh("volume")
         return None
 
-    def key(self, text):
+    def key(self, text, origin=MQTT):
         from .remote import press
 
         payload = parse(text)
@@ -329,7 +361,7 @@ class CommandDispatcher:
             return "no key given"
         return press(name, long=long)
 
-    def message(self, text):
+    def message(self, text, origin=MQTT):
         from . import osd
 
         payload = parse(text)
@@ -371,7 +403,7 @@ class CommandDispatcher:
             return "'" + _echo(timeout) + "' is not a number of seconds"
         return toast.request(self.bridge, payload.get("text"), kind, timeout)
 
-    def timer(self, text):
+    def timer(self, text, origin=MQTT):
         from . import recording
 
         payload = parse(text)
@@ -405,7 +437,7 @@ class CommandDispatcher:
         self._refresh("timers", "recording")
         return None
 
-    def record(self, text):
+    def record(self, text, origin=MQTT):
         from . import recording
 
         what = str(text or "").strip().lower()
@@ -420,13 +452,13 @@ class CommandDispatcher:
         self._refresh("recording", "timers")
         return None
 
-    def screenshot(self, _text):
+    def screenshot(self, _text, origin=MQTT):
         publisher = self.publisher("screenshot")
         if publisher is None:
             return "screenshots are not available on this box"
         return publisher.capture(commanded=True)
 
-    def softcam_restart(self, _text):
+    def softcam_restart(self, _text, origin=MQTT):
         """Collapse the cam to exactly one running instance.
 
         Every guard lives in the publisher, because the automatic restart uses
@@ -438,16 +470,16 @@ class CommandDispatcher:
         publisher = self.publisher("softcam")
         if publisher is None:
             return "this receiver's image has no softcam this plugin can restart"
-        return publisher.restart()
+        return publisher.restart(origin=origin)
 
-    def epg_grid(self, _text):
+    def epg_grid(self, _text, origin=MQTT):
         publisher = self.publisher("epg_grid")
         if publisher is None:
             return "the EPG grid is switched off"
         publisher.regenerate()
         return None
 
-    def config(self, text):
+    def config(self, text, origin=MQTT):
         from .config import validate_remote_settings
 
         payload = parse(text)
@@ -458,7 +490,7 @@ class CommandDispatcher:
             return str(error)
         return self.bridge.apply_remote_settings(values)
 
-    def discovery(self, _text):
+    def discovery(self, _text, origin=MQTT):
         info = self.bridge.build_info()
         self.bridge.publish_announcement(info)
         self.bridge.publish_discovery(info)
@@ -470,13 +502,13 @@ class CommandDispatcher:
             channels.refresh()
         return None
 
-    def ha_mode(self, text):
+    def ha_mode(self, text, origin=MQTT):
         mode = text.strip().lower()
         if mode not in HA_MODES:
             return "unknown ha_mode '" + _echo(mode) + "'; expected one of " + ", ".join(HA_MODES)
         self.bridge.set_ha_mode(mode)
         return None
 
-    def reset(self, _text):
+    def reset(self, _text, origin=MQTT):
         self.bridge.reset_retained()
         return None

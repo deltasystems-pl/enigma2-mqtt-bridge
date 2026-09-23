@@ -444,6 +444,24 @@ class MqttClient:
             average = self._dispatch_delay_total / count if count else 0.0
             return count, average, self._dispatch_delay_max, self._dispatch_peak
 
+    def diagnostics(self):
+        """The counters the log lines are made of, for the OpenWebif page.
+
+        Read from memory only, so it is safe on the main loop while a request is
+        being answered; nothing in it identifies the broker or the login.
+        """
+        count, average, maximum, peak = self._dispatch_summary()
+        with self._dispatch_lock:
+            pending = self._dispatch_pending
+        return {
+            "epoch": self._epoch,
+            "dispatched": count,
+            "dispatch_delay_avg_ms": int(average * 1000),
+            "dispatch_delay_max_ms": int(maximum * 1000),
+            "dispatch_pending": pending,
+            "dispatch_peak": peak,
+        }
+
     # -------------------------------------------------------- main-thread halves --
 
     def _handle_connect(self, reason_code):

@@ -79,6 +79,19 @@ class LoopMonitor:
         if stop_event is not None:
             stop_event.set()
 
+    def state(self, now=None):
+        """Whether the monitor runs, the heartbeat's age and whether it has stalled."""
+        now = self._clock() if now is None else now
+        with self._lock:
+            running = self._stop_event is not None
+            age = None if self._heartbeat is None else max(0.0, now - self._heartbeat)
+            stalled = self._stalled
+        return {
+            "loop_monitor": running,
+            "heartbeat_age_ms": None if age is None or not running else int(age * 1000),
+            "stalled": stalled,
+        }
+
     def _beat(self):
         now = self._clock()
         with self._lock:

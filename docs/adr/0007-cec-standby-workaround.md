@@ -1,6 +1,6 @@
 # ADR-0007: The CEC standby workaround identifies the television's standby when it is queued, and holds the echo across the close
 
-**Status:** accepted 2026-09-22
+**Status:** accepted 2026-09-22, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) (the box-only setting)
 **Date:** 2026-09-22
 **Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §5, in part — it
 described this feature, and three parts of it turned out to be wrong when they were read against

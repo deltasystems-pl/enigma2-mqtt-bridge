@@ -62,6 +62,7 @@ from . import recording
 from .cam import _encrypted
 from .enigma2 import Ticker, enigma_attribute, missing
 from .log import get_logger
+from .origin import MQTT, granted
 from .power import in_standby
 from .service import NavPublisher, event_id
 
@@ -649,7 +650,7 @@ class SoftcamPublisher(NavPublisher):
 
     # ---------------------------------------------------------------- the guards --
 
-    def _refusal(self, reason):
+    def _refusal(self, reason, origin=MQTT):
         """Why this restart may not happen, or None when it may.
 
         🔴 One guard, used identically by both paths. The asymmetry that suggests
@@ -659,8 +660,13 @@ class SoftcamPublisher(NavPublisher):
         recording is recoverable while a truncated one is not. So a dead cam in
         the ten minutes before a recording stays dead until the window passes,
         and that is the accepted cost rather than an oversight.
+
+        The permission alone is asked for the restart's `origin` (`origin.py`):
+        a restart asked for on the OpenWebif page needs no permission, every
+        other one does. The automatic restart passes no origin, so it is gated
+        by the setting whatever the page has done before it.
         """
-        if not self.value("softcam_restart_allowed"):
+        if not granted(self.value, "softcam_restart_allowed", origin):
             return "restarting the softcam is switched off in the plugin's settings"
         if self._busy:
             return "a softcam restart is already running"
@@ -688,9 +694,9 @@ class SoftcamPublisher(NavPublisher):
 
     # -------------------------------------------------------------- the sequence --
 
-    def restart(self, reason=MANUAL):
+    def restart(self, reason=MANUAL, origin=MQTT):
         """Collapse every instance to one. None when it began, a sentence otherwise."""
-        refusal = self._refusal(reason)
+        refusal = self._refusal(reason, origin)
         if refusal:
             return refusal
         found = self._recount()
@@ -890,6 +896,8 @@ class SoftcamPublisher(NavPublisher):
         stuck = not_decoding_seconds(self.path, self._service_since, self._since, time.time())
         if stuck < seconds:
             return
+        # No origin: the automatic restart is never the page's, so it stays
+        # behind `softcam_restart_allowed` on every path.
         refusal = self.restart(AUTOHEAL)
         if refusal:
             LOG.info("the softcam has not decoded for %d s; not restarting it: %s",

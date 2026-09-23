@@ -17,6 +17,14 @@ The link is a **`str`**: `putChild2` is the thing that encodes it
 a bytes object would read `b'mqttbridge'`. Twisted's own `putChild` inside the
 resource does need bytes, which is why the page's icon child is registered as
 `b"icon"` and not as `"icon"`.
+
+Mounting here is also what decides who reaches the page. OpenWebif wraps the
+tree it mounts this child on in its own authentication — for HTTP and again for
+HTTPS — and decides on the first path segment, before the page's code runs. The
+page trusts the web interface that mounted it and enforces no login of its own
+(ADR-0009). On an image with the original WebInterface installed instead,
+OpenWebif does not install its loader and the page would sit under that
+interface's authentication; that case has not been measured.
 """
 
 try:

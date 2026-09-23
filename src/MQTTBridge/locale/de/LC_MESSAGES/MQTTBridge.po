@@ -193,9 +193,6 @@ msgstr "Gestoppt"
 msgid "MQTT"
 msgstr "MQTT"
 
-#: src/MQTTBridge/webif.py
-msgid "Save publisher settings"
-msgstr "Publisher-Einstellungen speichern"
 
 #: src/MQTTBridge/webif.py
 msgid "Receiver integration status"
@@ -205,9 +202,6 @@ msgstr "Status der Receiver-Integration"
 msgid "Status"
 msgstr "Status"
 
-#: src/MQTTBridge/webif.py
-msgid "Publisher settings"
-msgstr "Publisher-Einstellungen"
 
 #: src/MQTTBridge/webif.py
 msgid "Sanitized log tail"
@@ -217,25 +211,13 @@ msgstr "Bereinigtes Log-Ende"
 msgid "Request rejected."
 msgstr "Anfrage abgelehnt."
 
-#: src/MQTTBridge/webif.py
-msgid "Invalid publisher settings."
-msgstr "Ungültige Publisher-Einstellungen."
 
-#: src/MQTTBridge/webif.py
-msgid "Publisher settings were not changed."
-msgstr "Publisher-Einstellungen wurden nicht geändert."
 
-#: src/MQTTBridge/webif.py
-msgid "Publisher settings saved."
-msgstr "Publisher-Einstellungen wurden gespeichert."
 
 #: src/MQTTBridge/webif.py
 msgid "Logging is unavailable."
 msgstr "Protokollierung ist nicht verfügbar."
 
-#: src/MQTTBridge/webif.py
-msgid "OpenWebif authentication is required for MQTT Bridge."
-msgstr "MQTT Bridge erfordert OpenWebif-Authentifizierung."
 
 #: src/MQTTBridge/webif.py
 msgid "The MQTT Bridge page could not be built; see the plugin log."
@@ -268,3 +250,359 @@ msgstr "OSCam-WebIf-Benutzername"
 #: src/MQTTBridge/setup.py
 msgid "OSCam WebIf password"
 msgstr "OSCam-WebIf-Passwort"
+
+#: src/MQTTBridge/webif.py
+msgid "Action"
+msgstr "Aktion"
+
+#: src/MQTTBridge/webif.py
+msgid "Add a timer by time"
+msgstr "Timer nach Zeit hinzufügen"
+
+#: src/MQTTBridge/webif.py
+msgid "Add a timer for an EPG event"
+msgstr "Timer für eine EPG-Sendung hinzufügen"
+
+#: src/MQTTBridge/webif.py
+msgid "Begins (epoch seconds)"
+msgstr "Beginn (Epochensekunden)"
+
+#: src/MQTTBridge/webif.py
+msgid "Behaviour"
+msgstr "Verhalten"
+
+#: src/MQTTBridge/webif.py
+msgid "Bouquet"
+msgstr "Bouquet"
+
+#: src/MQTTBridge/webif.py
+msgid "Broker"
+msgstr "Broker"
+
+#: src/MQTTBridge/webif.py
+msgid "By"
+msgstr "Nach"
+
+#: src/MQTTBridge/webif.py
+msgid "Capabilities"
+msgstr "Fähigkeiten"
+
+#: src/MQTTBridge/webif.py
+msgid "Change channel"
+msgstr "Kanal wechseln"
+
+#: src/MQTTBridge/webif.py
+msgid "Channel"
+msgstr "Kanal"
+
+#: src/MQTTBridge/webif.py
+msgid "Channel name"
+msgstr "Kanalname"
+
+#: src/MQTTBridge/webif.py
+msgid "Commands"
+msgstr "Befehle"
+
+#: src/MQTTBridge/webif.py
+msgid "Commands need a running bridge: %s"
+msgstr "Befehle brauchen eine laufende Bridge: %s"
+
+#: src/MQTTBridge/webif.py
+msgid "Confirm: %s"
+msgstr "Bestätigen: %s"
+
+#: src/MQTTBridge/webif.py
+msgid "Deep standby"
+msgstr "Deep-Standby"
+
+#: src/MQTTBridge/webif.py
+msgid "Delete a timer"
+msgstr "Timer löschen"
+
+#: src/MQTTBridge/webif.py
+msgid "Diagnostics"
+msgstr "Diagnose"
+
+#: src/MQTTBridge/webif.py
+msgid "Discreet toast"
+msgstr "Dezente Einblendung"
+
+#: src/MQTTBridge/webif.py
+msgid "Done: %s"
+msgstr "Erledigt: %s"
+
+#: src/MQTTBridge/webif.py
+msgid "Encrypted channels go dark for a few seconds while the softcam restarts."
+msgstr "Verschlüsselte Kanäle sind einige Sekunden dunkel, während der Softcam neu startet."
+
+#: src/MQTTBridge/webif.py
+msgid "Ends (epoch seconds)"
+msgstr "Ende (Epochensekunden)"
+
+#: src/MQTTBridge/webif.py
+msgid "Error"
+msgstr "Fehler"
+
+#: src/MQTTBridge/webif.py
+msgid "Event id"
+msgstr "Sendungs-ID"
+
+#: src/MQTTBridge/webif.py
+msgid "Every retained topic is emptied and published again; Home Assistant sees the receiver disappear for a moment."
+msgstr "Jedes gespeicherte Topic wird geleert und neu veröffentlicht; Home Assistant sieht den Receiver kurz verschwinden."
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant's view of this receiver changes: its entities are published, handed to the integration, or removed."
+msgstr "Die Sicht von Home Assistant auf diesen Receiver ändert sich: seine Entitäten werden veröffentlicht, an die Integration übergeben oder entfernt."
+
+#: src/MQTTBridge/webif.py
+msgid "Identity"
+msgstr "Identität"
+
+#: src/MQTTBridge/webif.py
+msgid "Information"
+msgstr "Information"
+
+#: src/MQTTBridge/webif.py
+msgid "Instant recording"
+msgstr "Sofortaufnahme"
+
+#: src/MQTTBridge/webif.py
+msgid "Key name"
+msgstr "Tastenname"
+
+#: src/MQTTBridge/webif.py
+msgid "Last error"
+msgstr "Letzter Fehler"
+
+#: src/MQTTBridge/webif.py
+msgid "Last published payloads"
+msgstr "Zuletzt veröffentlichte Nutzdaten"
+
+#: src/MQTTBridge/webif.py
+msgid "Level"
+msgstr "Pegel"
+
+#: src/MQTTBridge/webif.py
+msgid "Long press"
+msgstr "Langer Tastendruck"
+
+#: src/MQTTBridge/webif.py
+msgid "Message on the television"
+msgstr "Nachricht auf dem Fernseher"
+
+#: src/MQTTBridge/webif.py
+msgid "Mode"
+msgstr "Modus"
+
+#: src/MQTTBridge/webif.py
+msgid "Mute"
+msgstr "Stummschaltung"
+
+#: src/MQTTBridge/webif.py
+msgid "Name"
+msgstr "Name"
+
+#: src/MQTTBridge/webif.py
+msgid "None"
+msgstr "Keiner"
+
+#: src/MQTTBridge/webif.py
+msgid "Nothing has been published since the plugin started."
+msgstr "Seit dem Start des Plugins wurde nichts veröffentlicht."
+
+#: src/MQTTBridge/webif.py
+msgid "Nothing to save: every setting already has that value."
+msgstr "Nichts zu speichern: jede Einstellung hat diesen Wert bereits."
+
+#: src/MQTTBridge/webif.py
+msgid "Nothing was changed: %s"
+msgstr "Nichts wurde geändert: %s"
+
+#: src/MQTTBridge/webif.py
+msgid "Nothing was changed; see the plugin log."
+msgstr "Nichts wurde geändert; siehe Plugin-Protokoll."
+
+#: src/MQTTBridge/webif.py
+msgid "On"
+msgstr "An"
+
+#: src/MQTTBridge/webif.py
+msgid "Passwords are never shown. Leave a password empty to keep the stored one."
+msgstr "Passwörter werden nie angezeigt. Ein leeres Passwortfeld behält das gespeicherte Passwort."
+
+#: src/MQTTBridge/webif.py
+msgid "Permissions and kill-switches"
+msgstr "Berechtigungen und Notschalter"
+
+#: src/MQTTBridge/webif.py
+msgid "Popup"
+msgstr "Popup"
+
+#: src/MQTTBridge/webif.py
+msgid "Power"
+msgstr "Stromversorgung"
+
+#: src/MQTTBridge/webif.py
+msgid "Publish discovery again"
+msgstr "Discovery erneut veröffentlichen"
+
+#: src/MQTTBridge/webif.py
+msgid "Reboot"
+msgstr "Neustart"
+
+#: src/MQTTBridge/webif.py
+msgid "Rebuild the EPG grid"
+msgstr "EPG-Raster neu aufbauen"
+
+#: src/MQTTBridge/webif.py
+msgid "Refused: %s"
+msgstr "Abgelehnt: %s"
+
+#: src/MQTTBridge/webif.py
+msgid "Remote key"
+msgstr "Fernbedienungstaste"
+
+#: src/MQTTBridge/webif.py
+msgid "Reset retained topics"
+msgstr "Gespeicherte Topics zurücksetzen"
+
+#: src/MQTTBridge/webif.py
+msgid "Restart the softcam"
+msgstr "Softcam neu starten"
+
+#: src/MQTTBridge/webif.py
+msgid "Restart the user interface"
+msgstr "Benutzeroberfläche neu starten"
+
+#: src/MQTTBridge/webif.py
+msgid "Save settings"
+msgstr "Einstellungen speichern"
+
+#: src/MQTTBridge/webif.py
+msgid "Seconds on screen"
+msgstr "Sekunden auf dem Bildschirm"
+
+#: src/MQTTBridge/webif.py
+msgid "Sent: %s. The receiver may stop answering this page now."
+msgstr "Gesendet: %s. Der Receiver antwortet auf dieser Seite möglicherweise nicht mehr."
+
+#: src/MQTTBridge/webif.py
+msgid "Service reference"
+msgstr "Dienstreferenz"
+
+#: src/MQTTBridge/webif.py
+msgid "Settings"
+msgstr "Einstellungen"
+
+#: src/MQTTBridge/webif.py
+msgid "Settings as published"
+msgstr "Einstellungen wie veröffentlicht"
+
+#: src/MQTTBridge/webif.py
+msgid "Settings saved."
+msgstr "Einstellungen gespeichert."
+
+#: src/MQTTBridge/webif.py
+msgid "Settings saved; the bridge is reconnecting, which can take a few seconds."
+msgstr "Einstellungen gespeichert; die Bridge verbindet sich neu, das kann einige Sekunden dauern."
+
+#: src/MQTTBridge/webif.py
+msgid "Standby"
+msgstr "Standby"
+
+#: src/MQTTBridge/webif.py
+msgid "Start"
+msgstr "Starten"
+
+#: src/MQTTBridge/webif.py
+msgid "State"
+msgstr "Zustand"
+
+#: src/MQTTBridge/webif.py
+msgid "Stop"
+msgstr "Stoppen"
+
+#: src/MQTTBridge/webif.py
+msgid "Style"
+msgstr "Stil"
+
+#: src/MQTTBridge/webif.py
+msgid "TLS"
+msgstr "TLS"
+
+#: src/MQTTBridge/webif.py
+msgid "Take a screenshot"
+msgstr "Bildschirmfoto aufnehmen"
+
+#: src/MQTTBridge/webif.py
+msgid "Text"
+msgstr "Text"
+
+#: src/MQTTBridge/webif.py
+msgid "The node id, the base topic or the discovery prefix changes: every retained topic moves, and Home Assistant sees a new device."
+msgstr "Knoten-ID, Basis-Topic oder Discovery-Präfix ändern sich: jedes gespeicherte Topic zieht um, und Home Assistant sieht ein neues Gerät."
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver restarts. The picture and the connection to Home Assistant stop for a minute or two."
+msgstr "Der Receiver startet neu. Bild und Verbindung zu Home Assistant fallen für ein bis zwei Minuten aus."
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver switches off completely. It records nothing and answers nothing until somebody switches it on again."
+msgstr "Der Receiver schaltet sich ganz aus. Er nimmt nichts auf und antwortet nicht, bis ihn jemand wieder einschaltet."
+
+#: src/MQTTBridge/webif.py
+msgid "The running recording stops."
+msgstr "Die laufende Aufnahme wird beendet."
+
+#: src/MQTTBridge/webif.py
+msgid "The timer is deleted, and the recording it would have made will not happen."
+msgstr "Der Timer wird gelöscht, und die Aufnahme, die er gemacht hätte, findet nicht statt."
+
+#: src/MQTTBridge/webif.py
+msgid "The user interface restarts. The picture stops for about half a minute."
+msgstr "Die Benutzeroberfläche startet neu. Das Bild fällt etwa eine halbe Minute aus."
+
+#: src/MQTTBridge/webif.py
+msgid "This page answers only to the receiver's own address. Open it as: %s"
+msgstr "Diese Seite antwortet nur unter der eigenen Adresse des Receivers. Öffnen Sie sie als: %s"
+
+#: src/MQTTBridge/webif.py
+msgid "Toggle"
+msgstr "Umschalten"
+
+#: src/MQTTBridge/webif.py
+msgid "Topics"
+msgstr "Topics"
+
+#: src/MQTTBridge/webif.py
+msgid "Type"
+msgstr "Art"
+
+#: src/MQTTBridge/webif.py
+msgid "Volume"
+msgstr "Lautstärke"
+
+#: src/MQTTBridge/webif.py
+msgid "Warning"
+msgstr "Warnung"
+
+#: src/MQTTBridge/webif.py
+msgid "Yes, go ahead"
+msgstr "Ja, ausführen"
+
+#: src/MQTTBridge/webif.py
+msgid "published, not shown"
+msgstr "veröffentlicht, nicht angezeigt"
+
+#: src/MQTTBridge/webif.py
+msgid "the bridge is idle"
+msgstr "die Bridge ist untätig"
+
+#: src/MQTTBridge/webif.py
+msgid "the plugin did not start"
+msgstr "das Plugin ist nicht gestartet"
+
+#: src/MQTTBridge/webif.py
+msgid "the receiver's IP address"
+msgstr "die IP-Adresse des Receivers"

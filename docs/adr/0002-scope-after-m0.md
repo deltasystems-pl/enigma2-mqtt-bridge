@@ -1,6 +1,6 @@
 # ADR-0002: Scope added and changed after M0
 
-**Status:** accepted 2026-09-21
+**Status:** accepted 2026-09-21, extended by [ADR-0003](0003-control-feedback-and-household-features.md), §5 partly superseded by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md)
 **Date:** 2026-09-21
 **Supersedes:** — (it extends [ADR-0000](0000-prd.md); nothing in that record is reversed)
 

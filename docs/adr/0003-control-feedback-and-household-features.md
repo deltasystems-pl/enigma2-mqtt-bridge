@@ -1,6 +1,6 @@
 # ADR-0003: Control feedback and household features — the 0.2.0 and 0.3.0 plan
 
-**Status:** accepted 2026-09-21, amended 2026-09-22, extended by [ADR-0004](0004-remote-uninstall.md), partly superseded by [ADR-0005](0005-softcam-restart.md) (§3), [ADR-0007](0007-cec-standby-workaround.md) (§5) and [ADR-0008](0008-discreet-toast.md) (§2)
+**Status:** accepted 2026-09-21, amended 2026-09-22, extended by [ADR-0004](0004-remote-uninstall.md), partly superseded by [ADR-0005](0005-softcam-restart.md) (§3), [ADR-0007](0007-cec-standby-workaround.md) (§5) and [ADR-0008](0008-discreet-toast.md) (§2), amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) (the box-only rule and the status page)
 **Date:** 2026-09-21
 **Supersedes:** — (it extends [ADR-0000](0000-prd.md) and [ADR-0002](0002-scope-after-m0.md))
 

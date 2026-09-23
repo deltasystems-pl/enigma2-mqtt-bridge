@@ -76,6 +76,34 @@ version that has no section here.
 
 ### Changed
 
+- **The OpenWebif page now opens wherever OpenWebif does, shows everything, and changes
+  everything.** It answered 403 to everybody on a receiver whose OpenWebif authentication was off —
+  OpenWebif's default, and on most households a necessity — because it demanded a logged OpenWebif
+  session on top of OpenWebif's own gate. OpenWebif decides who reaches the page before any of this
+  plugin's code runs, and anybody it admits can already set every setting through OpenWebif's own
+  endpoints, so the page now enforces no login of its own and reads no OpenWebif setting. It shows
+  the bridge's state and why it is idle, the broker, the identity, the capabilities, the current
+  `last_error`, `info.settings`, the connection diagnostics and the last payload of every retained
+  topic; it edits **every** setting, the permissions and kill-switches included (passwords
+  write-only, every text value refusing control characters because enigma2's settings file has no
+  escaping); and it runs **every** command through the same handler MQTT uses, with the same
+  household-safety guards and with two-step confirmations for the destructive ones. A command from
+  the page does not need `deep_standby_allowed` or `softcam_restart_allowed`; over MQTT both are
+  still required, and the automatic softcam restart still needs its permission whatever the page
+  did. What guards the page against other web sites is a `Host` allowlist on every request — the
+  receiver's IP address, `localhost` or its own hostname — plus the same-origin check, the one-shot
+  session token and exact field sets; it adds `frame-ancestors 'self'` and stays script-free. The
+  decision and the measurements behind it are in
+  [ADR-0009](docs/adr/0009-the-openwebif-page-trusts-openwebif.md), which supersedes the
+  fail-closed clause of ADR-0002 §5.
+- 🔴 **If you relied on the page being closed:** it is now exactly as open as your receiver's
+  OpenWebif. With OpenWebif authentication off, anybody OpenWebif admits can open it — as they could
+  already change every setting through OpenWebif itself. Switch OpenWebif authentication on if that
+  is not what you want. The page also refuses to answer under a DNS name of your own or behind a
+  reverse proxy; open it by the receiver's address or `<hostname>.local`.
+- **„Box-only" now reads „never writable over MQTT".** A setting that enables a command is set on
+  the receiver — the setup screen, the provisioning file or the OpenWebif page — and the broker can
+  still never grant one: `cmd/config`'s allowlist and `info.settings` are unchanged.
 - **`epg_grid/<bouquet_slug>.generated` now means when the grid last changed**, not when it was
   last built, which follows from the fix below: an unchanged rebuild publishes nothing, so the
   retained stamp stays where the last real change left it. `docs/TOPICS.md` says so, and the

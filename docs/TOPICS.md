@@ -84,14 +84,23 @@ settings it did mean to change as well.
 
 | Read-only member | Since | Meaning | Where it is set |
 |---|---|---|---|
-| `deep_standby_allowed` | 0.2.0 | Whether `cmd/deep_standby` and `cmd/reboot` are permitted on this box. Always present, whichever way it is set | The box's setup screen, *Menu → Plugins → MQTT Bridge*, or the provisioning file at first install — never over MQTT, never from the OpenWebif status page |
-| `softcam_restart_allowed` | 0.3.0 | Whether `cmd/softcam_restart` is permitted, and with it the opt-in auto-heal. Always present, whichever way it is set | The same three places, and nowhere else |
+| `deep_standby_allowed` | 0.2.0 | Whether `cmd/deep_standby` and `cmd/reboot` are permitted over MQTT. Always present, whichever way it is set | On the receiver: the setup screen, *Menu → Plugins → MQTT Bridge*, the provisioning file at first install, or the plugin's OpenWebif page — never over MQTT |
+| `softcam_restart_allowed` | 0.3.0 | Whether `cmd/softcam_restart` is permitted over MQTT, and with it the opt-in auto-heal. Always present, whichever way it is set | The same places, and never over MQTT |
 
-The rule behind which side of the line a setting falls on: one that **enables a command** is
-settable on the box only; one that **tunes a command already permitted** may be remote. A member
-of this table exists so a consumer can **hide what the box will refuse** rather than offering a
-control that always fails. `info` is republished when it changes, because saving the setup screen
-reconnects the bridge and a connect publishes the snapshot.
+The rule behind which side of the line a setting falls on: one that **enables a command** is never
+writable over MQTT — it is set on the receiver (the setup screen, the provisioning file, or the
+OpenWebif page, which is exactly as open as the receiver's web interface; see
+[ADR-0009](adr/0009-the-openwebif-page-trusts-openwebif.md)); one that **tunes a command already
+permitted** may be remote. A member of this table exists so a consumer can **hide what the box will
+refuse** rather than offering a control that always fails. `info` is republished when it changes,
+because saving the setup screen or the OpenWebif page reconnects the bridge and a connect publishes
+the snapshot.
+
+A command run from the OpenWebif page does not need these permissions: the page runs the same
+handler with the origin `page`, and anybody OpenWebif admits could grant the permission through
+OpenWebif's own `saveconfig` anyway. Everything else about the command is unchanged — the
+household-safety guards apply, and `last_error` is published or cleared exactly as for a command
+over MQTT.
 
 **`capabilities` is the honest part of the contract.** Hook names differ between images, so the
 plugin detects what it managed to attach and names it here rather than assuming. A consumer
@@ -130,8 +139,8 @@ Deep standby is not a state here: the box is off and the broker shows `availabil
 {"last_intervention": 1789459200, "kind": "closed_channel_list", "count": 3, "pending": false}
 ```
 
-Retained, and present only when `cec_workaround` is a capability: the box-only setting
-`cec_standby_workaround` is on (it is off by default), **and** the image has HDMI-CEC switched on
+Retained, and present only when `cec_workaround` is a capability: the setting
+`cec_standby_workaround` (never writable over MQTT) is on (it is off by default), **and** the image has HDMI-CEC switched on
 and is set to follow the television into standby (`config.hdmicec.enabled` and
 `config.hdmicec.handle_tv_standby`, read when the plugin starts — with either off the image never
 queues the television's standby), **and** it has its notification queue and its standby screen.
@@ -755,8 +764,8 @@ switched off on this receiver" (`osd_toast` off) or „the discreet toast could 
 receiver".
 
 The capability `toast` is claimed **only once the screen has actually been created**, and is taken
-back — with `info` republished — if a skin reload cannot create it again. The box-only setting
-`osd_toast` (default on) is its kill-switch. An image where either fails keeps popups rather than
+back — with `info` republished — if a skin reload cannot create it again. The setting `osd_toast`
+(default on, never writable over MQTT) is its kill-switch. An image where either fails keeps popups rather than
 gaining a style that silently does nothing.
 
 ### `cmd/timer` payload forms
@@ -783,8 +792,9 @@ Either way, `timers` (and `recording` when it is imminent) is republished afterw
 This is deliberately not a general settings API. Broker credentials, TLS, identity, topic names,
 the configured bouquet filter, logging and destructive-command permission cannot be changed
 through `cmd/config`. `deep_standby_allowed` and `softcam_restart_allowed` are **read** from `info.settings` (§1) and are
-refused here like any other key outside the allowlist; they are granted on the box's setup screen
-or in the provisioning file, and reading a setting and writing it are two different permissions. Home Assistant mode has its dedicated command, and active TV bouquet
+refused here like any other key outside the allowlist; they are granted on the receiver — its setup
+screen, the provisioning file or the OpenWebif page — and never over MQTT, and reading a setting and
+writing it are two different permissions. Home Assistant mode has its dedicated command, and active TV bouquet
 context has `cmd/bouquet`; neither broadens this settings API. The command accepts the three original keys plus independently optional `screenshot_delay`,
 `cam_telemetry`, `oscam_telemetry`, `softcam_autoheal` and `softcam_autoheal_seconds`,
 with their JSON types unchanged. The two softcam keys only *tune* a restart the receiver has
@@ -1025,10 +1035,10 @@ this section. These join them on the same terms, rather than inventing a separat
 | Member | Release | Writable | Meaning |
 |---|---|---|---|
 | `epg_import_allowed` | 0.3.0 | **no** | Whether `cmd/epg_import` is permitted |
-| `uninstall_allowed` | 0.3.0 | **no** | Whether `cmd/uninstall` is permitted ([ADR-0004](adr/0004-remote-uninstall.md)). Default off, and granted on the box only |
+| `uninstall_allowed` | 0.3.0 | **no** | Whether `cmd/uninstall` is permitted ([ADR-0004](adr/0004-remote-uninstall.md)). Default off, and granted on the receiver, never over MQTT |
 
 Which side of the line each one falls on is §1's rule: a setting that **enables a command** is
-settable on the box only; a setting that **tunes a command already permitted** may be remote.
+never writable over MQTT; a setting that **tunes a command already permitted** may be remote.
 
 ### `info` gains `wol` — 0.3.0
 
@@ -1038,7 +1048,7 @@ settable on the box only; a setting that **tunes a command already permitted** m
 
 Read back from the system rather than assumed from the fact that a command was issued. A box that
 reports Wake-on-LAN supported and **not armed** cannot be woken from deep standby, which is worth
-knowing before enabling `deep_standby_allowed`. The `wol_arm` setting (box-only, default off) arms
+knowing before enabling `deep_standby_allowed`. The `wol_arm` setting (never writable over MQTT, default off) arms
 the interface at start and again immediately before deep standby.
 
 ### `<base>/<node>/epg_import` — 0.3.0, capability `epg_import`
@@ -1065,7 +1075,7 @@ a copy that was unpacked by hand or carried in a firmware image offers no such c
 
 🔴 **`cmd/uninstall` is a one-way door.** When it has run there is no plugin left to listen, so
 nothing over MQTT can undo it — the box comes back only through SSH or the receiver's own package
-manager. That is why its permission is off by default, is granted on the box and never over MQTT,
+manager. That is why its permission is off by default, is granted on the receiver and never over MQTT,
 and is read-only in `info.settings` like the other two. The decision, and the order the steps run
 in, are in [ADR-0004](adr/0004-remote-uninstall.md). `/etc/enigma2/settings` is not touched: a
 reinstall finds its configuration where it left it.
