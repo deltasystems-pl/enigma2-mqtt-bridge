@@ -54,8 +54,10 @@ class Recorded(ModelScreen):
         self.cancelled = []
 
     def cancel(self):
+        # Recorded as the image reads it — a yes or no (`HdmiCec` source line
+        # 618) — because the plugin's hold is truthy without being `True`.
         instance = HdmiCec.instance
-        self.cancelled.append(None if instance is None else instance.handlingStandbyFromTV)
+        self.cancelled.append(None if instance is None else bool(instance.handlingStandbyFromTV))
         self.close(None)
 
 
@@ -230,10 +232,13 @@ def test_the_channel_list_is_closed_and_the_standby_proceeds(world):
     assert channel_list.cancelled == [True]
     assert isinstance(standby_module.inStandby, standby_module.Standby)
     assert notifications == []
+    # Counted once the standby has happened and the image has read the flag.
+    MainLoop.advance(cec.SETTLE_MILLISECONDS)
     payload = box.cec()
     assert payload["kind"] == "closed_channel_list"
     assert payload["count"] == 1
     assert isinstance(payload["last_intervention"], int)
+    assert payload["pending"] is False
 
 
 @pytest.mark.parametrize("image_first", (True, False), ids=("image-first", "image-last"))
@@ -254,7 +259,7 @@ def test_the_echo_is_held_suppressed_across_the_close(world, image_first):
     assert channel_list.cancelled == [True]
     assert box.hdmi.sent == ["sourceinactive"]
     assert "standby" not in box.hdmi.sent
-    assert box.held is True
+    assert box.held is cec.HELD
 
     MainLoop.advance(cec.SETTLE_MILLISECONDS)
     assert box.held is False
@@ -284,7 +289,7 @@ def test_the_flag_is_put_back_to_the_value_it_had(world):
     box.hdmi.handlingStandbyFromTV = "sentinel"
 
     MainLoop.advance(0)
-    assert box.held is True
+    assert box.held is cec.HELD
     MainLoop.advance(cec.SETTLE_MILLISECONDS)
 
     assert box.held == "sentinel"
@@ -301,10 +306,10 @@ def test_the_hold_ends_at_its_deadline_when_the_standby_never_happens(world):
     MainLoop.advance(0)
     assert channel_list.cancelled == [True]
     assert config.misc.standbyCounter.value == 0
-    assert box.held is True
+    assert box.held is cec.HELD
 
     MainLoop.advance(cec.HOLD_SECONDS * 1000 - 1)
-    assert box.held is True
+    assert box.held is cec.HELD
     MainLoop.advance(1)
     assert box.held is False
 
@@ -370,6 +375,29 @@ def test_the_allowlist_is_exactly_three_names():
     assert cec.ALLOWLIST == ("ChannelSelection", "ChannelSelectionRadio", "PiPZapSelection")
 
 
+def test_the_timings_are_the_specifications():
+    """Pinned as literals: the other tests are written relative to these, so cannot."""
+    assert cec.HOLD_SECONDS == 5
+    assert cec.STALE_SECONDS == 30
+    assert cec.SETTLE_MILLISECONDS == 1500
+
+
+def test_a_subclass_of_a_channel_list_is_matched_through_its_bases(world):
+    """A skin or plugin that subclasses the channel list is still the channel list.
+
+    Its own name is on no list, so only the match against the class's bases
+    finds it — `PiPZapSelection` cannot show that, because it is listed by name.
+    """
+    Skinned = _screen("SkinnedChannelSelection", (ChannelSelection,), "Plugins.Extensions.Skin")
+    box = world()
+    dialog = box.show(Skinned)
+
+    box.tv_standby()
+    MainLoop.advance(0)
+
+    assert dialog.cancelled == [True]
+
+
 def test_a_dialog_stacked_on_the_channel_list_leaves_both_open(world):
     box = world()
     channel_list = box.show(ChannelSelection)
@@ -400,7 +428,8 @@ def test_the_list_closing_underneath_the_hook_is_a_no_op(world, plugin_log):
     assert "Traceback" not in plugin_log()
 
 
-def test_each_standby_closes_at_most_once(world):
+def test_a_list_that_is_already_closing_is_not_closed_again(world):
+    """The session's own guard: after a close, nothing executes until the pop."""
     box = world()
     channel_list = box.show(ChannelSelection)
 
@@ -411,6 +440,30 @@ def test_each_standby_closes_at_most_once(world):
     assert channel_list.cancelled == [True]
 
 
+def test_each_standby_closes_at_most_once(world):
+    """The one-shot on the record, where the session's guard no longer stands in for it.
+
+    Nothing under the list drains the queue, so the television's standby is
+    still waiting after the close; the household opens the channel list again,
+    and the workaround looks again. It has already acted for that standby, and
+    must not close the list a second time.
+    """
+    box = world(base=Screen)
+    first = box.show(ChannelSelection)
+    entry = box.tv_standby()
+    MainLoop.advance(0)
+    assert first.cancelled == [True]
+    assert queued(entry)
+
+    again = box.show(ChannelSelection)
+    assert box.session.in_exec and box.session.current_dialog is again
+    box.publisher._act_now()
+    MainLoop.advance(0)
+
+    assert again.cancelled == []
+    assert box.session.current_dialog is again
+
+
 # -------------------------------------------------- never the household's standby --
 
 
@@ -418,20 +471,16 @@ def _cmd_power_standby():
     assert power.enter_standby() is None
 
 
-def _remote_power_button():
-    notifications_module.AddNotification(standby_module.Standby)
-
-
-@pytest.mark.parametrize(
-    "household", (_cmd_power_standby, _remote_power_button), ids=("cmd-power", "remote")
-)
+# The remote's power button is not here because it never reaches the queue: on
+# the image this was measured on, `PowerKey.standby` opens the standby screen
+# directly (`StartEnigma.py`), and nothing notifies `notificationAdded`.
 @pytest.mark.parametrize("screen_class", (ChannelSelection, Menu), ids=lambda c: c.__name__)
-def test_a_standby_the_household_asked_for_is_never_touched(world, household, screen_class):
+def test_a_standby_the_household_asked_for_is_never_touched(world, screen_class):
     """🔴 Byte-identical to the television's, and never tracked, closed or dropped."""
     box = world()
     dialog = box.show(screen_class)
 
-    household()
+    _cmd_power_standby()
     entry = notifications[-1]
     assert entry == (None, standby_module.Standby, (), {}, None)
     MainLoop.advance(cec.STALE_SECONDS * 1000 * 2)
@@ -441,6 +490,53 @@ def test_a_standby_the_household_asked_for_is_never_touched(world, household, sc
     assert notifications == [entry] and notifications[0] is entry
     assert box.cec() == {"last_intervention": None, "kind": None, "count": 0, "pending": False}
     assert box.held is False
+
+
+def test_a_household_standby_during_the_hold_is_not_taken_for_the_televisions(world):
+    """🔴 The plugin's own hold must not pass for the television's bracket.
+
+    The list is closed and the flag held, but a popup was already queued ahead
+    of the television's standby, so the info bar opens that first and the
+    standby keeps waiting. A second later Home Assistant asks for standby —
+    exactly the „television off, so receiver off" automation. That standby is
+    queued while the flag is held, and must not be identified as the
+    television's, or its deadline would silently throw the household's request
+    away.
+    """
+    box = world()
+    box.show(ChannelSelection)
+    notifications_module.AddNotification(MessageBox, "a timer message")
+    television = box.tv_standby()
+    MainLoop.advance(0)
+
+    assert isinstance(box.session.current_dialog, MessageBox)
+    assert queued(television)
+    assert box.held  # the hold is in place
+
+    MainLoop.advance(1000)
+    _cmd_power_standby()
+    household = notifications[-1]
+    assert household == television and household is not television
+    MainLoop.advance(cec.STALE_SECONDS * 1000)
+
+    assert queued(household)
+    assert not queued(television)
+    assert [queued_entry.entry for queued_entry in box.publisher._queued] == []
+    payload = box.cec()
+    assert payload["count"] == 1
+    assert payload["kind"] == "dropped_stale_standby"
+
+
+def test_the_hold_is_truthy_but_is_not_true(world):
+    """Truthy, so the image still does not echo; not `True`, so it is not the bracket."""
+    box = world(base=Screen)
+    box.show(ChannelSelection)
+    box.tv_standby()
+    MainLoop.advance(0)
+
+    assert box.held is cec.HELD
+    assert bool(box.held) is True
+    assert box.held is not True
 
 
 def test_a_notification_that_is_not_a_standby_is_ignored_even_inside_the_bracket(world):
@@ -515,17 +611,88 @@ def test_a_standby_drained_normally_is_not_touched_and_is_forgotten(world):
     assert box.publisher._queued == []
 
 
-def test_a_closed_list_and_a_later_drop_both_count(world):
+def test_a_close_that_released_nothing_is_counted_once_as_a_drop(world):
+    """One standby, one intervention: the close is not a success if nothing followed it."""
     box = world(base=Screen)
     box.show(ChannelSelection)
 
     entry = box.tv_standby()
+    MainLoop.advance(0)
+    assert box.cec()["count"] == 0
+    assert box.cec()["kind"] is None
     MainLoop.advance(cec.STALE_SECONDS * 1000)
 
     assert not queued(entry)
     payload = box.cec()
-    assert payload["count"] == 2
+    assert payload["count"] == 1
     assert payload["kind"] == "dropped_stale_standby"
+
+
+def test_a_close_is_counted_when_the_standby_has_happened(world, plugin_log):
+    box = world()
+    box.show(ChannelSelection)
+
+    box.tv_standby()
+    MainLoop.advance(0)
+    assert isinstance(standby_module.inStandby, standby_module.Standby)
+    assert box.cec()["count"] == 0
+    MainLoop.advance(cec.SETTLE_MILLISECONDS)
+
+    assert box.cec()["count"] == 1
+    assert box.cec()["kind"] == "closed_channel_list"
+    MainLoop.advance(cec.STALE_SECONDS * 1000)
+    assert box.cec()["count"] == 1
+    assert "went ahead after the channel list was closed" in plugin_log()
+
+
+def test_without_the_standby_counter_a_close_is_counted_at_the_deadline(world):
+    """On an image whose standby counter could not be watched, being drained is the evidence."""
+    box = world()
+    config.misc.standbyCounter.removeNotifier(box.publisher._counter_moved)
+    box.show(ChannelSelection)
+
+    box.tv_standby()
+    MainLoop.advance(0)
+    assert isinstance(standby_module.inStandby, standby_module.Standby)
+    MainLoop.advance(cec.STALE_SECONDS * 1000 - 1)
+    assert box.cec()["count"] == 0
+    MainLoop.advance(1)
+
+    payload = box.cec()
+    assert payload["count"] == 1
+    assert payload["kind"] == "closed_channel_list"
+    assert payload["pending"] is False
+
+
+def test_a_repeated_television_standby_is_removed_once_the_receiver_sleeps(world):
+    """The second `<Standby>` must not put a woken receiver straight back to sleep.
+
+    The television says it twice before the list is closed; the info bar
+    carries out one entry per turn, so the second is still queued when the
+    receiver goes to standby. The household's own standby, queued alongside,
+    is not the plugin's to touch and stays.
+    """
+    box = world()
+    box.show(ChannelSelection)
+    first = box.tv_standby()
+    second = box.tv_standby()
+    _cmd_power_standby()
+    household = notifications[-1]
+    assert first is not second and household is not first and household is not second
+    MainLoop.advance(0)
+    assert not queued(first)
+    assert queued(second)
+    assert isinstance(standby_module.inStandby, standby_module.Standby)
+
+    MainLoop.advance(cec.SETTLE_MILLISECONDS)
+
+    assert not queued(second)
+    assert notifications == [household] and notifications[0] is household
+    assert box.publisher._queued == []
+    payload = box.cec()
+    assert payload["count"] == 1
+    assert payload["kind"] == "closed_channel_list"
+    assert payload["pending"] is False
 
 
 # --------------------------------------------------------- nothing reaches the GUI --
@@ -576,6 +743,7 @@ def test_a_dialog_without_cancel_is_closed_with_close(world):
     MainLoop.advance(0)
 
     assert isinstance(standby_module.inStandby, standby_module.Standby)
+    MainLoop.advance(cec.SETTLE_MILLISECONDS)
     assert box.cec()["kind"] == "closed_channel_list"
 
 
@@ -588,6 +756,7 @@ def test_the_list_is_still_closed_when_hdmi_cec_has_gone(world, plugin_log):
     MainLoop.advance(0)
 
     assert channel_list.cancelled == [None]
+    MainLoop.advance(cec.SETTLE_MILLISECONDS)
     assert box.cec()["kind"] == "closed_channel_list"
     assert "HDMI-CEC is no longer reachable" in plugin_log()
 
@@ -708,6 +877,8 @@ def test_every_field_is_present_with_its_type(world):
 
     box.tv_standby()
     MainLoop.advance(0)
+    assert box.cec()["pending"] is True
+    MainLoop.advance(cec.STALE_SECONDS * 1000)
     payload = box.cec()
 
     assert set(payload) == {"last_intervention", "kind", "count", "pending"}
@@ -732,6 +903,54 @@ def test_no_capability_without_a_running_hdmi_cec(make_bridge, factory, settings
     factory.client.fire_connect()
 
     assert HdmiCec.instance is None
+    assert bridge.publisher("cec_workaround") is None
+    assert notificationAdded == []
+
+
+def _start_with_cec(make_bridge, factory, settings, receiver):
+    settings.cec_standby_workaround.value = True
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+    factory.client.fire_connect()
+    return bridge
+
+
+@pytest.mark.parametrize("setting", ("enabled", "handle_tv_standby"))
+def test_no_capability_when_the_image_will_not_follow_the_television(
+    make_bridge, factory, settings, receiver, setting
+):
+    """The image builds `HdmiCec` with CEC switched off too; the singleton proves nothing.
+
+    With HDMI-CEC off, or the receiver set not to follow the television into
+    standby, the image never queues the television's standby, so a hook could
+    never fire.
+    """
+    hdmi = HdmiCec()
+    getattr(config.hdmicec, setting).value = False
+    # The model agrees that nothing would ever be queued.
+    hdmi.messageReceived(STANDBY_OPCODE)
+    assert notifications == []
+
+    bridge = _start_with_cec(make_bridge, factory, settings, receiver)
+
+    assert HdmiCec.instance is hdmi
+    assert bridge.publisher("cec_workaround") is None
+    assert notificationAdded == []
+    assert "cec_workaround" not in factory.client.last(INFO).json()["capabilities"]
+    assert all(entry.text == "" for entry in factory.client.all_for(CEC))
+
+
+@pytest.mark.parametrize("setting", ("enabled", "handle_tv_standby"))
+def test_no_capability_on_an_image_without_the_cec_setting(
+    make_bridge, factory, settings, receiver, monkeypatch, setting
+):
+    HdmiCec()
+    monkeypatch.delattr(config.hdmicec, setting)
+
+    bridge = _start_with_cec(make_bridge, factory, settings, receiver)
+
     assert bridge.publisher("cec_workaround") is None
     assert notificationAdded == []
 
@@ -763,7 +982,7 @@ def test_switching_it_off_retracts_the_topic_and_lets_go(world, factory, setting
     box.show(ChannelSelection)
     box.tv_standby()
     MainLoop.advance(0)
-    assert box.held is True  # a hold is in progress
+    assert box.held is cec.HELD  # a hold is in progress
     publisher = box.publisher
     assert publisher._notification_added in notificationAdded
 

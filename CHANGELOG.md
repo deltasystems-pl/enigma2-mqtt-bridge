@@ -52,11 +52,14 @@ version that has no section here.
   „this came from the television" marker set until the standby has happened (at most five
   seconds) so it is not echoed; and a television standby still waiting after thirty seconds behind
   any other screen is dropped from the queue rather than left to fire later. 🔴 A standby the
-  household asked for — the remote's power button, `cmd/power standby` — queues the identical
-  notification and is never touched: the television's is identified at the moment it is queued and
-  kept by identity. New capability `cec_workaround` and retained topic `cec`
-  (`last_intervention`, `kind`, `count`, `pending`), retracted when the workaround is switched off.
-  The decisions are in [ADR-0007](docs/adr/0007-cec-standby-workaround.md).
+  household asked for is never touched: `cmd/power standby` queues the identical notification, so
+  the television's is identified at the moment it is queued and kept by identity (the remote's
+  power button opens the standby screen directly and never reaches the queue at all). The
+  workaround is active only when the receiver has HDMI-CEC switched on and is set to follow the
+  television into standby. New capability `cec_workaround` and retained topic `cec`
+  (`last_intervention`, `kind`, `count`, `pending`), retracted when the workaround is switched off;
+  each television standby counts at most once. The decisions are in
+  [ADR-0007](docs/adr/0007-cec-standby-workaround.md).
 
 ### Changed
 

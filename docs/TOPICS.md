@@ -131,17 +131,21 @@ Deep standby is not a state here: the box is off and the broker shows `availabil
 ```
 
 Retained, and present only when `cec_workaround` is a capability: the box-only setting
-`cec_standby_workaround` is on (it is off by default), **and** the image has HDMI-CEC running,
-its notification queue and its standby screen. With the setting off nothing is bound and this
+`cec_standby_workaround` is on (it is off by default), **and** the image has HDMI-CEC switched on
+and is set to follow the television into standby (`config.hdmicec.enabled` and
+`config.hdmicec.handle_tv_standby`, read when the plugin starts — with either off the image never
+queues the television's standby), **and** it has its notification queue and its standby screen.
+An image that builds its HDMI-CEC component with CEC switched off does not count as running it.
+With the setting off nothing is bound and this
 topic is retracted on every connect — so switching the workaround off takes its count off the
 broker too. The setting itself is not in `info.settings`: it enables no command, and the
 capability already says whether the workaround is at work.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `last_intervention` | integer or `null` | Unix epoch seconds, UTC, of the last time the workaround did something. `null` until it has |
-| `kind` | `closed_channel_list` \| `dropped_stale_standby` \| `null` | What it did then |
-| `count` | integer | Interventions since the plugin started. In memory, so not a durable total across a receiver restart |
+| `last_intervention` | integer or `null` | Unix epoch seconds, UTC, of the last intervention that was counted. For `closed_channel_list` it is when the list was closed; for `dropped_stale_standby`, when the standby was dropped. `null` until there is one |
+| `kind` | `closed_channel_list` \| `dropped_stale_standby` \| `null` | What that intervention was |
+| `count` | integer | Interventions since the plugin started — **at most one per television standby**. In memory, so not a durable total across a receiver restart |
 | `pending` | bool | A standby **the television** asked for is queued and has not been carried out. This is what makes „the box is sitting there with a standby waiting" visible on a dashboard rather than only in a log |
 
 Every key is always present; a value that does not exist yet is `null`, never omitted.
@@ -159,19 +163,30 @@ then, because the image has already forgotten the standby was the television's, 
    `PiPZapSelection` — matched against the screen's class and its bases, and **never** the service
    picker other dialogs embed, the channel list's context menu or bouquet selector, an EPG screen, a
    menu, the plugin browser, an input box, a message box or a recording dialog. Anything stacked on
-   top of the list counts as „not the list", and the plugin never looks further down.
+   top of the list counts as „not the list", and the plugin never looks further down. It is
+   **counted once the standby has actually happened** (about a second and a half later, when the
+   receiver has entered standby), not when the list is closed: a close that released nothing —
+   something else was queued ahead, or the screen underneath does not carry out the queue — is not
+   counted as `closed_channel_list`.
 2. **`dropped_stale_standby`** — when that standby is still queued **30 seconds** after the
    television asked for it, removes it from the queue, so it cannot fire later — when somebody
-   closes the menu they were in — and take the television with it.
+   closes the menu they were in — and take the television with it. A standby the list was closed
+   for and which still did not happen is counted here, once, and not also as a close.
 
-🔴 **A standby the household asked for is never touched.** `cmd/power standby` and the remote's
-power button queue exactly the same notification as the television does. The workaround
-identifies the television's at the moment it is queued, by the image's own marker, and keeps that
-one entry by identity; nothing else in the queue is ever closed on or removed.
+When the receiver has entered standby, any television standby still queued — a television that
+said `<Standby>` twice — is removed too, so that waking the receiver does not put it straight back
+to sleep. That completes a request already carried out and is not counted.
+
+🔴 **A standby the household asked for is never touched.** `cmd/power standby` queues exactly the
+same notification as the television does. The workaround identifies the television's at the moment
+it is queued, by the image's own marker, and keeps that one entry by identity; nothing else in the
+queue is ever closed on or removed. (The remote's power button does not queue anything — it opens
+the standby screen directly — so it never reaches the workaround.)
 
 While it closes the list it also keeps the image's „this standby came from the television" marker
 set until the standby has happened, or for at most five seconds, so the late standby is not echoed
-back to the television.
+back to the television. It sets the marker to a value of its own rather than the image's, so that a
+standby the household asks for during those seconds is still told apart from the television's.
 
 ### `<base>/<node>/service`
 

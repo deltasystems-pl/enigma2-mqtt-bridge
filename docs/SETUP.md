@@ -69,13 +69,17 @@ With the setting on:
 - **A standby the television asked for that is still waiting after thirty seconds is dropped**, so
   that closing the menu you were in half an hour later does not put the receiver — and the
   television — to sleep.
-- **A standby you asked for is never touched** — the remote's power button, or `cmd/power standby`
-  from Home Assistant. They queue exactly the same thing as the television does; the plugin tells
-  them apart at the moment they are queued and only ever acts on the television's.
+- **A standby you asked for is never touched.** `cmd/power standby` from Home Assistant queues
+  exactly the same thing as the television does; the plugin tells the two apart at the moment they
+  are queued and only ever acts on the television's. The remote's power button does not go through
+  the queue at all — it opens the standby screen directly — so the workaround never sees it.
 
 It needs HDMI-CEC switched on in the image's own settings, with the image set to follow the
-television into standby (on OpenViX 6.6 that second one is on by default). Each intervention
-is logged at `info` and counted on the `cec` topic — see [TOPICS.md](TOPICS.md).
+television into standby (on OpenViX 6.6 that second one is on by default). With either of them
+off the image never queues the television's standby, so the plugin does not start the workaround
+and does not claim the `cec_workaround` capability. Both are read when the plugin starts, so after
+changing them restart the receiver's interface. Each intervention is logged at `info` and counted
+on the `cec` topic — see [TOPICS.md](TOPICS.md).
 
 ### What the softcam restart does
 

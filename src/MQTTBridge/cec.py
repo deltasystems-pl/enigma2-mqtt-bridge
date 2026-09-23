@@ -31,15 +31,24 @@ standby of its own, and tells the television to switch off.
    closes the menu they were in and take the television with it.
 
 **Why the standby is identified at the moment it is queued.** A standby from the
-plugin's own `cmd/power standby`, and one from the remote's power button, queue a
-notification identical to the television's, byte for byte. Anything that looked
-at the queue later for „a standby" could cancel one the household had just asked
-for. The one moment the television's standby can be told apart is while it is
-being queued: the image calls every `notificationAdded` callback from inside
-`__AddNotification`, which runs inside `HdmiCec.standby()`, which runs inside the
-`handlingStandbyFromTV` bracket. So the flag reads `True` there **if and only if**
-the television queued the entry. The entry is then kept **by identity** — the
-tuple itself, not its `id()` — and no other entry is ever touched.
+plugin's own `cmd/power standby` queues a notification identical to the
+television's, byte for byte. (The remote's power button queues nothing: it opens
+the standby screen directly, so it never reaches this module at all.) Anything
+that looked at the queue later for „a standby" could cancel one the household had
+just asked for. The one moment the television's standby can be told apart is
+while it is being queued: the image calls every `notificationAdded` callback from
+inside `__AddNotification`, which runs inside `HdmiCec.standby()`, which runs
+inside the `handlingStandbyFromTV` bracket. So the flag is the `True` singleton
+there **if and only if** the television queued the entry. The entry is then kept
+**by identity** — the tuple itself, not its `id()` — and no other entry is ever
+touched.
+
+🔴 That „if and only if" holds only while the image is the flag's one writer,
+and this module writes it too (see the hold, below). So the hold never writes
+`True`: it writes `HELD`, a private marker that is truthy — which is all the
+image asks of the flag when it decides whether to echo — but is not `True`. A
+household standby queued while the hold is in place therefore still fails the
+`is True` test and is never mistaken for the television's.
 
 **Why the hook is the image's own list.** `notificationAdded` is the extension
 point the info bar itself registers on, and appending a callable to it is the
@@ -53,8 +62,8 @@ returns, and the pop — and with it the info bar resuming and draining the queu
 happens on a later turn of the main loop, by which time `messageReceived` has long
 since put the flag back to `False`. However quickly the list is closed, the
 standby it releases runs outside the bracket. So immediately before closing, the
-flag is set `True` and its previous value remembered, and it is put back once the
-standby has happened — or after five seconds, whichever comes first. The deadline
+flag is set to `HELD` and its previous value remembered, and it is put back once
+the standby has happened — or after five seconds, whichever comes first. The deadline
 is there because a hold that leaked would silently stop „switch the receiver to
 standby and the television goes off too" for the rest of the session, which a
 household would notice and nobody would connect to this feature.
@@ -83,6 +92,25 @@ is the whole premise of a stale standby. Reaching it would need the raw CEC
 signal and a guess at which message this particular television sends, which the
 image itself declines to guess (it offers a nine-way setting for it). A deadline
 guesses nothing.
+
+**Once the receiver has gone to standby, the television's request is done.** A
+television that says `<Standby>` twice queues two entries, and the info bar
+carries out one per turn. Whatever is still queued and identified when the
+standby counter moves is removed then, by identity, so that waking the receiver
+does not run the second one and put it straight back to sleep.
+
+**One standby, at most one intervention.** A close is counted when the standby
+it released has actually happened, not when the close is issued: a close that
+released nothing — something else was queued ahead, or the screen underneath does
+not drain the queue — is not a success, and the standby it failed to release is
+counted once, as dropped, at its deadline.
+
+**The capability means the hook can fire.** It is claimed only when the image
+has HDMI-CEC switched on and is set to follow the television into standby
+(`config.hdmicec.enabled` and `config.hdmicec.handle_tv_standby`): the image
+builds its `HdmiCec` singleton whether or not CEC is on, and only queues the
+television's standby when both are, so the singleton alone proves nothing. Both
+are read once, when the workaround starts.
 
 With `cec_standby_workaround` off, which is the default, none of this runs: no
 callback is registered, nothing of the image's is read or written, and there is no
@@ -125,6 +153,26 @@ KIND_CLOSED = "closed_channel_list"
 KIND_DROPPED = "dropped_stale_standby"
 
 
+class _Held:
+    """What the hold writes into `handlingStandbyFromTV` instead of `True`.
+
+    Truthy, because the image only ever asks the flag a yes-or-no question
+    before it echoes; and not `True`, because `True` is how this module
+    recognises the television's own bracket. See the module.
+    """
+
+    __slots__ = ()
+
+    def __bool__(self):
+        return True
+
+    def __repr__(self):
+        return "<held by MQTTBridge>"
+
+
+HELD = _Held()
+
+
 def allowlisted(dialog):
     """Whether `dialog` is one of the channel lists, by its class or a base's name."""
     if dialog is None:
@@ -143,6 +191,35 @@ def _dialog_name(dialog):
         return "?"
 
 
+def _image_follows_tv_standby():
+    """Whether the image will ever queue a standby because the television asked.
+
+    `HdmiCec.messageReceived` does nothing at all unless `config.hdmicec.enabled`
+    is on, and only runs the `handlingStandbyFromTV` bracket around the queueing
+    call when `config.hdmicec.handle_tv_standby` is on too. With either off the
+    hook could never fire, and a hook that can never fire is not a capability.
+    An image that does not have one of the two settings gets none either.
+    """
+    try:
+        from Components.config import config
+
+        section = config.hdmicec
+        enabled = section.enabled.value
+        follows = section.handle_tv_standby.value
+    except Exception as error:
+        missing("config.hdmicec.enabled and config.hdmicec.handle_tv_standby", error)
+        return False
+    if not enabled:
+        LOG.info("HDMI-CEC is switched off in the receiver's settings; the standby workaround "
+                 "has nothing to work around")
+        return False
+    if not follows:
+        LOG.info("the receiver is set not to follow the television into standby; the standby "
+                 "workaround has nothing to work around")
+        return False
+    return True
+
+
 class _Queued:
     """One standby the television queued, held by the queue entry itself."""
 
@@ -151,6 +228,9 @@ class _Queued:
         self.queued_at = time.time()
         # One-shot: whatever happens, this standby causes at most one close.
         self.acted = False
+        # When the channel list was closed for it, if it was. Counted only once
+        # the standby has actually happened.
+        self.closed_at = None
         self.deadline = deadline
 
 
@@ -259,11 +339,15 @@ class CecPublisher(Publisher):
             missing("Components.HdmiCec", error)
             return False
         if getattr(HdmiCec, "instance", None) is None:
-            # An image without HDMI-CEC, or one with it switched off so the
-            # singleton was never built. A hook that can never fire is not a
-            # capability.
+            # An image without HDMI-CEC support at all. (Switched off in the
+            # settings is not this case: the image builds the singleton either
+            # way, which is why the settings are read next.) A hook that can
+            # never fire is not a capability.
             LOG.info("HDMI-CEC is not running on this receiver; the standby workaround has "
                      "nothing to work around")
+            self.switched_off = True
+            return False
+        if not _image_follows_tv_standby():
             self.switched_off = True
             return False
         self._notifications = notifications
@@ -319,7 +403,10 @@ class CecPublisher(Publisher):
                 return
             instance = self._cec_class.instance
             if instance is None or getattr(instance, "handlingStandbyFromTV", False) is not True:
-                # The household's own standby — the remote, `cmd/power`. Never ours.
+                # The household's own standby — `cmd/power`, or anything else
+                # that queues one — never ours. `is True`, not truth: while this
+                # module holds the flag it reads `HELD`, and a standby queued then
+                # is not the television's.
                 return
             if any(queued.entry is entry for queued in self._queued):
                 return
@@ -363,9 +450,9 @@ class CecPublisher(Publisher):
         for queued in waiting:
             queued.acted = True
         self._publish()
-        self._close_the_channel_list()
+        self._close_the_channel_list(waiting)
 
-    def _close_the_channel_list(self):
+    def _close_the_channel_list(self, waiting):
         session = self.session
         try:
             if session is None or not getattr(session, "in_exec", False):
@@ -397,11 +484,13 @@ class CecPublisher(Publisher):
             # outcome that was wanted anyway.
             LOG.exception("closing %s raised; the receiver is unaffected", name)
             return
-        self._count += 1
-        self._kind = KIND_CLOSED
-        self._last_intervention = int(time.time())
-        LOG.info("closed %s so that the television's standby could proceed", name)
-        self._publish()
+        # Not counted yet: a close is an intervention once the standby it
+        # released has happened (`_after_standby`). One that released nothing
+        # is counted once, as a drop, at the standby's deadline.
+        closed_at = int(time.time())
+        for queued in waiting:
+            queued.closed_at = closed_at
+        LOG.info("closed %s so that the television's standby can proceed", name)
 
     # ----------------------------------------------------------- holding the echo --
 
@@ -409,7 +498,7 @@ class CecPublisher(Publisher):
         """Hold `handlingStandbyFromTV` asserted across the close. See the module."""
         if self._hold is not None:
             # Already held for an earlier close: the value to put back is the one
-            # recorded then, not the `True` this module wrote.
+            # recorded then, not the `HELD` this module wrote.
             self._hold_deadline.start(HOLD_SECONDS * 1000, True)
             return
         try:
@@ -419,7 +508,8 @@ class CecPublisher(Publisher):
                          "receiver may echo the standby back to the television")
                 return
             previous = instance.handlingStandbyFromTV
-            instance.handlingStandbyFromTV = True
+            # 🔴 `HELD`, never `True`: see the module.
+            instance.handlingStandbyFromTV = HELD
         except Exception:
             LOG.exception("could not hold the television's standby flag; the list is closed "
                           "anyway, and the receiver may echo the standby back")
@@ -451,10 +541,24 @@ class CecPublisher(Publisher):
             LOG.exception("the standby counter hook raised; the receiver is unaffected")
 
     def _after_standby(self):
+        """The receiver went to standby and the image has read the flag."""
         self._release_hold()
+        closed_at = None
         for queued in list(self._queued):
-            if not self._still_queued(queued.entry):
-                self._forget(queued)
+            if self._still_queued(queued.entry):
+                # The television asked again before the first was carried out.
+                # That request is done now: removed, by identity, so waking the
+                # receiver does not put it straight back to sleep.
+                self._remove_from_queue(queued.entry)
+                LOG.info("removed a repeated standby from the television; the receiver is "
+                         "already in standby")
+            elif queued.closed_at is not None:
+                closed_at = max(closed_at or 0, queued.closed_at)
+            self._forget(queued)
+        if closed_at is not None:
+            # One close, one intervention, however many entries it released.
+            self._count_intervention(KIND_CLOSED, closed_at)
+            LOG.info("the television's standby went ahead after the channel list was closed")
         self._publish()
 
     # ------------------------------------------------------------ part 2: stale --
@@ -465,27 +569,40 @@ class CecPublisher(Publisher):
         if queued is None:
             return
         self._forget(queued)
-        removed = False
-        try:
-            queue = self._notifications.notifications
-            for index, item in enumerate(queue):
-                # By identity and nothing else: the household's own standby is
-                # an equal tuple, and must survive this.
-                if item is entry:
-                    del queue[index]
-                    removed = True
-                    break
-        except Exception:
-            LOG.exception("could not remove a stale standby from the queue")
-        if removed:
-            self._count += 1
-            self._kind = KIND_DROPPED
-            self._last_intervention = int(time.time())
+        if self._remove_from_queue(entry):
+            # Counted as a drop, and only as a drop, even if the channel list
+            # was closed for it: that close released nothing.
+            self._count_intervention(KIND_DROPPED, int(time.time()))
             LOG.info("dropped a standby the television asked for %d seconds ago and nothing "
                      "carried out", STALE_SECONDS)
+        elif queued.closed_at is not None:
+            # Taken off the queue after the close, but the standby counter was
+            # never seen to move — on an image where it could not be watched.
+            # Being drained is the best evidence there is that the close worked.
+            self._count_intervention(KIND_CLOSED, queued.closed_at)
+            LOG.info("the television's standby went ahead after the channel list was closed")
         else:
             LOG.debug("a standby from the television was carried out normally")
         self._publish()
+
+    def _remove_from_queue(self, entry):
+        """Take `entry` off the image's queue. By identity, and nothing else."""
+        try:
+            queue = self._notifications.notifications
+            for index, item in enumerate(queue):
+                # The household's own standby is an equal tuple, and must
+                # survive this.
+                if item is entry:
+                    del queue[index]
+                    return True
+        except Exception:
+            LOG.exception("could not remove a standby from the queue")
+        return False
+
+    def _count_intervention(self, kind, when):
+        self._count += 1
+        self._kind = kind
+        self._last_intervention = when
 
     def _forget(self, queued):
         queued.deadline.stop()

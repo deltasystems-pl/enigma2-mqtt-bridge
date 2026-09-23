@@ -1270,8 +1270,13 @@ standby_module.TryQuitMainloop = TryQuitMainloop
 # - `__init__` registers `onEnterStandby` on `config.misc.standbyCounter` with
 #   `initial_call=False` [368], and starts with `useStandby = True` and
 #   `handlingStandbyFromTV = False` [353–354].
-# - `messageReceived`, for `<Standby>` (0x36) with `handle_tv_standby` on, is
-#   exactly `handlingStandbyFromTV = True; self.standby(); … = False` [454–457].
+# - `messageReceived` does nothing unless `config.hdmicec.enabled` is on [385],
+#   and for `<Standby>` (0x36) with `handle_tv_standby` on it is exactly
+#   `handlingStandbyFromTV = True; self.standby(); … = False` [454–457]. With
+#   either setting off the television's standby is never queued at all. The
+#   singleton is built either way: `__init__` sets `instance` [342] before it
+#   looks at `enabled` [355].
+# - The flag is read only as a truth test [618], never compared with `True`.
 # - `standby()` queues `AddNotification(Screens.Standby.Standby)` unless already
 #   in standby [635–637].
 # - `onEnterStandby` appends to the standby screen's `onClose` and calls
@@ -1305,6 +1310,8 @@ class HdmiCec:
         config.misc.standbyCounter.addNotifier(self.onEnterStandby, initial_call=False)
 
     def messageReceived(self, cmd):
+        if not config.hdmicec.enabled.value:
+            return
         if cmd == STANDBY_OPCODE and config.hdmicec.handle_tv_standby.value:
             self.handlingStandbyFromTV = True
             self.standby()
