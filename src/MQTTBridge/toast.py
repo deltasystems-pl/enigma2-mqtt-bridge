@@ -55,10 +55,23 @@ same for every message, under a header that always reads „MQTT Bridge" in the
 receiver's language. The header is not the device name, which is provisioned from
 outside and could be anything; it is what says a message came from this plugin
 rather than from the receiver. The `type` a payload carries is validated as for a
-popup and then ignored, and a colour escape in the text is removed, so nothing in
-a payload can dress a toast up as something else. A skin may define a screen
-called `MQTTBridgeToast` and restyle it, as it may any screen: that is the box
-owner's choice, not a broker client's.
+popup and then ignored, and **no backslash in the text reaches the screen**, so
+nothing in a payload can dress a toast up as something else.
+
+🔴 **Every backslash, not only the colour escape.** enigma2's text renderer reads a
+backslash, a `c` and the eight characters after it as a colour change — and it
+reads them **after** right-to-left reordering, on the characters in the order they
+are drawn. A payload that mixes a right-to-left script with `cFFFF0000\\` is
+therefore an escape on the screen that is no escape in the string, and no pattern
+over the string can find it; on a receiver, a Hebrew toast carrying exactly that
+was drawn with the escape consumed and never shown. The renderer also reads
+`\\n`, `\\t` and `\\r`. So a colour escape the string does spell out is removed
+whole, and then every backslash that is left is removed as well: a literal `\\n`
+shows as `n`. A real newline character is not a backslash, and stays a line
+break.
+
+A skin may define a screen called `MQTTBridgeToast` and restyle it, as it may any
+screen: that is the box owner's choice, not a broker client's.
 
 **Lifecycle.** Instantiated when the bridge starts with a session and `osd_toast`
 on, and the capability `toast` is claimed only once that has worked — an image
@@ -134,7 +147,8 @@ TEXT_COLOUR = "#00f0f0f0"
 
 # enigma2's text renderer reads a backslash, a `c` and the eight characters after
 # them as a colour change. A toast whose colour the payload chooses is not one
-# fixed appearance.
+# fixed appearance. Removed whole where the string spells it out; every other
+# backslash is removed after it (see the module).
 COLOUR_ESCAPE = re.compile(r"\\c.{8}", re.DOTALL)
 
 SWITCHED_OFF = "the discreet toast is switched off on this receiver"
@@ -159,9 +173,24 @@ def strip_colour_escapes(text):
     return text
 
 
+def strip_backslashes(text):
+    """`text` with no backslash left in it — the escapes first, whole, then the rest.
+
+    Stripping the colour escapes first makes a plain `\\cFFFF0000` vanish as it
+    always did, rather than leave `cFFFF0000` behind. Removing the backslashes
+    that remain is what closes the escape the renderer only sees after
+    right-to-left reordering.
+    """
+    return strip_colour_escapes(text).replace("\\", "")
+
+
 def prepare_text(text):
-    """What the toast will display, or None when nothing would be left of it."""
-    text = strip_colour_escapes(str(text or ""))
+    """What the toast will display, or None when nothing would be left of it.
+
+    Cleaned before the cap, so the 200 characters are 200 displayed ones and no
+    escape is cut in half.
+    """
+    text = strip_backslashes(str(text or ""))
     if not text.strip():
         return None
     if len(text) > MAX_TEXT:

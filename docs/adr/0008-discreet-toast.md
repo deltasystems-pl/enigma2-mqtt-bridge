@@ -74,8 +74,14 @@ none of the skin-expression features, which are not on every image.
 
 **One fixed appearance.** A dark, slightly transparent box, light text, and a header that always
 reads the plugin's name in the receiver's language — not the device name, which is provisioned from
-outside. Every colour escape is removed from the text before it is shown, repeatedly, since removing
-one can join the characters around it into another. The text is capped at 200 characters.
+outside. **No backslash reaches the screen.** Every colour escape the text spells out is removed
+whole, repeatedly, since removing one can join the characters around it into another. Then every
+backslash that is left is removed too, because the renderer reads its escapes **after**
+right-to-left reordering: text that mixes a right-to-left script with `cFFFF0000\` is an escape on
+screen and none in the string, and a receiver showed exactly that — the escape consumed by the
+renderer and never drawn. A literal `\n` therefore shows as `n`; a real newline
+character stays a line break. The text is capped at 200 characters **after** this, so the cap
+counts what is displayed.
 
 **The contract.** `cmd/message` gains an optional `style`. **The handler decides the style before it
 applies any default.** Absent or `null` — or a payload that is not a JSON object — is the popup,
@@ -84,7 +90,7 @@ refused. For a toast:
 
 | Field | Rule |
 |---|---|
-| `text` | required; empty refused; truncated at 200; colour escapes removed |
+| `text` | required; empty refused; every backslash removed (colour escapes whole), then truncated at 200 |
 | `timeout` | parsed as the popup parses it, with `int()`; default **5**; **`0` or less refused** („a toast hides itself; timeout must be 1–30 seconds"); more than 30 becomes 30, with a note in the log |
 | `type` | validated exactly as for a popup — an unknown value is refused, so a payload is valid or invalid whatever its style — and then ignored |
 
@@ -122,5 +128,7 @@ skin-reload callback, stopping — is wrapped, and a failure is a line in the lo
   still hidden when the standby counter moves — rather than no toast at all.
 - **The geometry is a starting point, not a measurement.** Legibility and size on a real television,
   and how the translucent box reads over bright video, need a person looking at the screen.
+- **A toast cannot show a backslash at all**, even one a sender meant literally — a path, a
+  regular expression. That is the price of an appearance the payload cannot change.
 - **The popup still passes colour escapes through.** Whether it should get the same treatment is a
   separate decision; this record does not change the popup in any way.

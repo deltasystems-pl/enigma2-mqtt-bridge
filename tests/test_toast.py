@@ -295,9 +295,38 @@ def test_an_escape_counts_a_newline_as_one_of_its_eight_characters(live_bridge, 
     assert shown_text(live_bridge) == "Alarm"
 
 
-def test_a_backslash_c_without_eight_characters_is_left_alone(live_bridge, factory):
+def test_a_backslash_that_is_no_escape_is_removed_too(live_bridge, factory):
     send(factory, {"text": "C:\\config", "style": "toast"})
-    assert shown_text(live_bridge) == "C:\\config"
+    assert shown_text(live_bridge) == "C:config"
+
+
+def test_an_escape_only_the_renderer_would_see_leaves_no_backslash(live_bridge, factory):
+    """Measured on a receiver: the renderer reads escapes after right-to-left reordering.
+
+    In the string the backslash comes *after* `cFFFF0000`, so no pattern over the
+    string sees an escape; on screen it was consumed as one and never drawn.
+    """
+    send(factory, {"text": "א cFFFF0000\\ב – test RTL", "style": "toast"})
+    assert error(factory) is None
+    assert "\\" not in shown_text(live_bridge)
+    assert shown_text(live_bridge) == "א cFFFF0000ב – test RTL"
+
+
+def test_a_literal_backslash_n_shows_as_n(live_bridge, factory):
+    send(factory, {"text": "one\\ntwo\\t\\r", "style": "toast"})
+    assert shown_text(live_bridge) == "onentwotr"
+
+
+def test_the_cap_counts_what_is_left_after_the_backslashes(live_bridge, factory):
+    send(factory, {"text": "\\" * 50 + "x" * 210, "style": "toast"})
+    assert shown_text(live_bridge) == "x" * 200
+
+
+def test_the_popup_keeps_every_backslash(live_bridge, factory):
+    """The popup path is unchanged, byte for byte: the rule is the toast's."""
+    text = "א cFFFF0000\\ב \\cFFFF0000Alarm C:\\config \\n"
+    send(factory, {"text": text})
+    assert Notifications.popups == [{"text": text, "type": 1, "timeout": 10, "id": "mqttbridge"}]
 
 
 def test_a_real_newline_is_kept(live_bridge, factory):
