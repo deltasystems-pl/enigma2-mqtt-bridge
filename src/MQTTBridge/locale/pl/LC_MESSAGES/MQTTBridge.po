@@ -605,3 +605,7 @@ msgstr "wtyczka się nie uruchomiła"
 #: src/MQTTBridge/webif.py
 msgid "the receiver's IP address"
 msgstr "adres IP dekodera"
+
+#: src/MQTTBridge/webif.py
+msgid "This page is out of date: it was changed in another tab or window since it was opened. Reload the page and try again."
+msgstr "Ta strona jest nieaktualna: od jej otwarcia coś zmieniono w innej karcie lub oknie. Odśwież stronę i spróbuj ponownie."

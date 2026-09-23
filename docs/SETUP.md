@@ -182,6 +182,9 @@ first, because every retained topic moves and Home Assistant sees a new device. 
 seconds, and `info` follows when it has. Only the fields you actually changed are saved: the form
 remembers what it showed, so a page left open while a setting was changed elsewhere — over
 `cmd/config`, or a permission switched off at the television — does not write its old value back.
+Only the changed fields are checked, too, so a value stored before these rules (a longer host, say)
+does not block saving something else; it is checked when you edit it. If another tab or window
+saved first, the page says it is out of date — reload it and make the change again.
 
 **What it does.** Every command the plugin accepts over MQTT, run through the same code with the
 same household-safety guards — a recording, a timer due, the softcam's one-a-minute limit. Deep
@@ -208,7 +211,7 @@ in the browser is the receiver's IP address, `localhost`, or the receiver's host
 `.local`), which is what stops a hostile web site from reaching it through a name it controls; and
 every change must come from the page itself (its `Origin`), carrying the token the page put into
 the form. That token is kept in the browser's OpenWebif session, is accepted only from the POST
-body — never from the address — and is replaced after every change that took effect; a refused
+body — never from the address; the page reads every field from the body alone — and is replaced after every change that took effect; a refused
 request leaves it as it was, so the page you are looking at still works. A confirmation step
 carries a separate token that is good for exactly one attempt at exactly that action. But while
 OpenWebif authentication is off, any web page a household member opens can already switch the

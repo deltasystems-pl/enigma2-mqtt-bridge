@@ -84,7 +84,9 @@ from the first. The page trusts the web interface that mounted it.
 - **The session's token**, taken from the POST body only (never the query string) and replaced
   after every write that took effect; a refused request keeps it. A confirmation carries its own
   token, good for one attempt.
-- **The exact field set of the form**, no extra, none missing, none repeated.
+- **The exact field set of the form**, no extra, none missing, none repeated — read from the POST
+  body, which the page parses itself with `&` as the only separator. Twisted's `request.args`
+  merges the query string in and also splits on `;`, so it is never consulted.
 
 Headers stay as they were — `no-store`, `nosniff`, `X-Frame-Options: SAMEORIGIN`, `no-referrer`,
 the CSP — with `frame-ancestors 'self'` added. The page stays **script-free**, so every confirmation

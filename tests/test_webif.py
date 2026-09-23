@@ -18,11 +18,13 @@ form carrying every setting instead of four.
 
 import html
 import importlib.util
+import io
 import re
 import sys
 import types
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import unquote_to_bytes, urlencode
 
 import pytest
 from Components.config import config, configfile
@@ -64,6 +66,7 @@ class _Request:
         args=None,
         prepath=(b"mqttbridge",),
         uri=b"/mqttbridge",
+        raw_body=None,
     ):
         # What Twisted leaves behind: the path segments already consumed to
         # reach this resource, as bytes.
@@ -72,7 +75,16 @@ class _Request:
         self._secure = secure
         self._session = session if session is not None else new_session()
         self._headers = {"host": host, "origin": origin, "content-type": content_type}
-        self.args = args or {}
+        # What Twisted does with a POST: the body as a file, and `args` as the
+        # query string *and* the body merged, the query parsed its own way.
+        body = args or {}
+        self.content = io.BytesIO(urlencode(
+            [(key, value) for key, values in body.items() for value in values]
+        ).encode("ascii") if raw_body is None else raw_body)
+        query = uri.split(b"?", 1)[1] if b"?" in uri else b""
+        self.args = twisted_parse_qs(query)
+        for key, values in body.items():
+            self.args.setdefault(key, []).extend(values)
         self.response_code = 200
         self.response_headers = {}
 
@@ -93,6 +105,25 @@ class _Request:
 
     def setResponseCode(self, code):
         self.response_code = code
+
+
+def twisted_parse_qs(query):
+    """`twisted.web.http.parse_qs(query, 1)`, as Twisted 24 fills `request.args`.
+
+    🔴 It splits on `;` as well as `&` and unquotes `+` and `%XX` in names, which
+    is why the page cannot trust `request.args` to be the body.
+    """
+    found = {}
+    for item in re.split(rb"[&;]", query):
+        if not item:
+            continue
+        pair = item.split(b"=", 1)
+        if len(pair) != 2:
+            continue
+        name = unquote_to_bytes(pair[0].replace(b"+", b" "))
+        value = unquote_to_bytes(pair[1].replace(b"+", b" "))
+        found.setdefault(name, []).append(value)
+    return found
 
 
 class _UntouchableSession:
@@ -381,7 +412,6 @@ def _valid_change(bridge):
         ("prefix of the real token", 403),
         ("another session's token", 403),
         ("empty unissued token", 403),
-        ("token in the query string", 403),
         ("rendered snapshot tampered", 403),
         ("rendered snapshot of another session", 403),
         ("extra field", 400),
@@ -429,9 +459,6 @@ def test_a_refused_post_changes_nothing(connected_bridge, page, factory, setting
         assert len(own) >= 32 and csrf != own
     elif case == "empty unissued token":
         csrf = ""
-    elif case == "token in the query string":
-        # Twisted merges the query into `request.args`; a token in a URL leaks.
-        options["uri"] = ("/mqttbridge?csrf=" + token(session)).encode()
     elif case == "rendered snapshot tampered":
         fields["rendered"] = webif._seal(token(session), fields["rendered"])
         fields["rendered"] = fields["rendered"].replace('"screenshot_delay":4',
@@ -455,6 +482,105 @@ def test_a_refused_post_changes_nothing(connected_bridge, page, factory, setting
     assert configfile.save_calls == 0
     assert factory.client.published == before
     assert b"<script" not in body
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "csrf={t}",
+        ";csrf={t}",
+        "x;csrf={t}",
+        "form=action;csrf={t}",
+        "%63srf={t}",
+        "csrf+={t}",
+        "a=1&csrf={t}",
+        "a=1;%63srf={t}",
+    ],
+)
+def test_a_token_in_the_address_is_not_a_token(connected_bridge, page, monkeypatch, query):
+    """🔴 Twisted merges the query into `request.args` and splits it on `;` too.
+
+    The token is only ever read from the POST body, so no spelling of it in the
+    URL — which ends up in logs, history and `Referer` — counts.
+    """
+    sent = []
+    monkeypatch.setattr(connected_bridge, "run_command", lambda *args: sent.append(args))
+    session = new_session()
+    uri = ("/mqttbridge?" + query.format(t=token(session))).encode()
+
+    request, _body = post(page(connected_bridge), session, action_fields("discovery"),
+                          csrf=None, uri=uri)
+
+    assert request.response_code == 403
+    assert sent == []
+
+
+def test_only_the_body_is_read_even_for_ordinary_fields(connected_bridge, page, monkeypatch):
+    """A field smuggled in the query string is not a field of the form."""
+    sent = []
+    monkeypatch.setattr(connected_bridge, "run_command",
+                        lambda name, text, origin: sent.append((name, text)))
+    request, _body = post(page(connected_bridge), new_session(), action_fields("volume"),
+                          uri=b"/mqttbridge?level=30")
+    assert request.response_code == 400
+    assert sent == []
+
+
+def test_the_body_is_split_on_ampersands_only(connected_bridge, page, monkeypatch):
+    """`application/x-www-form-urlencoded` has one separator; `;` stays in its value."""
+    sent = []
+    monkeypatch.setattr(connected_bridge, "run_command",
+                        lambda name, text, origin: sent.append((name, text)))
+    session = new_session()
+    body = ("form=action&action=key&csrf=" + token(session)
+            + "&key=KEY_RED;long=true&long=false").encode()
+    request = _Request(session=session, raw_body=body)
+
+    page(connected_bridge).render_POST(request)
+
+    assert request.response_code == 200
+    assert sent == [("key", '{"key":"KEY_RED;long=true","long":false}')]
+
+
+def test_a_page_left_open_after_another_tab_saved_says_it_is_out_of_date(
+    connected_bridge, page, settings
+):
+    resource = page(connected_bridge)
+    session = new_session()
+    _request, old_tab = get(resource, session)
+    _request, new_tab = get(resource, session)
+
+    request, _body = post(resource, session, submitted(new_tab, log_level="debug"), csrf=None)
+    assert request.response_code == 200
+
+    request, body = post(resource, session, submitted(old_tab, screenshot_delay="9"), csrf=None)
+
+    assert request.response_code == 403
+    assert b"out of date" in body
+    assert b"Reload the page" in body
+    assert settings.screenshot_delay.value == 4
+
+
+def test_an_invalid_value_stored_before_does_not_block_other_saves(connected_bridge, page,
+                                                                    settings):
+    """A 200-character host from before the page's rules, and a save that leaves it alone."""
+    settings.host.value = "h" * 200
+    settings.host.save()
+    resource = page(connected_bridge)
+    session = new_session()
+    _request, body = get(resource, session)
+
+    request, reply = post(resource, session, submitted(body, log_level="debug"), csrf=None)
+
+    assert request.response_code == 200, re.findall(r"class='notice'>([^<]*)", reply.decode())
+    assert settings.log_level.value == "debug"
+    assert settings.host.value == "h" * 200
+
+    # Editing it is validated as always.
+    _request, body = get(resource, session)
+    request, _reply = post(resource, session, submitted(body, host="i" * 200), csrf=None)
+    assert request.response_code == 400
+    assert settings.host.value == "h" * 200
 
 
 def test_the_token_is_replaced_after_a_save(connected_bridge, page, settings):

@@ -44,7 +44,7 @@ import re
 import secrets
 import socket
 import stat
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import unquote_to_bytes, urlsplit
 
 try:
     from twisted.web import http, resource
@@ -89,6 +89,9 @@ MAX_FIELD_BYTES = 4096
 # A confirmation carries the change it confirms, which for a settings save can
 # be several text fields at once.
 MAX_CONFIRM_BYTES = 16384
+# The whole POST body: every setting at its field limit, the rendered snapshot
+# and the token, with room to spare. Anything larger is not this page's form.
+MAX_BODY_BYTES = 262144
 # What the page shows of one retained payload. The bridge keeps more.
 MAX_SHOWN_PAYLOAD = 4096
 SETTINGS_FORM = "settings"
@@ -272,41 +275,72 @@ def _rotate(request):
     _session(request)[CSRF_KEY] = secrets.token_urlsafe(32)
 
 
-def _token_in_query(request):
-    """True when a token arrived in the URL rather than in the POST body.
+class _OutOfDate(PermissionError):
+    """A well-formed token that is no longer this session's: the page is stale."""
 
-    Twisted merges the query string into `request.args`, so without this a token
-    could ride in a link — and a URL ends up in logs, in history and in a
-    `Referer`. A token is accepted from the body only.
+
+def _body_fields(request):
+    """The POST body's fields, `{name: [value, …]}` in bytes — and nothing else.
+
+    🔴 Twisted's `request.args` is the query string and the body merged, and its
+    parser splits on `;` as well as `&`, so a token could arrive in the URL in
+    spellings a query check would have to enumerate — and a URL ends up in logs,
+    in history and in a `Referer`. So the page never reads `request.args`: it
+    parses the body itself, as `application/x-www-form-urlencoded` is defined,
+    with `&` as the only separator. A field in the query string is simply not a
+    field the page can see.
     """
-    uri = getattr(request, "uri", b"") or b""
-    if isinstance(uri, str):
-        uri = uri.encode("utf-8", "replace")
-    query = uri.split(b"?", 1)[1] if b"?" in uri else b""
-    return b"csrf" in parse_qs(query, keep_blank_values=True)
+    cached = getattr(request, "_mqttbridge_body", None)
+    if cached is not None:
+        return cached
+    body = b""
+    content = getattr(request, "content", None)
+    if content is not None:
+        try:
+            content.seek(0)
+            body = content.read(MAX_BODY_BYTES + 1)
+        except Exception:
+            body = b""
+    if not isinstance(body, bytes) or len(body) > MAX_BODY_BYTES:
+        raise ValueError("the request body is too large")
+    fields = {}
+    for part in body.split(b"&"):
+        if not part:
+            continue
+        name, _equals, value = part.partition(b"=")
+        name = unquote_to_bytes(name.replace(b"+", b" "))
+        value = unquote_to_bytes(value.replace(b"+", b" "))
+        fields.setdefault(name, []).append(value)
+    try:
+        request._mqttbridge_body = fields
+    except Exception:
+        pass
+    return fields
 
 
 def _check_token(request):
-    """The session's token, from the POST body, or PermissionError."""
+    """The session's token, from the POST body, or PermissionError.
+
+    A token of the right shape that is simply not the current one is what an
+    open page sends after another tab of the same session saved and replaced it,
+    so that refusal says the page is out of date rather than only „rejected".
+    """
     try:
         supplied = _single_arg(request, "csrf")
     except ValueError:
         raise PermissionError from None
     expected = _session(request).get(CSRF_KEY)
-    if (
-        not isinstance(expected, str)
-        or len(expected) < 32
-        or len(supplied) < 32
-        or not hmac.compare_digest(supplied, expected)
-    ):
+    if not isinstance(expected, str) or len(expected) < 32 or len(supplied) < 32:
         raise PermissionError
+    if not hmac.compare_digest(supplied, expected):
+        raise _OutOfDate
 
 
 # ------------------------------------------------------------------ the form --
 
 
 def _single_arg(request, name, limit=MAX_FIELD_BYTES):
-    values = request.args.get(name.encode("ascii"))
+    values = _body_fields(request).get(name.encode("ascii"))
     if not isinstance(values, list) or len(values) != 1:
         raise ValueError("missing or repeated form field " + name)
     value = values[0]
@@ -320,7 +354,7 @@ def _single_arg(request, name, limit=MAX_FIELD_BYTES):
 
 def _bool_arg(request, name):
     """A checkbox, sent as a hidden `false` and, when ticked, a `true` after it."""
-    values = request.args.get(name.encode("ascii"))
+    values = _body_fields(request).get(name.encode("ascii"))
     if values not in ([b"false"], [b"false", b"true"]):
         raise ValueError("invalid checkbox field " + name)
     return values[-1].decode("ascii")
@@ -328,7 +362,7 @@ def _bool_arg(request, name):
 
 def _exact(request, names):
     """Exactly these fields and no other — no extra, no missing."""
-    if set(request.args) != {name.encode("ascii") for name in names}:
+    if set(_body_fields(request)) != {name.encode("ascii") for name in names}:
         raise ValueError("unexpected or missing form field")
 
 
@@ -705,6 +739,18 @@ def _unseal(request):
     return values
 
 
+def _untouched(name, raw, rendered):
+    """True when a submitted field still says what the form was rendered with.
+
+    Compared after the type coercion alone — the limits are not asked, because a
+    field that was not edited is not being written.
+    """
+    try:
+        return settings_module.coerce(name, raw) == rendered
+    except ValueError:
+        return False
+
+
 def _changes(request, section):
     """The settings the form changes, validated.
 
@@ -724,9 +770,12 @@ def _changes(request, section):
             # Write-only: the field is always rendered empty, so empty means
             # „leave it as it is". Clearing a password is the setup screen's job.
             continue
-        wanted = settings_module.validate_setting(name, raw)
-        if name in rendered and wanted == rendered[name]:
+        if name in rendered and _untouched(name, raw, rendered[name]):
+            # Not validated either: a value stored before today's rules — a
+            # host longer than the page allows, say — must not make every
+            # other save on the page fail over a field nobody touched.
             continue
+        wanted = settings_module.validate_setting(name, raw)
         if wanted != settings_module.value(name, section):
             changes[name] = wanted
     return changes
@@ -1235,11 +1284,7 @@ class MQTTBridgeWebResource(resource.Resource):
         if not _host_allowed(request):
             return _misdirected(request)
         content_type = (request.getHeader("content-type") or "").split(";", 1)[0].lower()
-        if (
-            content_type != "application/x-www-form-urlencoded"
-            or not _same_origin(request)
-            or _token_in_query(request)
-        ):
+        if content_type != "application/x-www-form-urlencoded" or not _same_origin(request):
             return _answer(request, _("Request rejected."), http.FORBIDDEN)
         try:
             form = _single_arg(request, "form")
@@ -1251,6 +1296,15 @@ class MQTTBridgeWebResource(resource.Resource):
             if form == "action":
                 return _act(request)
             raise ValueError("unknown form")
+        except _OutOfDate:
+            return _answer(
+                request,
+                _(
+                    "This page is out of date: it was changed in another tab or window "
+                    "since it was opened. Reload the page and try again."
+                ),
+                http.FORBIDDEN,
+            )
         except PermissionError:
             return _answer(request, _("Request rejected."), http.FORBIDDEN)
         except _NotRunning as error:
