@@ -253,7 +253,9 @@ The full list is in [CHANGELOG.md](CHANGELOG.md).
    never waits behind an open channel list. `cmd/message` gains `style: popup | toast`; `popup`
    stays the default.
 4. **`cmd/epg_import`** — run the image's EPG importer, behind a permission that is never
-   writable over MQTT, with progress on an `epg_import` topic.
+   writable over MQTT, with progress on an `epg_import` topic that follows every import, whoever
+   started it. The import is the image's: its end freezes the menus for two or three seconds.
+   Decided in [ADR-0011](docs/adr/0011-epg-import-on-demand.md).
 5. **`wol_arm`** — arm Wake-on-LAN at start and before deep standby, and report in `info.wol` what
    is actually true. 🔴 Until the deep standby → magic packet drill passes, **deep standby may be
    one-way on your box.**

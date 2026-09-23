@@ -37,13 +37,15 @@ and settings survive a plugin upgrade.
 | `softcam_restart_allowed` | `off` | Gate for `cmd/softcam_restart` and for the automatic restart below. Off by default because it stops a running program on your receiver |
 | `softcam_autoheal` | `off` | Restart the softcam by itself when the channel you are watching is encrypted and stops decoding. Does nothing unless the permission above is on |
 | `softcam_autoheal_seconds` | `90` | How long a stuck decode has to hold before that happens, 30 to 600. A healthy encrypted channel refreshes its ECM file about every ten seconds, so anything much shorter is reading noise |
+| `epg_import_allowed` | `off` | Gate for `cmd/epg_import`, which starts the image's EPG importer now. Off by default because the end of every import freezes the menus for two or three seconds; see below |
 | `log_level` | `info` | `error` / `warning` / `info` / `debug` |
 
-🔴 **`deep_standby_allowed` and `softcam_restart_allowed` are never writable over MQTT.** They are
+🔴 **`deep_standby_allowed`, `softcam_restart_allowed` and `epg_import_allowed` are never writable
+over MQTT.** They are
 set on the receiver — here, in the provisioning file, or on the [OpenWebif page](#the-openwebif-page)
 — and published in `info.settings` so that a consumer can hide a control the box would always
 refuse, but `cmd/config` rejects them like any other key outside its allowlist. The rule is the
-same for both: a setting that **enables** a command is granted on the receiver, and a setting
+same for all three: a setting that **enables** a command is granted on the receiver, and a setting
 that only **tunes** a command already permitted — `softcam_autoheal` and its delay — may be
 changed from the broker.
 
@@ -130,6 +132,43 @@ Two things it deliberately does not touch: the cam's own runtime directory, beca
 image's manual start screen uses would delete the live cam log with it, and the image's
 „skip this cam" marker file, because on these images the manager is the only thing that starts the
 cam at all and a marker left behind would disable it until the next interface restart.
+
+### What the EPG import does
+
+It asks the image's own EPG-Importer for an import now, exactly as the importer's „Manual" button
+does, without the button's dialogs — the same selected sources, the same settings. The plugin adds
+nothing of its own to the import and never loads the importer itself: it uses the one enigma2
+already loaded, and where there is none — or where the image's guide cannot take imported events
+and the importer would end by restarting the user interface — the command is simply not offered.
+
+What you should know first, because it is the importer's behaviour and applies to every import,
+scheduled ones included:
+
+- **At the end of every import the menus freeze for two or three seconds** while the importer saves
+  the guide on the thread that draws the picture. That is why the permission is off by default, and
+  why the import is refused while recording, with a timer due within ten minutes, and within ten
+  minutes of the importer's own scheduled run.
+- **With the importer's „clear old EPG" setting on**, the guide is empty until the import finishes.
+- **The importer's own deep-standby settings apply**, to an import started from Home Assistant as
+  to a scheduled one: after **every** import, whoever started it, the importer checks whether to put the receiver into
+  deep standby. It does so only when **all four** of its own conditions hold — its „shutdown"
+  setting is on, its deep-standby setting is „wake up", its „deep standby after import" setting is
+  on, and a timer woke the receiver — and then only if the receiver is in standby, nothing is
+  recording and it is not already shutting down. The settings are all off by default. That is the
+  importer, not this plugin.
+- **A network recording mount can hold the press up.** Before its first download the importer reads
+  `/proc/mounts` and asks the recording mount for its free space, on the main loop, to choose
+  where to put the file. If that mount is a network share that has stopped answering, pressing the
+  button can freeze the picture until the mount gives up — as the importer's scheduled run would.
+
+A normal run takes a minute or two. The `epg_import` topic says `running` from the moment it starts —
+whoever started it, including the importer's own schedule — and `done` with the number of events,
+or `failed` with a sentence. The importer does not say which source failed, so neither can the
+plugin. While an import runs the plugin also refuses its own deep standby, reboot and
+user-interface restart, because a restart mid-import loses the run — except once its own start of
+the import has failed, or the import has run past its 30-minute watchdog. The importer can go on
+saying „running" after a start that failed part-way, until its next scheduled run, and a receiver
+that cannot be restarted for a day because of it is the worse outcome.
 
 ### What a screenshot costs
 
@@ -265,7 +304,8 @@ For headless installs — and for the companion integration's guided installer �
   "publish_keys": true,
   "screenshot": "on zap",
   "deep_standby_allowed": false,
-  "softcam_restart_allowed": false
+  "softcam_restart_allowed": false,
+  "epg_import_allowed": false
 }
 ```
 

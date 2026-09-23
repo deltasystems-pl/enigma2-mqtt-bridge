@@ -184,7 +184,7 @@ def test_the_default_registry_is_the_documented_order():
     assert [cls.name for cls in publishers.PUBLISHER_CLASSES] == [
         "power", "cec_workaround", "service", "epg", "tuner", "cam", "oscam", "softcam",
         "recording", "timers", "volume", "hdd", "process", "channels", "bouquet_context",
-        "epg_grid", "keys", "screenshot", "toast",
+        "epg_grid", "epg_import", "keys", "screenshot", "toast",
     ]
 
 

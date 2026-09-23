@@ -150,6 +150,7 @@ SETTING_GROUPS = (
         (
             "deep_standby_allowed",
             "softcam_restart_allowed",
+            "epg_import_allowed",
             "cec_standby_workaround",
             "osd_toast",
         ),
@@ -642,6 +643,13 @@ def actions(bouquets=()):
             ),
         ),
         Action("epg_grid", "epg_grid", _("Rebuild the EPG grid")),
+        Action(
+            "epg_import", "epg_import", _("Import the EPG now"),
+            confirm=lambda _values: _(
+                "EPG-Importer downloads the guide now. When it finishes, the menus "
+                "freeze for two or three seconds while the guide is saved."
+            ),
+        ),
         Action("discovery", "discovery", _("Publish discovery again")),
         Action(
             "ha_mode", "ha_mode", _("Home Assistant mode"),

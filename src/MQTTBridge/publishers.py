@@ -16,6 +16,7 @@ from .cam import CamPublisher
 from .cec import CecPublisher
 from .channels import ChannelsPublisher
 from .epggrid import EpgGridPublisher
+from .epgimport import EpgImportPublisher
 from .hdd import HddPublisher
 from .oscam import OscamPublisher
 from .power import PowerPublisher
@@ -45,6 +46,7 @@ PUBLISHER_CLASSES = (
     ChannelsPublisher,
     BouquetPublisher,
     EpgGridPublisher,
+    EpgImportPublisher,
     KeyPublisher,
     ScreenPublisher,
     ToastPublisher,

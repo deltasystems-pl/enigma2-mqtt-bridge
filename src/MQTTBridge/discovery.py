@@ -162,7 +162,8 @@ def _kibibytes(field):
 
 def build_discovery_components(node_id, friendly_name, base_topic, info, prefix="homeassistant",
                                channel_options=(), deep_standby_allowed=False,
-                               softcam_restart_allowed=False, previous=None):
+                               softcam_restart_allowed=False, epg_import_allowed=False,
+                               previous=None):
     """Home Assistant discovery payloads, as {topic: payload}.
 
     One device-based payload carrying every component, and eight device
@@ -184,7 +185,9 @@ def build_discovery_components(node_id, friendly_name, base_topic, info, prefix=
     root = str(base_topic).strip("/") + "/" + str(node_id)
 
     builder = _Components(node_id, slug, root, capabilities)
-    builder.add_all(channel_options, deep_standby_allowed, softcam_restart_allowed)
+    builder.add_all(
+        channel_options, deep_standby_allowed, softcam_restart_allowed, epg_import_allowed
+    )
     components = builder.finish(previous)
 
     payload = {
@@ -258,7 +261,8 @@ class _Components:
 
     # --------------------------------------------------------------- the entities --
 
-    def add_all(self, channel_options, deep_standby_allowed, softcam_restart_allowed=False):
+    def add_all(self, channel_options, deep_standby_allowed, softcam_restart_allowed=False,
+                epg_import_allowed=False):
         self.add(
             "power", "switch", "power",
             name="Power",
@@ -461,6 +465,31 @@ class _Components:
                 cmd_t=self.topic("cmd/softcam_restart"),
                 ent_cat="config",
                 ic="mdi:key-wireless",
+            )
+        self.add(
+            "epg_import", "sensor", "epg_import",
+            name="EPG import",
+            stat_t=self.topic("epg_import"),
+            val_tpl="{{ value_json.state | default(none) }}",
+            json_attr_t=self.topic("epg_import"),
+            json_attr_tpl=(
+                "{{ {'started': value_json.started, "
+                "'finished': value_json.finished, "
+                "'events': value_json.events, "
+                "'error': value_json.error} | tojson }}"
+            ),
+            ent_cat="diagnostic",
+            ic="mdi:download",
+        )
+        if epg_import_allowed:
+            # Capability and permission, as for the softcam restart: the box can,
+            # and has been told it may.
+            self.add(
+                "epg_import_start", "button", "epg_import",
+                name="Import the EPG",
+                cmd_t=self.topic("cmd/epg_import"),
+                ent_cat="config",
+                ic="mdi:download",
             )
         self.add(
             "recording_disk", "binary_sensor", "hdd",

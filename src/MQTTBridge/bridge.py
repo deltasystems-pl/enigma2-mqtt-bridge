@@ -876,6 +876,7 @@ class Bridge:
             softcam_restart_allowed=bool(
                 info.get("settings", {}).get("softcam_restart_allowed")
             ),
+            epg_import_allowed=bool(info.get("settings", {}).get("epg_import_allowed")),
             previous=self.state.component_keys,
         )
         if not components:

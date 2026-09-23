@@ -11,6 +11,23 @@ version that has no section here.
 
 ### Added
 
+- **`cmd/epg_import`: ask the image's EPG-Importer for an import now**, behind the permission
+  `epg_import_allowed` — off by default, echoed read-only in `info.settings`, never writable over
+  MQTT, and not needed on the OpenWebif page, which gains the action and the setting. The import
+  starts exactly as the importer's own „Manual" button starts it; the payload is ignored. Refused
+  while an import runs (whoever started it), by the whole recording guard, within ten minutes of the
+  importer's own scheduled run, and when no sources are selected. A new retained **`epg_import`**
+  topic and capability (`state`, `started`, `finished`, `events`, `error`) **follows every import**,
+  including the image's scheduled ones; after one that imported events the EPG grid is rebuilt, and
+  each bouquet is published only if it changed. The capability is claimed only where enigma2 has
+  already loaded the importer and the image's guide can take imported events. A diagnostic sensor
+  and, with the permission on, a button in discovery mode.
+- **Deep standby, reboot and the user-interface restart are refused while an EPG import runs**,
+  whoever started it: a restart mid-import loses the run. The refusal lapses once the plugin's own
+  start of the import failed and left the importer saying „running", or once the 30-minute
+  watchdog fired, because the importer can go on saying „running" after a failed start until its
+  next scheduled run.
+
 - **What the enigma2 process costs**, on `process`: resident set, its high-water mark, threads,
   open file descriptors and the epoch second the process started, read from `/proc`. It answers the
   question a box that is never restarted eventually raises — „is it leaking?" — which cannot be
@@ -140,6 +157,18 @@ version that has no section here.
   part in the change comparison; it is still published, so nothing a consumer reads has moved.
 
 ### Notes
+- **An EPG import freezes the menus for two to three seconds at its end**, whoever starts it. The
+  importer saves the guide on the thread that draws the picture — measured at 2.3 and 2.6 seconds
+  during its scheduled runs — and the plugin cannot move that. The plugin adds nothing blocking of
+  its own: it asks whether the import is still running every two seconds while it runs and once a
+  minute otherwise, and never replaces the importer's completion callback.
+- **The importer has no failure signal**, so `epg_import` can say only that an import did not run,
+  finished with no events, or has not finished after 30 minutes — never which source failed.
+- **The importer's own deep-standby behaviour applies to every import**, including one started from
+  here, but only when all four of its conditions hold: its „shutdown" setting on, deep standby set
+  to „wake up", „deep standby after import" on, and the receiver woken by a timer — and then only in
+  standby, with nothing recording and not already shutting down. The three settings are off by
+  default.
 - **An instance is not a process.** A cam that forks a supervisor to keep its worker shows two
   processes for one instance, so `running_instances` counts matched processes whose parent is not
   itself matched — a plain process count reports a fault on a healthy receiver. A process is
