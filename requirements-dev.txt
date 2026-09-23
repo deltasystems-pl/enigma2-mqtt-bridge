@@ -14,8 +14,8 @@ pyflakes==3.4.0
 
 # Test-only. The discovery payloads carry Jinja templates that Home Assistant
 # renders, and comparing them as strings let a timestamp template ship with the
-# offset written twice. The tests render the two timestamp templates instead;
-# nothing in src/ imports this and the IPK does not carry it.
+# offset written twice. The tests render every one of them instead, through
+# tests/hatemplate.py; nothing in src/ imports this and the IPK does not carry it.
 jinja2==3.1.6
 pytest==9.1.1 ; python_version >= "3.10"
 pytest==8.4.2 ; python_version < "3.10"

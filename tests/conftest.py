@@ -17,12 +17,12 @@ from its network thread. Every assertion about the contract in `docs/TOPICS.md`
 is an assertion about what it recorded.
 """
 
-import datetime
+import json
 import sys
 import types
 from pathlib import Path
 
-import jinja2
+import hatemplate
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -41,39 +41,18 @@ def _module(name, package=False):
 
 # ------------------------------------------------------- value templates --
 
-# The discovery payloads carry Jinja templates that Home Assistant renders, and
-# for a long time these tests only compared them as strings. That is how a
-# `timestamp_utc` with `+00:00` appended to it survived review and a release:
-# the filter already ends in the offset, every assertion matched the string it
-# expected to see, and no assertion ever looked at what the string produces.
-#
-# 🔴 `_timestamp_utc` below is a COPY of Home Assistant's own filter, from
-# `homeassistant/helpers/template/extensions/datetime.py` in 2026.9.2:
-#
-#     return dt_util.utc_from_timestamp(value).isoformat()
-#
-# where `dt_util.utc_from_timestamp(value)` is `datetime.fromtimestamp(value,
-# UTC)`. Checked by rendering the same template through Home Assistant's own
-# engine on 2026.9.2 and comparing the output byte for byte. Being a copy it can
-# go stale with nothing here noticing, which is exactly why this covers the two
-# timestamp templates and is not extended to filters nobody has run: a shim that
-# guesses looks like coverage and is worse than a string compare.
-#
-# `int` is left as Jinja's own filter. Home Assistant replaces it with a
-# forgiving one, and the two differ only on input these templates never reach it
-# with — every use sits behind an `{% if %}` that excludes null and absent, and
-# the plugin publishes a whole number or nothing.
-
-
-def _timestamp_utc(value):
-    return datetime.datetime.fromtimestamp(value, datetime.timezone.utc).isoformat()
+# The discovery payloads carry Jinja templates that Home Assistant renders.
+# Tests render them — never compare them as strings, which is how a
+# `timestamp_utc` with a second `+00:00` survived review and a release — and
+# they render them with `hatemplate`: Home Assistant's own `int`, `round` and
+# `timestamp_utc`, and a guard that refuses any filter, test or global it does
+# not reproduce. `test_discovery_templates.py` renders every template the plugin
+# emits; this is the shorthand the feature modules use for their own.
 
 
 def render_value_template(template, payload):
-    """What Home Assistant would hand the entity for this `val_tpl`."""
-    environment = jinja2.Environment()
-    environment.filters["timestamp_utc"] = _timestamp_utc
-    return environment.from_string(template).render(value_json=payload)
+    """What Home Assistant would hand the entity for this `val_tpl` and payload."""
+    return hatemplate.render(template, value=json.dumps(payload), value_json=payload)
 
 
 # ------------------------------------------------------------------- enigma --
