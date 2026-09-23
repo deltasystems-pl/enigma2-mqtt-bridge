@@ -1,6 +1,7 @@
 # ADR-0008: The discreet toast is made of widgets that bind no keys, refuses a timeout it cannot honour, and is deleted rather than closed
 
-**Status:** accepted 2026-09-23, amended 2026-09-23, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) (the box-only setting)
+**Status:** accepted 2026-09-23, amended 2026-09-23 (twice: the backslash rule, then the popup
+under it), amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) (the box-only setting)
 **Date:** 2026-09-23
 **Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §2, in part — it
 described this feature, and three parts of it were right for the wrong reason or contradicted
@@ -85,10 +86,18 @@ this, so the cap counts what is displayed. (Amended 2026-09-23: this record firs
 escape together with its eight characters and then the remaining backslashes, and before that only
 the escape. The measurement above ended the first rule; the operator then chose the plainer second.)
 
+**The rule covers both styles** (amended 2026-09-23, by operator decision, while this record is
+still unreleased). The popup's text is drawn by the same renderer, so everything above about
+escapes is as true of a popup as of a toast; a popup that could still recolour its text or be broken
+into lines by a payload would leave the escape problem open on the default style. The popup removes
+every backslash and nothing else through the toast's own function — one rule in one place — then
+applies its own cap of **500** to what is left, and refuses a text with nothing left as empty, as it
+always refused a blank one.
+
 **The contract.** `cmd/message` gains an optional `style`. **The handler decides the style before it
 applies any default.** Absent or `null` — or a payload that is not a JSON object — is the popup,
-unchanged byte for byte. `"toast"`, trimmed and case-insensitive, is the toast; any other value is
-refused. For a toast:
+unchanged except that its text follows the rule above. `"toast"`, trimmed and case-insensitive, is
+the toast; any other value is refused. For a toast:
 
 | Field | Rule |
 |---|---|
@@ -130,7 +139,9 @@ skin-reload callback, stopping — is wrapped, and a failure is a line in the lo
   still hidden when the standby counter moves — rather than no toast at all.
 - **The geometry is a starting point, not a measurement.** Legibility and size on a real television,
   and how the translucent box reads over bright video, need a person looking at the screen.
-- **A toast cannot show a backslash at all**, even one a sender meant literally — a path, a
+- **Neither style can show a backslash at all**, even one a sender meant literally — a path, a
   regular expression. That is the price of an appearance the payload cannot change.
-- **The popup still passes colour escapes through.** Whether it should get the same treatment is a
-  separate decision; this record does not change the popup in any way.
+- ~~**The popup still passes colour escapes through.** Whether it should get the same treatment is a
+  separate decision; this record does not change the popup in any way.~~ Decided the same day: it
+  gets the same treatment. **This changes the popup for existing senders**: a sender that relied on a
+  literal `\n` for a line break in a popup now shows an `n` and has to send a real newline.

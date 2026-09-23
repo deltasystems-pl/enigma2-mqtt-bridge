@@ -791,7 +791,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `volume` | `0`–`100`, or `{"level": 42}` | Sets the volume, with the on-screen bar | Out-of-range values are clamped and noted in the log |
 | `mute` | `ON` \| `OFF` | Sets mute | Never a blind toggle: the state is read first, and read back afterwards. A receiver refuses to mute at volume 0, and that refusal is reported |
 | `key` | `KEY_OK` \| `{"key": "KEY_OK", "long": true}` | Injects a remote key | Unknown key names are refused with the name in `last_error`; at most 20 a second |
-| `message` | `{"text": "…", "type": "info", "timeout": 10}` — or a bare string; `"style": "toast"` since 0.3.0 | Shows an on-screen popup, or a discreet toast | `text` is required and truncated to 500 characters; `type` is `info`, `warning` or `error` (default `info`); `timeout` is seconds (default 10, `0` until dismissed). A new message replaces the previous one rather than queueing behind it. The toast's rules differ — see below |
+| `message` | `{"text": "…", "type": "info", "timeout": 10}` — or a bare string; `"style": "toast"` since 0.3.0 | Shows an on-screen popup, or a discreet toast | `text` is required; since 0.3.0 **every backslash is removed** and nothing else, as for a toast, and what is left is truncated to 500 characters; `type` is `info`, `warning` or `error` (default `info`); `timeout` is seconds (default 10, `0` until dismissed). A new message replaces the previous one rather than queueing behind it. The toast's rules differ — see below |
 | `timer` | see below | Adds or deletes a recording timer | An add that overlaps an existing timer, or refers to an unknown event, is refused — and so is one the receiver quietly dropped as a duplicate of a timer it already had |
 | `record` | `start` \| `stop` | Starts or stops an instant recording of the current service | `start` records the current service for two hours; `stop` with nothing recording is a no-op with a note in `last_error` |
 | `screenshot` | any | Captures `screen` now, in standby as well | Rate-limited to one per five seconds |
@@ -811,15 +811,25 @@ Every one of them is refused when it arrives retained, as above.
 {"text": "…", "style": "toast", "timeout": 5}
 ```
 
-`style` is optional. **Absent or `null` is the popup, exactly as before 0.3.0**, and so is a payload
-that is not a JSON object. The style is decided before any default is applied.
+`style` is optional. **Absent or `null` is the popup, as before 0.3.0** — with one change to its
+text, below — and so is a payload that is not a JSON object. The style is decided before any
+default is applied.
 
-| Field | Type | Popup (unchanged) | Toast |
+| Field | Type | Popup | Toast |
 |---|---|---|---|
-| `text` | string | required; empty refused; truncated at 500 | required; empty refused; **every backslash is removed** and nothing else — `\cFFFF0000Alarm` shows as `cFFFF0000Alarm`, `C:\config.txt` as `C:config.txt`, a literal `\n` as `n` — then truncated at **200** |
+| `text` | string | required; empty refused; **every backslash is removed** and nothing else (since 0.3.0, the toast's rule), then truncated at **500** | required; empty refused; **every backslash is removed** and nothing else, then truncated at **200** |
 | `style` | string, optional | absent, `null` or `"popup"` | `"toast"` (trimmed, case-insensitive). Any other value is refused: „unknown message style '…'; expected popup or toast" |
 | `timeout` | integer seconds, optional | default **10**; `0` or less = until dismissed | default **5**; **`0` or less is refused** („a toast hides itself; timeout must be 1–30 seconds"); more than `30` becomes `30`, with a note in the log |
 | `type` | `info` \| `warning` \| `error`, optional | chooses the box's icon | **validated exactly as for a popup** — an unknown value is refused, so a payload is valid or invalid whatever its style — and then **ignored** |
+
+**One text rule for both styles.** `\cFFFF0000Alarm` shows as `cFFFF0000Alarm`, `C:\config.txt` as
+`C:config.txt`, a literal `\n` as `n`; a real newline character is not a backslash and stays a line
+break. The cap counts the characters left after the removal, and a text with nothing but backslashes
+and blanks is refused as empty („message text is empty"). enigma2's text renderer reads a backslash
+and what follows it as a colour change or a line break, and it does so after right-to-left
+reordering, where no narrower rule over the string can find it. Until 0.3.0 the popup passed every
+backslash through, so a sender that relied on `\n` for a line break in a popup has to send a real
+newline instead.
 
 `timeout` is read as the popup reads it, with `int()`: `"5"` is 5, `5.9` is 5 and `0.5` is 0, which a
 toast refuses; `null` or a non-number is refused with „'…' is not a number of seconds".

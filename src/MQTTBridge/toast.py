@@ -158,6 +158,7 @@ def strip_backslashes(text):
     Every escape enigma2's renderer knows begins with a backslash, and it finds
     them after right-to-left reordering, where no pattern over the string can.
     Without a backslash there is no escape, whatever order the text is drawn in.
+    The popup (`osd.py`) calls this too: one rule for both styles, in one place.
     """
     return text.replace("\\", "")
 
