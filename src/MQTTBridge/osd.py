@@ -9,6 +9,17 @@ through its own catalogue would mangle a sentence it has never seen. What *is*
 this plugin's business is that the popup cannot stack: every message replaces
 the previous one, because `AddPopup` with no identifier would leave a queue of
 notifications for somebody to dismiss one at a time with a remote control.
+
+🔴 **No backslash reaches the screen here either.** The popup's text is drawn
+by the same enigma2 text renderer as the toast's, which reads a backslash and
+what follows it as a colour change or a line break, and reads it after
+right-to-left reordering, where no pattern over the string can find it. So the
+popup follows the toast's rule, through the toast's own function, so that there
+is one rule in one place: every backslash is removed and nothing else. A literal
+`\\n` shows as `n`, a real newline stays a line break, and the 500 characters
+are counted after the removal, so they are 500 displayed ones. A text that was
+nothing but backslashes and blanks is refused as empty, exactly as a blank one
+always was. The reasoning, and the measurement behind it, is in `toast.py`.
 """
 
 from .log import get_logger
@@ -79,7 +90,11 @@ def type_refusal(kind):
 
 def show(text, kind="info", timeout=DEFAULT_TIMEOUT):
     """Put `text` on the screen. None on success, otherwise the refusal."""
-    text = str(text or "")
+    # Imported here rather than at the top: `toast` reaches back into this
+    # module for the type check, and neither needs the other to import.
+    from .toast import strip_backslashes
+
+    text = strip_backslashes(str(text or ""))
     if not text.strip():
         return "message text is empty"
     if len(text) > MAX_TEXT:

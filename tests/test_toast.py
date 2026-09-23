@@ -324,11 +324,43 @@ def test_the_cap_counts_what_is_left_after_the_backslashes(live_bridge, factory)
     assert shown_text(live_bridge) == "x" * 200
 
 
-def test_the_popup_keeps_every_backslash(live_bridge, factory):
-    """The popup path is unchanged, byte for byte: the rule is the toast's."""
+def test_the_popup_loses_every_backslash_too(live_bridge, factory):
+    """One rule for both styles: the popup is drawn by the same renderer.
+
+    This test asserted the opposite until the operator decided the popup gets
+    the toast's rule; the text is the same, the expectation is inverted.
+    """
     text = "א cFFFF0000\\ב \\cFFFF0000Alarm C:\\config \\n"
     send(factory, {"text": text})
-    assert Notifications.popups == [{"text": text, "type": 1, "timeout": 10, "id": "mqttbridge"}]
+    assert error(factory) is None
+    assert Notifications.popups == [{
+        "text": "א cFFFF0000ב cFFFF0000Alarm C:config n",
+        "type": 1,
+        "timeout": 10,
+        "id": "mqttbridge",
+    }]
+
+
+def test_a_bare_string_popup_loses_its_backslashes(live_bridge, factory):
+    send(factory, "\\cFFFF0000Alarm")
+    assert Notifications.popups[-1]["text"] == "cFFFF0000Alarm"
+
+
+def test_a_popup_keeps_a_real_newline_and_shows_a_literal_one_as_n(live_bridge, factory):
+    send(factory, {"text": "Pralka\nskończyła\\n"})
+    assert Notifications.popups[-1]["text"] == "Pralka\nskończyłan"
+
+
+def test_the_popup_cap_counts_what_is_left_after_the_backslashes(live_bridge, factory):
+    send(factory, {"text": "\\" * 50 + "x" * 510})
+    assert Notifications.popups[-1]["text"] == "x" * 500
+
+
+@pytest.mark.parametrize("text", ["\\", "\\\\  \\"])
+def test_a_popup_of_nothing_but_backslashes_is_refused_as_empty(live_bridge, factory, text):
+    send(factory, {"text": text})
+    assert error(factory) == "message text is empty"
+    assert Notifications.popups == []
 
 
 def test_a_real_newline_is_kept(live_bridge, factory):

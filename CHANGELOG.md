@@ -93,6 +93,15 @@ version that has no section here.
 
 ### Changed
 
+- **A popup's text loses every backslash, as a toast's does.** `cmd/message` without `"style":
+  "toast"` used to pass its text to the screen as sent, and enigma2's text renderer reads a
+  backslash and what follows it as a colour change or a line break — after right-to-left
+  reordering, where no narrower rule can find it. Both styles now follow one rule, in one place:
+  every backslash is removed and nothing else, so `\cFFFF0000Alarm` shows as `cFFFF0000Alarm` and a
+  literal `\n` as `n`, while a real newline stays a line break. The 500-character cap counts what is
+  left, and a text of nothing but backslashes is refused as empty. 🔴 **A sender that used a literal
+  `\n` for a line break in a popup has to send a real newline instead.** The decision is recorded
+  in [ADR-0008](docs/adr/0008-discreet-toast.md).
 - **The OpenWebif page now opens wherever OpenWebif does, shows everything, and changes
   everything.** It answered 403 to everybody on a receiver whose OpenWebif authentication was off —
   OpenWebif's default, and on most households a necessity — because it demanded a logged OpenWebif
