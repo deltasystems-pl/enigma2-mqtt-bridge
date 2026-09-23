@@ -68,8 +68,8 @@ version that has no section here.
   toast built from one would eat the channel list's arrow keys. It is hidden when the receiver enters
   standby, a toast sent in standby is refused on `last_error`, and it is deleted — never merely
   closed — whenever the plugin stops. Its text is capped at 200 characters after **every backslash is
-  removed** (enigma2 applies its colour escapes after right-to-left reordering, so no narrower rule
-  holds); `type` is validated as for a popup and then ignored. New capability `toast`, claimed only
+  removed**, and nothing else (enigma2 applies its colour escapes after right-to-left reordering, so
+  no narrower rule holds; `\cFFFF0000` shows as `cFFFF0000`); `type` is validated as for a popup and then ignored. New capability `toast`, claimed only
   once the screen has been created, and the box-only setting `osd_toast` (on by default, not in
   `info.settings` or `cmd/config`). **Payloads without `style` behave exactly as before.** The
   decisions are in [ADR-0008](docs/adr/0008-discreet-toast.md).

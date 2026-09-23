@@ -1,6 +1,6 @@
 # ADR-0008: The discreet toast is made of widgets that bind no keys, refuses a timeout it cannot honour, and is deleted rather than closed
 
-**Status:** accepted 2026-09-23
+**Status:** accepted 2026-09-23, amended 2026-09-23
 **Date:** 2026-09-23
 **Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §2, in part — it
 described this feature, and three parts of it were right for the wrong reason or contradicted
@@ -74,14 +74,16 @@ none of the skin-expression features, which are not on every image.
 
 **One fixed appearance.** A dark, slightly transparent box, light text, and a header that always
 reads the plugin's name in the receiver's language — not the device name, which is provisioned from
-outside. **No backslash reaches the screen.** Every colour escape the text spells out is removed
-whole, repeatedly, since removing one can join the characters around it into another. Then every
-backslash that is left is removed too, because the renderer reads its escapes **after**
-right-to-left reordering: text that mixes a right-to-left script with `cFFFF0000\` is an escape on
-screen and none in the string, and a receiver showed exactly that — the escape consumed by the
-renderer and never drawn. A literal `\n` therefore shows as `n`; a real newline
-character stays a line break. The text is capped at 200 characters **after** this, so the cap
-counts what is displayed.
+outside. **No backslash reaches the screen: every backslash is removed, and nothing else.** The
+renderer reads its escapes **after** right-to-left reordering: text that mixes a right-to-left script
+with `cFFFF0000\` is an escape on screen and none in the string, and a receiver showed exactly that —
+the escape consumed by the renderer and never drawn. Every escape the renderer knows starts with a
+backslash, so without one there is none, in any drawing order. The characters after it stay:
+`\cFFFF0000Alarm` shows as `cFFFF0000Alarm`, `C:\config.txt` as `C:config.txt`, a literal `\n` as
+`n`; a real newline character stays a line break. The text is capped at 200 characters **after**
+this, so the cap counts what is displayed. (Amended 2026-09-23: this record first removed a `\c`
+escape together with its eight characters and then the remaining backslashes, and before that only
+the escape. The measurement above ended the first rule; the operator then chose the plainer second.)
 
 **The contract.** `cmd/message` gains an optional `style`. **The handler decides the style before it
 applies any default.** Absent or `null` — or a payload that is not a JSON object — is the popup,
@@ -90,7 +92,7 @@ refused. For a toast:
 
 | Field | Rule |
 |---|---|
-| `text` | required; empty refused; every backslash removed (colour escapes whole), then truncated at 200 |
+| `text` | required; empty refused; every backslash removed and nothing else, then truncated at 200 |
 | `timeout` | parsed as the popup parses it, with `int()`; default **5**; **`0` or less refused** („a toast hides itself; timeout must be 1–30 seconds"); more than 30 becomes 30, with a note in the log |
 | `type` | validated exactly as for a popup — an unknown value is refused, so a payload is valid or invalid whatever its style — and then ignored |
 

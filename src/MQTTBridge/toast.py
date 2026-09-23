@@ -58,17 +58,17 @@ rather than from the receiver. The `type` a payload carries is validated as for 
 popup and then ignored, and **no backslash in the text reaches the screen**, so
 nothing in a payload can dress a toast up as something else.
 
-🔴 **Every backslash, not only the colour escape.** enigma2's text renderer reads a
+🔴 **Every backslash, and only the backslash.** enigma2's text renderer reads a
 backslash, a `c` and the eight characters after it as a colour change — and it
 reads them **after** right-to-left reordering, on the characters in the order they
 are drawn. A payload that mixes a right-to-left script with `cFFFF0000\\` is
 therefore an escape on the screen that is no escape in the string, and no pattern
 over the string can find it; on a receiver, a Hebrew toast carrying exactly that
 was drawn with the escape consumed and never shown. The renderer also reads
-`\\n`, `\\t` and `\\r`. So a colour escape the string does spell out is removed
-whole, and then every backslash that is left is removed as well: a literal `\\n`
-shows as `n`. A real newline character is not a backslash, and stays a line
-break.
+`\\n`, `\\t` and `\\r`. Every one of these starts with a backslash, so removing
+the backslashes is enough, and nothing else is removed: `\\cFFFF0000Alarm` shows
+as `cFFFF0000Alarm`, a Windows path keeps its text, and a literal `\\n` shows as
+`n`. A real newline character is not a backslash, and stays a line break.
 
 A skin may define a screen called `MQTTBridgeToast` and restyle it, as it may any
 screen: that is the box owner's choice, not a broker client's.
@@ -102,8 +102,6 @@ Everything here runs on the main loop — commands already arrive there, and
 nothing blocks — and every entry point is wrapped: a toast that fails is a line
 in the log, never a traceback in the middle of the interface.
 """
-
-import re
 
 from .enigma2 import Ticker, enigma_attribute, missing
 from .i18n import _
@@ -145,12 +143,6 @@ BACKGROUND = "#30101418"
 HEADER_COLOUR = "#00b8c0c8"
 TEXT_COLOUR = "#00f0f0f0"
 
-# enigma2's text renderer reads a backslash, a `c` and the eight characters after
-# them as a colour change. A toast whose colour the payload chooses is not one
-# fixed appearance. Removed whole where the string spells it out; every other
-# backslash is removed after it (see the module).
-COLOUR_ESCAPE = re.compile(r"\\c.{8}", re.DOTALL)
-
 SWITCHED_OFF = "the discreet toast is switched off on this receiver"
 NOT_CREATED = "the discreet toast could not be created on this receiver"
 IN_STANDBY = "the receiver is in standby"
@@ -160,35 +152,20 @@ BAD_TIMEOUT = "a toast hides itself; timeout must be 1–30 seconds"
 # ---------------------------------------------------------------- the text --
 
 
-def strip_colour_escapes(text):
-    """`text` without any colour escape — including one a removal would create.
-
-    Removing `\\cXXXXXXXX` from between a backslash and a `c` joins them into a
-    new escape, so this repeats until nothing changes.
-    """
-    previous = None
-    while previous != text:
-        previous = text
-        text = COLOUR_ESCAPE.sub("", text)
-    return text
-
-
 def strip_backslashes(text):
-    """`text` with no backslash left in it — the escapes first, whole, then the rest.
+    """`text` with no backslash in it — and nothing else taken out.
 
-    Stripping the colour escapes first makes a plain `\\cFFFF0000` vanish as it
-    always did, rather than leave `cFFFF0000` behind. Removing the backslashes
-    that remain is what closes the escape the renderer only sees after
-    right-to-left reordering.
+    Every escape enigma2's renderer knows begins with a backslash, and it finds
+    them after right-to-left reordering, where no pattern over the string can.
+    Without a backslash there is no escape, whatever order the text is drawn in.
     """
-    return strip_colour_escapes(text).replace("\\", "")
+    return text.replace("\\", "")
 
 
 def prepare_text(text):
     """What the toast will display, or None when nothing would be left of it.
 
-    Cleaned before the cap, so the 200 characters are 200 displayed ones and no
-    escape is cut in half.
+    Cleaned before the cap, so the 200 characters are 200 displayed ones.
     """
     text = strip_backslashes(str(text or ""))
     if not text.strip():

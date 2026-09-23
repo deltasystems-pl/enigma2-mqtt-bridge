@@ -271,28 +271,30 @@ def test_the_text_is_truncated_at_two_hundred(live_bridge, factory, plugin_log):
     assert "toast truncated from 450 to 200 characters" in plugin_log()
 
 
-def test_escapes_are_removed_before_the_cap_so_none_is_cut_in_half(live_bridge, factory):
-    # The escape spans characters 196 to 205: cut first, and „\\cFFF" would be left.
+def test_the_cap_counts_the_escape_characters_that_stay(live_bridge, factory):
+    # Only the backslash goes; the nine characters after it are text, and count.
     send(factory, {"text": "x" * 195 + "\\cFFFF0000" + "Alarm", "style": "toast"})
-    assert shown_text(live_bridge) == "x" * 195 + "Alarm"
-    assert "\\c" not in shown_text(live_bridge)
+    assert shown_text(live_bridge) == "x" * 195 + "cFFFF"
 
 
-def test_a_colour_escape_is_removed(live_bridge, factory):
+def test_a_colour_escape_shows_as_text_without_its_backslash(live_bridge, factory):
     send(factory, {"text": "\\cFFFF0000Alarm", "style": "toast"})
-    assert shown_text(live_bridge) == "Alarm"
+    assert shown_text(live_bridge) == "cFFFF0000Alarm"
 
 
-def test_an_escape_a_removal_would_create_is_removed_too(live_bridge, factory):
-    # Taking out the inner escape joins the leading backslash to `cBBBBBBBB`.
+def test_two_escapes_in_a_row_lose_only_their_backslashes(live_bridge, factory):
     send(factory, {"text": "\\" + "\\cAAAAAAAA" + "cBBBBBBBBok", "style": "toast"})
-    assert shown_text(live_bridge) == "ok"
+    assert shown_text(live_bridge) == "cAAAAAAAAcBBBBBBBBok"
 
 
-def test_an_escape_counts_a_newline_as_one_of_its_eight_characters(live_bridge, factory):
-    # The renderer takes the next eight characters whatever they are.
+def test_a_newline_inside_an_escape_stays(live_bridge, factory):
     send(factory, {"text": "\\cFF\nF0000Alarm", "style": "toast"})
-    assert shown_text(live_bridge) == "Alarm"
+    assert shown_text(live_bridge) == "cFF\nF0000Alarm"
+
+
+def test_a_windows_path_keeps_its_text(live_bridge, factory):
+    send(factory, {"text": "C:\\config.txt ok", "style": "toast"})
+    assert shown_text(live_bridge) == "C:config.txt ok"
 
 
 def test_a_backslash_that_is_no_escape_is_removed_too(live_bridge, factory):
@@ -334,7 +336,7 @@ def test_a_real_newline_is_kept(live_bridge, factory):
     assert shown_text(live_bridge) == "Pralka\nskończyła"
 
 
-@pytest.mark.parametrize("text", ["", "   ", None, "\\c00000000", "\\c00000000  "])
+@pytest.mark.parametrize("text", ["", "   ", None, "\\", "\\\\  \\"])
 def test_a_toast_with_nothing_to_show_is_refused(live_bridge, factory, text):
     send(factory, {"text": text, "style": "toast"})
     assert error(factory) == "message text is empty"
