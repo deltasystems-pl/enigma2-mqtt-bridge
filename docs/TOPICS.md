@@ -744,8 +744,11 @@ in their own constructors — every list does — with no action map and no exec
 text labels and nothing else, so nothing in it can bind a key, and a test enforces that.
 
 It is **hidden when the receiver enters standby**, and a toast that arrives while the receiver is in
-standby, or while it is shutting down or restarting its interface, is **refused** on `last_error` with
-„the receiver is in standby" rather than kept for later. It is deleted — not merely hidden — when the
+standby, or while the receiver's own „really shut down / restart?" question is on screen, is
+**refused** on `last_error` with „the receiver is in standby" rather than kept for later. That
+question appears only when there is a reason to ask — a recording, a running job, timeshift, a
+stream — and is gone before the receiver actually quits, so an ordinary shutdown or interface restart
+is not covered by this refusal. It is deleted — not merely hidden — when the
 plugin stops, so a toast on screen does not survive into the frame a restarting receiver leaves
 behind. A toast requested while the capability is absent is refused with „the discreet toast is
 switched off on this receiver" (`osd_toast` off) or „the discreet toast could not be created on this

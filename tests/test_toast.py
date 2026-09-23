@@ -204,6 +204,34 @@ def test_an_unknown_style_is_refused(live_bridge, factory):
     assert not on_screen(live_bridge)
 
 
+@pytest.mark.parametrize("style", ["", False, 0])
+def test_an_empty_or_false_style_is_refused_not_taken_as_absent(live_bridge, factory, style):
+    """Only an absent or `null` style is the popup; a falsy value is still a value.
+
+    The echo of a falsy value is empty: `_echo` reads it as „nothing given".
+    """
+    send(factory, {"text": "hello", "style": style})
+    assert error(factory) == "unknown message style ''; expected popup or toast"
+    assert Notifications.popups == []
+    assert not on_screen(live_bridge)
+
+
+@pytest.mark.parametrize("payload, sentence", [
+    ({"timeout": 0}, "a toast hides itself; timeout must be 1–30 seconds"),
+    ({"type": "shouting"}, "unknown message type 'shouting'; expected one of info, warning, error"),
+    ({"text": "  "}, "message text is empty"),
+])
+def test_a_toast_is_validated_before_the_box_is_asked_whether_it_can(
+        start_bridge, factory, settings, payload, sentence):
+    """An invalid toast gets its own reason, even from a box that has no toast at all."""
+    settings.osd_toast.value = False
+    start_bridge()
+    message = {"text": "hello", "style": "toast"}
+    message.update(payload)
+    send(factory, message)
+    assert error(factory) == sentence
+
+
 @pytest.mark.parametrize("style", ["popup", "toast"])
 def test_an_unknown_type_is_refused_whatever_the_style(live_bridge, factory, style):
     send(factory, {"text": "hello", "style": style, "type": "shouting"})
@@ -241,6 +269,13 @@ def test_the_text_is_truncated_at_two_hundred(live_bridge, factory, plugin_log):
     assert error(factory) is None
     assert shown_text(live_bridge) == "x" * 200
     assert "toast truncated from 450 to 200 characters" in plugin_log()
+
+
+def test_escapes_are_removed_before_the_cap_so_none_is_cut_in_half(live_bridge, factory):
+    # The escape spans characters 196 to 205: cut first, and „\\cFFF" would be left.
+    send(factory, {"text": "x" * 195 + "\\cFFFF0000" + "Alarm", "style": "toast"})
+    assert shown_text(live_bridge) == "x" * 195 + "Alarm"
+    assert "\\c" not in shown_text(live_bridge)
 
 
 def test_a_colour_escape_is_removed(live_bridge, factory):

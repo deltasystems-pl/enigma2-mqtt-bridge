@@ -75,10 +75,15 @@ is the frame a restarting receiver leaves on the television.
 
 **Standby.** The standby screen is a full-screen black window at z 0, so a toast
 is drawn *over* it on a television that is still on. The toast is hidden when the
-receiver enters standby, and a toast asked for while it is in standby — or on
-its way out of the main loop — is refused rather than kept for later: a late
-toast is a wrong toast, and a refusal on `last_error` is something a sender can
-see.
+receiver enters standby, and a toast asked for while it is in standby — or
+while the image's „really shut down / restart?" question is on screen — is
+refused rather than kept for later: a late toast is a wrong toast, and a refusal
+on `last_error` is something a sender can see. That question is the only time
+the image's `inTryQuitMainloop` flag is set: `TryQuitMainloop` sets it when its
+dialog is shown and clears it when the dialog is hidden, which happens before
+the main loop is told to quit. The dialog appears only when there is a reason to
+ask — a recording, a running job, timeshift, a stream — so an ordinary restart
+or shutdown never sets the flag at all.
 
 Everything here runs on the main loop — commands already arrive there, and
 nothing blocks — and every entry point is wrapped: a toast that fails is a line
@@ -284,7 +289,11 @@ def _layout(dialog):
 
 
 def _receiver_in_standby():
-    """In standby, or on the way out of the main loop. False when the image will not say."""
+    """In standby, or asking whether to shut down or restart. False when the image will not say.
+
+    `inTryQuitMainloop` is set only while `TryQuitMainloop`'s question is on screen;
+    see the module.
+    """
     try:
         import Screens.Standby as standby
     except Exception as error:

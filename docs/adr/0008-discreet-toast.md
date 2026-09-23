@@ -89,9 +89,14 @@ refused. For a toast:
 | `type` | validated exactly as for a popup — an unknown value is refused, so a payload is valid or invalid whatever its style — and then ignored |
 
 **Standby refuses; it does not queue.** On the increment of the standby counter the toast is hidden
-and its timer stopped. A toast that arrives while the receiver is in standby, or while it is on its
-way out of the main loop, is refused on `last_error` with „the receiver is in standby". A late toast
-is a wrong toast, and a refusal is something a sender can see where a silent drop is not.
+and its timer stopped. A toast that arrives while the receiver is in standby, or while the image's
+„really shut down / restart?" question is on screen, is refused on `last_error` with „the receiver is
+in standby". A late toast is a wrong toast, and a refusal is something a sender can see where a
+silent drop is not. The second condition is the image's `inTryQuitMainloop`, and it is narrower than
+its name: `TryQuitMainloop` sets it when that question is shown and clears it when it is hidden,
+which happens before the main loop is told to quit, and the question appears only when there is a
+reason to ask — a recording, a running job, timeshift, a stream. An ordinary shutdown or interface
+restart never sets it.
 
 **Deleted, never closed.** The toast is torn down by stopping its timer, then calling
 `session.deleteDialog()`, then dropping the reference — in that order, because the delete sets every
