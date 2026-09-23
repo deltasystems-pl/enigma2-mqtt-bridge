@@ -81,7 +81,9 @@ from the first. The page trusts the web interface that mounted it.
   to send an IP literal as `Host` for a name somebody else controls, which is what defeats DNS
   rebinding.
 - **Same origin**: `Origin` present, its scheme matching the request's, its host equal to `Host`.
-- **The session's one-shot token**, rotated after every write that took effect.
+- **The session's token**, taken from the POST body only (never the query string) and replaced
+  after every write that took effect; a refused request keeps it. A confirmation carries its own
+  token, good for one attempt.
 - **The exact field set of the form**, no extra, none missing, none repeated.
 
 Headers stay as they were — `no-store`, `nosniff`, `X-Frame-Options: SAMEORIGIN`, `no-referrer`,
@@ -99,7 +101,11 @@ MQTT's wildcards. A change to the node id, the base topic or the discovery prefi
 first. The save reuses what exists and picks by what changed: a change inside `cmd/config`'s
 allowlist goes through `apply_remote_settings`, as the page always did; anything else takes the
 setup screen's path — save, write the settings file once, reload — so a permission changed on the
-page reaches `info.settings` and discovery exactly as one changed on the television does.
+page reaches `info.settings` and discovery exactly as one changed on the television does. 🔴 A
+form submits every field, so the page carries the values it rendered, sealed with the session
+token, and saves only the fields whose submitted value differs from them: a form left open while
+a setting changed elsewhere — over `cmd/config`, or a permission revoked at the television — never
+writes its stale copy back.
 
 **4. Every command is a page action, through the same handler.** The page builds the payload a
 broker client would have sent and calls the dispatcher with it and an **origin**. The dispatcher

@@ -15,7 +15,7 @@ household member's browser. Every request must name the receiver itself in
 `Host` — an IP literal, `localhost`, or the box's own hostname bare or with
 `.local` — which is what defeats DNS rebinding, where a hostile name is later
 pointed at the receiver and is same-origin with itself. Every write must also
-be same-origin, carry the session's one-shot token and exactly the form's
+be same-origin, carry the session's token and exactly the form's
 fields. Sessions exist without a login: OpenWebif opens one for every request
 before it decides anything.
 
@@ -44,7 +44,7 @@ import re
 import secrets
 import socket
 import stat
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 try:
     from twisted.web import http, resource
@@ -272,8 +272,22 @@ def _rotate(request):
     _session(request)[CSRF_KEY] = secrets.token_urlsafe(32)
 
 
+def _token_in_query(request):
+    """True when a token arrived in the URL rather than in the POST body.
+
+    Twisted merges the query string into `request.args`, so without this a token
+    could ride in a link — and a URL ends up in logs, in history and in a
+    `Referer`. A token is accepted from the body only.
+    """
+    uri = getattr(request, "uri", b"") or b""
+    if isinstance(uri, str):
+        uri = uri.encode("utf-8", "replace")
+    query = uri.split(b"?", 1)[1] if b"?" in uri else b""
+    return b"csrf" in parse_qs(query, keep_blank_values=True)
+
+
 def _check_token(request):
-    """The session's one-shot token, or PermissionError."""
+    """The session's token, from the POST body, or PermissionError."""
     try:
         supplied = _single_arg(request, "csrf")
     except ValueError:
@@ -651,8 +665,55 @@ def _group_label(group):
     }.get(group, group)
 
 
+def _rendered_values(section):
+    """What the settings form shows, name to value — every setting but the secrets."""
+    return {
+        name: settings_module.value(name, section)
+        for name in settings_module.SETTING_NAMES
+        if name not in settings_module.SECRET_NAMES
+    }
+
+
+def _seal(token, values):
+    """The rendered values as the form carries them, sealed with the session token.
+
+    A form submits every field, touched or not. Without knowing what it was
+    rendered with, a form left open while a setting changed elsewhere — over
+    `cmd/config`, or a permission revoked at the television — would write its
+    stale copy back as though somebody had chosen it. The seal only says this
+    server produced the snapshot for this token; the token itself is what keeps
+    another web site out.
+    """
+    encoded = _json(values)
+    digest = hmac.new(token.encode("utf-8"), encoded.encode("utf-8"), "sha256").hexdigest()
+    return digest + ":" + encoded
+
+
+def _unseal(request):
+    """The values the submitted form was rendered with, or PermissionError."""
+    sealed = _single_arg(request, "rendered", MAX_CONFIRM_BYTES)
+    digest, _colon, encoded = sealed.partition(":")
+    token = _session(request).get(CSRF_KEY)
+    if not isinstance(token, str) or not encoded:
+        raise PermissionError
+    expected = hmac.new(token.encode("utf-8"), encoded.encode("utf-8"), "sha256").hexdigest()
+    if not hmac.compare_digest(digest, expected):
+        raise PermissionError
+    values = json.loads(encoded)
+    if not isinstance(values, dict):
+        raise ValueError("invalid form field rendered")
+    return values
+
+
 def _changes(request, section):
-    """The settings the form changes, validated; secrets left blank are not changes."""
+    """The settings the form changes, validated.
+
+    🔴 A field counts only when its submitted value differs from the value the
+    form was rendered with — an untouched field never overwrites a newer value
+    set elsewhere since. Secrets are never rendered, so for them empty means
+    unchanged and anything else is a change.
+    """
+    rendered = _unseal(request)
     changes = {}
     for name in settings_module.SETTING_NAMES:
         if settings_module.SETTING_KINDS.get(name) == "bool":
@@ -664,6 +725,8 @@ def _changes(request, section):
             # „leave it as it is". Clearing a password is the setup screen's job.
             continue
         wanted = settings_module.validate_setting(name, raw)
+        if name in rendered and wanted == rendered[name]:
+            continue
         if wanted != settings_module.value(name, section):
             changes[name] = wanted
     return changes
@@ -705,7 +768,7 @@ def _save_settings(request):
     bridge = _bridge()
     if bridge is None:
         raise RuntimeError("the bridge is unavailable")
-    _exact(request, ("csrf", "form") + tuple(settings_module.SETTING_NAMES))
+    _exact(request, ("csrf", "form", "rendered") + tuple(settings_module.SETTING_NAMES))
     changes = _changes(request, bridge.settings)
     if not changes:
         return _answer(request, _("Nothing to save: every setting already has that value."))
@@ -955,6 +1018,7 @@ def _settings_section(section, token):
         "<form method='post' class='settings'>"
         + _hidden("form", SETTINGS_FORM)
         + _hidden("csrf", token)
+        + _hidden("rendered", _seal(token, _rendered_values(section)))
         + "".join(groups)
         + f"<button type='submit'>{_e(_('Save settings'))}</button></form></section>"
     )
@@ -1171,7 +1235,11 @@ class MQTTBridgeWebResource(resource.Resource):
         if not _host_allowed(request):
             return _misdirected(request)
         content_type = (request.getHeader("content-type") or "").split(";", 1)[0].lower()
-        if content_type != "application/x-www-form-urlencoded" or not _same_origin(request):
+        if (
+            content_type != "application/x-www-form-urlencoded"
+            or not _same_origin(request)
+            or _token_in_query(request)
+        ):
             return _answer(request, _("Request rejected."), http.FORBIDDEN)
         try:
             form = _single_arg(request, "form")

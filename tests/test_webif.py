@@ -3,7 +3,7 @@
 OpenWebif decides who reaches the page before any plugin code runs, so the page
 enforces no login of its own (ADR-0009). What it keeps is what stops another web
 page from using it through somebody's browser — the `Host` allowlist, the
-same-origin check, the one-shot session token and the exact field sets — and
+same-origin check, the session token and the exact field sets — and
 what stops a value from damaging the receiver: control characters refused in
 every text setting, secrets write-only.
 
@@ -63,10 +63,12 @@ class _Request:
         secure=False,
         args=None,
         prepath=(b"mqttbridge",),
+        uri=b"/mqttbridge",
     ):
         # What Twisted leaves behind: the path segments already consumed to
         # reach this resource, as bytes.
         self.prepath = list(prepath)
+        self.uri = uri
         self._secure = secure
         self._session = session if session is not None else new_session()
         self._headers = {"host": host, "origin": origin, "content-type": content_type}
@@ -157,6 +159,9 @@ def token(session):
 
 def post(resource, session, fields, csrf=True, **kwargs):
     fields = dict(fields)
+    if isinstance(fields.get("rendered"), dict):
+        # What the page would have rendered into the form for this session.
+        fields["rendered"] = webif._seal(token(session), fields["rendered"])
     if csrf is True:
         fields["csrf"] = token(session)
     elif csrf is not None:
@@ -166,8 +171,12 @@ def post(resource, session, fields, csrf=True, **kwargs):
 
 
 def settings_fields(section, **overrides):
-    """The settings form as a browser submits it, unchanged unless told otherwise."""
-    fields = {"form": "settings"}
+    """The settings form as a browser submits it, unchanged unless told otherwise.
+
+    Rendered from the section as it stands now; `post` seals the snapshot with
+    the session's token, exactly as the page does.
+    """
+    fields = {"form": "settings", "rendered": webif._rendered_values(section)}
     for name in SETTING_NAMES:
         kind = settings_module.SETTING_KINDS[name]
         current = settings_module.value(name, section)
@@ -204,6 +213,36 @@ def confirmation(body):
 def settings_form(body):
     text = body.decode("utf-8")
     return text.split("<form method='post' class='settings'>", 1)[1].split("</form>", 1)[0]
+
+
+def submitted(body, **overrides):
+    """What a browser submits from the settings form in `body`, as it was rendered.
+
+    Parsed from the page itself — hidden fields, inputs, checked boxes, selected
+    options — so a test of a stale form submits exactly what a stale tab would.
+    """
+    fields = {}
+    for tag, rest in re.findall(r"<(input|select)([^>]*)>", settings_form(body)):
+        attributes = {
+            key: html.unescape(value) for key, value in re.findall(r"(\w+)='([^']*)'", rest)
+        }
+        name = attributes.get("name")
+        if tag == "select":
+            options = settings_form(body).split("<select name='" + name + "'>", 1)[1]
+            options = options.split("</select>", 1)[0]
+            fields[name] = html.unescape(re.search(r"value='([^']*)' selected", options).group(1))
+        elif attributes.get("type") == "checkbox":
+            if " checked" in rest:
+                fields[name] = ["false", "true"]
+        elif attributes.get("type") == "hidden" and name in fields:
+            continue
+        else:
+            fields[name] = attributes.get("value", "")
+    for name, value in overrides.items():
+        if isinstance(value, bool):
+            value = ["false", "true"] if value else ["false"]
+        fields[name] = value
+    return fields
 
 
 def device(factory):
@@ -292,6 +331,12 @@ def test_the_receivers_own_names_are_accepted(connected_bridge, page, host):
         BOX + ":http",
         BOX + ":123456",
         "user@" + BOX,
+        # Matched whole, never by suffix or with the root's trailing dot.
+        "not" + HOSTNAME,
+        "not" + HOSTNAME + ".local",
+        HOSTNAME + ".",
+        HOSTNAME + ".local.",
+        "localhost.",
         "",
         None,
     ],
@@ -328,9 +373,17 @@ def _valid_change(bridge):
         ("cross-scheme origin", 403),
         ("mismatched origin", 403),
         ("missing token", 403),
+        ("null origin", 403),
+        ("origin with a path", 403),
+        ("origin with userinfo", 403),
+        ("origin on another port", 403),
         ("short token", 403),
-        ("stale token", 403),
+        ("prefix of the real token", 403),
+        ("another session's token", 403),
         ("empty unissued token", 403),
+        ("token in the query string", 403),
+        ("rendered snapshot tampered", 403),
+        ("rendered snapshot of another session", 403),
         ("extra field", 400),
         ("repeated field", 400),
         ("missing field", 400),
@@ -353,12 +406,38 @@ def test_a_refused_post_changes_nothing(connected_bridge, page, factory, setting
         options["origin"] = "http://attacker.example"
     elif case == "missing token":
         csrf = None
+    elif case == "null origin":
+        # What a sandboxed frame or a `data:` page sends.
+        options["origin"] = "null"
+    elif case == "origin with a path":
+        options["origin"] = "http://" + BOX + "/mqttbridge"
+    elif case == "origin with userinfo":
+        options["origin"] = "http://attacker@" + BOX
+    elif case == "origin on another port":
+        options["origin"] = "http://" + BOX + ":8080"
     elif case == "short token":
         csrf = token(session)[:31]
-    elif case == "stale token":
+    elif case == "prefix of the real token":
+        # Long enough to pass a length check, and still not the token.
+        csrf = token(session)[:40]
+    elif case == "another session's token":
+        # The victim has a token of its own; the attacker presents a valid
+        # token from a session of their own. Refused for not being *this*
+        # session's token — not for the victim having none.
+        own = token(session)
         csrf = token(new_session())
+        assert len(own) >= 32 and csrf != own
     elif case == "empty unissued token":
         csrf = ""
+    elif case == "token in the query string":
+        # Twisted merges the query into `request.args`; a token in a URL leaks.
+        options["uri"] = ("/mqttbridge?csrf=" + token(session)).encode()
+    elif case == "rendered snapshot tampered":
+        fields["rendered"] = webif._seal(token(session), fields["rendered"])
+        fields["rendered"] = fields["rendered"].replace('"screenshot_delay":4',
+                                                        '"screenshot_delay":5')
+    elif case == "rendered snapshot of another session":
+        fields["rendered"] = webif._seal(token(new_session()), fields["rendered"])
     elif case == "extra field":
         fields["path"] = "/etc/enigma2/settings"
     elif case == "repeated field":
@@ -378,7 +457,7 @@ def test_a_refused_post_changes_nothing(connected_bridge, page, factory, setting
     assert b"<script" not in body
 
 
-def test_a_token_is_one_shot(connected_bridge, page, settings):
+def test_the_token_is_replaced_after_a_save(connected_bridge, page, settings):
     resource = page(connected_bridge)
     session = new_session()
     used = token(session)
@@ -393,13 +472,95 @@ def test_a_token_is_one_shot(connected_bridge, page, settings):
     assert settings.screenshot_delay.value == 9
 
 
+def test_the_token_is_replaced_after_a_page_action(connected_bridge, page):
+    resource = page(connected_bridge)
+    session = new_session()
+    used = token(session)
+
+    request, _body = post(resource, session, action_fields("discovery"), csrf=used)
+    assert request.response_code == 200
+    assert token(session) != used
+
+    request, _body = post(resource, session, action_fields("discovery"), csrf=used)
+    assert request.response_code == 403
+
+
+def test_a_refused_post_keeps_the_token(connected_bridge, page):
+    """Said exactly in SETUP.md: the token changes after a change that took effect only."""
+    resource = page(connected_bridge)
+    session = new_session()
+    used = token(session)
+    request, _body = post(resource, session, action_fields("volume", level="loud"), csrf=used)
+    assert request.response_code == 400
+    assert token(session) == used
+
+
+# ------------------------------------------------------------- a stale form --
+
+
+def test_a_stale_form_does_not_revert_a_setting_changed_over_mqtt(
+    connected_bridge, page, factory, settings
+):
+    """🔴 Open the page, change `screenshot_delay` over `cmd/config`, save only `log_level`."""
+    resource = page(connected_bridge)
+    session = new_session()
+    _request, body = get(resource, session)
+    assert settings.screenshot_delay.value == 4
+
+    send(factory, "config", b'{"publish_keys": true, "screenshot": "on_zap", '
+                            b'"screenshot_interval": 60, "screenshot_delay": 12}')
+    assert settings.screenshot_delay.value == 12
+
+    request, _body = post(resource, session, submitted(body, log_level="debug"), csrf=None)
+
+    assert request.response_code == 200
+    assert settings.log_level.value == "debug"
+    assert settings.screenshot_delay.value == 12
+    assert settings.screenshot_delay.saved_value == 12
+
+
+def test_a_stale_form_does_not_regrant_a_permission_revoked_at_the_television(
+    connected_bridge, page, settings
+):
+    settings.deep_standby_allowed.value = True
+    settings.deep_standby_allowed.save()
+    resource = page(connected_bridge)
+    session = new_session()
+    _request, body = get(resource, session)
+
+    # Revoked on the setup screen while the page stays open.
+    settings.deep_standby_allowed.value = False
+    settings.deep_standby_allowed.save()
+
+    request, _body = post(resource, session, submitted(body, log_level="debug"), csrf=None)
+
+    assert request.response_code == 200
+    assert settings.log_level.value == "debug"
+    assert settings.deep_standby_allowed.value is False
+    assert settings.deep_standby_allowed.saved_value is False
+
+
+def test_a_field_changed_on_a_stale_form_still_wins(connected_bridge, page, factory, settings):
+    """The fix skips untouched fields only: a field the user did edit is applied."""
+    resource = page(connected_bridge)
+    session = new_session()
+    _request, body = get(resource, session)
+    send(factory, "config", b'{"publish_keys": true, "screenshot": "on_zap", '
+                            b'"screenshot_interval": 60, "screenshot_delay": 12}')
+
+    request, _body = post(resource, session, submitted(body, screenshot_delay="7"), csrf=None)
+
+    assert request.response_code == 200
+    assert settings.screenshot_delay.value == 7
+
+
 # ------------------------------------------------------------ what the page shows --
 
 
 def test_every_setting_is_on_the_form_and_nothing_else(connected_bridge, page):
     _request, body = get(page(connected_bridge))
     names = re.findall(r"name='([^']+)'", settings_form(body))
-    assert set(names) == {"form", "csrf"} | set(SETTING_NAMES)
+    assert set(names) == {"form", "csrf", "rendered"} | set(SETTING_NAMES)
     assert b"oscam_identity_salt" not in body
 
 
@@ -493,6 +654,32 @@ def test_the_remembered_payloads_are_bounded(connected_bridge, monkeypatch):
     json_rows = [row for row in connected_bridge.last_payloads() if row[1] is not None]
     assert [topic for topic, _payload in json_rows] == [ROOT + "/t2", ROOT + "/t3", ROOT + "/t4"]
     assert all(len(payload) == 20 and payload.endswith("…") for _topic, payload in json_rows)
+
+
+def test_a_secret_field_reveals_nothing_not_even_its_length(connected_bridge, page, settings):
+    settings.password.value = "twelve-chars"
+    settings.oscam_password.value = "x"
+    _request, body = get(page(connected_bridge))
+    for name in ("password", "oscam_password"):
+        tags = re.findall(r"<input type='password' name='" + name + "'[^>]*>", body.decode())
+        assert tags == [
+            "<input type='password' name='" + name + "' value='' maxlength='128' "
+            "autocomplete='new-password'>"
+        ]
+
+
+def test_what_broker_clients_can_influence_is_escaped(connected_bridge, page):
+    """`last_error` echoes a command's payload, and payloads carry channel names."""
+    connected_bridge.publish_last_error("zap", "no channel called <img src=x onerror=alert(1)>")
+    connected_bridge.publish_json(ROOT + "/service", {"name": "</pre><script>alert(2)</script>"})
+
+    _request, body = get(page(connected_bridge))
+
+    assert b"<img src=x" not in body
+    assert b"<script>" not in body
+    assert b"</pre><script>" not in body
+    assert b"&lt;img src=x onerror=alert(1)&gt;" in body
+    assert b"&lt;/pre&gt;&lt;script&gt;alert(2)" in body
 
 
 def test_a_retracted_topic_is_forgotten(connected_bridge):
@@ -705,6 +892,28 @@ def test_an_idle_bridge_offers_its_settings_and_disables_its_commands(make_bridg
     assert factory.client is not None
 
 
+def test_an_idle_bridge_saves_a_cmd_config_change_by_reloading(make_bridge, page, monkeypatch,
+                                                               settings):
+    """On an idle bridge the remote path would start publishers nothing asked for."""
+    bridge = make_bridge()
+    bridge.start()
+    assert not bridge.running
+    remote, reloads = [], []
+    monkeypatch.setattr(bridge, "apply_remote_settings", lambda values: remote.append(values))
+    monkeypatch.setattr(bridge, "reload", lambda: reloads.append(1))
+    writes = configfile.save_calls
+
+    request, body = post(page(bridge), new_session(),
+                         settings_fields(bridge.settings, screenshot_delay="9"))
+
+    assert request.response_code == 200
+    assert b"reconnecting" in body
+    assert remote == []
+    assert reloads == [1]
+    assert settings.screenshot_delay.saved_value == 9
+    assert configfile.save_calls == writes + 1
+
+
 # ------------------------------------------------------- what the page can do --
 
 
@@ -840,6 +1049,23 @@ def test_an_invalid_action_input_runs_nothing(connected_bridge, page, monkeypatc
     monkeypatch.setattr(connected_bridge, "run_command", lambda *args: sent.append(args))
     request, _body = post(page(connected_bridge), new_session(),
                           action_fields("volume", **fields))
+    assert request.response_code == 400
+    assert sent == []
+
+
+@pytest.mark.parametrize(
+    ("which", "fields"),
+    [
+        ("power", {"state": "deep_standby"}),
+        ("ha_mode", {"mode": "everything"}),
+        ("message", {"text": "x", "type": "info", "timeout": "5", "style": "fullscreen"}),
+    ],
+)
+def test_a_choice_the_page_did_not_offer_runs_nothing(connected_bridge, page, monkeypatch,
+                                                      which, fields):
+    sent = []
+    monkeypatch.setattr(connected_bridge, "run_command", lambda *args: sent.append(args))
+    request, _body = post(page(connected_bridge), new_session(), action_fields(which, **fields))
     assert request.response_code == 400
     assert sent == []
 
@@ -1023,7 +1249,10 @@ def test_the_openwebif_hook_registers_what_upstream_expects(monkeypatch):
     link, child, name, version, has_gui, target = entry
     assert link == "mqttbridge" and type(link) is str
     assert isinstance(name, str) and isinstance(version, int) and has_gui is True
-    assert target == "_self"
+    # 🔴 `"_self"` makes OpenWebif's menu inject the page into its own content
+    # panel by script instead of linking to it; anything else is a new-tab link.
+    assert target != "_self"
+    assert target == "_blank"
     assert hasattr(child, "render_GET") and hasattr(child, "putChild")
     # Twisted 22 on these images refuses a str key here.
     assert child.children and all(type(key) is bytes for key in child.children)

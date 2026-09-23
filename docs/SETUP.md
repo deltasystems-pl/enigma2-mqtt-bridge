@@ -161,7 +161,8 @@ disk. It is never sent to Home Assistant, MQTT, provisioning acknowledgements or
 ## The OpenWebif page
 
 If the receiver runs OpenWebif, the plugin adds a page to it: `http://<receiver-address>/mqttbridge`,
-also linked from OpenWebif's own menu. It is the recovery tool — it is served by the receiver's web
+also linked from OpenWebif's extras menu as *MQTT Bridge*, which opens it in a new browser tab. It
+is the recovery tool — it is served by the receiver's web
 interface, not by the broker session, so it keeps working when the broker settings are wrong.
 
 **What it shows.** The plugin version; whether the bridge is running, and if it is idle, why;
@@ -178,7 +179,9 @@ and line breaks — enigma2's settings file has no escaping, so a line break wou
 setting. A change to the node id, the base topic or the discovery prefix asks for a confirmation
 first, because every retained topic moves and Home Assistant sees a new device. A change inside
 `cmd/config`'s subset applies at once; any other change saves and reconnects, which can take a few
-seconds, and `info` follows when it has.
+seconds, and `info` follows when it has. Only the fields you actually changed are saved: the form
+remembers what it showed, so a page left open while a setting was changed elsewhere — over
+`cmd/config`, or a permission switched off at the television — does not write its old value back.
 
 **What it does.** Every command the plugin accepts over MQTT, run through the same code with the
 same household-safety guards — a recording, a timer due, the softcam's one-a-minute limit. Deep
@@ -203,10 +206,20 @@ port 80. Keep that port off anything you do not trust.
 🔴 **The page's own checks protect the page, not the receiver.** It answers only when the address
 in the browser is the receiver's IP address, `localhost`, or the receiver's hostname (bare or with
 `.local`), which is what stops a hostile web site from reaching it through a name it controls; and
-every change must come from the page itself, with the session's one-shot token. But while
+every change must come from the page itself (its `Origin`), carrying the token the page put into
+the form. That token is kept in the browser's OpenWebif session, is accepted only from the POST
+body — never from the address — and is replaced after every change that took effect; a refused
+request leaves it as it was, so the page you are looking at still works. A confirmation step
+carries a separate token that is good for exactly one attempt at exactly that action. But while
 OpenWebif authentication is off, any web page a household member opens can already switch the
 receiver off, or grant `deep_standby_allowed`, through OpenWebif's own endpoints — this page cannot
 make the receiver safer than its web interface. If that matters, switch OpenWebif authentication on.
+
+🔴 **The same holds for the broker password.** Whoever OpenWebif admits can point `host` at a
+server of their own (or switch TLS off) on this page, and the receiver will then send its stored
+broker password there on the next connect. That is no worse than OpenWebif's own `/web/settings`,
+which prints the password to anybody it admits — but it is the reason the page is not a safe place
+to leave open to people you would not give the broker login to.
 
 **Known limitation.** Because of the address check, the page refuses to answer under a DNS name of
 your own or behind a reverse proxy, with a message naming the addresses that work. This is

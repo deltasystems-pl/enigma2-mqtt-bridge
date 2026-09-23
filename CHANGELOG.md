@@ -86,12 +86,13 @@ version that has no section here.
   `last_error`, `info.settings`, the connection diagnostics and the last payload of every retained
   topic; it edits **every** setting, the permissions and kill-switches included (passwords
   write-only, every text value refusing control characters because enigma2's settings file has no
-  escaping); and it runs **every** command through the same handler MQTT uses, with the same
+  escaping, and only the fields actually edited saved, so a page left open never writes back a
+  value changed elsewhere since); and it runs **every** command through the same handler MQTT uses, with the same
   household-safety guards and with two-step confirmations for the destructive ones. A command from
   the page does not need `deep_standby_allowed` or `softcam_restart_allowed`; over MQTT both are
   still required, and the automatic softcam restart still needs its permission whatever the page
   did. What guards the page against other web sites is a `Host` allowlist on every request — the
-  receiver's IP address, `localhost` or its own hostname — plus the same-origin check, the one-shot
+  receiver's IP address, `localhost` or its own hostname — plus the same-origin check, the
   session token and exact field sets; it adds `frame-ancestors 'self'` and stays script-free. The
   decision and the measurements behind it are in
   [ADR-0009](docs/adr/0009-the-openwebif-page-trusts-openwebif.md), which supersedes the
@@ -101,6 +102,10 @@ version that has no section here.
   already change every setting through OpenWebif itself. Switch OpenWebif authentication on if that
   is not what you want. The page also refuses to answer under a DNS name of your own or behind a
   reverse proxy; open it by the receiver's address or `<hostname>.local`.
+- **OpenWebif's menu opens the page in a new tab.** The hook registered its link with the target
+  `_self`, which OpenWebif turns into a script call that injects the response into its own content
+  panel — so the entry appeared to do nothing, and a page that did load would have leaked its styles
+  into OpenWebif's and navigated the whole window on submit. The link is now a plain new-tab link.
 - **„Box-only" now reads „never writable over MQTT".** A setting that enables a command is set on
   the receiver — the setup screen, the provisioning file or the OpenWebif page — and the broker can
   still never grant one: `cmd/config`'s allowlist and `info.settings` are unchanged.
