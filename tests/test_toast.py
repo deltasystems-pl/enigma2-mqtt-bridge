@@ -271,33 +271,64 @@ def test_the_text_is_truncated_at_two_hundred(live_bridge, factory, plugin_log):
     assert "toast truncated from 450 to 200 characters" in plugin_log()
 
 
-def test_escapes_are_removed_before_the_cap_so_none_is_cut_in_half(live_bridge, factory):
-    # The escape spans characters 196 to 205: cut first, and „\\cFFF" would be left.
+def test_the_cap_counts_the_escape_characters_that_stay(live_bridge, factory):
+    # Only the backslash goes; the nine characters after it are text, and count.
     send(factory, {"text": "x" * 195 + "\\cFFFF0000" + "Alarm", "style": "toast"})
-    assert shown_text(live_bridge) == "x" * 195 + "Alarm"
-    assert "\\c" not in shown_text(live_bridge)
+    assert shown_text(live_bridge) == "x" * 195 + "cFFFF"
 
 
-def test_a_colour_escape_is_removed(live_bridge, factory):
+def test_a_colour_escape_shows_as_text_without_its_backslash(live_bridge, factory):
     send(factory, {"text": "\\cFFFF0000Alarm", "style": "toast"})
-    assert shown_text(live_bridge) == "Alarm"
+    assert shown_text(live_bridge) == "cFFFF0000Alarm"
 
 
-def test_an_escape_a_removal_would_create_is_removed_too(live_bridge, factory):
-    # Taking out the inner escape joins the leading backslash to `cBBBBBBBB`.
+def test_two_escapes_in_a_row_lose_only_their_backslashes(live_bridge, factory):
     send(factory, {"text": "\\" + "\\cAAAAAAAA" + "cBBBBBBBBok", "style": "toast"})
-    assert shown_text(live_bridge) == "ok"
+    assert shown_text(live_bridge) == "cAAAAAAAAcBBBBBBBBok"
 
 
-def test_an_escape_counts_a_newline_as_one_of_its_eight_characters(live_bridge, factory):
-    # The renderer takes the next eight characters whatever they are.
+def test_a_newline_inside_an_escape_stays(live_bridge, factory):
     send(factory, {"text": "\\cFF\nF0000Alarm", "style": "toast"})
-    assert shown_text(live_bridge) == "Alarm"
+    assert shown_text(live_bridge) == "cFF\nF0000Alarm"
 
 
-def test_a_backslash_c_without_eight_characters_is_left_alone(live_bridge, factory):
+def test_a_windows_path_keeps_its_text(live_bridge, factory):
+    send(factory, {"text": "C:\\config.txt ok", "style": "toast"})
+    assert shown_text(live_bridge) == "C:config.txt ok"
+
+
+def test_a_backslash_that_is_no_escape_is_removed_too(live_bridge, factory):
     send(factory, {"text": "C:\\config", "style": "toast"})
-    assert shown_text(live_bridge) == "C:\\config"
+    assert shown_text(live_bridge) == "C:config"
+
+
+def test_an_escape_only_the_renderer_would_see_leaves_no_backslash(live_bridge, factory):
+    """Measured on a receiver: the renderer reads escapes after right-to-left reordering.
+
+    In the string the backslash comes *after* `cFFFF0000`, so no pattern over the
+    string sees an escape; on screen it was consumed as one and never drawn.
+    """
+    send(factory, {"text": "א cFFFF0000\\ב – test RTL", "style": "toast"})
+    assert error(factory) is None
+    assert "\\" not in shown_text(live_bridge)
+    assert shown_text(live_bridge) == "א cFFFF0000ב – test RTL"
+
+
+def test_a_literal_backslash_n_shows_as_n(live_bridge, factory):
+    send(factory, {"text": "one\\ntwo\\t\\r", "style": "toast"})
+    assert shown_text(live_bridge) == "onentwotr"
+
+
+def test_the_cap_counts_what_is_left_after_the_backslashes(live_bridge, factory):
+    send(factory, {"text": "\\" * 50 + "x" * 210, "style": "toast"})
+    assert shown_text(live_bridge) == "x" * 200
+
+
+def test_the_popup_keeps_every_backslash(live_bridge, factory):
+    """The popup path is unchanged, byte for byte: the rule is the toast's."""
+    text = "א cFFFF0000\\ב \\cFFFF0000Alarm C:\\config \\n"
+    send(factory, {"text": text})
+    assert Notifications.popups == [{"text": text, "type": 1, "timeout": 10, "id": "mqttbridge"}]
 
 
 def test_a_real_newline_is_kept(live_bridge, factory):
@@ -305,7 +336,7 @@ def test_a_real_newline_is_kept(live_bridge, factory):
     assert shown_text(live_bridge) == "Pralka\nskończyła"
 
 
-@pytest.mark.parametrize("text", ["", "   ", None, "\\c00000000", "\\c00000000  "])
+@pytest.mark.parametrize("text", ["", "   ", None, "\\", "\\\\  \\"])
 def test_a_toast_with_nothing_to_show_is_refused(live_bridge, factory, text):
     send(factory, {"text": text, "style": "toast"})
     assert error(factory) == "message text is empty"

@@ -722,7 +722,7 @@ that is not a JSON object. The style is decided before any default is applied.
 
 | Field | Type | Popup (unchanged) | Toast |
 |---|---|---|---|
-| `text` | string | required; empty refused; truncated at 500 | required; empty refused; truncated at **200**; every `\c` followed by eight characters is removed |
+| `text` | string | required; empty refused; truncated at 500 | required; empty refused; **every backslash is removed** and nothing else — `\cFFFF0000Alarm` shows as `cFFFF0000Alarm`, `C:\config.txt` as `C:config.txt`, a literal `\n` as `n` — then truncated at **200** |
 | `style` | string, optional | absent, `null` or `"popup"` | `"toast"` (trimmed, case-insensitive). Any other value is refused: „unknown message style '…'; expected popup or toast" |
 | `timeout` | integer seconds, optional | default **10**; `0` or less = until dismissed | default **5**; **`0` or less is refused** („a toast hides itself; timeout must be 1–30 seconds"); more than `30` becomes `30`, with a note in the log |
 | `type` | `info` \| `warning` \| `error`, optional | chooses the box's icon | **validated exactly as for a popup** — an unknown value is refused, so a payload is valid or invalid whatever its style — and then **ignored** |
