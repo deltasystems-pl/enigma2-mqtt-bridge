@@ -48,6 +48,7 @@ from .log import configure as configure_logging
 from .log import get_logger, register_secret
 from .mqttclient import BrokerSettings, MqttClient
 from .publisher import Publisher
+from .uninstall import DEFERRED as UNINSTALL_DEFERRED
 from .uninstall import RUNNING as UNINSTALL_RUNNING
 from .uninstall import Uninstaller
 from .version import __version__
@@ -228,7 +229,19 @@ class Bridge:
         return values
 
     def apply_remote_settings(self, values):
-        """Persist one validated replacement, then apply its publisher lifecycle."""
+        """Persist one validated replacement, then apply its publisher lifecycle.
+
+        🔴 Not while the plugin removes itself — from acceptance, not only once
+        the doors close. Applying swaps publishers, republishes `info` and
+        discovery and retracts stale topics at QoS 0, none of it inside the set
+        the teardown retracts and has acknowledged. So the values are saved as
+        `apply_settings` saves them, nothing is applied, and `cmd/config` says
+        so on `last_error`: the change did not take effect, which is what a
+        consumer that waits for `info.settings` needs to hear.
+        """
+        if self._uninstaller.underway:
+            error = self.defer_settings(values)
+            return error or UNINSTALL_DEFERRED
         if self._uninstaller.closed:
             return UNINSTALL_RUNNING
         if not settings_module.save_remote_settings(values, self.settings):

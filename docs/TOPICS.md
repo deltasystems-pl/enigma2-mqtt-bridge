@@ -997,7 +997,9 @@ order, never blocking it ([ADR-0013](adr/0013-the-uninstall-closes-the-doors-and
    a command arriving now is dropped with a line in the log, and one from the OpenWebif page is
    answered „an uninstall is already running" without touching `last_error`. From the moment
    the command is accepted, a Save on the receiver's setup screen or on the OpenWebif page keeps
-   its settings but neither reconnects nor applies them, and the bridge does not start again. From here on nothing re-creates a topic.
+   its settings but neither reconnects nor applies them, and the bridge does not start again.
+   `cmd/config` in the same window saves its values, applies nothing and publishes nothing but a
+   `last_error` saying so, which the retraction then empties with everything else. From here on nothing re-creates a topic.
 2. **Retract** — an empty retained payload — every topic in the state file (§4), which is the set
    `cmd/reset` uses, **and** every command topic of this node on which somebody left a retained
    message during this session (the dispatcher discards those; this is where they are cleared).

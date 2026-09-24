@@ -924,8 +924,65 @@ def test_the_page_cannot_save_settings_during_the_removal(box, factory):
 
     refusal = bridge.apply_remote_settings(bridge.remote_settings())
 
-    assert refusal == "an uninstall is already running"
+    assert refusal == uninstall.DEFERRED
     assert len(factory.client.published) == after
+
+
+def _config(factory, **values):
+    import json
+
+    payload = {"publish_keys": True, "screenshot": "on_zap", "screenshot_interval": 60}
+    payload.update(values)
+    factory.client.fire_message(ROOT + "/cmd/config", json.dumps(payload).encode())
+
+
+def test_cmd_config_after_the_uninstall_was_accepted_is_saved_not_applied(
+    box, factory, settings
+):
+    """Before the teardown's first turn the doors are still open; `cmd/config` would
+    republish `info` and discovery and retract the triggers at QoS 0, outside the
+    set the teardown acknowledges."""
+    bridge = box()
+    assert settings.ha_mode.value == "discovery"
+    send(factory)
+    assert bridge.uninstaller.phase == "scheduled"
+    client = factory.client
+    before = len(client.published)
+    keys = bridge.publisher("keys")
+
+    _config(factory, publish_keys=False, screenshot_delay=9)
+
+    published = client.published[before:]
+    assert [entry.topic for entry in published] == [LAST_ERROR]
+    assert published[0].json()["cmd"] == "config"
+    assert published[0].json()["error"] == uninstall.DEFERRED
+    # Said in words a consumer can act on: kept, not applied, and why.
+    assert uninstall.DEFERRED.startswith("the settings were saved but not applied")
+    assert "being removed" in uninstall.DEFERRED
+    assert settings.publish_keys.saved_value is False
+    assert settings.screenshot_delay.saved_value == 9
+    # No publisher was swapped.
+    assert bridge.publisher("keys") is keys
+
+    # The teardown then begins connected, and the last_error is inside its set.
+    MainLoop.advance(0)
+    assert bridge.uninstaller.phase == "retracting"
+    retracted = {entry.topic for entry in teardown(client, before) if entry.text == ""}
+    assert LAST_ERROR in retracted
+
+
+def test_cmd_config_applies_again_after_a_failed_removal(box, factory, settings):
+    bridge = box()
+    old = run_to_opkg(bridge, factory)
+    opkg().finish(1)
+    client = _fresh_session(factory, old)
+    before = len(client.published)
+
+    _config(factory, screenshot_delay=9)
+
+    assert client.last(INFO) in client.published[before:]
+    assert client.last(INFO).json()["settings"]["screenshot_delay"] == 9
+    assert error(client) is None
 
 
 def test_a_connection_lost_before_the_first_retraction_removes_nothing(box, factory, receiver):

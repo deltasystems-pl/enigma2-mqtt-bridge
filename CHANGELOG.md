@@ -202,7 +202,9 @@ version that has no section here.
   that had just retracted it, and a page save made before the removal's first step left it an
   unconnected session, so the removal failed. The settings are still saved, the screen and the
   page say they are not applied yet, and the removal's own failure path reconnects with them if
-  it stops.
+  it stops. `cmd/config` accepted in the same window is saved and not applied either — it used
+  to republish `info` and discovery and retract device triggers at QoS 0 outside the removal's
+  acknowledged retraction — and answers with a `last_error` that says so.
 - **„Next timer" has been unreadable in discovery mode since 0.2.0.** Its value template appended
   `+00:00` to `timestamp_utc`, which already ends in the offset, so the state arrived as
   `2026-09-10T12:08:29+00:00+00:00`. Home Assistant cannot parse that: it logs „Invalid state
