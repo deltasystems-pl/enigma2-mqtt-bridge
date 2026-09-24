@@ -111,6 +111,13 @@ NOT_PACKAGED = (
     "this plugin was not installed by the package manager, so it cannot remove itself"
 )
 RUNNING = "an uninstall is already running"
+# `cmd/config` while a removal is under way: kept, not applied. English, as
+# every `last_error` sentence is — it is read by a consumer, not shown on the
+# television.
+DEFERRED = (
+    "the settings were saved but not applied: the plugin is being removed from this "
+    "receiver; they take effect if the removal stops or the plugin is installed again"
+)
 NO_TIMER = "this image has no eTimer, so the removal cannot be run"
 
 TIMED_OUT = (
