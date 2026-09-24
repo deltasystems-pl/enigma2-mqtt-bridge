@@ -571,6 +571,23 @@ def test_a_reload_after_the_connection_dropped_publishes_nothing(connected_bridg
     assert old.published[before:] == []
 
 
+def test_a_failed_removal_restarts_without_a_second_offline(connected_bridge, factory):
+    """The removal's own `offline` is its last word; its restart changes no setting.
+
+    A removal that stops reopens the session through `reload()`. Nothing of the
+    connection changed, so the old session publishes no `offline` of its own on
+    the way out, and the fresh one comes back `online` with the reason on
+    `last_error`.
+    """
+    old = factory.client
+    connected_bridge.restart_after_failed_uninstall("uninstall", "opkg is busy")
+
+    assert _offline_from(old) == []
+    factory.client.fire_connect()
+    assert _retained_on_the_broker(factory, AVAILABILITY) == "online"
+    assert factory.client.last("enigma2/" + NODE + "/last_error").json()["error"] == "opkg is busy"
+
+
 def test_a_reload_that_switches_the_plugin_off_leaves_offline_retained(connected_bridge,
                                                                        factory, settings):
     settings.enabled.value = False
