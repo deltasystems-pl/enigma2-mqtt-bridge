@@ -235,6 +235,13 @@ class Bridge:
             return "could not persist the plugin settings"
 
         self._replace_configurable_publishers()
+        # No reconnect follows this path, so nothing else would retract what the
+        # new settings stopped publishing: `publish_keys` switched off here takes
+        # the `keys` capability, and with it the eight device triggers, which
+        # would otherwise stay retained — and offered in Home Assistant's
+        # automation editor — until the next connect. Before the republish, so
+        # the node retracts before it announces, as a mode switch does.
+        self.retract_stale()
         info = self.build_info()
         self.publish_json(self.topic("info"), info)
         self.publish_discovery(info)

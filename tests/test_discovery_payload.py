@@ -563,3 +563,55 @@ def test_the_topic_set_is_what_the_builder_publishes(capabilities, prefix):
         NODE, "Living room receiver", "enigma2", {"capabilities": capabilities}, prefix=prefix
     )
     assert discovery.discovery_topics(prefix, NODE, capabilities) == set(built)
+
+
+# `cmd/config` and the OpenWebif page apply `publish_keys` without a reconnect,
+# so the retraction the connect would have done has to happen on the spot.
+
+def discovery_emptied(published):
+    # Every settings apply also re-retracts the switched-off telemetry topics;
+    # only the discovery side is this test's business.
+    return [topic for topic in emptied(published) if topic.startswith("homeassistant/")]
+
+
+def keys_off_over_mqtt(bridge, factory):
+    factory.client.fire_message(
+        ROOT + "/cmd/config",
+        b'{"publish_keys":false,"screenshot":"on_zap","screenshot_interval":60}',
+    )
+
+
+def keys_off_directly(bridge, factory):
+    """What the OpenWebif page calls for a change inside `cmd/config`'s allowlist."""
+    values = bridge.remote_settings()
+    values["publish_keys"] = False
+    assert bridge.apply_remote_settings(values) is None
+
+
+@pytest.mark.parametrize("switch_off", [keys_off_over_mqtt, keys_off_directly],
+                         ids=["cmd-config", "remote-settings"])
+def test_keys_switched_off_in_session_retract_the_triggers_at_once(live_bridge, factory,
+                                                                  settings, switch_off):
+    factory.client.clear()
+    switch_off(live_bridge, factory)
+
+    assert settings.publish_keys.value is False
+    assert sorted(set(discovery_emptied(factory.client.published))) == sorted(TRIGGERS)
+    assert factory.client.last(DEVICE_TOPIC).text != ""
+    for topic in TRIGGERS:
+        assert not live_bridge.state.knows(topic)
+    # Retracted before the republish, so nothing announced after it is taken back.
+    topics = factory.client.topics()
+    assert max(topics.index(topic) for topic in TRIGGERS) < topics.index(DEVICE_TOPIC)
+
+
+def test_keys_switched_back_on_in_session_republish_the_triggers(live_bridge, factory):
+    keys_off_directly(live_bridge, factory)
+    factory.client.clear()
+    values = live_bridge.remote_settings()
+    values["publish_keys"] = True
+    assert live_bridge.apply_remote_settings(values) is None
+
+    assert discovery_emptied(factory.client.published) == []
+    for topic in TRIGGERS:
+        assert factory.client.last(topic).text != ""

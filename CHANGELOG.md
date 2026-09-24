@@ -182,7 +182,7 @@ version that has no section here.
 ### Fixed
 
 - **In `discovery` mode, a connect no longer deletes the device from Home Assistant and creates
-  it again.** Since 0.1.0 the retraction of stale topics, which runs before the first publish of
+  it again.** Since 0.2.0, the first release to publish discovery payloads, the retraction of stale topics, which runs before the first publish of
   every connect, every reload and every settings save, took everything outside the node's own
   `enigma2/<node>/…` tree except the announcement for stale — including the node's current device
   payload and its eight device triggers. Each connect therefore emptied all nine and published
@@ -190,10 +190,13 @@ version that has no section here.
   device and its entities were removed and recreated, which can cost the names, areas and
   dashboard placements given to them. The contract in `docs/TOPICS.md` always said the plugin
   compares the state file with what it is about to publish and retracts only the difference; it
-  now does. A new discovery prefix, a new node id, leaving `discovery` mode on the setup screen,
-  and switching the remote's key publishing off (which takes the triggers, not the device) still
-  retract what they leave behind, and `cmd/uninstall` and `cmd/reset` still retract everything.
-  `integration` and `off` modes were not affected.
+  now does. A new discovery prefix, a new node id and leaving `discovery` mode on the setup screen
+  still retract what they leave behind, and `cmd/uninstall` and `cmd/reset` still retract
+  everything. `integration` and `off` modes were not affected.
+- **Switching `publish_keys` off over `cmd/config` or on the OpenWebif page retracts the eight
+  device triggers at once.** Neither path reconnects, so the triggers stayed retained — and
+  offered in Home Assistant's automation editor — until the next connect. They now go before
+  `info` and the device payload are republished; the device itself stays.
 - **A Save on the receiver's setup screen or the OpenWebif page no longer reopens the broker
   session while `cmd/uninstall` is under way.** It republished everything underneath a removal
   that had just retracted it, and a page save made before the removal's first step left it an
