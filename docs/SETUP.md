@@ -192,6 +192,8 @@ connection drops, or `opkg` refuses — it holds a lock that the image's own upd
 browser take as well — the plugin reconnects, publishes everything again as after any restart, and
 `last_error` says which step stopped it. Try again a minute later.
 
+**Saving the setup screen or the OpenWebif page's settings during a removal** keeps what you typed but does not reconnect or apply it: the screen and the page say so. The settings take effect if the removal stops — its failure path reconnects with them — or when the plugin is installed again.
+
 🔴 **opkg removes files one at a time.** If it is interrupted part way — it reports success even when
 it was killed — the plugin checks that the package really is gone before restarting. When it is not,
 some of its files may already be missing: `last_error` then says so and gives the command that puts
