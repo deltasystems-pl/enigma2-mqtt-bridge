@@ -470,7 +470,7 @@ class Field:
 
     def __init__(self, name, kind, label, options=(), limits=None, default=""):
         self.name = name
-        self.kind = kind  # text, number, select, checkbox or bouquet
+        self.kind = kind  # text, number, select, checkbox, bouquet or history
         self.label = label
         self.options = tuple(options)
         self.limits = limits
@@ -511,7 +511,7 @@ def _message_payload(values):
     })
 
 
-def actions(bouquets=(), node_id=""):
+def actions(bouquets=(), node_id="", history=()):
     """Every page action, in the order the page shows them.
 
     Built per request, so every label is in the language of the moment. Every
@@ -519,7 +519,9 @@ def actions(bouquets=(), node_id=""):
     action is the settings form; a test holds the two lists to each other.
     `node_id` is `uninstall`'s payload, which the page fills in: the node id is
     the confirmation a broker client has to type, and on the page the second,
-    server-rendered step is that confirmation.
+    server-rendered step is that confirmation. `history` is the last published
+    `zap_history`, as `(sref, name)`: the page offers what the topic said, by
+    reference, as a consumer would.
     """
     on_off = (("on", _("On")), ("off", _("Off")))
     sref = Field("sref", "text", _("Service reference"))
@@ -570,6 +572,19 @@ def actions(bouquets=(), node_id=""):
             "bouquet", "bouquet", _("Bouquet"),
             (Field("sref", "bouquet", _("Bouquet"), bouquets),),
             build=lambda values: _json({"sref": values["sref"]}),
+        ),
+        Action(
+            "zap_history", "zap_history", _("Zap to a recently watched channel"),
+            (Field("sref", "history", _("Channel"), history),),
+            build=lambda values: _json({"sref": values["sref"]}),
+        ),
+        Action(
+            "history_clear", "history_clear", _("Clear the recently watched list"),
+            build=lambda _values: "PRESS",
+            confirm=lambda _values: _(
+                "The receiver switches to channel 1, the first channel of its first "
+                "bouquet, and empties its list of recently watched channels."
+            ),
         ),
         Action(
             "volume", "volume", _("Volume"),
@@ -696,6 +711,18 @@ def _bouquets(bridge):
         reference = str(bouquet.get("sref") or "")
         if reference:
             found.append((reference, str(bouquet.get("name") or reference)))
+    return found
+
+
+def _history(bridge):
+    """`(sref, name)` for every entry of the last published `zap_history`, newest first."""
+    publisher = bridge.publisher("zap_history") if bridge is not None else None
+    payload = getattr(publisher, "published", None)
+    found = []
+    for entry in (payload or {}).get("entries") or []:
+        reference = str(entry.get("sref") or "")
+        if reference:
+            found.append((reference, str(entry.get("name") or reference)))
     return found
 
 
@@ -926,7 +953,7 @@ def _running_bridge():
 
 
 def _action(key, bridge=None):
-    for action in actions(_bouquets(bridge), _node_id(bridge)):
+    for action in actions(_bouquets(bridge), _node_id(bridge), _history(bridge)):
         if action.key == key:
             return action
     raise ValueError("unknown action")
@@ -1162,7 +1189,7 @@ def _settings_section(section, token):
 def _action_control(field):
     if field.kind == "checkbox":
         return _checkbox(field.name, False)
-    if field.kind == "select" or (field.kind == "bouquet" and field.options):
+    if field.kind == "select" or (field.kind in ("bouquet", "history") and field.options):
         return _select(field.name, field.options, None)
     if field.kind == "number":
         limits = ""
@@ -1237,7 +1264,7 @@ def _actions_section(request, bridge, token):
     forms = "".join(
         _action_form(action, token, running)
         + (_screenshot_figure(request, bridge) if action.key == "screenshot" else "")
-        for action in actions(_bouquets(bridge), _node_id(bridge))
+        for action in actions(_bouquets(bridge), _node_id(bridge), _history(bridge))
     )
     return (
         f"<section><h2>{_e(_('Commands'))}</h2>{note}"

@@ -261,6 +261,10 @@ settings as `info.settings` publishes them; the connection diagnostics; the last
 on every retained topic, exactly as a subscriber received it (a raw topic such as the screenshot is
 named, not shown); and a sanitised tail of the plugin's log.
 
+That includes `zap_history` - the receiver's list of recently watched channels - **unfiltered**:
+every channel of every bouquet in it, to whoever OpenWebif admits. A bouquet hidden in a Home
+Assistant list is hidden there and nowhere else.
+
 Beside *Take a screenshot* it shows the **last screenshot the plugin sent to the broker**, with the
 time the capture finished and a link to the full size (`<mount>/screen.jpg`). While a capture is
 running the page says so and reloads itself every two seconds, for at most twenty, until the new
@@ -285,9 +289,11 @@ saved first, the page says it is out of date - reload it and make the change aga
 **What it does.** Every command the plugin accepts over MQTT, run through the same code with the
 same household-safety guards - a recording, a timer due, the softcam's one-a-minute limit. Deep
 standby, reboot, restarting the interface, deleting a timer, stopping a recording, restarting the
-softcam, changing the Home Assistant mode, resetting the retained topics and removing the plugin
-each ask for a confirmation that says what the household loses; for the removal the page fills in
-the node id itself. The one difference from MQTT: a command from this
+softcam, clearing the list of recently watched channels (which also switches to channel 1, as the
+receiver's 0 key does), changing the Home Assistant mode, resetting the retained topics and
+removing the plugin each ask for a confirmation that says what the household loses; for the removal
+the page fills in the node id itself. Going back to a recently watched channel offers the channels
+of the last `zap_history` the plugin published, by reference, as a consumer would send them. The one difference from MQTT: a command from this
 page **does not need** `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed` or
 `uninstall_allowed`. While the bridge is idle
 the commands are shown disabled, with the reason.

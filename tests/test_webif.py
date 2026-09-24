@@ -1326,6 +1326,63 @@ def test_an_action_payload_is_exactly_what_a_broker_client_would_send(connected_
     ]
 
 
+HISTORY_ONE = "1:0:19:283E:3FB:1:C00000:0:0:0:"
+HISTORY_TWO = "1:0:19:283D:3FB:1:C00000:0:0:0:"
+
+
+def _with_published_history(bridge, monkeypatch):
+    """The page reads the last `zap_history` the publisher sent, and nothing else."""
+    published = SimpleNamespace(published={
+        "entries": [
+            {"sref": HISTORY_ONE, "name": "TVN <HD>", "bouquet": None, "bouquet_name": None},
+            {"sref": HISTORY_TWO, "name": None, "bouquet": None, "bouquet_name": None},
+        ],
+        "current": 0, "limit": 20, "panic_button": True,
+    })
+    original = bridge.publisher
+    monkeypatch.setattr(
+        bridge, "publisher",
+        lambda name: published if name == "zap_history" else original(name),
+    )
+
+
+def test_the_history_action_offers_the_last_published_entries_by_reference(
+    connected_bridge, page, monkeypatch
+):
+    _with_published_history(connected_bridge, monkeypatch)
+    _request, body = get(page(connected_bridge), new_session())
+    text = body.decode("utf-8")
+    form = text.split("value='zap_history'>", 1)[1].split("</form>", 1)[0]
+    assert "<select name='sref'>" in form
+    assert f"<option value='{HISTORY_ONE}'>TVN &lt;HD&gt;</option>" in form
+    # No name: the reference is the label rather than an empty option.
+    assert f"<option value='{HISTORY_TWO}'>{HISTORY_TWO}</option>" in form
+
+
+def test_the_history_action_sends_what_a_broker_client_would(connected_bridge, page,
+                                                             monkeypatch):
+    sent = []
+    monkeypatch.setattr(connected_bridge, "run_command",
+                        lambda name, text, origin: sent.append((name, text, origin)))
+    post(page(connected_bridge), new_session(), action_fields("zap_history", sref=HISTORY_ONE))
+    assert sent == [("zap_history", '{"sref":"' + HISTORY_ONE + '"}', PAGE)]
+
+
+def test_clearing_the_history_asks_first_and_then_runs_the_command(connected_bridge, page,
+                                                                  monkeypatch):
+    sent = []
+    monkeypatch.setattr(connected_bridge, "run_command",
+                        lambda name, text, origin: sent.append((name, text, origin)))
+    resource = page(connected_bridge)
+    session = new_session()
+    _request, body = post(resource, session, action_fields("history_clear"))
+    assert sent == []
+    assert b"switches to channel 1" in body
+    request, _body = post(resource, session, confirmation(body), csrf=None)
+    assert request.response_code == 200
+    assert sent == [("history_clear", "PRESS", PAGE)]
+
+
 @pytest.mark.parametrize(
     "fields",
     [

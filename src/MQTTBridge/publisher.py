@@ -12,6 +12,22 @@ from becoming a circular import.
 """
 
 
+class Refusal(str):
+    """A handler's refusal that also carries a stable reason code.
+
+    Still the sentence - every caller that treats a refusal as text goes on
+    doing so - with `reason` beside it, which the dispatcher puts on
+    `last_error` as the optional `reason` field. The sentence is for the person
+    reading the topic; the code is for a consumer that says the same thing in
+    the household's language. Only handlers that define codes return one.
+    """
+
+    def __new__(cls, sentence, reason):
+        refusal = str.__new__(cls, sentence)
+        refusal.reason = str(reason)
+        return refusal
+
+
 class Publisher:
     """One feature area's state: its hooks, its snapshot, and its capability name."""
 
@@ -62,6 +78,14 @@ class Publisher:
         is unclaimed and the bridge republishes `info` when it ends.
         """
         return True
+
+    def extra_capabilities(self):
+        """Capability names this area claims besides its own name, when it can.
+
+        For an area whose commands an image can offer only in part: the zap
+        history can be read on an image that has no way to clear it.
+        """
+        return []
 
     def stop(self):
         pass

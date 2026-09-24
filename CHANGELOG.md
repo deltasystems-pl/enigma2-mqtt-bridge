@@ -11,6 +11,31 @@ version that has no section here.
 
 ### Added
 
+- **The receiver's zap history, on a new retained `zap_history` topic** - the list its own "History
+  Zap" screen shows on KEY_NEXT and KEY_PREVIOUS, newest first, with each channel's reference, name,
+  bouquet and published bouquet name, plus `current`, `limit` and `panic_button`. It is the
+  receiver's list, read every two seconds and published when it changed; the plugin keeps none of
+  its own, so a user-interface restart empties it. New capabilities **`zap_history`** and
+  **`history_clear`**, claimed on the first successful read of the receiver's list, the second only
+  where the image has the 0 key's own path and its panic-button setting.
+- **`cmd/zap_history`**, `{"sref": ...}`: zap to one channel of that list the way the receiver's
+  screen does, which moves it to the front. By reference only; from standby after the wake, as
+  `cmd/zap`. Refused while a recording is played back.
+- **`cmd/history_clear`**: clear the list exactly as the receiver's 0 key does - the image's own
+  handler, which **switches to channel 1** (the first channel of the first bouquet) and leaves that
+  one channel in the list. Refused in every case in which 0 would not clear: standby, the image's
+  panic-button setting off, fewer than two entries, timeshift, the zap block after timeshift,
+  picture-in-picture taking the 0 key, and the playback of a recording. A "Clear zap history" button
+  in discovery mode; no history select there, because its options would republish discovery on
+  every zap.
+- **`last_error.reason`**, an optional stable code beside the English sentence, set only by commands
+  that define codes (`history_clear`, and `zap_history`'s `playback`), so a consumer can show the
+  refusal in the household's language. Every other `last_error` is unchanged.
+- The OpenWebif page shows the `zap_history` payload with the other topics, unfiltered, and gains
+  both commands - the zap as a list of the last published channels, the clear behind a
+  confirmation that says it switches to channel 1. Decided in
+  [ADR-0014](docs/adr/0014-the-zap-history-is-the-receivers.md).
+
 - **`cmd/uninstall`: the plugin removes itself from the receiver**, behind the permission
   `uninstall_allowed` - off by default, echoed read-only in `info.settings`, never writable over
   MQTT, set on the receiver (the setup screen, the provisioning file or the OpenWebif page, which

@@ -101,6 +101,8 @@ class CommandDispatcher:
             "restart_gui": self.restart_gui,
             "zap": self.zap,
             "bouquet": self.bouquet,
+            "zap_history": self.zap_history,
+            "history_clear": self.history_clear,
             "volume": self.volume,
             "mute": self.mute,
             "key": self.key,
@@ -349,6 +351,58 @@ class CommandDispatcher:
         if publisher is None:
             return "active bouquet selection is unavailable on this image"
         return publisher.select(sref)
+
+    def zap_history(self, text, origin=MQTT):
+        """Zap to one channel of the receiver's own zap history.
+
+        By reference and never by position or name: the list reorders on every
+        zap, and names repeat. No permission and no recording or timeshift
+        guard, because the receiver's own History Zap screen has none - it
+        plays the channel without asking. Refused while a recording is played
+        back, when the list the command would act on is not on screen.
+        """
+        from . import zaphistory
+        from .power import in_standby
+        from .service import run_after_wake
+
+        try:
+            payload = json.loads(text)
+        except (TypeError, ValueError):
+            return "cmd/zap_history takes a JSON object"
+        if not isinstance(payload, dict) or set(payload) != {"sref"}:
+            return "cmd/zap_history takes exactly one sref field"
+        sref = payload.get("sref")
+        if not isinstance(sref, str) or not sref.strip():
+            return "cmd/zap_history sref must be a non-empty string"
+        publisher = self.publisher("zap_history")
+        if publisher is None or not publisher.claimed():
+            return zaphistory.NOT_AVAILABLE
+        if zaphistory.playing_back(self.session):
+            return zaphistory.refusal(zaphistory.PLAYBACK)
+
+        def awake():
+            return publisher.zap_to(sref, on_zap=self._expect)
+
+        if in_standby():
+            return run_after_wake(
+                "zap_history", awake, report=self.bridge.publish_last_error,
+                allowed=self._still_open,
+            )
+        return awake()
+
+    def history_clear(self, _text, origin=MQTT):
+        """Clear the receiver's zap history exactly as its 0 key does.
+
+        🔴 The payload is ignored. Every case in which the key would not clear
+        is refused first, with a reason code on `last_error`; the guards and
+        the call are the publisher's (`zaphistory.py`).
+        """
+        from . import zaphistory
+
+        publisher = self.publisher("zap_history")
+        if publisher is None:
+            return zaphistory.CLEAR_NOT_AVAILABLE
+        return publisher.clear()
 
     def volume(self, text, origin=MQTT):
         from . import volume as volume_module

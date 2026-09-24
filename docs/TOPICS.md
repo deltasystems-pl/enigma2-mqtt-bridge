@@ -121,7 +121,8 @@ plugin detects what it managed to attach and names it here rather than assuming.
 hides what is missing instead of showing a dead entity. The names are the feature areas, and
 nothing else is ever in the list: `power`, `cec_workaround`, `service`, `epg`, `epg_grid`,
 `tuner`, `recording`, `timers`, `volume`, `cam`, `oscam`, `softcam`, `keys`, `screenshot`,
-`toast`, `message`, `hdd`, `process`, `channels`, `bouquet_context`, `epg_import`, `uninstall`. A build that has bound no
+`toast`, `message`, `hdd`, `process`, `channels`, `bouquet_context`, `zap_history`,
+`history_clear`, `epg_import`, `uninstall`. A build that has bound no
 feature area publishes `[]` - the connection, `info` and the commands are the plugin itself and
 are not capabilities. `uninstall` (since 0.3.0) is the one name with no feature area behind it: it
 says the package manager installed this very copy of the plugin, so `cmd/uninstall` can work - opkg
@@ -139,7 +140,8 @@ attached - which is logged once, with the name that could not be bound.
 behind them, which on some images happens after the plugin has already connected. `bouquet_context`
 is the one that does this today: it is claimed on the first successful read of the receiver's own
 service list, not when the plugin starts, so a box that never offers one publishes neither the
-capability nor the `bouquet` topic. When a capability appears after the connect, `info` and the
+capability nor the `bouquet` topic. `zap_history` and `history_clear` (since 0.3.0) arrive the same
+way, from the same list. When a capability appears after the connect, `info` and the
 announcement are published again with it - a consumer that acts on `info` therefore has to accept
 it more than once per connection, which it has to do anyway because `cmd/config` and `cmd/ha_mode`
 both republish it.
@@ -356,6 +358,45 @@ A consumer should read that as „channel up and down are not walking a list I k
 capability stays, because the service list is being read successfully - what is missing is a
 match, not a hook - and the topic goes back to naming a bouquet as soon as the receiver is in one
 again.
+
+### `<base>/<node>/zap_history` - since 0.3.0
+
+The receiver's own zap history: the list its "History Zap" screen shows when KEY_NEXT or
+KEY_PREVIOUS is pressed. Retained, QoS 0, published when it changes, and present when
+`zap_history` is a capability ([ADR-0014](adr/0014-the-zap-history-is-the-receivers.md)).
+
+```json
+{"entries": [{"sref": "1:0:19:2B66:3F3:1:C00000:0:0:0:", "name": "Das Erste HD",
+              "bouquet": "1:7:1:0:0:0:0:0:0:0:FROM BOUQUET \"userbouquet.favourites.tv\" ORDER BY bouquet",
+              "bouquet_name": "Favourites (TV)"}],
+ "current": 0, "limit": 20, "panic_button": true}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `entries` | list | The channels in the receiver's list, **newest first**, exactly the ones its own screen shows: an entry the receiver has no information for any more (a channel removed from every list) is left out, as the screen leaves it out. `[]` when the list is empty |
+| `entries[].sref` | string | The service reference |
+| `entries[].name` | string or `null` | The name the `service` topic uses for the same channel |
+| `entries[].bouquet` | string or `null` | The bouquet of the path the channel was zapped in; `null` when the entry has no path |
+| `entries[].bouquet_name` | string or `null` | That bouquet's name when it is one of the published bouquets (`channels`); `null` otherwise - a radio bouquet, or one `bouquets_for_select` leaves out |
+| `current` | int or `null` | Where the receiver's own position in the list is, as an index into `entries`; `null` when that entry is not shown |
+| `limit` | int or `null` | How many entries the image keeps (`HISTORYSIZE`, 20 on the images read); `null` when the image does not say |
+| `panic_button` | bool or `null` | The image's `config.usage.panicbutton`: `true` means the 0 key - and `cmd/history_clear` - clears the list and switches to channel 1; `false` means 0 only goes back one channel. `null` when the image has no such setting |
+
+**The receiver's list, not the plugin's.** The plugin keeps no history of its own; it reads the
+receiver's every two seconds and publishes when it changed. A user-interface restart, a reboot and
+a deep standby empty the receiver's list, and the topic then says so. The image keeps each service
+once, with the newest path, and drops the oldest past `limit`. While the image's "e1-like" radio
+mode is on - its default - radio services zapped in the same channel list are in the same list.
+
+**What enters it.** Zaps through the receiver's channel list: the remote, and since 0.3.0 every zap
+this plugin makes except the four direct-play cases of `cmd/zap` (see §2). Zaps made by OpenWebif's
+own zap, by a zap timer or from the EPG are in it only if the image routes them through its
+channel list, which is not documented here because it was not read.
+
+**Everything is published.** Every entry of every bouquet is on the broker, retained, as every
+channel is on `channels`. Hiding a bouquet from a list in a consumer hides nothing here. The
+plugin's OpenWebif page shows this payload as it is, to whoever OpenWebif admits.
 
 ### `<base>/<node>/epg_grid/<bouquet_slug>` - since M2
 
@@ -792,6 +833,17 @@ Published when a command fails or is refused by a guard, and **cleared** - an em
 payload - when the same command later succeeds. A consumer that raises an error to the user reads
 this topic, not the absence of a state change.
 
+| Field | Type | Meaning |
+|---|---|---|
+| `cmd` | string | The command refused |
+| `error` | string | Why, in English, for the person reading the topic. This is the contract's human text |
+| `ts` | int | When, in epoch seconds |
+| `reason` | string, optional | Since 0.3.0. A stable code for the refusal, **only** from a command that defines codes - today `history_clear` (and `zap_history`'s `playback`); see §2. Absent, not `null`, otherwise, so every other refusal is exactly what it was. A consumer that knows the code can say the refusal in the household's language, and one that does not ignores the field |
+
+```json
+{"cmd": "history_clear", "error": "the receiver's zap history holds at most one channel, and 0 does nothing then", "reason": "too_short", "ts": 1789459213}
+```
+
 ---
 
 ## 2. Commands
@@ -821,6 +873,8 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `restart_gui` | any | Restarts enigma2 only | Refused while recording or with a timer due within 10 minutes, and while an EPG import runs (since 0.3.0): a restart mid-import loses the run. That refusal **lapses** once this plugin's own start of the import failed, or once the 30-minute watchdog has fired for the current run, and returns with the next import; the `epg_import` topic still says what the importer says |
 | `zap` | `<sref>` \| `{"sref": "..."}` \| `{"name": "..."}` | Tunes to a service, waking the box from standby first. Since 0.3.0 through the receiver's channel list, so the zap is in the receiver's zap history - see below | By name: refused unless exactly one service in the configured bouquets matches - the error names the count. A zap that does not show up on `service` within 5 s is reported there too; from standby, one whose wake has not finished within 5 s is reported as "the receiver did not leave standby" |
 | `bouquet` | `{"sref": "..."}` | Makes one published TV bouquet the active channel-list context | Exact allowlist match only. The current channel is preserved when it belongs to the bouquet; otherwise the first playable channel is tuned. Empty/marker-only bouquets and unavailable service-list APIs are refused without changing context. Since 0.3.0 refused during timeshift, before anything changes: "timeshift is active; the receiver would ask on screen whether to leave it" |
+| `zap_history` - since 0.3.0, capability `zap_history` | `{"sref": "..."}`, exactly | Zaps to one channel of the receiver's zap history the way its own "History Zap" screen does: the entry moves to the front and plays. From standby the receiver is woken first, as for `zap`. Verified on `service` within 5 s | By reference only - the list reorders on every zap and names repeat - matched by service identity among the entries `zap_history` shows: "that channel is no longer in the receiver's zap history" otherwise. Refused while a recording is played back ("a recording is being played back", `reason` `playback`). **No permission, no recording guard and no timeshift guard**: the receiver's own screen has none, and leaves timeshift without asking |
+| `history_clear` - since 0.3.0, capability `history_clear` | any (`PRESS` by convention) | Clears the receiver's zap history **exactly as its 0 key does**: the image's own `keyNumberGlobal(0)`, which empties the list and **switches to channel 1** - the first channel of the first bouquet - closing picture-in-picture if it is open. Afterwards `zap_history.entries` holds that one channel and `service` names it | Refused, before anything happens, in this order, each with a `reason` on `last_error`: in standby - "the receiver is in standby, where 0 does not clear the history" (`standby`); with the image's panic-button setting off - "the receiver's panic-button setting is off, so 0 goes back one channel instead of clearing the history" (`panic_off`); with fewer than two entries - "the receiver's zap history holds at most one channel, and 0 does nothing then" (`too_short`); in timeshift, or with one waiting to be saved - "timeshift is active; 0 would ask on screen whether to leave it" (`timeshift`); while the image holds zaps after timeshift - "the receiver is holding zaps for a moment after timeshift; try again" (`zap_blocked`); with picture-in-picture shown and the image's "0 key in PiP" setting not "standard" - "picture-in-picture is showing and 0 is set to act on it" (`pip`); while a recording is played back - "a recording is being played back" (`playback`). More than one entry left afterwards - "the receiver did not clear its zap history" (`not_cleared`). 🔴 **The payload is ignored**. No permission: `key KEY_0` does the same, unguarded |
 | `volume` | `0`-`100`, or `{"level": 42}` | Sets the volume, with the on-screen bar | Out-of-range values are clamped and noted in the log |
 | `mute` | `ON` \| `OFF` | Sets mute | Never a blind toggle: the state is read first, and read back afterwards. A receiver refuses to mute at volume 0, and that refusal is reported |
 | `key` | `KEY_OK` \| `{"key": "KEY_OK", "long": true}` | Injects a remote key | Unknown key names are refused with the name in `last_error`; at most 20 a second |
@@ -870,6 +924,25 @@ leave standby" and no zap follows. A second zap sent while the first still waits
 
 A zap made this way asks for a parental-control PIN on the television exactly as one from the
 remote does, and it never opens or shows a screen of its own.
+
+### `cmd/history_clear` is the 0 key - since 0.3.0
+
+On the images read, 0 is a single press on key-down - holding it does nothing more - and with the
+image's defaults it empties the zap history and switches to **channel 1**. There is no "panic
+channel" setting: channel 1 is the first channel of the first bouquet, and it moves when the
+bouquet order does. The command runs the key's own handler, never an injected key press, which
+would go to whatever screen has focus; `cmd/key KEY_0` does that, unguarded. What the household
+sees is what the key does: the television switches to channel 1, picture-in-picture closes if it
+was open, and the history holds that one channel.
+
+The image's settings decide what 0 does, and the plugin changes none of them:
+
+| Image setting | Default | Effect |
+|---|---|---|
+| `config.usage.panicbutton` | on | on: clear and channel 1; off: 0 goes back to the previous channel and clears nothing - so `cmd/history_clear` is refused, and `zap_history.panic_button` says `false` |
+| `config.usage.multibouquet` | on | where channel 1 is looked for: the bouquet list, or the favourites when off |
+| `config.usage.pip_zero_button` | `standard` | anything else: 0 acts on picture-in-picture while it is shown - refused |
+| `config.usage.check_timeshift` | on | the question on screen in timeshift - refused in timeshift whatever it says |
 
 ### `cmd/message` styles - `toast` since 0.3.0, capability `toast`
 
@@ -1146,6 +1219,7 @@ gets no volume entity, rather than one that never moves. The unique id of each i
 | `volume` | number | `volume` | 0-100, slider |
 | `mute` | switch | `volume` | |
 | `channel_select` | select | `service` | Options are the channel names of the configured bouquets; selecting one publishes `cmd/zap` |
+| `history_clear` | button | - | Since 0.3.0, when `history_clear` is a capability. Publishes `cmd/history_clear`: the receiver switches to channel 1 and empties its zap history |
 | `screen` | image | `screen` | `image/jpeg` |
 | `screenshot`, `restart_gui`, `refresh_discovery` | button | - | And `deep_standby` and `reboot` **only** when `deep_standby_allowed` is on |
 | `snr`, `agc`, `ber` | sensor | `tuner` | Diagnostic, disabled by default |
@@ -1186,6 +1260,11 @@ say - and neither has `uninstall`, which a button with no confirmation must not 
 the first two would need a whole set of per-reader entities built from a list that changes shape,
 and the third is a selector whose options are the channel list, not a state anybody wants as a
 sensor. A plugin-only install reads them from the broker as they are documented above.
+
+`zap_history` has **no select** either, although it is exactly the kind of list a select offers: a
+core MQTT select carries its options inside this discovery payload, so a list that changes on every
+zap would mean republishing discovery on every zap. The companion integration builds that select
+from the topic; discovery mode offers the clear button only.
 
 ### The attributes the sensors carry
 

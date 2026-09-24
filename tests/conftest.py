@@ -2072,7 +2072,36 @@ infobar_module = _module("Screens.InfoBar")
 HISTORYSIZE = 20
 
 
+class _ZapBlock:
+    """`pts_blockZap_timer`, as far as the 0 key asks it."""
+
+    def __init__(self):
+        self.active = False
+
+    def isActive(self):
+        return self.active
+
+
 class InfoBar:
+    """The info bar, with the number-zap and timeshift mixins the 0 key runs through.
+
+    Beyond `selectAndStartService` (above), from the same bytecode:
+
+    - `InfoBarNumberZap.keyNumberGlobal(0)` [1136-1157]: nothing while
+      `pts_blockZap_timer` is active; with `pipHandles0Action()` true, the PiP
+      action and nothing else; with **more than one** history entry,
+      `checkTimeshiftRunning(recallPrevService)`; otherwise nothing at all.
+      (The timeshift seek-pointer branch before these is not modelled: the
+      plugin refuses in timeshift before it gets there.)
+    - `InfoBarTimeshift.checkTimeshiftRunning(fn)` [Timeshift.py 457-495]: in
+      timeshift, or with a timeshift waiting to be saved, opens a question with
+      no timeout (recorded in `questions`); otherwise `fn(True)`.
+    - `recallPrevService(True)` with `config.usage.panicbutton` on [1165-1215]:
+      the history is **replaced** by a new empty list, `history_pos = 0`, and
+      channel 1 is started through `selectAndStartService` - which records it.
+      With the setting off, the previous channel and nothing cleared.
+    """
+
     instance = None
 
     def __init__(self, servicelist=None):
@@ -2082,12 +2111,69 @@ class InfoBar:
         self.timeshift = False
         self.save_current_timeshift = False
         self.started = []
+        self.pts_blockZap_timer = _ZapBlock()
+        self.pip_zero = False
+        self.pip_actions = 0
+        self.questions = []
+        self.keys = []
+        # Channel 1: the first channel of the first bouquet.
+        self.first_channel = (eServiceReference(TVP1), eServiceReference(FIRST_BOUQUET))
+        # A defective panic, for the plugin's own check that the list emptied.
+        self.panic_keeps = None
 
     def isSeekable(self):
         return self.seekable
 
     def timeshiftEnabled(self):
         return self.timeshift
+
+    def pipHandles0Action(self):
+        return self.pip_zero
+
+    def pipDoHandle0Action(self):
+        self.pip_actions += 1
+
+    def keyNumberGlobal(self, number):
+        self.keys.append(number)
+        if self.pts_blockZap_timer.isActive():
+            return
+        if number == 0:
+            if self.pipHandles0Action():
+                self.pipDoHandle0Action()
+                return
+            if len(self.servicelist.history) > 1:
+                self.checkTimeshiftRunning(self.recallPrevService)
+
+    def checkTimeshiftRunning(self, returnFunction):
+        if (self.isSeekable() and self.timeshiftEnabled()) or self.save_current_timeshift:
+            self.questions.append(returnFunction)
+            return
+        returnFunction(True)
+
+    def recallPrevService(self, reply):
+        if not reply:
+            return
+        servicelist = self.servicelist
+        if config.usage.panicbutton.value:
+            servicelist.history_tv = []
+            servicelist.history_radio = []
+            servicelist.history = servicelist.history_tv
+            servicelist.history_pos = 0
+            service, bouquet = self.first_channel
+            servicelist.clearPath()
+            servicelist.enterPath(servicelist.bouquet_root)
+            servicelist.enterPath(bouquet)
+            servicelist.saveRoot()
+            self.selectAndStartService(service, bouquet)
+            if self.panic_keeps is not None:
+                servicelist.history[:0] = self.panic_keeps
+                servicelist.history_pos = len(servicelist.history) - 1
+        elif len(servicelist.history) > 1:
+            position = servicelist.history_pos
+            other = position - 1 if position > 0 else position + 1
+            history = servicelist.history
+            history[position], history[other] = history[other], history[position]
+            servicelist.setHistoryPath()
 
     def selectAndStartService(self, service, bouquet):
         self.started.append((service, bouquet))
@@ -2235,8 +2321,13 @@ class ChannelList:
         self.zap()
 
 
+class MoviePlayer(ModelScreen):
+    """`Screens/InfoBar.pyc`'s player for recordings, the current dialog while one plays."""
+
+
 infobar_module.InfoBar = InfoBar
 infobar_module.ChannelList = ChannelList
+infobar_module.MoviePlayer = MoviePlayer
 
 channel_selection_module = _module("Screens.ChannelSelection")
 channel_selection_module.service_types_tv = (

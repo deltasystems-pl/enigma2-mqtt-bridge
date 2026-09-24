@@ -775,6 +775,9 @@ class Bridge:
         for publisher in self._publishers:
             if publisher.name and publisher.name not in names and publisher.claimed():
                 names.append(publisher.name)
+                for extra in publisher.extra_capabilities():
+                    if extra not in names:
+                        names.append(extra)
         if self.session is not None and MESSAGE_CAPABILITY not in names:
             from .osd import popups_available
 
@@ -1106,12 +1109,21 @@ class Bridge:
 
     # ------------------------------------------------------------------ commands --
 
-    def publish_last_error(self, command, message):
+    def publish_last_error(self, command, message, reason=None):
+        """`last_error`; `reason` is the optional stable code of a handler that defines one.
+
+        Absent, not null, when there is none: the payload of every other
+        refusal stays exactly what it was before the field existed.
+        """
         payload = {
             "cmd": _capped(command, LAST_ERROR_CMD_LIMIT),
             "error": message,
             "ts": int(time.time()),
         }
+        if reason is None:
+            reason = getattr(message, "reason", None)
+        if reason:
+            payload["reason"] = str(reason)
         LOG.warning("cmd/%s refused: %s", payload["cmd"], message)
         self.publish_json(self.topic("last_error"), payload)
         self._last_error_published = True
