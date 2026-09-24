@@ -465,7 +465,7 @@ def test_a_replacement_instance_does_not_wait_for_a_stuck_retired_probe(
 
     first.stop()
 
-    # The retired instance is gone, so the replacement probes straight away —
+    # The retired instance is gone, so the replacement probes straight away -
     # with the old worker still blocked.
     assert second._start_probe() is True
     assert wait_until(lambda: calls == ["probe", "probe"])

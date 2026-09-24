@@ -2,7 +2,7 @@
 
 **Status:** accepted 2026-09-23
 **Date:** 2026-09-23
-**Supersedes:** [ADR-0004](0004-remote-uninstall.md) §3 in part — the order of the steps, and what
+**Supersedes:** [ADR-0004](0004-remote-uninstall.md) §3 in part - the order of the steps, and what
 happens when one fails. Everything else in ADR-0004 stands: the permission, the node id as the
 payload, the capability, the one-way door, the settings left alone.
 
@@ -14,7 +14,7 @@ going to run it, and against the receiver it was going to run on, that order is 
 places and silent in a fourth.
 
 - **The publishers are still running while the retraction runs.** The plugin publishes on change
-  from timers and events — a disk probe every minute, an EPG grid rebuilt on a timer, the process
+  from timers and events - a disk probe every minute, an EPG grid rebuilt on a timer, the process
   sample, the softcam, the screenshot after a zap. Any of them firing between the retraction and the
   end of the session puts a retained topic back on the broker and back into the state file, and
   after the package is gone nothing will ever retract it again. That is the exact failure the
@@ -27,7 +27,7 @@ places and silent in a fourth.
   lock held at the wrong moment is ordinary. A refused `opkg remove` after the retraction leaves a
   running plugin that has told everybody it is gone.
 - **The restart can wait for a person.** The image's restart screen asks „really restart?" with no
-  timeout when a stream, a background job or timeshift is running — none of which the recording
+  timeout when a stream, a background job or timeshift is running - none of which the recording
   guard looks at.
 
 And one thing the first record did not say: retained messages that other clients left on this
@@ -35,7 +35,7 @@ node's command topics. The dispatcher refuses to act on them, and until now noth
 
 ## Decision
 
-The handler validates and returns — so the dispatcher's own clearing of `last_error` has happened —
+The handler validates and returns - so the dispatcher's own clearing of `last_error` has happened -
 and the removal runs from the next turn of the main loop, never blocking it:
 
 1. **Close the doors.** Stop every publisher and stop dispatching commands. Every publish path
@@ -55,15 +55,15 @@ and the removal runs from the next turn of the main loop, never blocking it:
 **QoS 1 for the retractions is a documented exception** to „state at QoS 0". A subscriber receives
 at the lower of the publisher's and its own QoS, so no consumer sees a difference; QoS 1 is simply
 the only way the broker says „done". Recorded and not taken: retractions at QoS 0 and only the
-`offline` at QoS 1, relying on the broker handling one connection's packets in order — true of
+`offline` at QoS 1, relying on the broker handling one connection's packets in order - true of
 Mosquitto's single-threaded loop, not promised by MQTT 3.1.1 across QoS levels, and not measured.
 
 **A step that fails ends where a reset ends.** No acknowledgement within the bound, a dropped
 connection, a refused publish, or opkg that cannot start or exits non-zero: nothing further is
-removed, the bridge opens a fresh session — whose connect republishes availability, the snapshot,
-the announcement and discovery — and `last_error` names the step, with opkg's exit status and last
+removed, the bridge opens a fresh session - whose connect republishes availability, the snapshot,
+the announcement and discovery - and `last_error` names the step, with opkg's exit status and last
 line of output where there is one. An exception raised anywhere after the doors close is a
-failed step in the same way: every entry point from enigma2 — both timers and opkg's exit — is
+failed step in the same way: every entry point from enigma2 - both timers and opkg's exit - is
 wrapped so that it cannot leave the plugin closed, silent and deaf.
 
 **The removal is refused while an EPG import runs**, with the sentence and the lapse `restart_gui`
@@ -72,7 +72,7 @@ uses: it ends in the same restart, and a restart mid-import loses the run.
 **opkg's exit status is checked against the disk.** `eConsoleAppContainer` reports a child killed
 by a signal as exit 0, and an opkg still running when enigma2 itself exits reports the same. After a
 0 the package's `.control` and the running `plugin.py` must both be gone before the restart;
-otherwise it is a failed step. 🔴 opkg is not atomic — it removes files one at a time — so a failure
+otherwise it is a failed step. 🔴 opkg is not atomic - it removes files one at a time - so a failure
 at this point may leave an incomplete plugin, and `last_error` says so with the command that repairs
 it: `opkg install --force-reinstall enigma2-plugin-extensions-mqttbridge`. opkg's output is read
 from `dataAvail` alone: the image sends every chunk there and again on `stdoutAvail` or
@@ -89,7 +89,7 @@ cannot succeed, and it would fail inside the one sequence that has nowhere left 
 
 - **The state topics' QoS is no longer uniform.** A consumer that asserts QoS 0 on every retained
   message it sees will see QoS 1 exactly once per node, on its way out.
-- **A removal can be refused for a reason the household did not cause** — the image's own update
+- **A removal can be refused for a reason the household did not cause** - the image's own update
   check holding opkg's lock. The answer is on `last_error`, the plugin is back as it was, and the
   command can simply be sent again.
 - **The restart is not a promise.** The acceptance of this feature on hardware checks that the

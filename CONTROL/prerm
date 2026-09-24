@@ -3,16 +3,16 @@
 #
 # The image byte-compiles a plugin after opkg has installed it, so the `.pyc`
 # files in the plugin directory were written by the receiver and are not in
-# opkg's file list. `opkg remove` deletes the files it installed — the `.py`
-# ones — and walks away from the compiled copies. On an OpenViX 6.6 receiver
+# opkg's file list. `opkg remove` deletes the files it installed - the `.py`
+# ones - and walks away from the compiled copies. On an OpenViX 6.6 receiver
 # that left forty files behind: the whole plugin, still compiled, in the legacy
 # same-directory form that Python 3 imports on its own without a `.py` beside
 # it. enigma2's plugin loader enumerates by module name, so the next GUI restart
 # loaded the plugin that had just been removed, and it reconnected to the broker
 # while `opkg status` said nothing was installed.
 #
-# The set of `.pyc` files is not the set of `.py` files of any one build —
-# `setup.pyc` was there because somebody had opened the setup screen once — so
+# The set of `.pyc` files is not the set of `.py` files of any one build -
+# `setup.pyc` was there because somebody had opened the setup screen once - so
 # this sweeps by pattern under the plugin directory and never from a list.
 #
 # What it deletes is bytecode, and only bytecode. The `.py` files are opkg's and
@@ -34,7 +34,7 @@
 #   * on a removal, every `.pyc` and `.pyo` under the plugin directory goes, and
 #     so does every directory that is empty afterwards, the plugin directory
 #     included;
-#   * a `.py` — or anything else that is not bytecode — is never deleted, and
+#   * a `.py` - or anything else that is not bytecode - is never deleted, and
 #     keeps its directory and every directory above it;
 #   * on the removal half of an upgrade nothing is swept at all;
 #   * nothing outside the resolved plugin directory is read, deleted or
@@ -50,13 +50,13 @@
 
 # A rootfs being assembled is not a receiver. OE's do_rootfs runs maintainer
 # scripts on the build host with `D` or `OPKG_OFFLINE_ROOT` pointing at the
-# image directory, and every path below is absolute — so the sweep would walk
+# image directory, and every path below is absolute - so the sweep would walk
 # the *build host's* filesystem.
 [ -z "${D:-}${OPKG_OFFLINE_ROOT:-}" ] || exit 0
 
 # opkg runs this script at two different moments and says which one it is:
 # `prerm remove` before a removal, and `prerm upgrade` on the removal half of an
-# upgrade — the old package's script, run before the new package's files are
+# upgrade - the old package's script, run before the new package's files are
 # unpacked. Only the removal is swept.
 #
 # The upgrade case is already covered, and covered better, by `postinst`: it
@@ -64,8 +64,8 @@
 # „this bytecode has no source" is a true statement. Sweeping here as well would
 # delete every compiled file the receiver has, including the ones the new
 # package is about to reuse, and buy nothing but a slower first start while
-# enigma2 recompiles the lot. An argument this script does not recognise —
-# `failed-upgrade`, or whatever a future opkg invents — is treated as an
+# enigma2 recompiles the lot. An argument this script does not recognise -
+# `failed-upgrade`, or whatever a future opkg invents - is treated as an
 # upgrade, because that is the half of the guess that leaves files alone. No
 # argument at all is treated as a removal: a `./prerm` run by hand is somebody
 # taking this off their box.
@@ -77,7 +77,7 @@ esac
 PLUGIN_DIR=/usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge
 
 # `MQTTBRIDGE_PLUGIN_DIR` is the test suite's seam, and opkg passes its
-# environment to maintainer scripts verbatim — so it is reachable in production
+# environment to maintainer scripts verbatim - so it is reachable in production
 # whether or not that was anybody's intention. It is therefore honoured only
 # alongside a second variable that exists for no other purpose, and the guards
 # below (the basename, the symlink test, and every path being checked to be
@@ -131,7 +131,7 @@ sweep_plugin_directory() {
     # this script parts company with `postinst`. That sweep only ever deletes
     # files, so resolving a link and sweeping what it points at is safe. This
     # one removes the directories as well, and the last of them is the plugin
-    # directory itself — so following the link would empty and remove a
+    # directory itself - so following the link would empty and remove a
     # directory somebody deliberately put somewhere else (onto a USB stick, off
     # a full flash) and leave the link dangling behind it. Refusing costs the
     # owner of such a box one `rm -rf`; guessing costs them whatever else was in
@@ -139,12 +139,12 @@ sweep_plugin_directory() {
     #
     # It is refused out loud. The documentation promises that removing the
     # package takes the compiled plugin with it, and on this one arrangement it
-    # does not — so the person removing it is told, and told where to look,
+    # does not - so the person removing it is told, and told where to look,
     # rather than left with a promise that quietly did not hold.
     if [ -L "$dir" ]; then
         target=$(cd -P "$dir" 2>/dev/null && pwd -P)
         # A dangling link cannot be resolved that way, so its own text is the
-        # only thing left to name — and that text may be relative, in which case
+        # only thing left to name - and that text may be relative, in which case
         # it is relative to the directory the link is in and not to anything the
         # reader can paste. Made absolute here, unresolved: `../x` is left as
         # written inside an absolute path rather than tidied away, because the
@@ -162,15 +162,15 @@ sweep_plugin_directory() {
 
     # Resolved for the paths below, because a symlinked *parent* is ordinary on
     # a receiver whose flash is short. The basename is not re-checked
-    # afterwards: the last component is not a symlink — that was just refused —
+    # afterwards: the last component is not a symlink - that was just refused -
     # so resolving the ones above it cannot change what this directory is
     # called.
     dir=$(cd -P "$dir" 2>/dev/null && pwd -P) || return 0
     [ -n "$dir" ] || return 0
     [ -d "$dir" ] || return 0
 
-    # `-xdev` so a *different filesystem* mounted under the plugin directory —
-    # a USB stick, a network share — is not walked into. It is the device
+    # `-xdev` so a *different filesystem* mounted under the plugin directory -
+    # a USB stick, a network share - is not walked into. It is the device
     # number that is compared, so a same-filesystem `mount --bind` is descended
     # like any other directory and this is not a guard against one. Probed
     # rather than assumed: busybox builds it optionally, and a busybox without
@@ -180,7 +180,7 @@ sweep_plugin_directory() {
     find "$dir" -xdev -maxdepth 0 >/dev/null 2>&1 || XDEV=
 
     # `-depth` is probed the same way and for the same reason. It is POSIX, and
-    # every `find` a receiver is likely to have supports it — but the directory
+    # every `find` a receiver is likely to have supports it - but the directory
     # pass is the half of this script that cannot be written safely without it
     # (a listing sorted by depth would have to survive a newline in a directory
     # name), so a `find` that refuses it loses the directory pass rather than
@@ -192,7 +192,7 @@ sweep_plugin_directory() {
 
     # `-type f` and no `-L`: a symlink inside the tree is neither followed nor
     # removed, so a link out of the plugin directory cannot become a way out.
-    # $XDEV is deliberately unquoted — it is one fixed word or nothing.
+    # $XDEV is deliberately unquoted - it is one fixed word or nothing.
     #
     # The counting is done inside the pipeline and comes back as its output,
     # one `x` per file: the right-hand side of a pipe is a subshell in every
@@ -203,7 +203,7 @@ sweep_plugin_directory() {
         while IFS= read -r bytecode; do
             # 🔴 `read` splits on newlines and a filename may contain one, so a
             # directory called `evil<newline>etc` arrives here as two lines and
-            # the second of them — `etc/passwd.pyc` — is a *relative* path.
+            # the second of them - `etc/passwd.pyc` - is a *relative* path.
             # opkg never chdir()s, so for a GUI-driven removal that would
             # resolve against `/`. Nothing is touched unless it is under the
             # plugin directory.
@@ -225,7 +225,7 @@ sweep_plugin_directory() {
     # under it has been. `rmdir` refuses a directory with anything in it, and
     # that refusal is what makes „every directory that is now empty" safe to
     # say: a `.py` opkg has not deleted yet, a `.mo`, a `__pycache__` somebody
-    # else writes into — each keeps its own directory and every directory above
+    # else writes into - each keeps its own directory and every directory above
     # it, without this script having to decide what any of them are.
     #
     # Unlike `postinst`, this gives back directories it did not empty itself.
@@ -253,13 +253,13 @@ sweep_plugin_directory() {
     # Something is left. Whether that is worth saying depends on whether
     # anything else is coming: during an ordinary removal every `.py` is still
     # here, because opkg deletes them after this script returns, so a count
-    # taken now would be a number about files that are about to go — printed on
+    # taken now would be a number about files that are about to go - printed on
     # every single removal. The count is reported only once no source remains,
     # which is the state in which nothing else is coming.
     #
     # It says what it knows and not why. A leftover is usually somebody's own
     # file, but it is also what a `.pyc` on a read-only filesystem, or one whose
-    # `rm` was refused, looks like from here — and „not this package's" would be
+    # `rm` was refused, looks like from here - and „not this package's" would be
     # the wrong thing to tell the second person.
     sources=$(
         find "$dir" $XDEV -name '*.py' -type f -print 2>/dev/null |
@@ -281,7 +281,7 @@ sweep_plugin_directory() {
 # is addressed by its exact path rather than swept: `MQTTBridge.pyc` beside
 # where opkg's `MQTTBridge.py` was, and the `__pycache__` form of the same
 # module. Nothing in `External/` is enumerated and the directory itself is never
-# removed — an `External/` left holding an empty `__pycache__` is OpenWebif's
+# removed - an `External/` left holding an empty `__pycache__` is OpenWebif's
 # business and not this package's.
 remove_webif_hook() {
     external=$1
@@ -293,8 +293,8 @@ remove_webif_hook() {
 
     # 🔴 Every component from `WebInterface` down, not just the last one. A
     # symlink two levels up is followed exactly as silently as a symlink on the
-    # directory itself — `[ -d ]` is true either way and `rm` would go straight
-    # through it — so the whole tail is checked, and a link anywhere in it is
+    # directory itself - `[ -d ]` is true either way and `rm` would go straight
+    # through it - so the whole tail is checked, and a link anywhere in it is
     # refused out loud for the same reason the plugin directory's is.
     for component in "${external%/WebChilds/External}" \
                      "${external%/External}" \
@@ -322,8 +322,8 @@ remove_webif_hook() {
 # Both halves are gated on the plugin directory's own name, so that the test
 # seam above cannot be turned into a way of pointing either of them at somebody
 # else's files. The hook's directory is derived from the configured path rather
-# than from the resolved one: `…/Extensions/MQTTBridge` and
-# `…/Extensions/WebInterface/WebChilds/External` are siblings, and a symlink on
+# than from the resolved one: `.../Extensions/MQTTBridge` and
+# `.../Extensions/WebInterface/WebChilds/External` are siblings, and a symlink on
 # the plugin directory says nothing about where OpenWebif is installed.
 case "$PLUGIN_DIR" in
     */MQTTBridge)
@@ -335,7 +335,7 @@ esac
 # Still true of a removal somebody runs by hand, and still the one thing it
 # cannot do for them. Not said when the plugin is removing itself through
 # `cmd/uninstall`: that has already retracted every retained topic, and a reset
-# now — the advice below — would publish them all again. The plugin sets
+# now - the advice below - would publish them all again. The plugin sets
 # `MQTTBRIDGE_UNINSTALL=1` in opkg's environment, which opkg passes to this
 # script as it is; the variable silences a message and does nothing else, so
 # setting it by hand can cost nothing but the advice.

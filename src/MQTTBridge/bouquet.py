@@ -11,7 +11,7 @@ POLL_MILLISECONDS = 2000
 
 # Once a minute, for a box that has not produced a service list yet. A cold
 # boot can spend a while before enigma2 builds its InfoBar, and an image that
-# never does should not be asked every two seconds for the rest of its uptime —
+# never does should not be asked every two seconds for the rest of its uptime -
 # but it must still be asked, because „never so far" is not „never".
 SLOW_POLL_MILLISECONDS = 60000
 
@@ -63,7 +63,7 @@ def _tv_mode(servicelist):
 
 
 class BouquetPublisher(Publisher):
-    """`bouquet` — the active channel-list root used by channel up/down.
+    """`bouquet` - the active channel-list root used by channel up/down.
 
     The capability is claimed by reading, not by registering. A box whose
     InfoBar this plugin never gets to see produces no `bouquet` topic and no
@@ -245,7 +245,7 @@ class BouquetPublisher(Publisher):
         try:
             servicelist.clearPath()
             # `channels` contains TV bouquets only.  Do not inherit a radio
-            # service-list root merely because that happened to be on screen —
+            # service-list root merely because that happened to be on screen -
             # and enter the bouquet under the root it was actually read from,
             # which on a box with „multiple bouquets" off is the favourites
             # list rather than `bouquets.tv`.

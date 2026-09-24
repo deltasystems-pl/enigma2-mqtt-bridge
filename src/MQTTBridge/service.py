@@ -170,7 +170,7 @@ def _event_payload(event):
 
 
 def read_epg(session):
-    """The `epg` payload — `now` and `next`, either of which may be null."""
+    """The `epg` payload - `now` and `next`, either of which may be null."""
     info = _service_info(session)
     if info is None:
         return {"now": None, "next": None}
@@ -216,8 +216,8 @@ def _frontend(session):
     if getter is None:
         return None
     try:
-        # Returns None for anything not coming off a tuner — IPTV, a recording
-        # being played back — which is not a failure and not worth a log line.
+        # Returns None for anything not coming off a tuner - IPTV, a recording
+        # being played back - which is not a failure and not worth a log line.
         return getter()
     except Exception:
         return None
@@ -293,7 +293,7 @@ def _zap_through_channel_list(reference):
     Worth the trouble because `playService` alone leaves the receiver's own
     channel list where it was: tune to BBC One from Home Assistant, press
     channel-up on the remote, and the box goes to the neighbour of whatever was
-    selected before — not the neighbour of what is on screen.
+    selected before - not the neighbour of what is on screen.
 
     🔴 `zap()` tunes to whatever the list has *selected*, so the selection is
     read back and compared before it is called. A `setCurrentSelection` for a
@@ -331,7 +331,7 @@ def zap(session, sref):
     """Tune to a service. None on success, otherwise the refusal.
 
     Standby first: the channel list is not usable in standby, and a box woken
-    afterwards restores the service it was on — so a zap sent to a sleeping
+    afterwards restores the service it was on - so a zap sent to a sleeping
     receiver would silently undo itself.
     """
     nav = navigation(session)
@@ -427,7 +427,7 @@ class NavPublisher(Publisher):
 
 
 class ServicePublisher(NavPublisher):
-    """`service` — what is tuned, and what it looks like."""
+    """`service` - what is tuned, and what it looks like."""
 
     name = "service"
     events = ("evStart", "evUpdatedInfo", "evNewProgramInfo", "evTunedIn", "evEnd")
@@ -504,7 +504,7 @@ class ServicePublisher(NavPublisher):
 
 
 class EpgPublisher(NavPublisher):
-    """`epg` — the programme now and the one after it."""
+    """`epg` - the programme now and the one after it."""
 
     name = "epg"
     events = ("evUpdatedEventInfo", "evStart", "evEnd")
@@ -533,7 +533,7 @@ class EpgPublisher(NavPublisher):
         return payload
 
     def _arm(self, now):
-        """Wake up when this programme ends — that is when the state changes.
+        """Wake up when this programme ends - that is when the state changes.
 
         Without this the programme sensor of a box left on one channel shows the
         news until somebody zaps, which on a receiver nobody has touched since
@@ -555,7 +555,7 @@ class EpgPublisher(NavPublisher):
 
 
 class TunerPublisher(NavPublisher):
-    """`tuner` — how well the signal is arriving."""
+    """`tuner` - how well the signal is arriving."""
 
     name = "tuner"
     events = ("evTunedIn", "evTuneFailed", "evStart")

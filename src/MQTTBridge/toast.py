@@ -1,4 +1,4 @@
-"""The discreet toast — `cmd/message` with `"style": "toast"`.
+"""The discreet toast - `cmd/message` with `"style": "toast"`.
 
 **Why not the popup.** The popup is the image's own `MessageBox`, opened through
 the notification queue. It takes focus, and the queue is drained only while the
@@ -9,7 +9,7 @@ does nothing on a screen that is not executing, and it looks like a system
 dialog, which a message from a broker must never do.
 
 **Why a dialog that is never executed.** The image already puts transient
-overlays on the screen this way — the volume bar and the unhandled-key symbol are
+overlays on the screen this way - the volume bar and the unhandled-key symbol are
 both created with `session.instantiateDialog()`, shown with `show()`, and hidden
 by an `eTimer`. `instantiateDialog` builds, skins and lays the screen out and
 never touches the dialog stack, `current_dialog` or `in_exec`. A Python action
@@ -17,7 +17,7 @@ map binds only between `execBegin` and `execEnd`, and `show()` calls neither. So
 the toast is instantiated once, driven by `show()`/`hide()` and one single-shot
 timer, and is never passed to `open`, `openWithCallback` or `execDialog`.
 
-🔴 **The widget rule — the property that makes „cannot steal a key press" true.**
+🔴 **The widget rule - the property that makes „cannot steal a key press" true.**
 „No action map is bound" is not enough on its own. Every key reaches the
 interface through one dispatcher, ordered by priority and, within a priority, by
 the age of the binding, and it holds two kinds of binding: Python action maps,
@@ -37,15 +37,15 @@ built on a widget that binds keys without being executed. A test enforces it.
 in front. The channel list, the info bar, every message box and the standby
 screen are at 0 on the skins read, the image's own transient overlays (volume,
 mute, the unhandled-key symbol) at 10. The toast has to be strictly above the
-channel list without depending on which was created first — a skin reload
-recreates it and would put it behind — and 10 is the tier the image already uses
+channel list without depending on which was created first - a skin reload
+recreates it and would put it behind - and 10 is the tier the image already uses
 for exactly this kind of window.
 
 **Geometry is computed, not written into the skin.** Numbers in a plugin's
 embedded skin are desktop pixels: the image scales them by the identity. So the
 toast reads the desktop's size, takes `f = height / 720` (the image's own skin
 factor), and formats plain integers into the skin string before
-`Screen.__init__`, per instance — the way the image's own shutdown screen builds
+`Screen.__init__`, per instance - the way the image's own shutdown screen builds
 its skin. It depends on none of the skin-expression features (`f`, `e`, list
 templates), which not every image has. Top right: a fixed width, equal margins
 from the top and the right edge, and a height that follows the text, capped.
@@ -59,7 +59,7 @@ popup and then ignored, and **no backslash in the text reaches the screen**, so
 nothing in a payload can dress a toast up as something else.
 
 🔴 **Every backslash, and only the backslash.** enigma2's text renderer reads a
-backslash, a `c` and the eight characters after it as a colour change — and it
+backslash, a `c` and the eight characters after it as a colour change - and it
 reads them **after** right-to-left reordering, on the characters in the order they
 are drawn. A payload that mixes a right-to-left script with `cFFFF0000\\` is
 therefore an escape on the screen that is no escape in the string, and no pattern
@@ -74,32 +74,32 @@ A skin may define a screen called `MQTTBridgeToast` and restyle it, as it may an
 screen: that is the box owner's choice, not a broker client's.
 
 **Lifecycle.** Instantiated when the bridge starts with a session and `osd_toast`
-on, and the capability `toast` is claimed only once that has worked — an image
+on, and the capability `toast` is claimed only once that has worked - an image
 where it fails keeps popups rather than gaining a style that silently does
 nothing. 🔴 Torn down with `session.deleteDialog()`, never `close()`: on a dialog
 that is not executing `close()` only records a value for an `execBegin` that will
-never come and hides nothing — the image's own volume control leaks its windows
+never come and hides nothing - the image's own volume control leaks its windows
 on every skin reload exactly that way. The timer is stopped *before* the delete,
 because the delete sets every attribute of the screen to `None`. The bridge stops
-its publishers on every path that stops it — a settings save, removal from the
-plugin browser, shutdown — and all of them need the delete: enigma2 repaints the
+its publishers on every path that stops it - a settings save, removal from the
+plugin browser, shutdown - and all of them need the delete: enigma2 repaints the
 desktop once more after the plugins are shut down, so a toast still showing then
 is the frame a restarting receiver leaves on the television.
 
 **Standby.** The standby screen is a full-screen black window at z 0, so a toast
 is drawn *over* it on a television that is still on. The toast is hidden when the
-receiver enters standby, and a toast asked for while it is in standby — or
-while the image's „really shut down / restart?" question is on screen — is
+receiver enters standby, and a toast asked for while it is in standby - or
+while the image's „really shut down / restart?" question is on screen - is
 refused rather than kept for later: a late toast is a wrong toast, and a refusal
 on `last_error` is something a sender can see. That question is the only time
 the image's `inTryQuitMainloop` flag is set: `TryQuitMainloop` sets it when its
 dialog is shown and clears it when the dialog is hidden, which happens before
 the main loop is told to quit. The dialog appears only when there is a reason to
-ask — a recording, a running job, timeshift, a stream — so an ordinary restart
+ask - a recording, a running job, timeshift, a stream - so an ordinary restart
 or shutdown never sets the flag at all.
 
-Everything here runs on the main loop — commands already arrive there, and
-nothing blocks — and every entry point is wrapped: a toast that fails is a line
+Everything here runs on the main loop - commands already arrive there, and
+nothing blocks - and every entry point is wrapped: a toast that fails is a line
 in the log, never a traceback in the middle of the interface.
 """
 
@@ -146,14 +146,14 @@ TEXT_COLOUR = "#00f0f0f0"
 SWITCHED_OFF = "the discreet toast is switched off on this receiver"
 NOT_CREATED = "the discreet toast could not be created on this receiver"
 IN_STANDBY = "the receiver is in standby"
-BAD_TIMEOUT = "a toast hides itself; timeout must be 1–30 seconds"
+BAD_TIMEOUT = "a toast hides itself; timeout must be 1\u201330 seconds"
 
 
 # ---------------------------------------------------------------- the text --
 
 
 def strip_backslashes(text):
-    """`text` with no backslash in it — and nothing else taken out.
+    """`text` with no backslash in it - and nothing else taken out.
 
     Every escape enigma2's renderer knows begins with a backslash, and it finds
     them after right-to-left reordering, where no pattern over the string can.
@@ -261,7 +261,7 @@ def screen_class():
     from .plugin import PLUGIN_NAME
 
     class MQTTBridgeToast(Screen):
-        """Two labels in a box, top right. 🔴 Nothing else — see the widget rule."""
+        """Two labels in a box, top right. 🔴 Nothing else - see the widget rule."""
 
         def __init__(self, session, shape):
             # Before `Screen.__init__`, as the image's own shutdown screen does:

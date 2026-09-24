@@ -234,7 +234,7 @@ def test_a_box_with_no_bouquet_list_selects_inside_the_root_it_read(
     make_bridge, factory, settings, receiver
 ):
     """🔴 „Multiple bouquets" off: the list came from favourites, so entering
-    `bouquets.tv` first would build — and persist — a path the box does not use."""
+    `bouquets.tv` first would build - and persist - a path the box does not use."""
     favourites = channels_module.bouquet_roots()[1]
     receiver.service_center.contents = {favourites: [(TVP1, "TVP 1 HD"), (TVN, "TVN HD")]}
     settings.host.value = "192.0.2.2"

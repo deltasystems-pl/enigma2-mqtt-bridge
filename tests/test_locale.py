@@ -106,7 +106,7 @@ def test_the_catalogues_declare_utf_8():
 
 
 def test_the_fallback_translator_is_the_identity():
-    """No catalogue, no crash — this runs on a PC in every test above."""
+    """No catalogue, no crash - this runs on a PC in every test above."""
     from MQTTBridge.i18n import _
 
     assert _("Save") in ("Save", "Zapisz", "Speichern")

@@ -9,7 +9,7 @@ mosquitto_sub -h <broker> -u <user> -P <password> -v -t 'enigma2/#'
 ```
 
 If the log says the plugin is doing something and the subscription disagrees, the problem is
-between the plugin and the broker — credentials, ACL, or the network. If the log is silent, the
+between the plugin and the broker - credentials, ACL, or the network. If the log is silent, the
 plugin is not running.
 
 ## The log
@@ -31,10 +31,10 @@ report.
 
 **The plugin never loaded.** `opkg install` reporting success only means the files landed;
 enigma2 looks for plugins at start-up. Restart the GUI (`init 4 && sleep 3 && init 3`) and check
-that *Menu → Plugins* lists **MQTT Bridge**.
+that *Menu -> Plugins* lists **MQTT Bridge**.
 
 **The plugin is idle because the configuration is invalid.** A missing broker host, an
-unparseable port, an empty node id — the plugin writes one line saying so and then does nothing
+unparseable port, an empty node id - the plugin writes one line saying so and then does nothing
 for the rest of the session. This is deliberate: **the GUI must never fail to start because of
 the bridge**, so there is no retry storm and no dialog. Fix the setting and restart the GUI.
 
@@ -43,7 +43,7 @@ grep -i 'mqttbridge' /home/root/mqttbridge.log | head
 grep 'config.plugins.mqttbridge' /etc/enigma2/settings
 ```
 
-**The provisioning file was ignored.** It is read once at start-up and then deleted — but only
+**The provisioning file was ignored.** It is read once at start-up and then deleted - but only
 once at least one setting in it has been applied. If `/etc/enigma2/mqttbridge.json` is still
 there, either the plugin has not started since you wrote it, or it could not use a single key in
 it and left it for you to correct; the log says which. If it is gone but nothing looks different,
@@ -53,29 +53,29 @@ the log names the keys it rejected.
 
 The log names the reason paho gives back. The three common ones:
 
-- **Connection refused, not authorised** — wrong username or password, or the broker has no such
-  user. Test the same credentials from your PC with `mosquitto_sub -u … -P …`.
-- **Connection refused, protocol** — something that is not an MQTT broker on that port, or TLS
+- **Connection refused, not authorised** - wrong username or password, or the broker has no such
+  user. Test the same credentials from your PC with `mosquitto_sub -u ... -P ...`.
+- **Connection refused, protocol** - something that is not an MQTT broker on that port, or TLS
   expected and not configured. Check `port` and `tls`.
-- **Connection timed out / no route** — the box cannot reach the broker. `ping` it from the box;
+- **Connection timed out / no route** - the box cannot reach the broker. `ping` it from the box;
   receivers on a separate VLAN are the usual cause.
 
-A reconnect is attempted with a 1 → 60 second backoff, forever. A box that comes back after an
+A reconnect is attempted with a 1 -> 60 second backoff, forever. A box that comes back after an
 outage republishes its whole state on connect, so nothing needs to be prodded.
 
 ## The receiver pauses or ignores the remote
 
 Start at `info`, not `debug`. The bounded diagnostic lines answer different questions:
 
-- `mqtt epoch … connected in …` measures the connection or reconnection, and includes lifetime
+- `mqtt epoch ... connected in ...` measures the connection or reconnection, and includes lifetime
   enqueue-to-main-loop delay and backlog aggregates;
-- `snapshot complete …` measures the retained-state burst after a connection;
-- `slow main-loop dispatch …` means a paho callback waited at least 250 ms for enigma2's main
+- `snapshot complete ...` measures the retained-state burst after a connection;
+- `slow main-loop dispatch ...` means a paho callback waited at least 250 ms for enigma2's main
   loop;
-- `event loop stalled … stack …` is a watcher-observed pause of at least two seconds;
-- `event loop resumed; heartbeat gap …` preserves a pause even when native code prevented the
+- `event loop stalled ... stack ...` is a watcher-observed pause of at least two seconds;
+- `event loop resumed; heartbeat gap ...` preserves a pause even when native code prevented the
   watcher itself from running; it deliberately makes no claim about the cause;
-- `recording disk probe timing …` separates the filesystem read in the plugin's daemon worker
+- `recording disk probe timing ...` separates the filesystem read in the plugin's daemon worker
   from the small delay returning its result to the main loop.
 
 The recording-disk probe cannot block the interface: mount and free-space calls run in its daemon
@@ -93,8 +93,8 @@ interface remains responsive; only a slow-batch or event-loop warning indicates 
 ## The receiver's memory use keeps climbing
 
 **Watch the curve before believing anything about it.** The plugin publishes the enigma2 process's
-own counters on `<base>/<node>/process` — resident set, its high-water mark, threads, open file
-descriptors and the epoch second the process started — in the snapshot on every connect, then every
+own counters on `<base>/<node>/process` - resident set, its high-water mark, threads, open file
+descriptors and the epoch second the process started - in the snapshot on every connect, then every
 300 seconds, and early whenever the resident set moves by 4 MiB. The 300-second publish is a ceiling
 on the gap rather than a heartbeat: like every state topic it is only sent when something changed, so
 a flat stretch in the curve is a receiver with nothing to report, not a plugin that stopped. In discovery mode the entity to
@@ -109,14 +109,14 @@ plugin and this one share that resident set and nothing in `/proc` can attribute
 of them. A rising line is a question, and the paragraph below is the first thing to rule out.
 
 Most of it is the receiver, not this plugin. The one cost worth knowing is the screenshot:
-**every capture leaves about 22 kB in enigma2 permanently, whoever takes it** — measured on
+**every capture leaves about 22 kB in enigma2 permanently, whoever takes it** - measured on
 OpenViX 6.6 with 60 captures from the box's own shell and the plugin idle (+1 320 kB, never
 returned), and the same 60 taken through the plugin cost no more. If a box that is never
 restarted is short of memory, set `screenshot` to a long `interval` and take one on demand with
-`cmd/screenshot`. `off` is stronger and stops captures altogether — the publisher does not start,
+`cmd/screenshot`. `off` is stronger and stops captures altogether - the publisher does not start,
 so `cmd/screenshot` is refused too; see [SETUP.md](SETUP.md#what-a-screenshot-costs). Plugin loads that
-were measured against a 20-minute idle baseline — commands, EPG-grid and channel-list rebuilds,
-OSCam polling, settings writes — all stayed at or below the receiver's own background variation.
+were measured against a 20-minute idle baseline - commands, EPG-grid and channel-list rebuilds,
+OSCam polling, settings writes - all stayed at or below the receiver's own background variation.
 
 ## The box connects but no topics appear
 
@@ -144,7 +144,7 @@ missing the login or the ACL is the problem, not the plugin's hooks.
 ## Entities Home Assistant will never update again
 
 **Retained ghosts.** A retained topic belongs to the broker, and it outlives whatever created it.
-Change the node id, rename the box, uninstall the plugin without resetting first — and the old
+Change the node id, rename the box, uninstall the plugin without resetting first - and the old
 retained payloads sit there forever. Home Assistant keeps the entities, permanently stale, and
 nothing will ever correct them.
 
@@ -160,7 +160,7 @@ mosquitto_pub -h <broker> -u <user> -P <password> -t 'enigma2/<node_id>/cmd/rese
 ```
 
 which retracts every retained topic the node owns, including the discovery payloads and EPG-grid
-bouquets it remembers in `/etc/enigma2/mqttbridge-state.json` — and then **immediately
+bouquets it remembers in `/etc/enigma2/mqttbridge-state.json` - and then **immediately
 republishes**: availability,
 the whole state snapshot, the announcement and, in `discovery` mode, the discovery payloads, in
 the same order as on a fresh connect. That is what makes a reset safe to run at any time: the
@@ -169,14 +169,14 @@ Home Assistant shows the entities go unavailable and come back, exactly as it do
 reboot. Settings are untouched.
 
 If the plugin is already gone, retract by hand: publish an **empty** retained message
-(`mosquitto_pub -r -n -t …`) to each leftover topic. There is no other way — a broker will not
+(`mosquitto_pub -r -n -t ...`) to each leftover topic. There is no other way - a broker will not
 forget a retained topic on its own.
 
 ## Duplicated entities
 
 You are in `discovery` mode and running the companion integration at the same time. The
 integration switches the box to `integration` mode itself and the plugin retracts its discovery
-payloads first, so this should not happen — but it does if the mode was changed by hand, or if
+payloads first, so this should not happen - but it does if the mode was changed by hand, or if
 the retraction did not reach the broker (see the ACL section). Check `info.ha_mode`, then
 publish to `cmd/ha_mode` with the mode you want; the switch always retracts before it announces.
 
@@ -184,7 +184,7 @@ publish to `cmd/ha_mode` with the mode you want; the switch always retracts befo
 
 `cmd/restart_gui`, `cmd/reboot` and `cmd/deep_standby` are all refused while a recording is
 running or a timer is due within ten minutes, and `last_error` says so. But **a GUI restart from
-anywhere else — the receiver's menu, `init 4`, `opkg`, your own script — kills a running
+anywhere else - the receiver's menu, `init 4`, `opkg`, your own script - kills a running
 recording**, and nothing in the plugin can prevent it.
 
 So: check the `recording` topic before restarting anything, and never let a package script or a
@@ -195,16 +195,16 @@ cron job restart enigma2 unconditionally. This is why `postinst` only prints a m
 There is no acknowledgement topic. A command's answer is the state topic changing; a refusal is
 `last_error`. In order:
 
-1. Subscribe to `enigma2/<node_id>/last_error` — a guard that refused the command says so there,
+1. Subscribe to `enigma2/<node_id>/last_error` - a guard that refused the command says so there,
    with the reason.
 2. Check the payload form in [TOPICS.md](TOPICS.md#2-commands). `cmd/zap` by name is refused
    unless exactly one service matches within the configured bouquets; `cmd/key` is refused for an
    unknown key name.
 3. Check `info.capabilities`. If the hook a command needs is not in that list, this image did not
-   give it to the plugin and the command cannot work — say so in an issue with your image name.
+   give it to the plugin and the command cannot work - say so in an issue with your image name.
 4. Make sure you are not publishing the command **retained**. The plugin logs a retained command
-   and discards it without executing it — which is the right answer, because the broker would
-   hand it back on every reconnect — so a retained command looks exactly like a command that did
+   and discards it without executing it - which is the right answer, because the broker would
+   hand it back on every reconnect - so a retained command looks exactly like a command that did
    nothing. The log line names it. Clear it by publishing an empty retained payload to that
    topic, then send it again without `-r`.
 
@@ -213,5 +213,5 @@ There is no acknowledgement topic. A command's answer is the state topic changin
 Open an issue with: the image and its version, the plugin version, the `info` payload (its
 `capabilities` list is the interesting part), the relevant `info`/`warning` diagnostic lines, and
 what you expected instead. Enable `debug` only when key classification or publish metadata is
-needed. For anything with security implications, use a private advisory instead — see
+needed. For anything with security implications, use a private advisory instead - see
 [SECURITY.md](../SECURITY.md).

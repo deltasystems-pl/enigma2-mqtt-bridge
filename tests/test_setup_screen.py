@@ -2,8 +2,8 @@
 
 The screen cannot be drawn without a receiver, but the two things that go wrong
 about it can both be checked here: a setting that exists in the configuration and
-is missing from the screen — invisible, and therefore unreachable on a box with
-no SSH — and a save that does not reach enigma2's settings file.
+is missing from the screen - invisible, and therefore unreachable on a box with
+no SSH - and a save that does not reach enigma2's settings file.
 """
 
 from Components.ConfigList import ConfigListScreen as REAL_CONFIG_LIST_SCREEN
@@ -97,7 +97,7 @@ def test_saving_the_permission_republishes_info_with_it(settings, make_bridge, f
     Nothing else tells Home Assistant the two power-off buttons have become
     usable, and the screen's own save is the only moment it changes. No code
     does this deliberately: `keySave` reloads the bridge, and a connect
-    republishes the snapshot — which is why it is asserted rather than assumed.
+    republishes the snapshot - which is why it is asserted rather than assumed.
     The second session is asserted *before* the connect is fired, because firing
     it by hand would otherwise hide a `keySave` that had stopped reloading.
     """

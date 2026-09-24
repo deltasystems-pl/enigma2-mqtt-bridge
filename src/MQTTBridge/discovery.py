@@ -1,7 +1,7 @@
 """The announcement, the Home Assistant discovery payloads, and retraction.
 
 A retained topic belongs to the broker and outlives whatever created it. Rename
-a node, drop a component, uninstall the plugin — and the old payload sits there
+a node, drop a component, uninstall the plugin - and the old payload sits there
 forever while a consumer keeps an entity nothing will ever update again. The
 only cure is to publish an empty retained payload to the exact topic, which
 means the plugin has to remember every topic it has ever published, across
@@ -25,7 +25,7 @@ Four things it does that are worth knowing before changing anything here:
   time.
 * **The null state is the literal string `None`.** A `value_template` over a
   JSON `null` renders exactly that, so a field that is null on the wire becomes
-  an unknown state for free — but only if the key exists. An *absent* key
+  an unknown state for free - but only if the key exists. An *absent* key
   renders an empty string, which for a numeric sensor means „ignore this
   message" and leaves the old value on screen. Hence `| default(none)`.
 """
@@ -138,7 +138,7 @@ def _entity_id(platform, slug, key):
     """The `default_entity_id` value: a full entity id, whose domain is ignored.
 
     The domain half is thrown away by Home Assistant, which keeps only what
-    follows the dot — but a value with **no** dot leaves nothing to keep and the
+    follows the dot - but a value with **no** dot leaves nothing to keep and the
     entity is created as `<platform>.unnamed_device`. So the domain is always
     written out even though nothing reads it.
     """
@@ -149,7 +149,7 @@ def _kibibytes(field):
     """A kB field rendered as MiB, and rendered as unknown when it is not there.
 
     The arithmetic has to be guarded. A `value_template` over a JSON `null`
-    renders the literal string `None` for free — but only where the template
+    renders the literal string `None` for free - but only where the template
     does nothing to the value first; `null / 1024` is a template *error*, and a
     template error is not an unknown state, it is the previous reading staying
     on screen for ever with a line in the log nobody reads.
@@ -173,8 +173,8 @@ def build_discovery_components(node_id, friendly_name, base_topic, info, prefix=
     One device-based payload carrying every component, and eight device
     triggers, which are separate topics because that is what the contract in
     `docs/TOPICS.md` promises the companion integration. (They would in fact
-    ride inside the device payload on this version of Home Assistant — that was
-    measured, not assumed — but the contract is what the other half of this
+    ride inside the device payload on this version of Home Assistant - that was
+    measured, not assumed - but the contract is what the other half of this
     project is written against, and one retained topic saved is not worth
     breaking it.)
 
@@ -221,7 +221,7 @@ def _device_block(node_id, friendly_name, info):
     address = str(info.get("ip") or "").strip()
     if address:
         # Only with an address: Home Assistant validates this as a URL and
-        # `http:///` would be rejected — taking the whole device with it.
+        # `http:///` would be rejected - taking the whole device with it.
         block["cu"] = "http://" + address + "/"
     return block
 
@@ -252,7 +252,7 @@ class _Components:
         """Add the removals: what was announced last time and is not here now.
 
         A component simply left out of a republished payload is *kept* by Home
-        Assistant, not removed — so turning the screenshots off, or moving a box
+        Assistant, not removed - so turning the screenshots off, or moving a box
         to an image without the volume hooks, would leave an entity behind
         forever. The documented removal is the component cut down to nothing but
         its platform.
@@ -336,7 +336,7 @@ class _Components:
             # time without a zone; this renders the one shape it accepts.
             # 🔴 Nothing follows `timestamp_utc`. The filter is
             # `dt_util.utc_from_timestamp(value).isoformat()`, so the offset is
-            # already on the end, and a second one makes the state unparseable —
+            # already on the end, and a second one makes the state unparseable -
             # Home Assistant logs „Invalid state message" and stores nothing at
             # all, which reads as a sensor that never works rather than as an
             # error. `tests/` renders this rather than matching it as a string,
@@ -511,7 +511,7 @@ class _Components:
             "process_memory", "sensor", "process",
             name="Process memory",
             stat_t=self.topic("process"),
-            # kB on the wire, MiB on screen — and the division is guarded,
+            # kB on the wire, MiB on screen - and the division is guarded,
             # because dividing a JSON `null` is a template error and a template
             # error leaves the last reading on screen for ever. `| default(none)`
             # first, so an absent key and an explicit null take the same branch.
@@ -621,7 +621,7 @@ def discovery_topics(prefix, node_id, capabilities):
     The retraction of stale topics runs before anything is published on a
     connect, and it has to know what is about to be published so that it does
     not take it back first: an empty retained device payload is a deletion in
-    Home Assistant — of the device and every entity on it — and the republish a
+    Home Assistant - of the device and every entity on it - and the republish a
     moment later creates them again, without the names, areas and dashboards
     somebody gave them. The topic set depends on the prefix, the node id and one
     capability, and on nothing a payload carries, so it is answered here from

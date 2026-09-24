@@ -2,7 +2,7 @@
 
 **Status:** accepted 2026-09-22, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) (the box-only permission)
 **Date:** 2026-09-22
-**Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §3, in part — it
+**Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §3, in part - it
 described this feature, and the parts of it corrected below turned out to be wrong when they were
 measured. Everything else in ADR-0003 stands.
 
@@ -16,7 +16,7 @@ the earlier record did not ask, and the answers changed the design.
 an init script checks whether the cam is alive by looking it up **by process name**, against
 `/proc/<pid>/stat`'s `comm` field. The kernel caps `comm` at **15 characters**. A cam binary whose
 basename is longer can therefore never equal its own truncated name: the lookup always comes back
-empty, and the manager always takes its „could not find it, start one" branch — which stops
+empty, and the manager always takes its „could not find it, start one" branch - which stops
 nothing and only adds, once per graphical-interface start. 🔴 **The defect is conditional on the
 filename.** A receiver whose cam is named fifteen characters or fewer does not accumulate copies
 at all, and a feature written as though every receiver does would be describing somebody else's
@@ -35,7 +35,7 @@ command line contained the pattern. A matcher that can match the process doing t
 matcher that can kill it.
 
 **Why „not decoding" cannot be „the ECM file is missing".** The cam **removes** `/tmp/ecm.info`
-when it stops descrambling — measured by zapping to a free-to-air service and sampling for a
+when it stops descrambling - measured by zapping to a free-to-air service and sampling for a
 minute, then zapping back and watching it reappear within a second. On a free-to-air channel
 absence is therefore the normal, healthy state.
 
@@ -50,26 +50,26 @@ parent was killed one, without any of the three being a special case. A count th
 taken is `null` and never `0`. `pgrep -f`, and name matching of any kind outside these two
 conditions, are ruled out. 🔴 The `exe` link is compared with the kernel's `(deleted)` marker
 removed: from the moment an upgrade replaces the cam binary, every copy already running reads
-`…/<name> (deleted)`, and comparing verbatim would drop exactly those processes out of the count —
+`.../<name> (deleted)`, and comparing verbatim would drop exactly those processes out of the count -
 reporting one instance while two fight over the card, at the one moment most likely to precede
 somebody reaching for the button.
 
 **Resolving, and where the normalisation happens.** 🔴 The autostart setting holds **absolute
-paths**, `/usr/softcams/<name>`, not bare names — the image's own manager begins its loop by
+paths**, `/usr/softcams/<name>`, not bare names - the image's own manager begins its loop by
 stripping exactly that prefix, and that line exists only because the prefix is there. The plugin
 strips it at the same point, where the setting is read, so that nothing downstream ever sees a
 path: `selected` publishes the basename the contract promises, the truncated command is the first
-fifteen characters of a name rather than of `/usr/softcams/…`, and "is this name longer than
+fifteen characters of a name rather than of `/usr/softcams/...`, and "is this name longer than
 fifteen characters" stays a question about a name instead of being true for every receiver.
-Normalising later — inside the path guard, say — silently produces three wrong answers instead of
+Normalising later - inside the path guard, say - silently produces three wrong answers instead of
 one. Only that one prefix is removed: an entry pointing anywhere else keeps its separators and is
 refused by the name guard, rather than being quietly rebased onto the softcam directory, which
 would run a different program from the one the image was told to start.
 
 **Restarting.** The binary is refused unless it is an executable regular file **directly under the
 softcam directory** after symlink resolution, with a name that needs no shell quoting. It is then started with a
-**family-keyed, fixed command line** — the family being the lowercase prefix of the binary's
-basename, never the protocol the cam speaks outward — reproducing the image's own line including
+**family-keyed, fixed command line** - the family being the lowercase prefix of the binary's
+basename, never the protocol the cam speaks outward - reproducing the image's own line including
 its stack limit and background flag. A family for which no line is known does not get the
 capability. 🔴 **No part of the command line comes from the payload**, ever.
 
@@ -81,8 +81,8 @@ starts the cam at all, so a marker left behind by a crash would disable it until
 interface restart.
 
 **Guards.** One guard, used identically by the manual and the automatic path. The permission
-`softcam_restart_allowed` is box-only; the whole recording guard applies — recording, a timer due
-within ten minutes, and „the image will not say" — and a restart is refused for the first sixty
+`softcam_restart_allowed` is box-only; the whole recording guard applies - recording, a timer due
+within ten minutes, and „the image will not say" - and a restart is refused for the first sixty
 seconds after the plugin starts, because the image's own check fires about a second after every
 interface start and restarting inside that window races a copy already on its way. Manual restarts
 are limited to one a minute and automatic ones to one every ten minutes.
@@ -105,12 +105,12 @@ else's receiver.
   restart would fight the init script; nobody in this project has such a receiver to measure, so
   refusing is the honest answer rather than guessing at one.
 - **The counting rule is now load-bearing elsewhere.** Anything later that counts processes on the
-  receiver — a process-cost topic, a watchdog — uses roots, not processes, and `comm` plus `exe`,
+  receiver - a process-cost topic, a watchdog - uses roots, not processes, and `comm` plus `exe`,
   not a name. Changing it means changing what `running_instances` has meant on every published
   payload.
 - **A dead cam in the ten minutes before a recording stays dead** until the window passes. The
-  asymmetry that suggests itself — healing inside that window, because a recording deserves a
-  working cam — was considered and rejected: a restart landing close to a timer risks the opening
+  asymmetry that suggests itself - healing inside that window, because a recording deserves a
+  working cam - was considered and rejected: a restart landing close to a timer risks the opening
   seconds of the recording, and a scrambled recording is recoverable while a truncated one is not.
   This is the accepted cost, not an oversight.
 - **Reversing the privacy boundary is a breaking decision.** Publishing anything further from the

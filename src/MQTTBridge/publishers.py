@@ -1,8 +1,8 @@
 """Which feature areas a running bridge has, and in what order.
 
 The order is not cosmetic. `channels` is registered before `service` and
-`epg_grid` because both ask it questions — which bouquet a service came from,
-which bouquets to build a grid for — and a publisher that failed to start is
+`epg_grid` because both ask it questions - which bouquet a service came from,
+which bouquets to build a grid for - and a publisher that failed to start is
 removed from the registry, so „ask the channel list if there is one" is a
 lookup that has to happen after it either started or did not.
 

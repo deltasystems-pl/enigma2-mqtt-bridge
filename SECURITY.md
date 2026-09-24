@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---|---|
-| 0.1.x | yes — the current development line |
+| 0.1.x | yes - the current development line |
 | < 0.1.0 | no |
 
 Security fixes are released on the newest minor line. There are no long-term support branches
@@ -14,7 +14,7 @@ before v1.0.
 
 **Do not open a public issue for a security problem.**
 
-Report it privately through GitHub: *Security → Advisories → Report a vulnerability* on
+Report it privately through GitHub: *Security -> Advisories -> Report a vulnerability* on
 [this repository](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/security/advisories/new).
 That opens a private thread with the maintainer.
 
@@ -25,7 +25,7 @@ What to expect:
 - Credit in the advisory and the changelog unless you would rather stay anonymous.
 
 Please include the image and version of the receiver, the plugin version, what you observed and
-how to reproduce it. Logs are welcome — strip the broker password first; the plugin never writes
+how to reproduce it. Logs are welcome - strip the broker password first; the plugin never writes
 it, but a manually edited provisioning file might be in your paste.
 
 ## Threat model
@@ -53,7 +53,7 @@ everything else:
    topic write homeassistant/device_automation/<node_id>/#
    ```
 
-   Verify the ACL by subscribing elsewhere and trying to publish there as that user — Mosquitto
+   Verify the ACL by subscribing elsewhere and trying to publish there as that user - Mosquitto
    drops an ACL-denied publish silently and the publisher sees success either way.
 
 Consequences the design accepts: the password is stored in enigma2's settings file in clear, as

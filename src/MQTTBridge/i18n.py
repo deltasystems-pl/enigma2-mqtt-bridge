@@ -1,7 +1,7 @@
 """Translations for the strings a household sees.
 
 Source strings are English. Topics, JSON keys and log lines stay English
-everywhere — only what appears on the television is translated, the way
+everywhere - only what appears on the television is translated, the way
 OpenWebif and the other OE-Alliance plugins do it: `bindtextdomain` against the
 plugin's own `locale/` directory and `dgettext` for the lookup, so the catalogue
 never collides with enigma2's own domain.

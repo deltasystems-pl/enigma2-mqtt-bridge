@@ -2,7 +2,7 @@
 
 Everything here is best effort and nothing here raises: an image that does not
 ship `boxbranding`, a box whose first network interface is not `eth0`, a
-`/proc/uptime` that reads oddly — each falls back rather than taking the plugin
+`/proc/uptime` that reads oddly - each falls back rather than taking the plugin
 down. The `info` topic is honest about what could not be determined by saying
 `unknown` instead of guessing.
 
@@ -28,7 +28,7 @@ _NULL_MAC = "00:00:00:00:00:00"
 
 
 def sanitise(value):
-    """Lowercase ASCII with `_` for everything else — what a topic segment may hold."""
+    """Lowercase ASCII with `_` for everything else - what a topic segment may hold."""
     return _NOT_ALLOWED.sub("_", str(value or "").strip().lower()).strip("_")
 
 
@@ -78,11 +78,11 @@ def _key_values(path):
 
 
 def box_type():
-    """The machine name, lowercase — `vuuno4kse` and friends.
+    """The machine name, lowercase - `vuuno4kse` and friends.
 
     The order matters and was learned from a real box. `/proc/stb/info/model` on
-    a Vu+ Uno 4K SE running OpenViX 6.6 reads **`dm8000`** — a Dreambox
-    compatibility stub, not this receiver — while `/proc/stb/info/boxtype` is not
+    a Vu+ Uno 4K SE running OpenViX 6.6 reads **`dm8000`** - a Dreambox
+    compatibility stub, not this receiver - while `/proc/stb/info/boxtype` is not
     there at all. `/etc/image-version` names the machine honestly on every OE
     image, so it is asked before `model` rather than after it. Getting this wrong
     means a node id that identifies the wrong hardware, and the node id is what
@@ -128,12 +128,12 @@ def mac_address():
 
 
 def mac_interface():
-    """The interface `mac_address()` read — one rule, so `info.mac` and `info.wol` agree."""
+    """The interface `mac_address()` read - one rule, so `info.mac` and `info.wol` agree."""
     return _interface_and_mac()[0]
 
 
 def mac_suffix(mac=None):
-    """The last six hex digits — the half of the node id that makes it unique."""
+    """The last six hex digits - the half of the node id that makes it unique."""
     source = mac_address() if mac is None else mac
     digits = re.sub(r"[^0-9a-f]", "", str(source or "").lower())
     return digits[-6:] if len(digits) >= 6 else ""
@@ -148,7 +148,7 @@ def derive_node_id():
 
 
 def image_version():
-    """Image name and version, as the box reports it — `OpenViX 6.6.007`.
+    """Image name and version, as the box reports it - `OpenViX 6.6.007`.
 
     `/etc/image-version` is read first for the *name* only, because it is the one
     source that spells it the way a person would: `Creator = OpenViX` against

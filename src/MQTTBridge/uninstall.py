@@ -6,7 +6,7 @@ worse than it is. It is what the image itself does: its plugin browser runs
 not even restart the interface afterwards. The running code is in memory; what
 goes is the files, and nothing on the way out needs one of them. That last part
 is a rule rather than an accident, and it is why **every module this sequence
-touches is imported when the plugin starts** — after the package is removed a
+touches is imported when the plugin starts** - after the package is removed a
 first import cannot succeed, and it would fail inside the one sequence that has
 nowhere left to report a failure.
 
@@ -16,12 +16,12 @@ never blocking the main loop:
 
 1. **Close the doors.** Every publisher lets go of its hooks and no command is
    dispatched any more. A publisher that fires after a retraction re-creates a
-   retained topic that nothing will ever retract again — which is the exact
+   retained topic that nothing will ever retract again - which is the exact
    failure this command exists to prevent, and on a receiver that probes its
    disk every minute and rebuilds its EPG grid on a timer it is not a
    theoretical one.
-2. **Retract every retained topic this node owns** — the state file's list,
-   which is what `cmd/reset` uses — and every command topic on which the
+2. **Retract every retained topic this node owns** - the state file's list,
+   which is what `cmd/reset` uses - and every command topic on which the
    dispatcher discarded somebody's retained message this session. At **QoS 1**,
    although state is QoS 0 everywhere else: a QoS 0 publish is „done" the moment
    it reaches the socket, and this sequence has to know that the broker has
@@ -35,7 +35,7 @@ never blocking the main loop:
 5. **Forget and save**: the state file left behind says nothing is published.
 6. **Disconnect cleanly**, which suppresses the will; `availability` stays at
    the `offline` from step 3, and the shutdown hook later finds no session.
-7. **Remove the package** with `opkg remove` — no `--autoremove`, which can take
+7. **Remove the package** with `opkg remove` - no `--autoremove`, which can take
    dependencies installed as automatic, and no `--force-*`. `prerm`'s sweep is
    what makes it a real removal: the receiver's compiled copies go with the
    sources.
@@ -47,8 +47,8 @@ never blocking the main loop:
 **A removal can fail, and a failure ends where a reset ends.** opkg holds a lock
 that the image's own update check and plugin browser take too; a broker can
 stop acknowledging; a connection can drop. In every case nothing further is
-removed, the bridge opens a fresh session — which republishes availability, the
-snapshot, the announcement and discovery, as every connect does — and
+removed, the bridge opens a fresh session - which republishes availability, the
+snapshot, the announcement and discovery, as every connect does - and
 `last_error` says which step failed. The same holds for anything this code did
 not foresee: an exception anywhere after the doors close is a failed step, not
 a plugin left closed, silent and deaf.
@@ -58,8 +58,8 @@ reports a child killed by a signal as exit 0, and so it does for an opkg still
 running when enigma2 itself goes away. So a zero is checked against the disk:
 the package's `.control` and this plugin's `plugin.py` must both be gone before
 the interface is restarted. When they are not, the removal may have stopped
-half way — opkg deletes files one at a time, so some of the plugin may already
-be missing — and `last_error` gives the one command that puts it back whole:
+half way - opkg deletes files one at a time, so some of the plugin may already
+be missing - and `last_error` gives the one command that puts it back whole:
 `opkg install --force-reinstall enigma2-plugin-extensions-mqttbridge`.
 
 **Only a plugin the package manager installed can ask it to remove it.** The
@@ -112,7 +112,7 @@ NOT_PACKAGED = (
 )
 RUNNING = "an uninstall is already running"
 # `cmd/config` while a removal is under way: kept, not applied. English, as
-# every `last_error` sentence is — it is read by a consumer, not shown on the
+# every `last_error` sentence is - it is read by a consumer, not shown on the
 # television.
 DEFERRED = (
     "the settings were saved but not applied: the plugin is being removed from this "
@@ -287,7 +287,7 @@ class Uninstaller:
         """From acceptance to the end: nothing may reopen the session meanwhile.
 
         Accepted, retracting, removing, or removed and waiting for the restart.
-        Not after a failure — `_fail` clears the phase before it reloads — and
+        Not after a failure - `_fail` clears the phase before it reloads - and
         not once the interface is shutting down anyway.
         """
         return self.phase in ("scheduled", "retracting", "removing", "done")
@@ -355,7 +355,7 @@ class Uninstaller:
         self._poll_ticker.stop()
 
     # ---------------------------------------------------------------- teardown --
-    # Every entry point from enigma2 — the two timers and opkg's exit — goes
+    # Every entry point from enigma2 - the two timers and opkg's exit - goes
     # through `_guarded`. The doors are closed by then, so an exception that
     # merely reached the timer's own handler would leave a plugin that neither
     # publishes nor listens until the next restart. It is a failed step instead.
@@ -475,7 +475,7 @@ class Uninstaller:
         else:
             LOG.warning("uninstall step 5: the state file could not be emptied; it still "
                         "names topics that are already retracted, which a reinstall "
-                        "republishes anyway — carrying on")
+                        "republishes anyway \u2014 carrying on")
         # 6. A clean disconnect suppresses the will.
         bridge.disconnect_for_uninstall()
         LOG.info("uninstall step 6: disconnected from the broker")
@@ -538,7 +538,7 @@ class Uninstaller:
             return
         LOG.info("opkg: %s", line)
         if len(line) > OUTPUT_LINE_LIMIT:
-            line = line[: OUTPUT_LINE_LIMIT - 1] + "…"
+            line = line[: OUTPUT_LINE_LIMIT - 1] + "\u2026"
         self._last_line = line
 
     def _removed_steps(self, retval=0):
@@ -553,8 +553,8 @@ class Uninstaller:
             LOG.error("opkg remove exited with status %s", retval)
             self._fail(self._removal_failed("exited with status " + str(retval)))
             return
-        # 🔴 A zero is not proof: a signal-killed opkg — or one still running when
-        # enigma2 went away — also reports 0 through the container.
+        # 🔴 A zero is not proof: a signal-killed opkg - or one still running when
+        # enigma2 went away - also reports 0 through the container.
         if not package_gone(self.root, self.plugin_directory):
             LOG.error("opkg remove exited 0 but the package is still installed")
             self._fail(NOT_REMOVED)

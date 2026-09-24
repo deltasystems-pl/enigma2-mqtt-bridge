@@ -2,13 +2,13 @@
 
 OpenWebif decides who reaches the page before any plugin code runs, so the page
 enforces no login of its own (ADR-0009). What it keeps is what stops another web
-page from using it through somebody's browser — the `Host` allowlist, the
-same-origin check, the session token and the exact field sets — and
+page from using it through somebody's browser - the `Host` allowlist, the
+same-origin check, the session token and the exact field sets - and
 what stops a value from damaging the receiver: control characters refused in
 every text setting, secrets write-only.
 
-Five tests here asserted the old rule — that the page answers only a logged
-OpenWebif session with authentication switched on — and were rewritten to the
+Five tests here asserted the old rule - that the page answers only a logged
+OpenWebif session with authentication switched on - and were rewritten to the
 new one rather than deleted: the refusal of an anonymous request is now the
 page answering it (`test_the_page_its_icon_and_an_action_answer_without_any_login`);
 the icon test lost its login; and the three POST tests keep every refusal they
@@ -254,8 +254,8 @@ def settings_form(body):
 def submitted(body, **overrides):
     """What a browser submits from the settings form in `body`, as it was rendered.
 
-    Parsed from the page itself — hidden fields, inputs, checked boxes, selected
-    options — so a test of a stale form submits exactly what a stale tab would.
+    Parsed from the page itself - hidden fields, inputs, checked boxes, selected
+    options - so a test of a stale form submits exactly what a stale tab would.
     """
     fields = {}
     for tag, rest in re.findall(r"<(input|select)([^>]*)>", settings_form(body)):
@@ -302,7 +302,7 @@ def test_the_page_its_icon_and_an_action_answer_without_any_login(connected_brid
     """Inverts `test_page_refuses_anonymous_or_auth_disabled`.
 
     That test required OpenWebif authentication on and a logged session, and
-    refused everybody else — which on a receiver at OpenWebif's defaults was
+    refused everybody else - which on a receiver at OpenWebif's defaults was
     everybody. OpenWebif's own gate runs before this code; the page answers
     whatever it lets through, and there is no setting for it to read.
     """
@@ -458,7 +458,7 @@ def test_a_refused_post_changes_nothing(connected_bridge, page, factory, setting
     elif case == "another session's token":
         # The victim has a token of its own; the attacker presents a valid
         # token from a session of their own. Refused for not being *this*
-        # session's token — not for the victim having none.
+        # session's token - not for the victim having none.
         own = token(session)
         csrf = token(new_session())
         assert len(own) >= 32 and csrf != own
@@ -506,7 +506,7 @@ def test_a_token_in_the_address_is_not_a_token(connected_bridge, page, monkeypat
     """🔴 Twisted merges the query into `request.args` and splits it on `;` too.
 
     The token is only ever read from the POST body, so no spelling of it in the
-    URL — which ends up in logs, history and `Referer` — counts.
+    URL - which ends up in logs, history and `Referer` - counts.
     """
     sent = []
     monkeypatch.setattr(connected_bridge, "run_command", lambda *args: sent.append(args))
@@ -549,7 +549,7 @@ def test_an_already_read_body_is_read_again_from_its_start(connected_bridge, pag
 
 
 def test_a_body_is_unquoted_percent_after_plus(connected_bridge, page, monkeypatch):
-    """`%2B` is a literal plus and `+` a space — decoding in the other order swaps them."""
+    """`%2B` is a literal plus and `+` a space - decoding in the other order swaps them."""
     sent = []
     monkeypatch.setattr(connected_bridge, "run_command",
                         lambda name, text, origin: sent.append(text))
@@ -568,7 +568,7 @@ def test_a_body_over_the_cap_is_refused(connected_bridge, page, monkeypatch):
     sent = []
     monkeypatch.setattr(connected_bridge, "run_command", lambda *args: sent.append(args))
     session = new_session()
-    # Valid in every field; only its size is wrong. Empty `&&…` parts are
+    # Valid in every field; only its size is wrong. Empty `&&...` parts are
     # skipped by the parser, so without the cap this body would be accepted.
     body = ("form=action&action=discovery&csrf=" + token(session)).encode()
     body += b"&" * (webif.MAX_BODY_BYTES + 1 - len(body))
@@ -835,8 +835,8 @@ def test_no_secret_is_ever_rendered(connected_bridge, page, settings, monkeypatc
     )
     monkeypatch.setattr(webif.log_module, "active_path", lambda: str(log))
     connected_bridge.publish_json(ROOT + "/info", connected_bridge.build_info())
-    # A payload is shown as it went out, so a secret that reached one — it
-    # must not, but the page is the last line — is redacted on the way in.
+    # A payload is shown as it went out, so a secret that reached one - it
+    # must not, but the page is the last line - is redacted on the way in.
     webif.log_module.register_secret("broker-pw-marker")
     connected_bridge.publish_json(ROOT + "/probe", {"echo": "broker-pw-marker"})
 
@@ -901,7 +901,7 @@ def test_the_remembered_payloads_are_bounded(connected_bridge, monkeypatch):
         connected_bridge.publish_json(ROOT + "/t" + str(number), {"n": "x" * 40})
     json_rows = [row for row in connected_bridge.last_payloads() if row[1] is not None]
     assert [topic for topic, _payload in json_rows] == [ROOT + "/t2", ROOT + "/t3", ROOT + "/t4"]
-    assert all(len(payload) == 20 and payload.endswith("…") for _topic, payload in json_rows)
+    assert all(len(payload) == 20 and payload.endswith("\u2026") for _topic, payload in json_rows)
 
 
 def test_a_secret_field_reveals_nothing_not_even_its_length(connected_bridge, page, settings):
@@ -940,7 +940,7 @@ def test_a_retracted_topic_is_forgotten(connected_bridge):
 
 
 @pytest.mark.parametrize("name", TEXT_SETTINGS)
-@pytest.mark.parametrize("bad", ["\n", "\r", "\x00", "\x1b", "\x7f", "\x85", " "])
+@pytest.mark.parametrize("bad", ["\n", "\r", "\x00", "\x1b", "\x7f", "\x85", "\u2028"])
 def test_a_control_character_is_refused_in_every_text_setting(name, bad):
     """🔴 enigma2's settings file is `key=value` lines with no escaping."""
     with pytest.raises(ValueError):
@@ -1947,7 +1947,7 @@ def test_the_openwebif_hook_registers_what_upstream_expects(monkeypatch):
 
     OpenWebif's `addExternalChild` takes one sequence of at least three items
     and mounts it with `root.putChild2(plugin[0], plugin[1])`, so the link is a
-    `str` there — while Twisted's own `putChild`, which the resource uses for
+    `str` there - while Twisted's own `putChild`, which the resource uses for
     its icon, needs bytes.
     """
     registered = []

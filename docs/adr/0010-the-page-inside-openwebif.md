@@ -2,7 +2,7 @@
 
 **Status:** accepted 2026-09-23
 **Date:** 2026-09-23
-**Supersedes:** — (it amends [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) on how
+**Supersedes:** - (it amends [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) on how
 OpenWebif opens the page; nothing ADR-0009 decides about who reaches the page or what guards its
 writes changes)
 
@@ -19,7 +19,7 @@ was this one, and the household wanted it inside OpenWebif like every other entr
 
 **The panel load can be recognised.** Measured in Chromium against the page under Twisted and
 upstream's jQuery: the panel load arrives with `X-Requested-With: XMLHttpRequest` and
-`Sec-Fetch-Dest: empty`; every navigation — a tab, a bookmark, a frame — carries neither
+`Sec-Fetch-Dest: empty`; every navigation - a tab, a bookmark, a frame - carries neither
 (`Sec-Fetch-Dest` is `document` or `iframe`). And a frame of the page inside an OpenWebif page of
 the same origin renders under the page's existing headers (`X-Frame-Options: SAMEORIGIN`,
 `frame-ancestors 'self'`), and its forms post with the frame's own origin and the session cookie,
@@ -33,11 +33,11 @@ There was also no record of when a picture was taken, only of when a capture sta
 
 **1. The hook registers `"_self"` again, and the page answers a panel load with a fragment.** A
 `GET` of the page that carries `X-Requested-With: XMLHttpRequest`, or `Sec-Fetch-Dest: empty` for a
-theme that uses `fetch()`, is answered — **before** the `Host` allowlist and before anything else —
+theme that uses `fetch()`, is answered - **before** the `Host` allowlist and before anything else -
 with one `<div>` holding an `<iframe>` of the page and a link to open it in a new tab. Before the
 `Host` check because OpenWebif's jQuery `.load()` injects nothing at all on a non-2xx answer: a `421`
 there would be a menu entry that does nothing under a DNS name or a reverse proxy. That is safe
-because the fragment carries nothing the check protects — no token, no data, and a mount path taken
+because the fragment carries nothing the check protects - no token, no data, and a mount path taken
 from the request's path, never from `Host`. The frame it opens is a navigation, which meets the
 `Host` check like every other request to the page, `screen.jpg` and every `POST`. The fragment has
 **no script, no style element and no class OpenWebif styles**; its presentation is the frame's
@@ -49,7 +49,7 @@ ADR-0009's earlier reason for `"_blank"` no longer applies.
 
 **2. The bridge holds the last picture it put on `screen`, with the time the capture finished.**
 It is recorded where it is published, is the same bytes object, is cleared when `screen` is
-retracted — by `retract` or with the rest of an old name after a rename — or the retained topics
+retracted - by `retract` or with the rest of an old name after a rename - or the retained topics
 are reset, and is set again by the snapshot; it is only ever served for the `screen` topic it went
 out on. It survives a
 publisher replacement, a remote save and a reload, as the retained topic does, and is lost when the

@@ -180,7 +180,7 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 # Three kept, older ones removed: a receiver's flash is small and a backup of a
 # build from six deploys ago is not something anyone will roll back to. The
 # stamp sorts chronologically, so `sort -r | tail -n +4` is everything but the
-# three newest — and `tail -n +N` is the form busybox has.
+# three newest - and `tail -n +N` is the form busybox has.
 box_ssh "set -e
          if [ -d '$PLUGIN_DIR' ]; then
              mkdir -p '$BACKUP_DIR'
@@ -202,7 +202,7 @@ box_ssh "opkg install --force-reinstall '/tmp/$IPK_NAME' && rm -f '/tmp/$IPK_NAM
 if [ -n "$PROVISION" ]; then
     [ -r "$PROVISION" ] || { echo "deploy-to-box.sh: cannot read $PROVISION" >&2; exit 2; }
     say "installing the provisioning file"
-    # It holds a broker password, so it is never readable by anyone else — not
+    # It holds a broker password, so it is never readable by anyone else - not
     # even for the moment it spends in /tmp. scp applies the box's umask to what
     # it creates, and a `chmod` in the *next* ssh call is a window, so the
     # directory it lands in is made 0700 before the copy. The plugin deletes the

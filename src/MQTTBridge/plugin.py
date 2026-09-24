@@ -11,11 +11,11 @@ loads, appears in the menu, and does nothing.
 
 Three descriptors:
 
-* `WHERE_SESSIONSTART` — the only one that is handed the `session`, which every
+* `WHERE_SESSIONSTART` - the only one that is handed the `session`, which every
   screen and every enigma2 event source hangs off;
-* `WHERE_AUTOSTART` with reason 1 — the shutdown edge, where the bridge gets to
+* `WHERE_AUTOSTART` with reason 1 - the shutdown edge, where the bridge gets to
   say `offline` properly instead of leaving it to the last will;
-* `WHERE_PLUGINMENU` — the setup screen.
+* `WHERE_PLUGINMENU` - the setup screen.
 """
 
 from .i18n import _

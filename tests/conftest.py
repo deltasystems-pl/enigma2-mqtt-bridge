@@ -6,8 +6,8 @@ else, so the only way to run this plugin's logic on a PC is to put a stub in
 import time, before any test module is collected.
 
 The stubs are deliberately faithful rather than minimal where the real behaviour
-is load-bearing — `ConfigYesNo` really does hold a bool, `configfile.save()`
-really is counted — because a stub that is kinder than the real thing tests
+is load-bearing - `ConfigYesNo` really does hold a bool, `configfile.save()`
+really is counted - because a stub that is kinder than the real thing tests
 nothing. Where the real behaviour is irrelevant (drawing a screen) the stub is a
 shell.
 
@@ -42,8 +42,8 @@ def _module(name, package=False):
 # ------------------------------------------------------- value templates --
 
 # The discovery payloads carry Jinja templates that Home Assistant renders.
-# Tests render them — never compare them as strings, which is how a
-# `timestamp_utc` with a second `+00:00` survived review and a release — and
+# Tests render them - never compare them as strings, which is how a
+# `timestamp_utc` with a second `+00:00` survived review and a release - and
 # they render them with `hatemplate`: Home Assistant's own `int`, `round` and
 # `timestamp_utc`, and a guard that refuses any filter, test or global it does
 # not reproduce. `test_discovery_templates.py` renders every template the plugin
@@ -108,7 +108,7 @@ class MainLoop:
     something happens on: `Session.close()` does not pop a screen, it starts a
     0 ms timer and returns, and the standby the screen was holding up runs on
     the turn that timer fires. `advance(0)` runs every timer that is already
-    due — including ones started while it runs, as the real loop would — in
+    due - including ones started while it runs, as the real loop would - in
     the order they fall due, and a single-shot timer stops before its callback
     runs, as enigma2's does.
     """
@@ -188,7 +188,7 @@ enigma.getEnigmaVersionString = lambda: "2024-09-11-Release"
 #   renderer: half the font size per character and 1.2 lines, which is enough to
 #   make a longer text taller and a wider label shorter.
 #
-# Destruction is not modelled — a window here lives as long as the test — so
+# Destruction is not modelled - a window here lives as long as the test - so
 # what a test can see is whether a window is *visible*, which is also what a
 # household sees.
 
@@ -381,7 +381,7 @@ class eServiceReference:
 
     The real class carries the fields as members and rebuilds the string on
     demand. Nothing in this plugin depends on that, and everything in it depends
-    on the string round-tripping unchanged — including the flags in the second
+    on the string round-tripping unchanged - including the flags in the second
     field, which are how a marker is told from a channel.
     """
 
@@ -633,7 +633,7 @@ class EPGCache:
     _instance = None
 
     def __init__(self):
-        # {sref: [Event, …]}, in time order.
+        # {sref: [Event, ...]}, in time order.
         self.events = {}
         self.queries = []
         self.multi_service = True
@@ -718,7 +718,7 @@ class KeyActionMap:
         """The three-argument form every current image has.
 
         Injected presses are delivered to whatever bound a handler, which is how
-        a test proves that `cmd/key` reaches the plugin's own listener — exactly
+        a test proves that `cmd/key` reaches the plugin's own listener - exactly
         as it does on the box.
         """
         self.pressed.append((device, key, flags))
@@ -1075,7 +1075,7 @@ class SystemInformation(dict):
 
     Shaped after OpenViX 6.6's bytecode, read from a receiver: a `dict`
     subclass whose `get(item, default=None)` delegates to `BoxInfo`, and in
-    which `WakeOnLAN` is always set — to the path of `/proc/stb/fp/wol` (or
+    which `WakeOnLAN` is always set - to the path of `/proc/stb/fp/wol` (or
     `/proc/stb/power/wol` on two machines) when the driver created it, and to
     `False` otherwise, which is what that receiver holds. `config.usage` is
     left as the rest of this file has it, with no `wakeOnLAN`, because the
@@ -1464,7 +1464,7 @@ screen_module.Screen = Screen
 # 🔴 From the receiver's `skin.pyc`, which compiles from `cd4f9bc4ee` except for
 # three `assert`s the image strips. `addOnLoadCallback`/`removeOnLoadCallback` are
 # membership-guarded appends and removes on the module's `onLoadCallbacks`, and
-# `InitSkins(booting=False)` — a skin reload without a restart — resizes the
+# `InitSkins(booting=False)` - a skin reload without a restart - resizes the
 # desktop **before** it calls every callback (a test resizes `DESKTOP` first).
 # `readSkin` prefers a screen the skin defines under the screen's `skinName`,
 # falls back to the embedded `skin` string, and refuses a named widget the screen
@@ -1615,7 +1615,7 @@ notifications_module = _module("Tools.Notifications")
 
 # 🔴 The queue is modelled on the receiver's own `Tools/Notifications.pyc`
 # (OpenViX 6.6, disassembled under Python 3.12, which is what that image runs),
-# not on what a queue ought to look like — the CEC workaround is tested against
+# not on what a queue ought to look like - the CEC workaround is tested against
 # exactly these details and would pass against a kinder stub while doing nothing
 # on a real box:
 #
@@ -1626,7 +1626,7 @@ notifications_module = _module("Tools.Notifications")
 #   `AddNotification(screen)` queues `(None, screen, (), {}, None)`.
 # - `__AddNotification` appends **first** and then calls every entry of
 #   `notificationAdded` with **no arguments**, iterating the live list.
-# - `RemovePopup(id)` skips every entry whose id is falsy — which is why a
+# - `RemovePopup(id)` skips every entry whose id is falsy - which is why a
 #   queued standby cannot be removed through it.
 notifications = []
 notificationAdded = []
@@ -1717,8 +1717,8 @@ class StandbyScreen:
 # - `Session.close(screen)` returns silently when `in_exec` is false, **asserts**
 #   `screen == current_dialog`, then starts `delay_timer` at 0 ms single-shot and
 #   calls `execEnd()`. It does **not** pop the dialog: `processDelay` does, on the
-#   turn that timer fires, and it is that pop — `execBegin(first=False)` on the
-#   screen underneath — which lets the info bar drain the notification queue.
+#   turn that timer fires, and it is that pop - `execBegin(first=False)` on the
+#   screen underneath - which lets the info bar drain the notification queue.
 # - `execDialog` (how the info bar shows the channel list) makes a non-temporary
 #   dialog; `open` makes a temporary one and refuses a modal open from a screen
 #   that is not executing.
@@ -1726,7 +1726,7 @@ class StandbyScreen:
 #   otherwise remembers the close for the next `execBegin`.
 # - `Screen.execBegin` runs `onExecBegin` and then the one-off `onFirstExecBegin`,
 #   returns early if one of them opened another dialog, and only then sets
-#   `execing` — so the info bar is *not* executing while it drains its queue.
+#   `execing` - so the info bar is *not* executing while it drains its queue.
 
 
 class ModelScreen:
@@ -1851,7 +1851,7 @@ class ModalSession:
 
 
 class NotifiableInfoBar(ModelScreen):
-    """The info bar's `InfoBarNotifications` mixin — the only thing that drains the queue.
+    """The info bar's `InfoBarNotifications` mixin - the only thing that drains the queue.
 
     From `Screens/InfoBarGenerics.pyc`: it registers `checkNotificationsIfExecing`
     on `notificationAdded` (which does nothing unless the info bar is executing)
@@ -1888,7 +1888,7 @@ class Standby(ModelScreen):
     """The class enigma2 hands to `AddNotification` to *enter* standby.
 
     As `Screens/Standby.pyc` has it: on its first `execBegin` the screen becomes
-    `inStandby` and increments `config.misc.standbyCounter` — which is the
+    `inStandby` and increments `config.misc.standbyCounter` - which is the
     moment everything listening for „the receiver entered standby" hears it,
     `HdmiCec` included.
     """
@@ -1931,21 +1931,21 @@ standby_module.TryQuitMainloop = TryQuitMainloop
 #   image builds the singleton once, from `StartEnigma.py`. Until then it is None.
 # - `__init__` registers `onEnterStandby` on `config.misc.standbyCounter` with
 #   `initial_call=False` [368], and starts with `useStandby = True` and
-#   `handlingStandbyFromTV = False` [353–354].
+#   `handlingStandbyFromTV = False` [353-354].
 # - `messageReceived` does nothing unless `config.hdmicec.enabled` is on [385],
 #   and for `<Standby>` (0x36) with `handle_tv_standby` on it is exactly
-#   `handlingStandbyFromTV = True; self.standby(); … = False` [454–457]. With
+#   `handlingStandbyFromTV = True; self.standby(); ... = False` [454-457]. With
 #   either setting off the television's standby is never queued at all. The
 #   singleton is built either way: `__init__` sets `instance` [342] before it
 #   looks at `enabled` [355].
 # - The flag is read only as a truth test [618], never compared with `True`.
 # - `standby()` queues `AddNotification(Screens.Standby.Standby)` unless already
-#   in standby [635–637].
+#   in standby [635-637].
 # - `onEnterStandby` appends to the standby screen's `onClose` and calls
-#   `standbyMessages` [598–601]; that sends at once, unless `next_boxes_detect` is
-#   on, in which case it waits a second on its own timer [607–613].
+#   `standbyMessages` [598-601]; that sends at once, unless `next_boxes_detect` is
+#   on, in which case it waits a second on its own timer [607-613].
 # - `sendStandbyMessages` sends `standby` to the television when `useStandby and
-#   not handlingStandbyFromTV`, and `sourceinactive` otherwise [615–622] — the
+#   not handlingStandbyFromTV`, and `sourceinactive` otherwise [615-622] - the
 #   flag is read there and nowhere else. `sent` records what went out.
 
 config.hdmicec = ConfigSubsection()
@@ -2324,7 +2324,7 @@ class FakeMessageInfo:
     """paho's `MQTTMessageInfo`: `is_published()` is the broker's acknowledgement.
 
     As in paho, a QoS 0 publish counts as published once it is handed over, and
-    a QoS 1 publish only when its PUBACK is in — which here is when a test says
+    a QoS 1 publish only when its PUBACK is in - which here is when a test says
     so, with `FakeMQTTClient.acknowledge()`. A rejected publish raises from
     `is_published()`, as paho's does.
     """
@@ -2512,7 +2512,7 @@ class Session:
 
     `instantiateDialog` and `deleteDialog` are the real ones, from the source the
     image ships (`StartEnigma.py`, identical to OpenViX `cd4f9bc4ee`):
-    construct, `readSkin`, `setDesktop`, `applySkin` — and never the dialog stack;
+    construct, `readSkin`, `setDesktop`, `applySkin` - and never the dialog stack;
     and `hide()` then `doClose()`. `open` only records, and `execDialog` is not
     here, so a dialog handed to either is visible to a test.
     """
@@ -2729,7 +2729,7 @@ def isolated_log(tmp_path, monkeypatch):
 def no_package_manager(tmp_path, monkeypatch):
     """The `uninstall` capability reads opkg's files: none here, unless a test builds them.
 
-    Without this the capability would depend on the machine the suite runs on —
+    Without this the capability would depend on the machine the suite runs on -
     a developer's box with an `/usr/bin/opkg` would claim it and every
     capability list asserted anywhere would change.
     """
@@ -2759,8 +2759,8 @@ def plugin_log(isolated_log):
     """The plugin's own log file, at debug, read back as a string.
 
     Deliberately not `caplog`: the package logger does not propagate to the root
-    logger, and what this project promises about its log — that a password never
-    reaches it — is a promise about the file, not about a capture handler.
+    logger, and what this project promises about its log - that a password never
+    reaches it - is a promise about the file, not about a capture handler.
     """
     from MQTTBridge import log as log_module
 
@@ -2843,7 +2843,7 @@ def make_bridge(factory, state_path, tmp_path, isolated_log):
 def connected_bridge(make_bridge, factory, settings):
     """A started, connected bridge with a plausible broker configured.
 
-    No session, so no feature area registers: this is the bridge itself — the
+    No session, so no feature area registers: this is the bridge itself - the
     connection, `info`, the announcement and the commands that need nothing from
     the receiver.
     """
@@ -2929,7 +2929,7 @@ class FakeEpgImporter:
         self.source = self.sources.pop()
 
     def finish(self, events):
-        """What the end of the download chain does: clear, save, call back — one turn."""
+        """What the end of the download chain does: clear, save, call back - one turn."""
         self.sources = []
         self.eventCount = events
         self.closeImport()

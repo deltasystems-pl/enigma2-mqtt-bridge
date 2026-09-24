@@ -4,7 +4,7 @@ The image here is the stub in `conftest`: `Components.SystemInfo` with
 `WakeOnLAN` set to `False`, which is what the one measured receiver holds, and
 no `config.usage.wakeOnLAN`, which that image builds only when the driver made
 the front-processor file. The `image_wol` fixture below gives a test the other
-kind of receiver — a file under `…/fp/wol` or `…/power/wol` and the image's own
+kind of receiver - a file under `.../fp/wol` or `.../power/wol` and the image's own
 setting, whose notifier writes the file the way the image's does.
 """
 
@@ -39,7 +39,7 @@ class ImageWakeOnLan(ConfigYesNo):
     The shared `ConfigYesNo` stub already behaves as OpenViX 6.6's does: it
     stores **the object it is given** and calls the notifiers only when that
     differs from the previous one. A stub that turned `1` into `True` would hide
-    an `arm()` that wrote `1` — which the image keeps, writes `enable` for, and
+    an `arm()` that wrote `1` - which the image keeps, writes `enable` for, and
     which then fails an `is True` test on every start until a reboot loads a
     real bool. What this adds is the image's notifier, registered the way the
     image registers it, so the file holds the setting from the moment the image
@@ -284,7 +284,7 @@ def test_arming_sets_and_saves_the_image_s_setting_exactly_once(
 
     # Exactly `True`, not something truthy: the image keeps what it is given.
     assert setting.value is True
-    # What reaches the settings file is the new value — saved after it was set.
+    # What reaches the settings file is the new value - saved after it was set.
     assert setting.saved_value is True
     assert setting.save_calls == 1
     assert configfile.save_calls == 1

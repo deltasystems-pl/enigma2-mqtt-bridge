@@ -18,14 +18,14 @@ succeeds.
 
 Every handler returns `None` when it worked and a sentence when it did not, and
 that sentence is written for the person who will read it on `last_error` at
-eleven at night — it says what was refused and why, not which function returned
+eleven at night - it says what was refused and why, not which function returned
 what.
 
 **The OpenWebif page runs the same handlers**, through `run()`, with its origin
 passed down the call (`origin.py`). It is not a second implementation of any
 command: the page builds the payload a broker client would have sent, the
-handler runs exactly as it does for MQTT — every household-safety guard
-included — and `last_error` is published or cleared exactly as it is for MQTT.
+handler runs exactly as it does for MQTT - every household-safety guard
+included - and `last_error` is published or cleared exactly as it is for MQTT.
 The one difference is the box-side permission, which the page does not need.
 """
 
@@ -61,8 +61,8 @@ def decode(payload):
 def parse(text):
     """A payload as an object when it is JSON, and as text when it is not.
 
-    Several commands take either — `zap` accepts a bare service reference and a
-    `{"name": …}` object — so this answers with both rather than forcing every
+    Several commands take either - `zap` accepts a bare service reference and a
+    `{"name": ...}` object - so this answers with both rather than forcing every
     handler to try `json.loads` in a `try`.
     """
     stripped = str(text or "").strip()
@@ -78,7 +78,7 @@ def _echo(text):
     """A rejected payload, safe to put on a retained topic."""
     cleaned = redact(str(text or "").strip())
     if len(cleaned) > ERROR_ECHO_LIMIT:
-        cleaned = cleaned[:ERROR_ECHO_LIMIT] + "…"
+        cleaned = cleaned[:ERROR_ECHO_LIMIT] + "\u2026"
     return cleaned
 
 
@@ -200,7 +200,7 @@ class CommandDispatcher:
         return self.bridge.publisher(name)
 
     def _refresh(self, *names):
-        """Read the state back after changing it — the „verified by effect" half."""
+        """Read the state back after changing it - the „verified by effect" half."""
         for name in names:
             publisher = self.publisher(name)
             if publisher is None:
@@ -481,7 +481,7 @@ class CommandDispatcher:
         Every guard lives in the publisher, because the automatic restart uses
         the same ones and „one guard, one code path" is the point: a second copy
         of the recording check here would be a second thing to keep in step.
-        🔴 The payload is ignored on purpose — nothing on the command line may
+        🔴 The payload is ignored on purpose - nothing on the command line may
         come from the broker.
         """
         publisher = self.publisher("softcam")
@@ -549,7 +549,7 @@ class CommandDispatcher:
     def uninstall(self, text, origin=MQTT):
         """Remove the plugin from the receiver: validated here, done on the next turn.
 
-        🔴 The payload is this receiver's node id and nothing else — a
+        🔴 The payload is this receiver's node id and nothing else - a
         confirmation of *which* receiver was meant, not a secret. Every guard
         and the ordered teardown are in `uninstall.py`; this handler returns
         before anything changes, so the dispatcher clears `last_error` first.

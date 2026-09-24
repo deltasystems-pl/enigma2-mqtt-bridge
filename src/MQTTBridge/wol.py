@@ -5,15 +5,15 @@ SE's Ethernet MAC as `Supports Wake-on: gs`, and it is telling the truth about
 the wrong thing: that is the MAC's ability to wake the system from a Linux
 *suspend*, programmed only by the driver's suspend callback. An enigma2 image
 never suspends. Its deep standby takes the interface down, hands the box to the
-front processor and powers off, so a flag set with `ethtool -s … wol g` is stored
-and then read by nothing — and a plugin that set it, read it back and published
+front processor and powers off, so a flag set with `ethtool -s ... wol g` is stored
+and then read by nothing - and a plugin that set it, read it back and published
 „armed" would be publishing a receiver that cannot be woken as one that can
 (ADR-0012).
 
 What an image does have, where the hardware allows it, is a front-processor
 switch. `Components.SystemInfo` probes for it at start and records its path as
-`SystemInfo["WakeOnLAN"]` — `/proc/stb/fp/wol`, or `/proc/stb/power/wol` on the
-two machines that have that one — or `False` when the driver created neither.
+`SystemInfo["WakeOnLAN"]` - `/proc/stb/fp/wol`, or `/proc/stb/power/wol` on the
+two machines that have that one - or `False` when the driver created neither.
 Only when it is there does the image build `config.usage.wakeOnLAN` („Wake On
 LAN" in its expert settings), whose notifier writes the file at every start and
 on every change. So this module does exactly two things, and both go through
@@ -25,7 +25,7 @@ what the image already built:
   setting exists. It never switches it off: somebody may have switched it on in
   the image's menu, and this plugin arms, it does not disarm.
 
-🔴 Nothing here starts a process — no `ethtool`, no shell, no
+🔴 Nothing here starts a process - no `ethtool`, no shell, no
 `eConsoleAppContainer`. There is nothing on this path a command line could do
 that the image's own setting does not, and a test asserts it stays that way.
 """
@@ -66,9 +66,9 @@ def switch_path():
 
     🔴 Three answers, not two. `False` in `SystemInfo["WakeOnLAN"]` is the
     image's own statement that its probe found no switch, and only that becomes
-    "" — „this receiver cannot be woken over the network". Everything else that
-    is not a path — no `SystemInfo` to import, a `get` that raises, a key the
-    image never set, a value of a type its probe never produces — is a question
+    "" - „this receiver cannot be woken over the network". Everything else that
+    is not a path - no `SystemInfo` to import, a `get` that raises, a key the
+    image never set, a value of a type its probe never produces - is a question
     that went unanswered, and a consumer that read it as „no switch" would tell
     a household something nobody measured.
     """
@@ -95,8 +95,8 @@ def supported():
 def mechanism(path):
     """`fp` or `power` for the image's file, None when there is none.
 
-    Named by the directory the file sits in. A path under neither — an image
-    that moved it — is read the way the image's own notifier reads it: `fp`
+    Named by the directory the file sits in. A path under neither - an image
+    that moved it - is read the way the image's own notifier reads it: `fp`
     anywhere in the path means the `fp` vocabulary.
     """
     if not path:
@@ -108,7 +108,7 @@ def mechanism(path):
 
 
 def _image_setting():
-    """`config.usage.wakeOnLAN`, or None on an image — or a box — that did not build it."""
+    """`config.usage.wakeOnLAN`, or None on an image - or a box - that did not build it."""
     try:
         from Components.config import config
 
@@ -136,7 +136,7 @@ def armed(path):
     """Whether the image's switch is on, as the image states it; None when not supported.
 
     The file first, because it is what the front processor is told. Where it
-    cannot be read — the driver may make it write-only, which is unmeasured —
+    cannot be read - the driver may make it write-only, which is unmeasured -
     the image's own setting answers, since its notifier is what writes the
     file. Never this plugin's `wol_arm`: that is what somebody asked for, not
     what the receiver is.

@@ -2,7 +2,7 @@
 
 `opkg remove` deletes the files it installed, which are the `.py` ones. The
 image byte-compiles a plugin after opkg has installed it, so the `.pyc` files
-are the receiver's and are in nobody's file list — and a legacy-location `.pyc`,
+are the receiver's and are in nobody's file list - and a legacy-location `.pyc`,
 sitting where its source used to be rather than under `__pycache__`, is a
 complete importable module in Python 3. On an OpenViX 6.6 receiver forty files
 survived a removal, enigma2's plugin loader found them by module name at the
@@ -10,13 +10,13 @@ next GUI restart, and the plugin that `opkg status` said was not installed
 reconnected to the broker.
 
 These tests run the real maintainer script, under every POSIX shell on the
-machine, against a fixture tree — the same arrangement as
+machine, against a fixture tree - the same arrangement as
 `tests/test_postinst_sweep.py`, and for the same reason: the shell is the unit,
 and rewriting the sweep in Python would test something the receiver never runs.
 
 Half of what is asserted below is about what the script refuses to do. It runs
 as root, over paths somebody else chose the names of, and it is the one script
-here that removes directories — so „it deleted the right files" is only half the
+here that removes directories - so „it deleted the right files" is only half the
 question.
 """
 
@@ -45,7 +45,7 @@ WEBIF_TAIL = ("WebInterface", "WebChilds", "External")
 
 # What the receiver had compiled in the plugin directory when the removal that
 # started all this was measured. `setup` is in the list because somebody had
-# opened the setup screen once — which is the whole reason the sweep matches a
+# opened the setup screen once - which is the whole reason the sweep matches a
 # pattern instead of a list of modules.
 COMPILED_MODULES = (
     "__init__ plugin bridge commands discovery mqttclient keys setup version config log i18n"
@@ -133,7 +133,7 @@ def external_dir(tmp_path):
 def removed_package(plugin_dir, external_dir):
     """What opkg leaves behind: every `.py` gone, every `.pyc` still there.
 
-    The shape measured on a receiver — forty files, 31 in the plugin directory
+    The shape measured on a receiver - forty files, 31 in the plugin directory
     and 9 under `_vendor/paho/`, all in the legacy same-directory form, plus the
     compiled OpenWebif hook beside where opkg's own `MQTTBridge.py` was.
     """
@@ -252,7 +252,7 @@ def test_nothing_is_said_about_leftovers_while_opkg_still_has_files_to_remove(
     shell, plugin_dir
 ):
     """A count of what remains, taken before opkg deletes its own files, would
-    be a number about files that are about to go — printed on every removal."""
+    be a number about files that are about to go - printed on every removal."""
     write(plugin_dir / "bridge.py", "# the source")
     write(plugin_dir / "bridge.pyc")
 
@@ -492,7 +492,7 @@ def test_a_symlinked_plugin_directory_is_refused(shell, tmp_path):
 
     That sweep resolves a symlinked plugin directory and sweeps what it points
     at, which is safe because it only ever deletes files. This one removes the
-    directories too, and the last of them is the plugin directory itself — so
+    directories too, and the last of them is the plugin directory itself - so
     following the link would empty and remove a directory somebody deliberately
     put somewhere else, and leave the link dangling behind it.
     """
@@ -520,7 +520,7 @@ def test_a_dangling_relative_symlink_is_named_as_an_absolute_path(shell, tmp_pat
     """`readlink` gives the link's own text, and that text may be relative.
 
     A dangling link cannot be resolved, so its text is the only thing left to
-    name — and `../a removed medium/MQTTBridge` is relative to the directory the
+    name - and `../a removed medium/MQTTBridge` is relative to the directory the
     link sits in, not to anything the reader can paste into a shell.
     """
     link = tmp_path / PLUGIN_PARENT / PLUGIN_NAME
@@ -548,7 +548,7 @@ def test_a_symlink_inside_the_tree_is_neither_followed_nor_removed(
     assert outside.exists()
     assert link.is_symlink()
     # A link is not bytecode this script may delete, so the directory holding it
-    # stays — and it is counted as somebody else's file.
+    # stays - and it is counted as somebody else's file.
     assert plugin_dir.is_dir()
 
 
@@ -568,8 +568,8 @@ def test_a_symlinked_external_directory_is_refused(shell, plugin_dir, tmp_path):
 def test_a_symlink_above_the_hooks_directory_is_refused(shell, plugin_dir, tmp_path, depth):
     """🔴 `[ -d ]` is true through a symlink, and so is `rm`.
 
-    Checking only the last component leaves `WebChilds` — or `WebInterface`
-    itself — as a way through. Both are checked, and both are refused out loud.
+    Checking only the last component leaves `WebChilds` - or `WebInterface`
+    itself - as a way through. Both are checked, and both are refused out loud.
     """
     real = tmp_path / "the real openwebif"
     hook = write(real.joinpath(*WEBIF_TAIL[depth:], "MQTTBridge.pyc"))
@@ -594,7 +594,7 @@ def test_a_find_without_depth_still_leaves_no_bytecode(
     The directory pass cannot be written safely without `-depth`: a listing
     sorted by depth would have to survive a newline in a directory name. So the
     fallback is to leave the directories to opkg, which removes its own, and to
-    say so — rather than to reach for a sorting trick nobody can review.
+    say so - rather than to reach for a sorting trick nobody can review.
     """
     shim = tmp_path / "a shim on the path"
     shim.mkdir()
@@ -681,7 +681,7 @@ def test_the_sweep_holds_when_run_from_inside_the_directory_it_removes(shell, re
     """Run as a child of the process being removed, from the worst working directory it could have.
 
     enigma2 runs from `/home/root` on the receiver this was measured on, so this
-    is the case that does not happen — and the one that would break a sweep
+    is the case that does not happen - and the one that would break a sweep
     that relied on its own working directory.
     """
     result = run(shell, removed_package, cwd=removed_package,
@@ -716,7 +716,7 @@ def test_the_depth_support_is_probed_the_way_xdev_is():
     """A source assertion: the probe is cheap and its absence is invisible.
 
     A `find` that refuses `-depth` would otherwise make the directory pass fail
-    silently — the pipeline's exit status is the `while`'s, not the `find`'s —
+    silently - the pipeline's exit status is the `while`'s, not the `find`'s -
     and the plugin directory would be left standing with nobody told why.
     """
     body = PRERM.read_text(encoding="utf-8")

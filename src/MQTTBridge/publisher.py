@@ -5,7 +5,7 @@ needs, it names itself in `info.capabilities` when they bound, and it produces a
 snapshot of everything it knows for `on_connect`.
 
 It lives in its own module rather than in `bridge.py` so that the publishers and
-the command handlers can import it without either importing the bridge — a
+the command handlers can import it without either importing the bridge - a
 command needs to reach a publisher (to read a state back), and a publisher needs
 to reach the bridge (to publish), and one shared base class is what keeps that
 from becoming a circular import.
@@ -18,12 +18,12 @@ class Publisher:
     name = ""
 
     # Suffixes whose payload goes out verbatim rather than as JSON. The contract
-    # has three of them — `availability`, `power` and `screen` — because a
+    # has three of them - `availability`, `power` and `screen` - because a
     # string and a JPEG are not improved by being wrapped in quotes.
     raw = ()
 
     # Fields this area's payload stamps from the clock rather than reads from
-    # the receiver — `generated`, and anything else that moves on its own. They
+    # the receiver - `generated`, and anything else that moves on its own. They
     # go out with every publish and take no part in the change comparison,
     # because a field that moves by itself turns „publish when it changed" into
     # „publish every time it was built".
@@ -55,8 +55,8 @@ class Publisher:
         """Whether this area's capability is true *now*.
 
         Starting and working are usually the same thing, which is why this says
-        yes by default. They come apart when a hook can only bind later — an
-        InfoBar enigma2 has not created yet — and the publisher has to stay
+        yes by default. They come apart when a hook can only bind later - an
+        InfoBar enigma2 has not created yet - and the publisher has to stay
         registered while it waits. Claiming a capability that produces no topic
         is exactly the dead entity `capabilities` exists to prevent, so the wait
         is unclaimed and the bridge republishes `info` when it ends.
@@ -77,7 +77,7 @@ class Publisher:
         return None if self.bridge is None else self.bridge.value(name)
 
     def publish(self, suffix, payload):
-        """Publish this feature area's state — but only when it has changed."""
+        """Publish this feature area's state - but only when it has changed."""
         if self.bridge is None:
             return None
         return self.bridge.publish_state(

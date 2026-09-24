@@ -7,7 +7,7 @@ walking every bouquet costs real time on a receiver and doing it three times
 would cost three times as much.
 
 **The list changes without anything telling you.** Bouquets are files, edited by
-the user, by an editor over the network, or by a channel-scan — this box's list
+the user, by an editor over the network, or by a channel-scan - this box's list
 went from 36 entries to 11 in half an hour once. There is no event. So the
 modification times of `bouquets.tv` and every `userbouquet.*` are compared once
 a minute, which is cheap, and the walk only happens when one of them moved.
@@ -36,16 +36,16 @@ from .publisher import Publisher
 LOG = get_logger("channels")
 
 # The service-type filter in front of a bouquet reference. The list of numbers
-# differs between images and between releases of the same image — high-definition,
+# differs between images and between releases of the same image - high-definition,
 # ultra-high-definition and several operator-specific types were each added to it
-# at some point — so it is imported from the receiver's own channel selection
+# at some point - so it is imported from the receiver's own channel selection
 # screen and this literal is only the fallback.
 SERVICE_TYPES_TV = "1:7:1:0:0:0:0:0:0:0:(type == 1) || (type == 17) || (type == 22)" \
                    " || (type == 25) || (type == 31) || (type == 134) || (type == 195)"
 
 BOUQUET_SOURCE = 'FROM BOUQUET "bouquets.tv" ORDER BY bouquet'
 
-# A box with „multiple bouquets" switched off has no bouquet list at all — it
+# A box with „multiple bouquets" switched off has no bouquet list at all - it
 # has one favourites list, and asking for `bouquets.tv` answers with nothing.
 FAVOURITES_SOURCE = 'FROM BOUQUET "userbouquet.favourites.tv" ORDER BY bouquet'
 FAVOURITES_NAME = "Favourites (TV)"
@@ -89,9 +89,9 @@ TRANSLITERATIONS = {
 
 
 def slugify(name):
-    """A bouquet name as an MQTT topic segment: „Ulubione TV" → `ulubione_tv`.
+    """A bouquet name as an MQTT topic segment: „Ulubione TV" -> `ulubione_tv`.
 
-    A slug is an address, never a label — the payload carries the original name
+    A slug is an address, never a label - the payload carries the original name
     and that is what a person should be shown. Two bouquets whose names differ
     only in punctuation would slug the same; the second one to be published wins
     the topic, which is visible in the payload's `bouquet` field rather than
@@ -143,7 +143,7 @@ def _service_center():
 
 
 def _list_entries(handler, sref):
-    """[(reference, name), …] for a bouquet or for the bouquet list itself.
+    """[(reference, name), ...] for a bouquet or for the bouquet list itself.
 
     `getContent("SN", True)` is enigma2's own way of asking for the string form
     of each reference and the name beside it, sorted as the user ordered them.
@@ -191,10 +191,10 @@ def bouquet_roots():
 
 
 def read_bouquets(wanted=None):
-    """`(root, bouquets)` — which root answered, and the bouquets it holds.
+    """`(root, bouquets)` - which root answered, and the bouquets it holds.
 
     `wanted` is the `bouquets_for_select` setting already split into names. An
-    empty selection means every bouquet — which is what a box that has never
+    empty selection means every bouquet - which is what a box that has never
     been configured should publish, rather than nothing.
 
     The root is returned rather than assumed, because the one that answered is
@@ -235,7 +235,7 @@ def read_bouquets(wanted=None):
 def selection_from(setting):
     """The `bouquets_for_select` setting as a list of names.
 
-    Comma-separated, because a bouquet name can contain almost anything else —
+    Comma-separated, because a bouquet name can contain almost anything else -
     including spaces, brackets and a colon.
     """
     return [part.strip() for part in str(setting or "").split(",") if part.strip()]
@@ -259,7 +259,7 @@ def bouquet_mtimes(directory=BOUQUET_DIRECTORY):
 
 
 class ChannelsPublisher(Publisher):
-    """`channels` — the bouquets a consumer may offer, and their services.
+    """`channels` - the bouquets a consumer may offer, and their services.
 
     Picons are not published. A picon is a file on the box, it is tens of
     kilobytes each, and a consumer that wants them has OpenWebif on the same
@@ -291,7 +291,7 @@ class ChannelsPublisher(Publisher):
         self._ticker.stop()
 
     def when_changed(self, callback):
-        """Tell somebody — the EPG grid — that the bouquets moved."""
+        """Tell somebody - the EPG grid - that the bouquets moved."""
         self._on_change.append(callback)
 
     # ------------------------------------------------------------------ reading --

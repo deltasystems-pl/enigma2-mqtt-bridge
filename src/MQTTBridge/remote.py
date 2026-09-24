@@ -2,7 +2,7 @@
 
 🔴 **The handler returns 0, always, on every path.** enigma2 asks every bound
 action handler whether it consumed the key, and anything other than `0` means
-„yes, I dealt with it" — the key never reaches the user interface and the person
+„yes, I dealt with it" - the key never reaches the user interface and the person
 holding the remote finds that their television has stopped responding. This
 plugin observes; it never consumes, and it never *acts* on a key either.
 `KEY_POWER` is published like any other and interpreted by nobody here.
@@ -60,7 +60,7 @@ class RateLimiter:
     """At most `limit` things a second, and one log line about the rest.
 
     Used twice, for the two directions: presses observed on the remote and
-    presses injected into the receiver. The second is not a nicety — an
+    presses injected into the receiver. The second is not a nicety - an
     automation stuck in a loop would otherwise hand enigma2 a key press every
     few milliseconds for as long as it ran.
     """
@@ -115,7 +115,7 @@ def action_map():
 def press(name, long=False):
     """Inject a key press. None on success, otherwise the refusal.
 
-    A long press is a make, the long marker, and then a break — the same three
+    A long press is a make, the long marker, and then a break - the same three
     events the driver produces for a held button, which is what makes a plugin
     that only listens to the break see it as a long press.
 
@@ -159,7 +159,7 @@ def _key_pressed(actions, code, flag):
 
 
 class KeyPublisher(Publisher):
-    """`key` — one payload per press, and never retained.
+    """`key` - one payload per press, and never retained.
 
     Not retained on purpose: a retained key press is delivered again the moment
     anything subscribes, so every automation bound to the blue button would fire
@@ -175,7 +175,7 @@ class KeyPublisher(Publisher):
         self._limiter = RateLimiter(MAX_PUBLISHES_PER_SECOND, "key presses")
         # 🔴 One object, kept for the life of the publisher. `self._on_key` is a
         # *new* bound method every time it is read, and the action map holds the
-        # object it was given and compares it by identity when unbinding — so
+        # object it was given and compares it by identity when unbinding - so
         # binding one and unbinding another leaves the handler attached for the
         # rest of the receiver's uptime.
         self._handler = self._on_key

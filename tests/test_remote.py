@@ -238,7 +238,7 @@ def test_injection_is_rate_limited_too(live_bridge, receiver):
     for _ in range(40):
         remote.press("KEY_RED")
     presses = [entry for entry in receiver.actions.pressed if entry[1] == 398]
-    # Two events — a make and a break — for each of twenty presses.
+    # Two events - a make and a break - for each of twenty presses.
     assert len(presses) == 2 * remote.MAX_PUBLISHES_PER_SECOND
 
 

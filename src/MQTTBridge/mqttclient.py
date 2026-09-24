@@ -22,8 +22,8 @@ from .log import get_logger, redact
 LOG = get_logger("mqtt")
 
 PLUGIN_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
-# The vendored packages live one directory down, and it is that directory — not
-# the plugin's own — that goes on sys.path. See `ensure_paho_on_path`.
+# The vendored packages live one directory down, and it is that directory - not
+# the plugin's own - that goes on sys.path. See `ensure_paho_on_path`.
 VENDOR_DIRECTORY = os.path.join(PLUGIN_DIRECTORY, "_vendor")
 
 KEEPALIVE = 30
@@ -128,7 +128,7 @@ class MessagePumpDispatcher:
 
         A session is replaced whenever the settings change, and a listener left
         attached is one more `_drain` on the pump for every reload the box ever
-        does — each holding the dead session's queue alive.
+        does - each holding the dead session's queue alive.
         """
         signal, self._signal = self._signal, None
         self._pump = None
@@ -162,8 +162,8 @@ def make_dispatcher():
     """However this image lets a background thread reach the main loop.
 
     None when there is no way at all. Running a callback on paho's network
-    thread is not a fallback — it would touch enigma2 from off the main loop,
-    which is how a receiver loses its user interface — so a bridge with no
+    thread is not a fallback - it would touch enigma2 from off the main loop,
+    which is how a receiver loses its user interface - so a bridge with no
     dispatcher stays idle instead.
     """
     reactor = _twisted_reactor()
@@ -254,7 +254,7 @@ class MqttClient:
         if self._client is not None:
             # Never reuse a client object: paho's network thread is tied to it,
             # and a second loop_start on the same one is a stranded thread. The
-            # thread bridge is left alone — this session is about to need it.
+            # thread bridge is left alone - this session is about to need it.
             LOG.warning("a session was already open; closing it before opening another")
             previous, self._client = self._client, None
             self.connected = False
@@ -308,9 +308,9 @@ class MqttClient:
             LOG.exception("disconnect failed")
         # `loop_stop()` joins paho's network thread, and that thread may be
         # inside a connect attempt to an address that black-holes packets:
-        # 2–5 seconds of a blocked caller, measured. Both callers of `stop` are
-        # on enigma2's main thread — the setup screen's Save, and the shutdown
-        # hook — so the join gets a thread of its own and the user interface
+        # 2-5 seconds of a blocked caller, measured. Both callers of `stop` are
+        # on enigma2's main thread - the setup screen's Save, and the shutdown
+        # hook - so the join gets a thread of its own and the user interface
         # never waits for a broker to time out.
         try:
             threading.Thread(
@@ -545,5 +545,5 @@ def _describe(data):
         return f"<{len(data)} bytes>" if data else "<empty>"
     text = redact(text)
     if len(text) > LOG_PAYLOAD_LIMIT:
-        return text[:LOG_PAYLOAD_LIMIT] + "…"
+        return text[:LOG_PAYLOAD_LIMIT] + "\u2026"
     return text

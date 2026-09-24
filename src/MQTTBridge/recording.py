@@ -2,14 +2,14 @@
 
 Every recording on an Enigma2 box is a timer, including the one somebody started
 by pressing the red button thirty seconds ago. So there is one source of truth
-here — `session.nav.RecordTimer` — and two topics reading it for two different
+here - `session.nav.RecordTimer` - and two topics reading it for two different
 questions: `recording` answers „is the box busy right now", which is what the
 shutdown guards need, and `timers` answers „what is it going to do", which is
 what a household planner needs.
 
 The timer list has no change event. This build of enigma2 has no
 `on_state_change` list to attach to, so what is wrapped instead is `saveTimer`,
-which enigma2 calls after every change it makes to the list — adding, removing,
+which enigma2 calls after every change it makes to the list - adding, removing,
 editing, a timer finishing. Wrapping it is how this plugin learns about a timer
 somebody set from the remote control while sitting in front of the television.
 
@@ -118,7 +118,7 @@ def timer_list(session):
 
 
 def read_timers(session):
-    """The `timers` payload — a list, one entry per timer."""
+    """The `timers` payload - a list, one entry per timer."""
     payloads = []
     for timer in timer_list(session):
         payload = _timer_payload(timer)
@@ -135,7 +135,7 @@ def _is_running(timer):
 
 
 def read_recording(session):
-    """The `recording` payload — what is being written now, and what is next."""
+    """The `recording` payload - what is being written now, and what is next."""
     active = []
     upcoming = []
     now = int(time.time())
@@ -252,7 +252,7 @@ def _record(session, entry):
     # 🔴 `record()` answers `None` for two different outcomes: the timer was
     # accepted, and the timer was silently dropped because its own duplicate
     # check recognised one like it. The return value cannot tell them apart, so
-    # the list is the only honest answer — and „added" is exactly the kind of
+    # the list is the only honest answer - and „added" is exactly the kind of
     # claim that must be verified by effect rather than by a return code.
     if not any(listed is entry for listed in timer_list(session)):
         return "the receiver did not keep the timer; it already has one like it"
@@ -321,7 +321,7 @@ def add_manual_timer(session, sref, begin, end, name):
 
 
 def find_timer(session, sref, begin, end):
-    """The timer identified by service, start and end — enigma2's own identity."""
+    """The timer identified by service, start and end - enigma2's own identity."""
     try:
         begin = int(begin)
         end = int(end)
@@ -429,11 +429,11 @@ class TimerWatcher(Publisher):
         """Publish after the current burst of changes, not during it."""
         self._coalesce.start(COALESCE_MILLISECONDS, True)
 
-    # `saveTimer` is enigma2's own „the list changed" — it writes timers.xml.
+    # `saveTimer` is enigma2's own „the list changed" - it writes timers.xml.
     #
     # Two publishers read that list, so the wrapper carries a list of listeners
-    # rather than one callback. The alternative — whichever publisher started
-    # first wrapping the method for itself — silently leaves the second one
+    # rather than one callback. The alternative - whichever publisher started
+    # first wrapping the method for itself - silently leaves the second one
     # listening to nothing, which is how `timers` would stop noticing a timer
     # set from the remote control while `recording` kept working.
     def _wrap_save(self):
@@ -461,7 +461,7 @@ class TimerWatcher(Publisher):
 
         setattr(wrapper, self.MARKER, listeners)
         # On the wrapper rather than only on the publisher, so that whichever of
-        # the two stops last can put the original back — which is not
+        # the two stops last can put the original back - which is not
         # necessarily the one that installed it.
         setattr(wrapper, self.ORIGINAL, original)
         try:
@@ -492,7 +492,7 @@ class TimerWatcher(Publisher):
             LOG.exception("could not restore RecordTimer.saveTimer")
 
     # `record_event` is the recording itself starting, ending, or failing to
-    # write — which `saveTimer` does not always cover.
+    # write - which `saveTimer` does not always cover.
     def _bind_record_event(self):
         nav = getattr(self.session, "nav", None) if self.session is not None else None
         hook = getattr(nav, "record_event", None) if nav is not None else None
@@ -527,7 +527,7 @@ class TimerWatcher(Publisher):
 
 
 class RecordingPublisher(TimerWatcher):
-    """`recording` — what is being written to the disk, and what is next."""
+    """`recording` - what is being written to the disk, and what is next."""
 
     name = "recording"
 
@@ -541,7 +541,7 @@ class RecordingPublisher(TimerWatcher):
 
 
 class TimersPublisher(TimerWatcher):
-    """`timers` — the whole list, as a list."""
+    """`timers` - the whole list, as a list."""
 
     name = "timers"
 
