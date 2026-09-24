@@ -6,6 +6,8 @@ rule that `on_connect` publishes the lot *every* time rather than only at
 start-up.
 """
 
+import pytest
+
 from MQTTBridge import boxinfo, discovery
 from MQTTBridge import config as settings_module
 from MQTTBridge.bridge import Bridge, Publisher
@@ -442,6 +444,165 @@ def test_reload_retracts_topics_the_new_node_id_orphans(connected_bridge, factor
     retractions = [e for e in factory.clients[0].published if e.text == "" and e.retain]
     assert AVAILABILITY in [e.topic for e in retractions]
     assert INFO in [e.topic for e in retractions]
+
+
+def _retained_on_the_broker(factory, topic):
+    """What a broker holds for `topic` once every session here has ended cleanly.
+
+    Sessions in the order they were opened, publishes in the order each made
+    them. A clean disconnect discards the will, so the will never counts.
+    """
+    held = None
+    for client in factory.clients:
+        for entry in client.published:
+            if entry.topic == topic and entry.retain:
+                held = entry.text
+    return held
+
+
+def _record_disconnect_order(client):
+    """Note how many publishes the client had made when it was told to disconnect."""
+    seen = []
+    disconnect = client.disconnect
+
+    def recorded():
+        seen.append(len(client.published))
+        disconnect()
+
+    client.disconnect = recorded
+    return seen
+
+
+def _offline_from(client):
+    return [entry for entry in client.published if entry.text == "offline"]
+
+
+@pytest.mark.parametrize("name, changed", [
+    ("host", "10.0.0.9"),
+    ("port", 8883),
+    ("username", "someone"),
+    ("password", "something else"),
+    ("tls", True),
+    ("ca_file", "/etc/ssl/certs/ca.pem"),
+])
+def test_a_reload_whose_reconnect_fails_leaves_offline_retained(connected_bridge, factory,
+                                                                 settings, name, changed):
+    """A save that changes the connection: the old session says `offline` itself.
+
+    The clean disconnect drops the will, and the new session may never connect —
+    a wrong address, a password that no longer matches.
+    """
+    old = factory.client
+    assert _retained_on_the_broker(factory, AVAILABILITY) == "online"
+    seen = _record_disconnect_order(old)
+
+    getattr(settings, name).value = changed
+    connected_bridge.reload()
+
+    assert factory.client is not old
+    assert factory.client.published == []
+    assert _retained_on_the_broker(factory, AVAILABILITY) == "offline"
+    offline = [i for i, e in enumerate(old.published) if e.topic == AVAILABILITY
+               and e.text == "offline" and e.retain]
+    # Before the DISCONNECT, which is what a broker would still deliver.
+    assert offline and offline[-1] < seen[0]
+    # A state topic, so QoS 0 — the will alone is asked for at QoS 1.
+    assert [e.qos for e in _offline_from(old)] == [0]
+
+
+@pytest.mark.parametrize("name, changed", [
+    ("log_level", "debug"),
+    ("screenshot_delay", 9),
+    ("publish_keys", False),
+    ("friendly_name", "Kitchen receiver"),
+])
+def test_a_reload_that_leaves_the_connection_alone_says_nothing(connected_bridge, factory,
+                                                                settings, name, changed):
+    """The setup screen reloads on every save: only a connection change may blink `offline`."""
+    old = factory.client
+    getattr(settings, name).value = changed
+    connected_bridge.reload()
+
+    assert _offline_from(old) == []
+    assert _retained_on_the_broker(factory, AVAILABILITY) == "online"
+    factory.client.fire_connect()
+    assert _retained_on_the_broker(factory, AVAILABILITY) == "online"
+
+
+@pytest.mark.parametrize("name, changed, renamed", [
+    ("node_id", "vuuno4kse_beef01", "enigma2/vuuno4kse_beef01/availability"),
+    ("base_topic", "stb", "stb/" + NODE + "/availability"),
+])
+@pytest.mark.parametrize("with_host", [False, True], ids=["rename", "rename-and-new-broker"])
+def test_a_rename_publishes_no_offline_for_either_name(connected_bridge, factory, settings,
+                                                       name, changed, renamed, with_host):
+    """The old name is retracted; the new one belongs to the new session alone.
+
+    An `offline` from the old session under the new name could land after the
+    new session's `online` — two client ids, which the broker does not order —
+    and stay retained under a name that is live. One under the old name would
+    land after its retraction and stay behind for a name nobody uses. That holds
+    when the same save also changes the broker.
+    """
+    old = factory.client
+    getattr(settings, name).value = changed
+    if with_host:
+        settings.host.value = "10.0.0.9"
+    connected_bridge.reload()
+
+    assert _offline_from(old) == []
+    assert old.last(AVAILABILITY).text == ""
+    assert old.all_for(renamed) == []
+    factory.client.fire_connect()
+    assert _retained_on_the_broker(factory, renamed) == "online"
+
+
+def test_a_reload_after_the_connection_dropped_publishes_nothing(connected_bridge, factory,
+                                                                 settings):
+    """With the session already gone, the broker has published the will; there is no one to tell."""
+    old = factory.client
+    old.fire_disconnect(reason_code=7)
+    assert connected_bridge.connected is False
+    before = len(old.published)
+
+    settings.host.value = "10.0.0.9"
+    connected_bridge.reload()
+
+    assert old.published[before:] == []
+
+
+def test_a_failed_removal_restarts_without_a_second_offline(connected_bridge, factory):
+    """The removal's own `offline` is its last word; its restart changes no setting.
+
+    A removal that stops reopens the session through `reload()`. Nothing of the
+    connection changed, so the old session publishes no `offline` of its own on
+    the way out, and the fresh one comes back `online` with the reason on
+    `last_error`.
+    """
+    old = factory.client
+    connected_bridge.restart_after_failed_uninstall("uninstall", "opkg is busy")
+
+    assert _offline_from(old) == []
+    factory.client.fire_connect()
+    assert _retained_on_the_broker(factory, AVAILABILITY) == "online"
+    assert factory.client.last("enigma2/" + NODE + "/last_error").json()["error"] == "opkg is busy"
+
+
+def test_a_reload_that_switches_the_plugin_off_leaves_offline_retained(connected_bridge,
+                                                                       factory, settings):
+    settings.enabled.value = False
+    connected_bridge.reload()
+
+    assert connected_bridge.running is False
+    assert _retained_on_the_broker(factory, AVAILABILITY) == "offline"
+
+
+def test_a_reload_that_reconnects_ends_online(connected_bridge, factory, settings):
+    settings.host.value = "10.0.0.9"
+    connected_bridge.reload()
+    factory.client.fire_connect()
+
+    assert _retained_on_the_broker(factory, AVAILABILITY) == "online"
 
 
 def test_the_default_state_path_sits_beside_enigma2s_settings(monkeypatch):

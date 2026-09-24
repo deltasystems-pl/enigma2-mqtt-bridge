@@ -38,7 +38,13 @@ Retained, QoS 0. **Not JSON** — the literal string `online` or `offline`.
 
 `offline` is registered as the connection's last will, so the broker publishes it when the box
 vanishes without saying goodbye. The plugin publishes `online` in `on_connect` and a clean
-`offline` on a graceful shutdown. `cmd/uninstall` ends on `offline` too, published at QoS 1 as the
+`offline` on a graceful shutdown. A settings save restarts the session with a clean disconnect,
+which discards the will; when the save changed the connection — broker address or port, login,
+TLS — or switched the plugin off, the old session publishes `offline` first, so it stays retained
+until the new session connects, and for good if it never does. Any other save reconnects without
+an `offline`. A rename of the node id or the base topic publishes none either: every retained topic
+under the old name, `availability` included, is retracted, and the new name's `availability` is
+published only by the new session. `cmd/uninstall` ends on `offline` too, published at QoS 1 as the
 node's last message, after every other retained topic of the node has been emptied — which is what
 tells a removed plugin from a switched-off receiver: a switched-off one leaves `info` and the
 announcement retained.

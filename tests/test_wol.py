@@ -36,32 +36,27 @@ class ImageWakeOnLan(ConfigYesNo):
     The notifier is the image's `wakeOnLANChanged`: `enable`/`disable` when the
     path has `fp` in it, `on`/`off` otherwise.
 
-    🔴 Unlike the shared `ConfigYesNo` stub, this one stores **the object it is
-    given**, because OpenViX 6.6's `ConfigElement.setValue` does: it keeps
-    `value` as assigned and calls the notifiers only when it differs from the
-    previous one. A stub that turned `1` into `True` would hide an `arm()` that
-    wrote `1` — which the image keeps, writes `enable` for, and which then
-    fails an `is True` test on every start until a reboot loads a real bool.
+    The shared `ConfigYesNo` stub already behaves as OpenViX 6.6's does: it
+    stores **the object it is given** and calls the notifiers only when that
+    differs from the previous one. A stub that turned `1` into `True` would hide
+    an `arm()` that wrote `1` — which the image keeps, writes `enable` for, and
+    which then fails an `is True` test on every start until a reboot loads a
+    real bool. What this adds is the image's notifier, registered the way the
+    image registers it, so the file holds the setting from the moment the image
+    has started.
     """
 
     def __init__(self, path, default=False):
         self.path = path
         ConfigYesNo.__init__(self, default=default)
+        self.addNotifier(self._written)
 
-    def _set(self, value):
-        previous = self._value
-        self._value = value
-        if previous != value:
-            self._notify()
-
-    def _notify(self):
+    def _written(self, element):
         with open(self.path, "w", encoding="ascii") as handle:
             if "fp" in self.path:
-                handle.write("enable" if self._value else "disable")
+                handle.write("enable" if element.value else "disable")
             else:
-                handle.write("on" if self._value else "off")
-
-    value = property(ConfigYesNo._get, _set)
+                handle.write("on" if element.value else "off")
 
 
 @pytest.fixture
@@ -104,9 +99,6 @@ def image_wol(monkeypatch, tmp_path, usage):
             # What a start loads from the settings file: a real bool.
             setting.value = value
             setting.saved_value = value
-            # The image's `addNotifier` calls the notifier at once, so the file
-            # holds the setting from the moment the image has started.
-            setting._notify()
             usage.wakeOnLAN = setting
         if content is not None:
             path.write_text(content, encoding="ascii")

@@ -811,6 +811,32 @@ _module("Components.Sources", package=True)
 config_module = _module("Components.config")
 
 
+# 🔴 The value classes below follow OpenViX 6.6's `Components/config.pyc`, read
+# from the receiver's bytecode, in the two respects a plugin can trip over:
+#
+# - **A value is stored as it is given.** `ConfigElement.setValue` keeps the
+#   object it was handed; `ConfigBoolean` (and so `ConfigYesNo`) does not
+#   override it, `ConfigInteger` keeps `[value]` and hands `value` back, and
+#   `ConfigText` keeps its `text` as given, `None` included. Nothing turns `1`
+#   into `True` or `"5"` into `5`. These stubs used to, and a stub that
+#   converts is a stub under which a plugin that writes the wrong type passes:
+#   on the box the wrong type is what stays in memory until the next start
+#   reads the settings file back.
+# - **Notifiers are called only on a change.** `setValue` compares the old
+#   value with the new one (`ConfigText` before storing, `ConfigSelection` by
+#   the `str()` of the choice, `ConfigInteger` by the `str()` of the
+#   one-element list it keeps) and calls `changed()` only when they differ;
+#   `addNotifier` calls the new notifier at once unless told not to. So on an
+#   integer `5` then `"5"` is a change (`[5]` against `['5']`), while on a
+#   selection `2` then `"2"` is not.
+#
+# `ConfigSelection` never raises either: a value that is not one of its
+# choices is replaced by the default, silently.
+#
+# Two things are deliberately left simpler than the image: `save()` keeps the
+# value itself rather than its `tostring()` (and keeps it even when it equals
+# the default), and `ConfigLocations` keeps a list of strings rather than the
+# image's mount-point records. Neither is something the plugin writes through.
 class ConfigElement:
     def __init__(self, default=None):
         self.default = default
@@ -818,20 +844,39 @@ class ConfigElement:
         self.saved_value = default
         self.save_calls = 0
         self.cancel_calls = 0
-
-    def _get(self):
-        return self._value
-
-    def _set(self, value):
-        self._value = value
-
-    value = property(_get, _set)
+        self.notifiers = []
+        self.notifiers_final = []
 
     def getValue(self):
         return self._value
 
     def setValue(self, value):
-        self.value = value
+        previous = self._value
+        self._value = value
+        if previous != value:
+            self.changed()
+
+    # The image binds the property to the class's own accessors, and every
+    # subclass that replaces one of them builds its own property again.
+    value = property(getValue, setValue)
+
+    def changed(self):
+        for notifier in list(self.notifiers):
+            notifier(self)
+
+    def addNotifier(self, notifier, initial_call=True, immediate_feedback=True):
+        if immediate_feedback:
+            self.notifiers.append(notifier)
+        else:
+            self.notifiers_final.append(notifier)
+        if initial_call:
+            notifier(self)
+
+    def removeNotifier(self, notifier):
+        if notifier in self.notifiers:
+            self.notifiers.remove(notifier)
+        if notifier in self.notifiers_final:
+            self.notifiers_final.remove(notifier)
 
     def save(self):
         self.saved_value = self._value
@@ -857,10 +902,13 @@ class ConfigText(ConfigElement):
         self.fixed_size = fixed_size
         self.visible_width = visible_width
 
-    def _set(self, value):
-        self._value = "" if value is None else str(value)
+    def setValue(self, value):
+        # The image compares first and stores only a different value.
+        if value != self._value:
+            self._value = value
+            self.changed()
 
-    value = property(ConfigElement._get, _set)
+    value = property(ConfigElement.getValue, setValue)
 
 
 class ConfigPassword(ConfigText):
@@ -869,25 +917,26 @@ class ConfigPassword(ConfigText):
 
 class ConfigInteger(ConfigElement):
     def __init__(self, default=0, limits=(0, 9999)):
-        ConfigElement.__init__(self, int(default))
+        ConfigElement.__init__(self, default)
         self.limits = limits
 
-    def _set(self, value):
-        self._value = int(value)
+    def setValue(self, value):
+        # The image keeps `[value]` and compares the `str()` of that list, so
+        # `5` and `"5"` differ (`[5]` against `['5']`) and the change notifies.
+        previous = str([self._value])
+        self._value = value
+        if str([self._value]) != previous:
+            self.changed()
 
-    value = property(ConfigElement._get, _set)
+    value = property(ConfigElement.getValue, setValue)
 
 
-# In enigma2 ConfigYesNo is a ConfigBoolean, not a ConfigSelection; what matters
-# here is that its value is a bool and nothing else.
+# In enigma2 ConfigYesNo is a ConfigBoolean, not a ConfigSelection, and a
+# ConfigBoolean inherits `setValue`: it holds whatever it was last given. Only a
+# start, which reads the settings file back, turns the value into a real bool.
 class ConfigYesNo(ConfigElement):
     def __init__(self, default=False):
-        ConfigElement.__init__(self, bool(default))
-
-    def _set(self, value):
-        self._value = bool(value)
-
-    value = property(ConfigElement._get, _set)
+        ConfigElement.__init__(self, default)
 
 
 class ConfigLocations(ConfigElement):
@@ -903,13 +952,16 @@ class ConfigLocations(ConfigElement):
     def __init__(self, default=None, visible_width=False):
         ConfigElement.__init__(self, list(default or []))
 
-    def _set(self, value):
+    def setValue(self, value):
         if isinstance(value, (list, tuple)):
-            self._value = [str(item) for item in value]
+            locations = [str(item) for item in value]
         else:
-            self._value = [str(value)] if value else []
+            locations = [str(value)] if value else []
+        if locations != self._value:
+            self._value = locations
+            self.changed()
 
-    value = property(ConfigElement._get, _set)
+    value = property(ConfigElement.getValue, setValue)
 
 
 class ConfigSelection(ConfigElement):
@@ -923,12 +975,20 @@ class ConfigSelection(ConfigElement):
         self.choices = normalised
         ConfigElement.__init__(self, default if default is not None else normalised[0][0])
 
-    def _set(self, value):
-        if value not in [key for key, _label in self.choices]:
-            raise ValueError(f"not a choice: {value!r}")
-        self._value = value
+    def setValue(self, value):
+        # Matched by `str()`, as the image's `choicesList.index` does, and the
+        # choice's own key is what gets stored; anything else becomes the default.
+        previous = str(self._value)
+        keys = [key for key, _label in self.choices]
+        texts = [str(key) for key in keys]
+        if str(value) in texts:
+            self._value = keys[texts.index(str(value))]
+        else:
+            self._value = self.default
+        if str(self._value) != previous:
+            self.changed()
 
-    value = property(ConfigElement._get, _set)
+    value = property(ConfigElement.getValue, setValue)
 
 
 class _Content:
@@ -969,21 +1029,10 @@ class StandbyCounter(ConfigInteger):
 
     def __init__(self):
         ConfigInteger.__init__(self, default=0)
-        self.notifiers = []
-
-    def addNotifier(self, notifier, initial_call=True, immediate_feedback=True):
-        self.notifiers.append(notifier)
-        if initial_call:
-            notifier(self)
-
-    def removeNotifier(self, notifier):
-        if notifier in self.notifiers:
-            self.notifiers.remove(notifier)
 
     def increment(self):
-        self._value += 1
-        for notifier in list(self.notifiers):
-            notifier(self)
+        # What the image's `Standby` does, and the change is what notifies.
+        self.value += 1
 
 
 config = ConfigSubsection()
