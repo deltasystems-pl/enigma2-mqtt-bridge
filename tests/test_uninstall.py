@@ -756,6 +756,36 @@ def test_refused_while_the_followed_import_runs(make_bridge, factory, settings, 
     assert bridge.uninstaller.phase is None
 
 
+def test_the_import_block_lapses_for_the_uninstall_exactly_as_for_restart_gui(
+    make_bridge, factory, settings, receiver, opkg_tree, monkeypatch
+):
+    """After the plugin's own import start failed part-way the importer can say „running" for
+    a day; `restart_gui` stops refusing then, and so does the removal."""
+    from conftest import install_epg_importer
+
+    importer = install_epg_importer(monkeypatch)
+    opkg_tree()
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    settings.uninstall_allowed.value = True
+    settings.epg_import_allowed.value = True
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+    factory.client.fire_connect()
+
+    def start():
+        importer.epgimport.source = object()
+        raise OSError("fetch failed")
+
+    importer.startImport = start
+    factory.client.fire_message(ROOT + "/cmd/epg_import", b"PRESS")
+    assert importer.epgimport.isImportRunning() is True
+
+    send(factory)
+    assert error(factory.client) is None
+    assert bridge.uninstaller.phase == "scheduled"
+
+
 def test_a_zero_exit_with_the_package_still_there_is_a_failure(box, factory, receiver):
     """A signal-killed opkg reports 0 through eConsoleAppContainer."""
     bridge = box()
