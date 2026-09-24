@@ -39,6 +39,7 @@ EXPECTED_DEFAULTS = {
     "softcam_autoheal": False,
     "softcam_autoheal_seconds": 90,
     "epg_import_allowed": False,
+    "uninstall_allowed": False,
     "log_level": "info",
     "epg_grid_events": 4,
 }

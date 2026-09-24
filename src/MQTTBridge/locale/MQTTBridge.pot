@@ -658,3 +658,15 @@ msgstr ""
 #: src/MQTTBridge/webif.py
 msgid "EPG-Importer downloads the guide now. When it finishes, the menus freeze for two or three seconds while the guide is saved."
 msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "Allow removing the plugin remotely"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Remove the plugin from this receiver"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "The plugin is removed from this receiver and the user interface restarts. There is no way back from here or from Home Assistant: only the receiver's own plugin menu or SSH can install it again. Its settings stay on the receiver."
+msgstr ""

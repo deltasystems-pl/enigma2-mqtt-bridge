@@ -18,7 +18,7 @@ Conventions that hold everywhere:
 |---|---|
 | Protocol | **MQTT 3.1.1**. No MQTT 5 feature is used or required — no user properties, no response topics, no subscription identifiers, no shared subscriptions — so the contract holds on every broker a receiver can be pointed at, including the old ones. A broker running MQTT 5 serves it unchanged. |
 | Encoding | UTF-8. Every payload is JSON unless the table says otherwise. |
-| **State topics** | QoS **0**, **retained** (the exceptions are marked). A fresh subscriber gets the current state immediately, without asking the box for it. |
+| **State topics** | QoS **0**, **retained** (the exceptions are marked). A fresh subscriber gets the current state immediately, without asking the box for it. The one exception to the QoS: the retractions and the final `offline` of `cmd/uninstall` go out at QoS 1 (§2). |
 | **Command topics** | QoS **1**, **never retained**. A retained command would re-fire on every reconnect; the plugin refuses to publish one and you should not either. |
 | Timestamps | `begin`, `end`, `generated`, `ts` are **Unix epoch seconds, UTC, integer**. Never a formatted string, never local time. |
 | Absent values | `null` for a field that has no value right now (no next event, no recording). A key is not silently dropped. |
@@ -38,7 +38,10 @@ Retained, QoS 0. **Not JSON** — the literal string `online` or `offline`.
 
 `offline` is registered as the connection's last will, so the broker publishes it when the box
 vanishes without saying goodbye. The plugin publishes `online` in `on_connect` and a clean
-`offline` on a graceful shutdown.
+`offline` on a graceful shutdown. `cmd/uninstall` ends on `offline` too, published at QoS 1 as the
+node's last message, after every other retained topic of the node has been emptied — which is what
+tells a removed plugin from a switched-off receiver: a switched-off one leaves `info` and the
+announcement retained.
 
 ### `<base>/<node>/info`
 
@@ -58,7 +61,7 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
                "cam_telemetry": false, "oscam_telemetry": false,
                "softcam_autoheal": false, "softcam_autoheal_seconds": 90,
                "deep_standby_allowed": false, "softcam_restart_allowed": false,
-               "epg_import_allowed": false},
+               "epg_import_allowed": false, "uninstall_allowed": false},
   "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
                    "volume", "hdd", "process", "channels", "bouquet_context", "epg_grid", "keys",
                    "screenshot", "toast", "message"]
@@ -76,7 +79,7 @@ vanishes without saying goodbye. The plugin publishes `online` in `on_connect` a
 | `uptime` | int | Seconds since boot |
 | `wol` | object | Since 0.3.0. What the **image** says about Wake-on-LAN — whether it has a switch for it and whether that is on. See below |
 | `ha_mode` | string | `discovery` \| `integration` \| `off` — the acknowledgement of `cmd/ha_mode` |
-| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5–3600), `screenshot_delay` (post-zap settling seconds, 1–30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30–600). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed` and `epg_import_allowed` (bools, off by default). See below. |
+| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5–3600), `screenshot_delay` (post-zap settling seconds, 1–30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30–600). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed` (bools, off by default). See below. |
 | `capabilities` | list of strings | Which hooks this image actually gave the plugin |
 
 **Presence in `settings` is not permission to write it back.** Until 0.2.0 this object was „the
@@ -90,6 +93,7 @@ settings it did mean to change as well.
 | `deep_standby_allowed` | 0.2.0 | Whether `cmd/deep_standby` and `cmd/reboot` are permitted over MQTT. Always present, whichever way it is set | On the receiver: the setup screen, *Menu → Plugins → MQTT Bridge*, the provisioning file at first install, or the plugin's OpenWebif page — never over MQTT |
 | `softcam_restart_allowed` | 0.3.0 | Whether `cmd/softcam_restart` is permitted over MQTT, and with it the opt-in auto-heal. Always present, whichever way it is set | The same places, and never over MQTT |
 | `epg_import_allowed` | 0.3.0 | Whether `cmd/epg_import` is permitted over MQTT. Always present, whichever way it is set | The same places, and never over MQTT |
+| `uninstall_allowed` | 0.3.0 | Whether `cmd/uninstall` is permitted over MQTT. Always present, whichever way it is set. A consumer offers the removal only on a **stated** `true` together with the `uninstall` capability: for a one-way door, silence means no | The same places, and never over MQTT |
 
 The rule behind which side of the line a setting falls on: one that **enables a command** is never
 writable over MQTT — it is set on the receiver (the setup screen, the provisioning file, or the
@@ -111,9 +115,12 @@ plugin detects what it managed to attach and names it here rather than assuming.
 hides what is missing instead of showing a dead entity. The names are the feature areas, and
 nothing else is ever in the list: `power`, `cec_workaround`, `service`, `epg`, `epg_grid`,
 `tuner`, `recording`, `timers`, `volume`, `cam`, `oscam`, `softcam`, `keys`, `screenshot`,
-`toast`, `message`, `hdd`, `process`, `channels`, `bouquet_context`, `epg_import`. A build that has bound no
+`toast`, `message`, `hdd`, `process`, `channels`, `bouquet_context`, `epg_import`, `uninstall`. A build that has bound no
 feature area publishes `[]` — the connection, `info` and the commands are the plugin itself and
-are not capabilities.
+are not capabilities. `uninstall` (since 0.3.0) is the one name with no feature area behind it: it
+says the package manager installed this very copy of the plugin, so `cmd/uninstall` can work — opkg
+is executable, its configured info directory knows the package, and the package's file list names
+the running `plugin.py`. A copy unpacked by hand or carried in a firmware image does not claim it.
 
 A name is in the list because it **worked on this box**, not because this version of the plugin
 has the code for it. Three things can take one out: the image did not provide the hooks
@@ -822,6 +829,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `discovery` | any | Republishes the announcement, the channel list, and the discovery payloads in discovery mode | — |
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
 | `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
+| `uninstall` — since 0.3.0 | this receiver's node id, exactly (surrounding whitespace is stripped; case matters) | Removes the plugin from the receiver: stops publishing, retracts every retained topic this node owns at QoS 1, publishes `offline` last, removes the package and restarts the interface. 🔴 **A one-way door** | Refused, before anything changes, in this order: unless `uninstall_allowed` is on — „uninstall is switched off in the plugin's settings"; unless the payload is this node's id — „the payload must be this receiver's node id"; without the `uninstall` capability — „this plugin was not installed by the package manager, so it cannot remove itself"; while an EPG import runs — „an EPG import is running", exactly as `restart_gui` refuses it and with the same lapse, because the removal ends in the same restart; by the same recording guard as `deep_standby`; where the image has no way to restart the interface; while a removal is already running — „an uninstall is already running". See below |
 
 Every one of them is refused when it arrives retained, as above.
 
@@ -965,12 +973,70 @@ topics for the width of one publish burst, not until the box next reconnects, an
 that was listening throughout ends up exactly where it started. Home Assistant sees the entities
 go unavailable and come back, which is the same thing it sees when the box reboots.
 
-It is also the documented step **before uninstalling**, because retained topics outlive the plugin
-that created them: remove the package without it and the broker keeps serving a snapshot of a box
-that is gone, forever, while Home Assistant keeps showing entities nothing will ever update. Do it
-while the plugin is still running and connected — after `opkg remove` there is nothing left to ask.
+It is also the documented step **before uninstalling by hand**, because retained topics outlive
+the plugin that created them: remove the package without it and the broker keeps serving a snapshot
+of a box that is gone, forever, while Home Assistant keeps showing entities nothing will ever update.
+Do it while the plugin is still running and connected — after `opkg remove` there is nothing left to
+ask. `cmd/uninstall` does it for you, without the republish; never run a reset after one.
 
 It is a cleanup, not a factory reset: settings are untouched.
+
+### `cmd/uninstall` semantics — since 0.3.0
+
+The handler checks the refusals in the table above and returns — so a `last_error` left by an
+earlier refusal is cleared — and the removal runs from the next turn of the main loop, in this
+order, never blocking it ([ADR-0013](adr/0013-the-uninstall-closes-the-doors-and-waits-for-the-broker.md)):
+
+1. **Stop publishing.** Every publisher lets go of its hooks and no further command is dispatched;
+   a command arriving now is dropped with a line in the log, and one from the OpenWebif page is
+   answered „an uninstall is already running" without touching `last_error`. From here on nothing
+   re-creates a topic.
+2. **Retract** — an empty retained payload — every topic in the state file (§4), which is the set
+   `cmd/reset` uses, **and** every command topic of this node on which somebody left a retained
+   message during this session (the dispatcher discards those; this is where they are cleared).
+   🔴 **At QoS 1**, the one exception to „state at QoS 0": a QoS 0 publish counts as done when it
+   reaches the socket, and this is the one sequence that must know the broker has it. A subscriber
+   receives at the lower of the two QoS values, so no consumer sees a difference.
+3. **`availability: offline`**, retained, QoS 1 — the node's last message. No `online` follows.
+4. **Wait for every acknowledgement**, polled every 100 ms for at most **15 s**, with no more than
+   half of the client's 200-message queue outstanding at once.
+5. **Empty the state file.** It stays in place, saying nothing is published.
+6. **Disconnect cleanly.** The last will is not sent; `offline` from step 3 is what stays retained.
+7. **`opkg remove enigma2-plugin-extensions-mqttbridge`**, through enigma2's own process runner — no
+   `--autoremove`, no `--force` — with `MQTTBRIDGE_UNINSTALL=1` in its environment, which only
+   silences `prerm`'s advice to run `cmd/reset`. Its output goes to the plugin's log. 🔴 **An exit
+   status of 0 is checked against the disk**: enigma2's process runner reports an opkg killed by a
+   signal — or one still running when enigma2 itself went away — as 0, so the package's `.control`
+   and the plugin's `plugin.py` must both be gone before step 8.
+8. **Restart the user interface**, as `cmd/restart_gui` does. Best effort: with a stream, a
+   background job or timeshift running, the receiver asks on screen and waits for an answer. The
+   plugin is already disconnected and removed from disk by then.
+
+🔴 **When a step fails, the removal stops there and puts everything back.** No acknowledgement
+within 15 s, a dropped connection or a refused publish during steps 2–4, or opkg that cannot start
+or exits non-zero — its lock is also taken by the image's own daily update check and its plugin
+browser — and nothing further is removed: the plugin opens a fresh session, which republishes
+`online`, the full snapshot, the announcement and discovery as every connect does, and then
+publishes `last_error` with `"cmd": "uninstall"` and a sentence naming the step — for opkg, its exit
+status and its last line of output. It ends where a reset ends. Anything unforeseen that raises
+after step 1 is treated the same way, as a failed step, rather than leaving a plugin that neither
+publishes nor listens.
+
+🔴 **opkg is not atomic.** It deletes a package's files one at a time, so an opkg that exits 0 while
+the package is still installed may have removed some of the plugin already. That case is a failed
+step too, and its `last_error` gives the command that puts the plugin back whole:
+`opkg install --force-reinstall enigma2-plugin-extensions-mqttbridge`.
+
+What a subscriber sees on success is therefore: every retained topic of the node emptied, then
+`offline`, then nothing — while a switched-off receiver leaves `info` and the announcement in place.
+There is **no Home Assistant discovery component** for this command: a core MQTT button has no
+confirmation, and this is the one command that must not be one press away on a dashboard. The
+OpenWebif page offers it behind a confirmation and fills in the node id itself; like every command
+from the page, it does not need the permission there.
+
+`/etc/enigma2/settings` is not touched — a reinstall finds its configuration, the broker password
+included — and neither are the plugin's log, its backups directory or the package feed's
+configuration; `docs/SETUP.md` lists what stays and why.
 
 ---
 
@@ -1075,7 +1141,7 @@ was measured against Home Assistant rather than assumed:
 ### What discovery deliberately leaves out
 
 `cam`, `oscam` and `bouquet` have **no discovery components at all**, whatever their capabilities
-say. All three are consumed by the companion integration, which subscribes to the topics directly:
+say — and neither has `uninstall`, which a button with no confirmation must not offer. All three are consumed by the companion integration, which subscribes to the topics directly:
 the first two would need a whole set of per-reader entities built from a list that changes shape,
 and the third is a selector whose options are the channel list, not a state anybody wants as a
 sensor. A plugin-only install reads them from the broker as they are documented above.
@@ -1135,45 +1201,11 @@ retained ghost nobody can find: the list is the only record that they exist.
 
 ## 5. Planned (not implemented yet)
 
-🔴 **Nothing in this section exists on any release, and nothing in it is on `main`.** It is here because the contract
-keeps one home: a consumer can be written against these shapes, and they will not move quietly
-between now and the release that carries them. Each is decided in
-[ADR-0003](adr/0003-control-feedback-and-household-features.md) — or, for the remote uninstall, in
-[ADR-0004](adr/0004-remote-uninstall.md); the release that carries it is in the heading. Until a capability below is in `info.capabilities`, the box does not have it — that
-rule is unchanged, and it is how a consumer tells a plan from a feature.
-
-### `info.settings` gains further members — 0.3.0
-
-The object already carries read-only members and says so in §1: `deep_standby_allowed`,
-`softcam_restart_allowed` and `epg_import_allowed` are on `main` and are documented there, which is
-why they are not in this section. These join them on the same terms, rather than inventing a separate
-`info.permissions`.
-
-| Member | Release | Writable | Meaning |
-|---|---|---|---|
-| `uninstall_allowed` | 0.3.0 | **no** | Whether `cmd/uninstall` is permitted ([ADR-0004](adr/0004-remote-uninstall.md)). Default off, and granted on the receiver, never over MQTT |
-
-Which side of the line each one falls on is §1's rule: a setting that **enables a command** is
-never writable over MQTT; a setting that **tunes a command already permitted** may be remote.
-
-### New commands — 0.3.0
-
-| Command | Payload | Effect | Guard |
-|---|---|---|---|
-| `uninstall` | the node id (confirmation) | Removes the plugin from the receiver: retracts every retained topic it owns, publishes a final `offline`, removes the package, and restarts the interface | Refused unless `uninstall_allowed` is on; refused unless the payload matches this node's id; refused while recording or with a timer due, like every other command that restarts the interface |
-
-The payload is the node id because a household with two boxes has two nearly identical command
-topics, and the difference is one word in a path. It is a confirmation, not a secret — the node id
-is in every topic name this plugin publishes to. The permission is the security boundary. The
-capability `uninstall` is claimed only where the plugin can resolve its own installed package, so
-a copy that was unpacked by hand or carried in a firmware image offers no such command.
-
-🔴 **`cmd/uninstall` is a one-way door.** When it has run there is no plugin left to listen, so
-nothing over MQTT can undo it — the box comes back only through SSH or the receiver's own package
-manager. That is why its permission is off by default, is granted on the receiver and never over MQTT,
-and is read-only in `info.settings` like the other two. The decision, and the order the steps run
-in, are in [ADR-0004](adr/0004-remote-uninstall.md). `/etc/enigma2/settings` is not touched: a
-reinstall finds its configuration where it left it.
+Nothing at the moment. This section is where a planned addition is written down before it is built,
+so that a consumer can be written against its shape; the last ones — `uninstall_allowed` and
+`cmd/uninstall` ([ADR-0004](adr/0004-remote-uninstall.md)) — are now in §1 and §2. Until a
+capability is in `info.capabilities`, the box does not have it — that rule is unchanged, and it is
+how a consumer tells a plan from a feature.
 
 ---
 

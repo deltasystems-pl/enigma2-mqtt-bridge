@@ -332,7 +332,15 @@ case "$PLUGIN_DIR" in
         ;;
 esac
 
-# Still true, and still the one thing removing the package cannot do for you.
-echo "MQTT Bridge: retained topics are not retracted by uninstalling."
-echo "Publish to enigma2/<node_id>/cmd/reset first if you want them gone."
+# Still true of a removal somebody runs by hand, and still the one thing it
+# cannot do for them. Not said when the plugin is removing itself through
+# `cmd/uninstall`: that has already retracted every retained topic, and a reset
+# now — the advice below — would publish them all again. The plugin sets
+# `MQTTBRIDGE_UNINSTALL=1` in opkg's environment, which opkg passes to this
+# script as it is; the variable silences a message and does nothing else, so
+# setting it by hand can cost nothing but the advice.
+if [ "${MQTTBRIDGE_UNINSTALL:-}" != "1" ]; then
+    echo "MQTT Bridge: retained topics are not retracted by uninstalling."
+    echo "Publish to enigma2/<node_id>/cmd/reset first if you want them gone."
+fi
 exit 0

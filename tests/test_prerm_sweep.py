@@ -658,6 +658,39 @@ def test_the_retained_topics_message_still_comes_out(shell, removed_package):
     assert "cmd/reset" in result.stdout
 
 
+def test_the_advice_is_not_given_when_the_plugin_removes_itself(shell, removed_package,
+                                                                 external_dir):
+    """`cmd/uninstall` has already retracted everything; a reset now would put it all back."""
+    result = run(shell, removed_package, environment={"MQTTBRIDGE_UNINSTALL": "1"})
+
+    assert result.returncode == 0
+    assert "cmd/reset" not in result.stdout
+    assert "retained topics are not retracted" not in result.stdout
+    # The variable silences a message and nothing else: the sweep is whole.
+    assert not removed_package.exists()
+    assert not (external_dir / "MQTTBridge.pyc").exists()
+
+
+@pytest.mark.parametrize("value", ["0", "", "yes"])
+def test_any_other_value_still_gives_the_advice(shell, removed_package, value):
+    result = run(shell, removed_package, environment={"MQTTBRIDGE_UNINSTALL": value})
+    assert "cmd/reset" in result.stdout
+
+
+def test_the_sweep_holds_when_run_from_inside_the_directory_it_removes(shell, removed_package):
+    """Run as a child of the process being removed, from the worst working directory it could have.
+
+    enigma2 runs from `/home/root` on the receiver this was measured on, so this
+    is the case that does not happen — and the one that would break a sweep
+    that relied on its own working directory.
+    """
+    result = run(shell, removed_package, cwd=removed_package,
+                 environment={"MQTTBRIDGE_UNINSTALL": "1"})
+
+    assert result.returncode == 0
+    assert not removed_package.exists()
+
+
 def test_the_script_does_not_restart_enigma2():
     """A restart during a recording loses the recording; opkg cannot know."""
     body = PRERM.read_text(encoding="utf-8")
