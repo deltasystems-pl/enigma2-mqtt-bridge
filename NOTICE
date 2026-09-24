@@ -55,6 +55,6 @@ paho-mqtt
   Nobody has to remember to look. The `vendored-paho` job in the CI workflow
   runs weekly, and on demand from the Actions tab, and compares the version
   recorded here and in src/MQTTBridge/_vendor/paho against the latest 2.x on PyPI. It is
-  a soft job — `continue-on-error`, so it never blocks a merge or a release —
+  a soft job - `continue-on-error`, so it never blocks a merge or a release -
   and its only output is a warning on the run when this file has fallen behind.
   A vendored dependency has no package manager to nag you; this is the nag.

@@ -102,7 +102,7 @@ the toast; any other value is refused. For a toast:
 | Field | Rule |
 |---|---|
 | `text` | required; empty refused; every backslash removed and nothing else, then truncated at 200 |
-| `timeout` | parsed as the popup parses it, with `int()`; default **5**; **`0` or less refused** („a toast hides itself; timeout must be 1-30 seconds"); more than 30 becomes 30, with a note in the log |
+| `timeout` | parsed as the popup parses it, with `int()`; default **5**; **`0` or less refused** („a toast hides itself; timeout must be 1&ndash;30 seconds"); more than 30 becomes 30, with a note in the log |
 | `type` | validated exactly as for a popup - an unknown value is refused, so a payload is valid or invalid whatever its style - and then ignored |
 
 **Standby refuses; it does not queue.** On the increment of the standby counter the toast is hidden

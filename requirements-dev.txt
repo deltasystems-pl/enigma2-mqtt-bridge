@@ -1,5 +1,5 @@
 # Development and CI tooling. The plugin itself has no runtime dependency that is
-# not vendored — see NOTICE.
+# not vendored - see NOTICE.
 #
 # Pinned exactly, not with `>=`. A floating lint or test tool means CI can go red
 # on a commit that changed nothing, and a contributor's local run can disagree

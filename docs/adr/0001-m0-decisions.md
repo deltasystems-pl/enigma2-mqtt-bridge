@@ -1,6 +1,6 @@
 # ADR-0001: M0 sign-off - the three open questions
 
-**Status:** accepted 2026-09-16, amended 2026-09-16 (see [the amendment](#amendment-2026-09-16--one-epg-grid-topic-per-bouquet))
+**Status:** accepted 2026-09-16, amended 2026-09-16 (see [the amendment](#amendment-2026-09-16---one-epg-grid-topic-per-bouquet))
 **Date:** 2026-09-16
 **Supersedes:** the proposed answers in [ADR-0000](0000-prd.md) §12
 
