@@ -736,7 +736,9 @@ class ConsoleAppContainer:
 
     def __init__(self):
         self.appClosed = []
+        self.dataAvail = []
         self.stdoutAvail = []
+        self.stderrAvail = []
         self.commands = []
         self.rejects = False
         ConsoleAppContainer.instances.append(self)
@@ -744,6 +746,14 @@ class ConsoleAppContainer:
     def execute(self, command, *arguments):
         self.commands.append(command)
         return 1 if self.rejects else 0
+
+    def send(self, data, stream="stdout"):
+        """Output, as the image delivers it: every chunk on `dataAvail`, and again
+        on `stdoutAvail` or `stderrAvail` (OpenViX `lib/base/console.cpp`)."""
+        for function in list(self.dataAvail):
+            function(data)
+        for function in list(self.stdoutAvail if stream == "stdout" else self.stderrAvail):
+            function(data)
 
     def finish(self, retval=0):
         for function in list(self.appClosed):

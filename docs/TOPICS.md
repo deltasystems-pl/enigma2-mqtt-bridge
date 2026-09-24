@@ -829,7 +829,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `discovery` | any | Republishes the announcement, the channel list, and the discovery payloads in discovery mode | — |
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
 | `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
-| `uninstall` — since 0.3.0 | this receiver's node id, exactly (surrounding whitespace is stripped; case matters) | Removes the plugin from the receiver: stops publishing, retracts every retained topic this node owns at QoS 1, publishes `offline` last, removes the package and restarts the interface. 🔴 **A one-way door** | Refused, before anything changes, in this order: unless `uninstall_allowed` is on — „uninstall is switched off in the plugin's settings"; unless the payload is this node's id — „the payload must be this receiver's node id"; without the `uninstall` capability — „this plugin was not installed by the package manager, so it cannot remove itself"; by the same recording guard as `deep_standby`; where the image has no way to restart the interface; while a removal is already running — „an uninstall is already running". See below |
+| `uninstall` — since 0.3.0 | this receiver's node id, exactly (surrounding whitespace is stripped; case matters) | Removes the plugin from the receiver: stops publishing, retracts every retained topic this node owns at QoS 1, publishes `offline` last, removes the package and restarts the interface. 🔴 **A one-way door** | Refused, before anything changes, in this order: unless `uninstall_allowed` is on — „uninstall is switched off in the plugin's settings"; unless the payload is this node's id — „the payload must be this receiver's node id"; without the `uninstall` capability — „this plugin was not installed by the package manager, so it cannot remove itself"; while an EPG import runs — „an EPG import is running", exactly as `restart_gui` refuses it and with the same lapse, because the removal ends in the same restart; by the same recording guard as `deep_standby`; where the image has no way to restart the interface; while a removal is already running — „an uninstall is already running". See below |
 
 Every one of them is refused when it arrives retained, as above.
 
@@ -1004,7 +1004,10 @@ order, never blocking it ([ADR-0013](adr/0013-the-uninstall-closes-the-doors-and
 6. **Disconnect cleanly.** The last will is not sent; `offline` from step 3 is what stays retained.
 7. **`opkg remove enigma2-plugin-extensions-mqttbridge`**, through enigma2's own process runner — no
    `--autoremove`, no `--force` — with `MQTTBRIDGE_UNINSTALL=1` in its environment, which only
-   silences `prerm`'s advice to run `cmd/reset`. Its output goes to the plugin's log.
+   silences `prerm`'s advice to run `cmd/reset`. Its output goes to the plugin's log. 🔴 **An exit
+   status of 0 is checked against the disk**: enigma2's process runner reports an opkg killed by a
+   signal — or one still running when enigma2 itself went away — as 0, so the package's `.control`
+   and the plugin's `plugin.py` must both be gone before step 8.
 8. **Restart the user interface**, as `cmd/restart_gui` does. Best effort: with a stream, a
    background job or timeshift running, the receiver asks on screen and waits for an answer. The
    plugin is already disconnected and removed from disk by then.
@@ -1015,7 +1018,14 @@ or exits non-zero — its lock is also taken by the image's own daily update che
 browser — and nothing further is removed: the plugin opens a fresh session, which republishes
 `online`, the full snapshot, the announcement and discovery as every connect does, and then
 publishes `last_error` with `"cmd": "uninstall"` and a sentence naming the step — for opkg, its exit
-status and its last line of output. It ends where a reset ends.
+status and its last line of output. It ends where a reset ends. Anything unforeseen that raises
+after step 1 is treated the same way, as a failed step, rather than leaving a plugin that neither
+publishes nor listens.
+
+🔴 **opkg is not atomic.** It deletes a package's files one at a time, so an opkg that exits 0 while
+the package is still installed may have removed some of the plugin already. That case is a failed
+step too, and its `last_error` gives the command that puts the plugin back whole:
+`opkg install --force-reinstall enigma2-plugin-extensions-mqttbridge`.
 
 What a subscriber sees on success is therefore: every retained topic of the node emptied, then
 `offline`, then nothing — while a switched-off receiver leaves `info` and the announcement in place.

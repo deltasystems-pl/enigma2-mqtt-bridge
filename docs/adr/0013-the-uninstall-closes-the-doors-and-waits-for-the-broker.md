@@ -62,7 +62,25 @@ Mosquitto's single-threaded loop, not promised by MQTT 3.1.1 across QoS levels, 
 connection, a refused publish, or opkg that cannot start or exits non-zero: nothing further is
 removed, the bridge opens a fresh session — whose connect republishes availability, the snapshot,
 the announcement and discovery — and `last_error` names the step, with opkg's exit status and last
-line of output where there is one.
+line of output where there is one. An exception raised anywhere after the doors close is a
+failed step in the same way: every entry point from enigma2 — both timers and opkg's exit — is
+wrapped so that it cannot leave the plugin closed, silent and deaf.
+
+**The removal is refused while an EPG import runs**, with the sentence and the lapse `restart_gui`
+uses: it ends in the same restart, and a restart mid-import loses the run.
+
+**opkg's exit status is checked against the disk.** `eConsoleAppContainer` reports a child killed
+by a signal as exit 0, and an opkg still running when enigma2 itself exits reports the same. After a
+0 the package's `.control` and the running `plugin.py` must both be gone before the restart;
+otherwise it is a failed step. 🔴 opkg is not atomic — it removes files one at a time — so a failure
+at this point may leave an incomplete plugin, and `last_error` says so with the command that repairs
+it: `opkg install --force-reinstall enigma2-plugin-extensions-mqttbridge`. opkg's output is read
+from `dataAvail` alone: the image sends every chunk there and again on `stdoutAvail` or
+`stderrAvail`.
+
+**A state file that cannot be emptied does not stop the removal.** Every topic it still names has
+just been acknowledged as retracted, a reinstall republishes them on its first connect anyway, and
+stopping would put back everything the broker has just removed. The plugin logs it and carries on.
 
 **Every module the sequence uses is imported when the plugin starts.** After step 7 a first import
 cannot succeed, and it would fail inside the one sequence that has nowhere left to report it.

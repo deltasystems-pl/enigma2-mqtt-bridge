@@ -49,7 +49,18 @@ that the image's own update check and plugin browser take too; a broker can
 stop acknowledging; a connection can drop. In every case nothing further is
 removed, the bridge opens a fresh session — which republishes availability, the
 snapshot, the announcement and discovery, as every connect does — and
-`last_error` says which step failed.
+`last_error` says which step failed. The same holds for anything this code did
+not foresee: an exception anywhere after the doors close is a failed step, not
+a plugin left closed, silent and deaf.
+
+**opkg's exit status is not proof, and opkg is not atomic.** `eConsoleAppContainer`
+reports a child killed by a signal as exit 0, and so it does for an opkg still
+running when enigma2 itself goes away. So a zero is checked against the disk:
+the package's `.control` and this plugin's `plugin.py` must both be gone before
+the interface is restarted. When they are not, the removal may have stopped
+half way — opkg deletes files one at a time, so some of the plugin may already
+be missing — and `last_error` gives the one command that puts it back whole:
+`opkg install --force-reinstall enigma2-plugin-extensions-mqttbridge`.
 
 **Only a plugin the package manager installed can ask it to remove it.** The
 capability `uninstall` is claimed when opkg is on the box, knows the package,
@@ -60,7 +71,7 @@ carried in a firmware image takes no such command.
 import os
 import time
 
-from . import power, recording
+from . import epgimport, power, recording
 from .enigma2 import Ticker, enigma_attribute
 from .log import get_logger, redact
 from .mqttclient import MAX_QUEUED_MESSAGES
@@ -117,6 +128,15 @@ REFUSED_PUBLISH = (
 NO_CONTAINER = (
     "the uninstall stopped at the package removal: this image has no "
     "eConsoleAppContainer to run opkg in; the plugin is still installed"
+)
+# The same sentence as `cmd/restart_gui`'s, because the removal ends in the same
+# restart, and a restart mid-import loses the run.
+EPG_IMPORT_RUNNING = "an EPG import is running"
+REINSTALL = "opkg install --force-reinstall " + PACKAGE
+NOT_REMOVED = (
+    "the uninstall stopped at the package removal: opkg reported success but the "
+    "package is still on the receiver, and some of its files may already be gone; "
+    "to put it back whole, run: " + REINSTALL
 )
 
 
@@ -210,6 +230,22 @@ def installed_by_package_manager(root="/", plugin_directory=None):
     return False, "the package's file list does not name " + running
 
 
+def package_gone(root="/", plugin_directory=None):
+    """Whether opkg really removed the package: its `.control` and this `plugin.py` are gone.
+
+    Asked after opkg exits 0, because a zero from `eConsoleAppContainer` is also
+    what a killed opkg reports. Anything that cannot be answered is „not gone".
+    """
+    info = info_directory(root)
+    if info is None:
+        return False
+    directory = plugin_directory or os.path.dirname(os.path.abspath(__file__))
+    for path in (os.path.join(info, PACKAGE + ".control"), os.path.join(directory, "plugin.py")):
+        if os.path.lexists(path):
+            return False
+    return True
+
+
 class Uninstaller:
     """The permission, the guards and the ordered teardown of `cmd/uninstall`.
 
@@ -271,6 +307,11 @@ class Uninstaller:
             return WRONG_NODE
         if not self.claimed:
             return NOT_PACKAGED
+        # Exactly `cmd/restart_gui`'s check: the publisher knows when the block
+        # has lapsed; without one, only the importer can be asked.
+        follower = bridge.publisher("epg_import")
+        if follower.blocks_power() if follower is not None else epgimport.running():
+            return EPG_IMPORT_RUNNING
         refusal = recording.guard(bridge.session)
         if refusal:
             return refusal
@@ -297,8 +338,41 @@ class Uninstaller:
         self._poll_ticker.stop()
 
     # ---------------------------------------------------------------- teardown --
+    # Every entry point from enigma2 — the two timers and opkg's exit — goes
+    # through `_guarded`. The doors are closed by then, so an exception that
+    # merely reached the timer's own handler would leave a plugin that neither
+    # publishes nor listens until the next restart. It is a failed step instead.
 
     def _begin(self):
+        self._guarded(self._begin_steps)
+
+    def _poll(self):
+        self._guarded(self._poll_steps)
+
+    def _removed(self, retval=0):
+        self._guarded(self._removed_steps, retval)
+
+    def _guarded(self, steps, *arguments):
+        try:
+            steps(*arguments)
+        except Exception as error:
+            LOG.exception("the uninstall raised at %s", self.phase)
+            if self.phase in (None, "done", "abandoned"):
+                return
+            sentence = (
+                "the uninstall stopped at " + str(self.phase) + ": an internal error ("
+                + type(error).__name__ + ")"
+            )
+            if self.phase == "removing":
+                sentence += "; if the plugin is incomplete, run: " + REINSTALL
+            else:
+                sentence += "; nothing was removed"
+            try:
+                self._fail(sentence)
+            except Exception:
+                LOG.exception("putting the bridge back after a failed uninstall raised")
+
+    def _begin_steps(self):
         if self.phase != "scheduled":
             return
         bridge = self.bridge
@@ -343,7 +417,7 @@ class Uninstaller:
                          payload)
         return True
 
-    def _poll(self):
+    def _poll_steps(self):
         if self.phase != "retracting":
             return
         if not self.bridge.connected:
@@ -374,8 +448,17 @@ class Uninstaller:
         LOG.info("uninstall step 4: the broker acknowledged every retraction and offline")
         # 5. The state file left in /etc/enigma2 says nothing is published.
         bridge.forget_everything_published()
-        bridge.state.save(force=True)
-        LOG.info("uninstall step 5: the state file is empty")
+        # A state file that could not be written is left saying what it said.
+        # That costs nothing worth stopping for: every topic it names is already
+        # empty on the broker, a reinstall republishes them on its first connect,
+        # and a retraction of an empty topic is a no-op. Stopping here instead
+        # would put back everything the broker has just acknowledged removing.
+        if bridge.state.save(force=True):
+            LOG.info("uninstall step 5: the state file is empty")
+        else:
+            LOG.warning("uninstall step 5: the state file could not be emptied; it still "
+                        "names topics that are already retracted, which a reinstall "
+                        "republishes anyway — carrying on")
         # 6. A clean disconnect suppresses the will.
         bridge.disconnect_for_uninstall()
         LOG.info("uninstall step 6: disconnected from the broker")
@@ -415,8 +498,10 @@ class Uninstaller:
             return None
         if not _attach(container, "appClosed", self._removed):
             return None
-        for name in ("dataAvail", "stdoutAvail", "stderrAvail"):
-            _attach(container, name, self._data)
+        # `dataAvail` only. The image sends every chunk on `dataAvail` and again
+        # on `stdoutAvail` or `stderrAvail`; listening on both doubles each line
+        # and garbles the last one, which is what `last_error` quotes.
+        _attach(container, "dataAvail", self._data)
         # Held so that the container is not collected while opkg runs.
         self._container = container
         return container
@@ -439,7 +524,7 @@ class Uninstaller:
             line = line[: OUTPUT_LINE_LIMIT - 1] + "…"
         self._last_line = line
 
-    def _removed(self, retval=0):
+    def _removed_steps(self, retval=0):
         # Not detached here: the container is walking its own callback list.
         self._finished_container, self._container = self._container, None
         if self._output:
@@ -450,6 +535,12 @@ class Uninstaller:
         if retval:
             LOG.error("opkg remove exited with status %s", retval)
             self._fail(self._removal_failed("exited with status " + str(retval)))
+            return
+        # 🔴 A zero is not proof: a signal-killed opkg — or one still running when
+        # enigma2 went away — also reports 0 through the container.
+        if not package_gone(self.root, self.plugin_directory):
+            LOG.error("opkg remove exited 0 but the package is still installed")
+            self._fail(NOT_REMOVED)
             return
         LOG.info("uninstall step 7: the package is removed")
         # 8. Best effort, and said so.

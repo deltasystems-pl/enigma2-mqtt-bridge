@@ -179,7 +179,7 @@ a message meant for another receiver removes nothing — takes the plugin off th
 companion integration offers it from 0.3.0 in the entry's options, behind a confirmation, and only
 while the receiver says both that it may and that it can; the OpenWebif page offers it too, behind
 its own confirmation. Deleting the integration's entry never removes anything. It is refused while a recording runs or is
-due within ten minutes, and on a plugin that the package manager did not install (the `uninstall`
+due within ten minutes, while an EPG import runs, and on a plugin that the package manager did not install (the `uninstall`
 capability says which).
 
 It first stops everything that publishes, then empties every retained topic the plugin put on the
@@ -191,6 +191,12 @@ looks switched off: its entities stay, unavailable.
 connection drops, or `opkg` refuses — it holds a lock that the image's own update check and plugin
 browser take as well — the plugin reconnects, publishes everything again as after any restart, and
 `last_error` says which step stopped it. Try again a minute later.
+
+🔴 **opkg removes files one at a time.** If it is interrupted part way — it reports success even when
+it was killed — the plugin checks that the package really is gone before restarting. When it is not,
+some of its files may already be missing: `last_error` then says so and gives the command that puts
+it back whole, `opkg install --force-reinstall enigma2-plugin-extensions-mqttbridge`, to run over
+SSH.
 
 🟡 **The restart can wait for you.** If something is streaming from the receiver, a background job
 is running or timeshift is active, the receiver asks on the television whether to restart now, and

@@ -67,8 +67,14 @@ def opkg_tree(tmp_path, monkeypatch):
             (info / (uninstall.PACKAGE + ".control")).write_text(
                 "Package: " + uninstall.PACKAGE + "\n", encoding="utf-8"
             )
+        # The plugin's own directory, under the root, so that a test can do
+        # what opkg does to it. The running code stays where it is.
+        plugin = root / "plugin" / "MQTTBridge"
+        plugin.mkdir(parents=True, exist_ok=True)
+        (plugin / "plugin.py").write_text("# the installed plugin\n", encoding="utf-8")
+        monkeypatch.setattr(Uninstaller, "plugin_directory", str(plugin))
         # opkg 0.6 writes `path<TAB>mode`, measured on the receiver.
-        named = str(PACKAGE_DIR / ("plugin.py" if listed else "bridge.py"))
+        named = str(plugin / ("plugin.py" if listed else "bridge.py"))
         (info / (uninstall.PACKAGE + ".list")).write_text(
             "/usr/lib/enigma2/python/Plugins/Extensions/WebInterface/WebChilds/External/"
             "MQTTBridge.py\t0100644\n" + named + "\t0100644\n",
@@ -122,6 +128,18 @@ def run_to_opkg(bridge, factory):
     client.acknowledge()
     MainLoop.advance(uninstall.POLL_MILLISECONDS)
     return client
+
+
+def opkg_removes():
+    """What a successful `opkg remove` leaves: no `.control`, no `plugin.py`."""
+    info = Path(uninstall.info_directory(Uninstaller.root))
+    (info / (uninstall.PACKAGE + ".control")).unlink()
+    (Path(Uninstaller.plugin_directory) / "plugin.py").unlink()
+
+
+def opkg_succeeds():
+    opkg_removes()
+    opkg().finish(0)
 
 
 def opkg():
@@ -316,7 +334,9 @@ def test_announced_in_info(box, factory):
 )
 def test_not_claimed_otherwise(opkg_tree, tree, why):
     root = opkg_tree(**tree)
-    claimed, reason = uninstall.installed_by_package_manager(str(root))
+    claimed, reason = uninstall.installed_by_package_manager(
+        str(root), Uninstaller.plugin_directory
+    )
     assert claimed is False
     assert why in reason
 
@@ -324,7 +344,9 @@ def test_not_claimed_otherwise(opkg_tree, tree, why):
 def test_the_info_directory_is_the_one_opkg_is_configured_with(opkg_tree):
     root = opkg_tree(info_dir="/usr/lib/opkg/info")
     assert uninstall.info_directory(str(root)) == str(root / "usr" / "lib" / "opkg" / "info")
-    assert uninstall.installed_by_package_manager(str(root)) == (True, None)
+    assert uninstall.installed_by_package_manager(
+        str(root), Uninstaller.plugin_directory
+    ) == (True, None)
 
 
 def test_no_discovery_component_even_when_everything_allows_it(box, factory, settings):
@@ -392,7 +414,7 @@ def test_the_order_on_the_way_out(box, factory, receiver, monkeypatch):
     assert saved["epg_grid_slugs"] == []
     assert receiver.session.opened == []
 
-    opkg().finish(0)
+    opkg_succeeds()
     assert receiver.session.opened == [(TryQuitMainloop, (3,))]
     assert bridge.uninstaller.phase == "done"
     # Nothing at all after the final `offline`.
@@ -473,7 +495,7 @@ def test_more_topics_than_the_queue_holds_go_out_in_batches(box, factory):
 def test_nothing_is_published_at_the_shutdown_afterwards(box, factory):
     bridge = box()
     client = run_to_opkg(bridge, factory)
-    opkg().finish(0)
+    opkg_succeeds()
     count = len(client.published)
 
     bridge.stop()
@@ -485,7 +507,7 @@ def test_nothing_is_published_at_the_shutdown_afterwards(box, factory):
 def test_the_teardown_never_waits_on_the_main_loop(box, factory):
     bridge = box()
     client = run_to_opkg(bridge, factory)
-    opkg().finish(0)
+    opkg_succeeds()
     assert all(info.waited is None for info in client.infos)
 
 
@@ -525,7 +547,7 @@ def test_the_settings_file_is_not_written_by_the_teardown(box, factory, settings
 
     monkeypatch.setattr(builtins, "open", spy)
     run_to_opkg(bridge, factory)
-    opkg().finish(0)
+    opkg_succeeds()
     monkeypatch.setattr(builtins, "open", real_open)
 
     assert configfile.save_calls == writes
@@ -538,9 +560,8 @@ def test_the_settings_file_is_not_written_by_the_teardown(box, factory, settings
 def test_opkg_output_goes_to_the_log(box, factory, plugin_log):
     bridge = box()
     run_to_opkg(bridge, factory)
-    for listener in opkg().stdoutAvail:
-        listener(b"Removing package enigma2-plugin-extensions-mqttbridge from root...\n")
-    opkg().finish(0)
+    opkg().send(b"Removing package enigma2-plugin-extensions-mqttbridge from root...\n")
+    opkg_succeeds()
     log = plugin_log()
     assert "opkg: Removing package enigma2-plugin-extensions-mqttbridge" in log
     for step in range(1, 9):
@@ -564,6 +585,8 @@ def _put_back(client, bridge):
     assert bridge.state.knows(INFO)
     assert not bridge.uninstaller.closed
     assert bridge.uninstaller.phase is None
+    assert bridge.uninstaller._poll_ticker.timer is None
+    assert bridge.uninstaller._begin_ticker.timer is None
     assert bridge.publisher("power") is not None
 
 
@@ -623,9 +646,9 @@ def test_a_refused_publish_removes_nothing(box, factory, receiver):
 def test_opkg_refusing_the_removal_puts_everything_back(box, factory, receiver):
     bridge = box()
     old = run_to_opkg(bridge, factory)
-    for listener in opkg().stdoutAvail:
-        listener(b"Collected errors:\n * opkg_conf_load: Could not lock /run/opkg.lock: "
-                 b"Resource temporarily unavailable.\n")
+    opkg().send(b"Collected errors:\n", stream="stderr")
+    opkg().send(b" * opkg_conf_load: Could not lock /run/opkg.lock: "
+                b"Resource temporarily unavailable.\n", stream="stderr")
     opkg().finish(255)
 
     assert receiver.session.opened == []
@@ -666,6 +689,242 @@ def test_a_shutdown_in_the_middle_abandons_the_removal(box, factory, receiver):
     assert opkg() is None
     assert receiver.session.opened == []
     assert bridge.uninstaller.phase == "abandoned"
+    # And its poll is gone rather than ticking for ever over nothing.
+    assert bridge.uninstaller._poll_ticker.timer is None
+
+
+@pytest.mark.parametrize("retval", [0, 1])
+def test_a_shutdown_while_opkg_runs_acts_on_nothing_opkg_reports(
+    box, factory, receiver, retval
+):
+    """enigma2 is going away with opkg still running; whatever opkg says next is ignored."""
+    bridge = box()
+    old = run_to_opkg(bridge, factory)
+    assert bridge.uninstaller.phase == "removing"
+
+    bridge.stop()
+    assert bridge.uninstaller.phase == "abandoned"
+    if retval == 0:
+        opkg_succeeds()
+    else:
+        opkg().finish(retval)
+
+    assert receiver.session.opened == []
+    assert factory.client is old
+    assert bridge.uninstaller.phase == "abandoned"
+
+
+# ---------------------------------------------------- review round 1 (§11 v) --
+
+
+def test_refused_while_an_epg_import_runs_where_restart_gui_is(box, factory, receiver,
+                                                               monkeypatch):
+    """The removal ends in the same restart, so it is refused on the same terms."""
+    from MQTTBridge import epgimport
+
+    bridge = box()
+    monkeypatch.setattr(epgimport, "running", lambda: True)
+
+    factory.client.fire_message(ROOT + "/cmd/restart_gui", b"PRESS")
+    assert error(factory.client) == "an EPG import is running"
+    send(factory)
+    assert error(factory.client) == "an EPG import is running"
+    assert bridge.run_command("uninstall", NODE, PAGE) == "an EPG import is running"
+    MainLoop.advance(1000)
+    assert bridge.uninstaller.phase is None
+    assert opkg() is None
+    assert receiver.session.opened == []
+
+
+def test_refused_while_the_followed_import_runs(make_bridge, factory, settings, receiver,
+                                               opkg_tree, monkeypatch):
+    from conftest import install_epg_importer
+
+    importer = install_epg_importer(monkeypatch)
+    opkg_tree()
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    settings.uninstall_allowed.value = True
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+    factory.client.fire_connect()
+    importer.epgimport.source = object()
+    bridge.publisher("epg_import")._poll.timer.fire()
+
+    send(factory)
+    assert error(factory.client) == "an EPG import is running"
+    assert bridge.uninstaller.phase is None
+
+
+def test_a_zero_exit_with_the_package_still_there_is_a_failure(box, factory, receiver):
+    """A signal-killed opkg reports 0 through eConsoleAppContainer."""
+    bridge = box()
+    old = run_to_opkg(bridge, factory)
+    opkg().finish(0)
+
+    assert receiver.session.opened == []
+    client = _fresh_session(factory, old)
+    _put_back(client, bridge)
+    sentence = error(client)
+    assert "opkg reported success but the package is still on the receiver" in sentence
+    assert sentence.endswith(
+        "run: opkg install --force-reinstall enigma2-plugin-extensions-mqttbridge"
+    )
+
+
+@pytest.mark.parametrize("left", ["control", "plugin.py"])
+def test_either_file_left_behind_is_a_failure(box, factory, receiver, left):
+    bridge = box()
+    old = run_to_opkg(bridge, factory)
+    info = Path(uninstall.info_directory(Uninstaller.root))
+    if left == "control":
+        (Path(Uninstaller.plugin_directory) / "plugin.py").unlink()
+    else:
+        (info / (uninstall.PACKAGE + ".control")).unlink()
+    opkg().finish(0)
+
+    assert receiver.session.opened == []
+    assert "--force-reinstall" in error(_fresh_session(factory, old))
+
+
+def test_opkg_output_is_read_once_although_the_image_sends_it_twice(box, factory, plugin_log):
+    bridge = box()
+    old = run_to_opkg(bridge, factory)
+    # Chunks do not end on line boundaries; read twice, they interleave.
+    opkg().send(b"Collected errors:\n * could ", stream="stderr")
+    opkg().send(b"not lock\n", stream="stderr")
+    opkg().finish(255)
+
+    sentence = error(_fresh_session(factory, old))
+    assert "(* could not lock)" in sentence
+    assert plugin_log().count("opkg: Collected errors:") == 1
+
+
+def test_a_long_opkg_line_is_cut_on_last_error(box, factory, plugin_log):
+    bridge = box()
+    old = run_to_opkg(bridge, factory)
+    opkg().send(("x" * 400 + "\n").encode())
+    opkg().finish(1)
+
+    sentence = error(_fresh_session(factory, old))
+    quoted = sentence.split("(", 1)[1].split(")", 1)[0]
+    assert len(quoted) == uninstall.OUTPUT_LINE_LIMIT
+    assert quoted.endswith("…")
+    assert "x" * 400 in plugin_log()
+
+
+def test_output_without_a_final_newline_is_not_lost(box, factory):
+    bridge = box()
+    old = run_to_opkg(bridge, factory)
+    opkg().send(b"first line\nNo space left on device")
+    opkg().finish(1)
+
+    assert "(No space left on device)" in error(_fresh_session(factory, old))
+
+
+@pytest.mark.parametrize("where", ["begin", "poll", "removed"])
+def test_an_unforeseen_exception_is_a_failed_step_not_a_mute_plugin(
+    box, factory, receiver, monkeypatch, where
+):
+    bridge = box()
+    old = factory.client
+    send(factory)
+    if where == "begin":
+        monkeypatch.setattr(bridge, "discarded_retained_commands", lambda: 1 / 0)
+        MainLoop.advance(0)
+    elif where == "poll":
+        MainLoop.advance(0)
+        monkeypatch.setattr(bridge, "forget_everything_published", lambda: 1 / 0)
+        old.acknowledge()
+        MainLoop.advance(uninstall.POLL_MILLISECONDS)
+    else:
+        MainLoop.advance(0)
+        old.acknowledge()
+        MainLoop.advance(uninstall.POLL_MILLISECONDS)
+        monkeypatch.setattr(uninstall, "package_gone", lambda *arguments: 1 / 0)
+        opkg().finish(0)
+
+    assert receiver.session.opened == []
+    client = _fresh_session(factory, old)
+    _put_back(client, bridge)
+    sentence = error(client)
+    assert "an internal error (ZeroDivisionError)" in sentence
+    if where == "removed":
+        assert "--force-reinstall" in sentence
+    else:
+        assert sentence.endswith("nothing was removed")
+
+
+def test_a_state_file_that_cannot_be_emptied_is_said_and_the_removal_carries_on(
+    box, factory, receiver, monkeypatch, plugin_log
+):
+    bridge = box()
+    monkeypatch.setattr(bridge.state, "save", lambda force=False: False)
+    run_to_opkg(bridge, factory)
+    opkg_succeeds()
+
+    assert "the state file could not be emptied" in plugin_log()
+    assert "uninstall step 5: the state file is empty" not in plugin_log()
+    assert receiver.session.opened == [(TryQuitMainloop, (3,))]
+
+
+def test_the_failure_is_reported_once_not_on_every_reconnect(box, factory):
+    bridge = box()
+    old = run_to_opkg(bridge, factory)
+    opkg().finish(1)
+    client = _fresh_session(factory, old)
+    reports = [entry for entry in client.all_for(LAST_ERROR) if entry.text]
+    assert len(reports) == 1
+
+    client.fire_disconnect(7)
+    client.fire_connect()
+
+    assert [entry for entry in client.all_for(LAST_ERROR) if entry.text] == reports
+    assert bridge._pending_error is None
+
+
+def test_the_page_cannot_save_settings_during_the_removal(box, factory):
+    bridge = box()
+    send(factory)
+    MainLoop.advance(0)
+    after = len(factory.client.published)
+
+    refusal = bridge.apply_remote_settings(bridge.remote_settings())
+
+    assert refusal == "an uninstall is already running"
+    assert len(factory.client.published) == after
+
+
+def test_a_connection_lost_before_the_first_retraction_removes_nothing(box, factory, receiver):
+    bridge = box()
+    old = factory.client
+    send(factory)
+    old.fire_disconnect(7)
+    MainLoop.advance(0)
+
+    assert teardown(old, 0) == []
+    assert opkg() is None
+    client = _fresh_session(factory, old)
+    _put_back(client, bridge)
+    assert "connection to the broker dropped" in error(client)
+
+
+def test_a_later_opkg_option_overrides_an_earlier_one(opkg_tree):
+    root = opkg_tree(info_dir="/usr/lib/opkg/info")
+    (root / "etc" / "opkg" / "zz-override.conf").write_text(
+        "option info_dir /var/lib/opkg/info\n", encoding="utf-8"
+    )
+    assert uninstall.info_directory(str(root)) == str(root / "var" / "lib" / "opkg" / "info")
+
+
+def test_an_info_dir_that_climbs_out_of_the_root_is_refused(opkg_tree):
+    root = opkg_tree(info_dir="/var/lib/opkg/info")
+    (root / "etc" / "opkg" / "opkg.conf").write_text(
+        "option info_dir /var/../../outside/info\n", encoding="utf-8"
+    )
+    assert uninstall.info_directory(str(root)) is None
+    assert uninstall.installed_by_package_manager(str(root))[0] is False
+    assert uninstall.package_gone(str(root)) is False
 
 
 # -------------------------------------------------------------- the page seam --
@@ -752,6 +1011,7 @@ CHILD = textwrap.dedent(
     client.acknowledge()
     conftest.MainLoop.advance(uninstall.POLL_MILLISECONDS)
     container = [c for c in conftest.ConsoleAppContainer.instances if c.commands][-1]
+    os.remove(os.path.join(info, uninstall.PACKAGE + ".control"))
     container.finish(0)
     assert receiver.session.opened[-1][1] == (3,), receiver.session.opened
     assert bridge.uninstaller.phase == "done"
