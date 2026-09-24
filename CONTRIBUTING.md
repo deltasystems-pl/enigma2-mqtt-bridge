@@ -65,6 +65,16 @@ Lint is ruff plus pyflakes. The redundancy is deliberate: a `NameError` in an un
 of a sibling project broke every polling cycle for three releases, and pyflakes would have caught
 it.
 
+**Discovery templates are rendered, never matched.** `tests/test_discovery_templates.py` renders
+every `*_tpl` the discovery payloads carry against the bytes the plugin's own publishers produce,
+and fails when a template has no rendering test — so a new templated entity needs one. It renders
+with `tests/hatemplate.py`: an environment that starts empty and holds only the filters, tests
+and globals listed there, with Home Assistant's own `int`, `round` and `timestamp_utc` copied from
+the release the companion integration pins. A template that reaches for anything else fails
+before it is rendered. That is on purpose: Home Assistant replaces some of Jinja's filters, and a
+test that quietly used Jinja's would be coverage of the wrong engine. Adding a filter means
+copying Home Assistant's, saying where it came from, and moving it when that pin moves.
+
 ## Becoming an image tester
 
 The maintainer has exactly one box — a Vu+ Uno 4K SE on OpenViX. Every other row of the

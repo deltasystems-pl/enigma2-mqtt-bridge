@@ -162,8 +162,10 @@ version that has no section here.
   message" and stores nothing, so the sensor read unknown for ever rather than reading wrong. One
   character in one template. It was found by the review of the process telemetry above, which had
   copied the same shape from it — and it was invisible to both test suites because they compared
-  the template as a string and never rendered it. The two timestamp templates are now rendered in
-  the tests and the result is parsed as a datetime.
+  the template as a string and never rendered it. Every template the discovery payloads carry is
+  now rendered in the tests, against what the plugin's own publishers produce, with Home
+  Assistant's versions of the filters it replaces — and a template that uses a filter the tests do
+  not reproduce fails the build instead of rendering with plain Jinja's.
 - **An EPG grid that has not changed is no longer republished.** The contract has always said it
   was not, and it was not true: every payload carries `generated`, stamped from the clock at the
   moment the grid was built, and the change comparison is made on the encoded payload — so two
