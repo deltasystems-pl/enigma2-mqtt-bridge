@@ -819,8 +819,8 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `deep_standby` | any (`PRESS` by convention) | Shuts the box down completely | Refused while recording, or with a timer due within 10 minutes; refused while an EPG import runs (since 0.3.0, and see below for when that lapses); also refused unless `deep_standby_allowed` is on |
 | `reboot` | any | Reboots the receiver | Same as `deep_standby` |
 | `restart_gui` | any | Restarts enigma2 only | Refused while recording or with a timer due within 10 minutes, and while an EPG import runs (since 0.3.0): a restart mid-import loses the run. That refusal **lapses** once this plugin's own start of the import failed, or once the 30-minute watchdog has fired for the current run, and returns with the next import; the `epg_import` topic still says what the importer says |
-| `zap` | `<sref>` \| `{"sref": "..."}` \| `{"name": "..."}` | Tunes to a service, waking the box from standby first | By name: refused unless exactly one service in the configured bouquets matches - the error names the count. A zap that does not show up on `service` within 5 s is reported there too |
-| `bouquet` | `{"sref": "..."}` | Makes one published TV bouquet the active channel-list context | Exact allowlist match only. The current channel is preserved when it belongs to the bouquet; otherwise the first playable channel is tuned. Empty/marker-only bouquets and unavailable service-list APIs are refused without changing context |
+| `zap` | `<sref>` \| `{"sref": "..."}` \| `{"name": "..."}` | Tunes to a service, waking the box from standby first. Since 0.3.0 through the receiver's channel list, so the zap is in the receiver's zap history - see below | By name: refused unless exactly one service in the configured bouquets matches - the error names the count. A zap that does not show up on `service` within 5 s is reported there too; from standby, one whose wake has not finished within 5 s is reported as "the receiver did not leave standby" |
+| `bouquet` | `{"sref": "..."}` | Makes one published TV bouquet the active channel-list context | Exact allowlist match only. The current channel is preserved when it belongs to the bouquet; otherwise the first playable channel is tuned. Empty/marker-only bouquets and unavailable service-list APIs are refused without changing context. Since 0.3.0 refused during timeshift, before anything changes: "timeshift is active; the receiver would ask on screen whether to leave it" |
 | `volume` | `0`-`100`, or `{"level": 42}` | Sets the volume, with the on-screen bar | Out-of-range values are clamped and noted in the log |
 | `mute` | `ON` \| `OFF` | Sets mute | Never a blind toggle: the state is read first, and read back afterwards. A receiver refuses to mute at volume 0, and that refusal is reported |
 | `key` | `KEY_OK` \| `{"key": "KEY_OK", "long": true}` | Injects a remote key | Unknown key names are refused with the name in `last_error`; at most 20 a second |
@@ -838,6 +838,38 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `uninstall` - since 0.3.0 | this receiver's node id, exactly (surrounding whitespace is stripped; case matters) | Removes the plugin from the receiver: stops publishing, retracts every retained topic this node owns at QoS 1, publishes `offline` last, removes the package and restarts the interface. 🔴 **A one-way door** | Refused, before anything changes, in this order: unless `uninstall_allowed` is on - „uninstall is switched off in the plugin's settings"; unless the payload is this node's id - „the payload must be this receiver's node id"; without the `uninstall` capability - „this plugin was not installed by the package manager, so it cannot remove itself"; while an EPG import runs - „an EPG import is running", exactly as `restart_gui` refuses it and with the same lapse, because the removal ends in the same restart; by the same recording guard as `deep_standby`; where the image has no way to restart the interface; while a removal is already running - „an uninstall is already running". See below |
 
 Every one of them is refused when it arrives retained, as above.
+
+### `cmd/zap` goes through the channel list - since 0.3.0
+
+The receiver keeps a list of the channels zapped to, the one its own "History Zap" screen shows on
+KEY_NEXT and KEY_PREVIOUS, and it only records a zap that passes through its channel selection. So
+`cmd/zap` does what the remote's number entry does: it calls the image's
+`InfoBar.instance.selectAndStartService(service, bouquet)`, and the zap is recorded exactly as a
+remote zap is, bouquet included. The payload is unchanged. The bouquet is, in order:
+
+1. the bouquet the channel list is on now, when the service is in it - so a zap to a channel of
+   the bouquet being browsed never moves the channel list;
+2. otherwise the first published bouquet (`channels`) that holds the service - and the channel
+   list **moves to that bouquet**, as it does after a number zap on the remote: channel up and down
+   walk it afterwards, and `bouquet` names it.
+
+Four cases play the service directly, as before 0.3.0, and are **not recorded**:
+
+| Case | Why |
+|---|---|
+| timeshift is active, or waiting to be saved | the channel list would ask on the television, with no timeout, whether to leave timeshift |
+| the channel list is in picture-in-picture zap mode | the channel list would zap the small picture |
+| the channel list is in radio mode | a television bouquet entered under the radio root would be saved as the radio list's root |
+| the service is in no published bouquet (a radio service, a bouquet `bouquets_for_select` leaves out, a reference in no bouquet) | there is no bouquet to enter it through; logged once per service |
+
+**From standby** the receiver is woken first. Its standby screen closes on the next turn of the
+main loop and plays the channel it slept on; the zap follows on the turn after that, so it is
+recorded and the restored channel is not. The 5 s verification on `service` starts when the zap is
+made. When the standby screen has not closed within 5 s, `last_error` says "the receiver did not
+leave standby" and no zap follows. A second zap sent while the first still waits replaces it.
+
+A zap made this way asks for a parental-control PIN on the television exactly as one from the
+remote does, and it never opens or shows a screen of its own.
 
 ### `cmd/message` styles - `toast` since 0.3.0, capability `toast`
 

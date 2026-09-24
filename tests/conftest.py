@@ -1708,6 +1708,39 @@ class StandbyScreen:
             function()
 
 
+class RestoringStandbyScreen:
+    """The standby screen as a zap from standby meets it, closing a turn late.
+
+    From `Screens/Standby.pyc` (`Standby2`) and `StartEnigma.py`: `Power()` is
+    `self.close(True)`, and `Session.close` only starts a 0 ms timer - the screen
+    is closed, and its `onClose` walked, on the next turn of the main loop
+    (`finish_close` here). The first listener is the screen's own `__onClose`,
+    appended in its constructor [Standby.py 70-...], which sets `inStandby` to
+    None and `playService`s the service the box slept on [136-...]. `doClose`
+    walks the list itself, not a copy.
+    """
+
+    def __init__(self, nav=None, restore=None):
+        self.nav = nav
+        self.restore = restore
+        self.onClose = [self._on_close]
+        self.power_calls = 0
+        self.closing = False
+
+    def Power(self):
+        self.power_calls += 1
+        self.closing = True
+
+    def finish_close(self):
+        for function in self.onClose:
+            function()
+
+    def _on_close(self):
+        standby_module.inStandby = None
+        if self.nav is not None and self.restore is not None:
+            self.nav.playService(eServiceReference(self.restore))
+
+
 # ------------------------------------------------- the session, as StartEnigma --
 #
 # 🔴 `ModalSession` and `ModelScreen` follow `/usr/lib/enigma2/python/StartEnigma.py`
@@ -2012,11 +2045,63 @@ hdmi_cec_module.HdmiCec = HdmiCec
 infobar_module = _module("Screens.InfoBar")
 
 
+# 🔴 `InfoBar` and `ChannelList` below model the receiver's own
+# `Screens/InfoBarGenerics.pyc` and `Screens/ChannelSelection.pyc` (OpenViX
+# 6.6.007, disassembled with the image's own CPython 3.12; source lines in
+# brackets) as far as the zap history goes:
+#
+# - `InfoBarNumberZap.selectAndStartService(service, bouquet)` [1255-1265]: when
+#   `servicelist.getRoot() != bouquet`, `clearPath()`, then `enterPath
+#   (bouquet_root)` unless the bouquet is the root, then `enterPath(bouquet)`;
+#   `setCurrentSelection(service)`; `zap(enable_pipzap=True)`;
+#   `correctChannelNumber()`; `startRoot = None`.
+# - `ChannelSelection.addToHistory(ref)` [2372-2389]: only with a `servicePath`;
+#   appends the path plus the service, deletes every *older* entry for the same
+#   service, drops the oldest past `HISTORYSIZE` (20), and points `history_pos`
+#   at the newest.
+# - `historyMenuClosed(ref)` [2451-2465]: the entry whose last element equals
+#   `ref` moves to the end and `setHistoryPath()` plays it - unless it is
+#   already at `history_pos`, when nothing at all happens.
+# - `setHistoryPath()` [2407-2423]: the entry's path becomes `servicePath`, the
+#   root follows, and `session.nav.playService(ref, adjust=False)` - no
+#   timeshift check on this path.
+# - `ChannelSelection.zap` records through `addToHistory` unless the service is
+#   `startServiceRef`; the stub tunes by setting `nav.sref`, never through
+#   `playService`, because other tests count `playService` as the unrecorded path.
+
+HISTORYSIZE = 20
+
+
 class InfoBar:
     instance = None
 
     def __init__(self, servicelist=None):
         self.servicelist = servicelist
+        # Timeshift, as `checkTimeshiftRunning` reads it [Timeshift.py 457-495].
+        self.seekable = False
+        self.timeshift = False
+        self.save_current_timeshift = False
+        self.started = []
+
+    def isSeekable(self):
+        return self.seekable
+
+    def timeshiftEnabled(self):
+        return self.timeshift
+
+    def selectAndStartService(self, service, bouquet):
+        self.started.append((service, bouquet))
+        servicelist = self.servicelist
+        if service:
+            if servicelist.getRoot() != bouquet:
+                servicelist.clearPath()
+                if servicelist.bouquet_root != bouquet:
+                    servicelist.enterPath(servicelist.bouquet_root)
+                servicelist.enterPath(bouquet)
+            servicelist.setCurrentSelection(service)
+            servicelist.zap(enable_pipzap=True)
+            servicelist.correctChannelNumber()
+            servicelist.startRoot = None
 
 
 class ChannelList:
@@ -2034,6 +2119,13 @@ class ChannelList:
         self.nav = nav
         self.saved_roots = 0
         self.mode = 0
+        self.history = []
+        self.history_pos = 0
+        self.dopipzap = False
+        self.startServiceRef = None
+        self.startRoot = None
+        self.corrected = 0
+        self.history_paths = 0
 
     def setCurrentSelection(self, reference):
         wanted = getattr(reference, "reference", str(reference))
@@ -2043,12 +2135,71 @@ class ChannelList:
     def getCurrentSelection(self):
         return None if self.selection is None else eServiceReference(self.selection)
 
-    def zap(self):
+    def zap(self, enable_pipzap=False, preview_zap=False, checkParentalControl=True, ref=None):
         self.zaps += 1
         if self.nav is not None and self.selection is not None:
             # ChannelSelection.zap owns the tune; do not model it as the
             # fallback Navigation.playService path whose use other tests detect.
             self.nav.sref = self.selection
+            reference = eServiceReference(self.selection)
+            if self.startServiceRef is None or reference != self.startServiceRef:
+                self.addToHistory(reference)
+
+    def addToHistory(self, ref):
+        if self.servicePath is None:
+            return
+        entry = self.servicePath[:]
+        entry.append(ref)
+        self.history.append(entry)
+        length = len(self.history)
+        index = 0
+        while index < length - 1:
+            if self.history[index][-1] == ref:
+                del self.history[index]
+                length -= 1
+            else:
+                index += 1
+        if length > HISTORYSIZE:
+            del self.history[0]
+            length -= 1
+        self.history_pos = length - 1
+
+    def historyMenuClosed(self, retval):
+        if not retval:
+            return
+        length = len(self.history)
+        position = 0
+        for entry in self.history:
+            if entry[-1] == retval:
+                break
+            position += 1
+        if position < length and position != self.history_pos:
+            entry = self.history[position]
+            del self.history[position]
+            self.history.append(entry)
+            self.history_pos = len(self.history) - 1
+            self.setHistoryPath()
+
+    def setHistoryPath(self, doZap=True):
+        self.history_paths += 1
+        path = self.history[self.history_pos][:]
+        ref = path.pop()
+        del self.servicePath[:]
+        self.servicePath += path
+        self.saveRoot()
+        root = path[-1]
+        current = self.getRoot()
+        if current and current != root:
+            self.root = root
+            services = self.bouquets.get(getattr(root, "reference", str(root)))
+            if services is not None:
+                self.selectable = list(services)
+        if doZap:
+            self.nav.playService(ref, adjust=False)
+        self.setCurrentSelection(ref)
+
+    def correctChannelNumber(self):
+        self.corrected += 1
 
     def clearPath(self):
         self.path.clear()
@@ -2091,6 +2242,8 @@ channel_selection_module = _module("Screens.ChannelSelection")
 channel_selection_module.service_types_tv = (
     "1:7:1:0:0:0:0:0:0:0:(type == 1) || (type == 17) || (type == 22)"
 )
+# A module constant on the receiver [ChannelSelection.py 2006].
+channel_selection_module.HISTORYSIZE = HISTORYSIZE
 
 
 # ------------------------------------------------- ServiceReference / RecordTimer --
@@ -2494,7 +2647,9 @@ class Navigation:
     def getCurrentlyPlayingServiceReference(self):
         return eServiceReference(self.sref) if self.sref else None
 
-    def playService(self, reference):
+    def playService(self, reference, checkParentalControl=True, forceRestart=False, adjust=True):
+        # The receiver's signature, from `Navigation.pyc`: the channel list's
+        # history zap calls it with `adjust=False`.
         self.sref = getattr(reference, "reference", str(reference))
         self.played.append(self.sref)
 
@@ -2616,8 +2771,12 @@ class Receiver:
 
     # --- what a test does to it ---------------------------------------------
 
-    def enter_standby(self):
-        standby_module.inStandby = StandbyScreen()
+    def enter_standby(self, restoring=False):
+        """`restoring`: the screen closes a turn late and plays what the box slept on."""
+        if restoring:
+            standby_module.inStandby = RestoringStandbyScreen(self.nav, self.nav.sref)
+        else:
+            standby_module.inStandby = StandbyScreen()
         config.misc.standbyCounter.increment()
         return standby_module.inStandby
 
@@ -2660,8 +2819,13 @@ def fresh_receiver():
     from MQTTBridge import enigma2 as enigma2_module
     from MQTTBridge import keys as keys_module
     from MQTTBridge import remote as remote_module
+    from MQTTBridge import service as service_module
 
     def reset():
+        service_module.forget_unrecorded()
+        if service_module._pending_wake is not None:
+            service_module._pending_wake.cancel()
+        service_module._pending_wake = None
         ServiceCenter._instance = None
         EPGCache._instance = None
         KeyActionMap._instance = None

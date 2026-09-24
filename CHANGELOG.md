@@ -126,6 +126,26 @@ version that has no section here.
 
 ### Changed
 
+- **`cmd/zap` goes through the receiver's channel list, so its zaps are in the receiver's own zap
+  history** - the list KEY_NEXT and KEY_PREVIOUS open - exactly as a zap made with the remote is.
+  Every zap the plugin makes (a service reference, a name, the channel select, the media player's
+  source list, `play_media` and the integration's `zap` action) now calls the image's own number-zap
+  path, `InfoBar.instance.selectAndStartService`, in the bouquet the channel list is on when the
+  service is in it, and otherwise in the first published bouquet that holds it. 🔴 **Visible
+  change: a zap to a channel outside the bouquet being browsed now moves the channel list to that
+  channel's bouquet**, so channel up and down on the remote walk that bouquet afterwards and the
+  `bouquet` topic names it - which is what the remote's own number zap does. It used to leave the
+  channel list where it was. Four cases keep the old direct `playService` and are **not** recorded:
+  timeshift (the channel list would ask on the television, with no timeout, whether to leave it),
+  picture-in-picture zap mode (it would zap the small picture), a channel list in radio mode, and a
+  channel in no published bouquet (logged once per channel). **From standby** the receiver is woken
+  first and the zap follows on the turn after the receiver's own restore of the channel it slept on,
+  so it is recorded too; if the standby screen has not closed within 5 s, `last_error` says "the
+  receiver did not leave standby". The 5 s verification on `service` starts when the zap is made.
+  The decision is recorded in [ADR-0014](docs/adr/0014-the-zap-history-is-the-receivers.md).
+- **`cmd/bouquet` is refused during timeshift**, with "timeshift is active; the receiver would ask
+  on screen whether to leave it", before anything changes. Its zap would have opened that question
+  and then, seeing nothing tuned, restored the old channel underneath it.
 - **A popup's text loses every backslash, as a toast's does.** `cmd/message` without `"style":
   "toast"` used to pass its text to the screen as sent, and enigma2's text renderer reads a
   backslash and what follows it as a colour change or a line break - after right-to-left

@@ -305,16 +305,34 @@ class CommandDispatcher:
         if not sref:
             return "no service reference or name given"
 
-        error = zap_to(self.session, sref)
-        if error:
-            return error
+        return zap_to(
+            self.session, sref, channels=self.publisher("channels"), on_zap=self._expect,
+            report=self.bridge.publish_last_error, allowed=self._still_open,
+        )
+
+    def _expect(self, sref):
+        """Start verifying a zap, when it has actually been made.
+
+        The zap is verified when `service` echoes the reference. Nothing is
+        published here: `evStart` will, and a refusal arrives on `last_error` if
+        it does not. From standby the zap is made a turn after the wake, and the
+        five seconds start then, not when the command arrived.
+        """
         service = self.publisher("service")
         if service is not None:
-            # The zap is verified when `service` echoes the reference. Nothing
-            # is published here: `evStart` will, and a refusal arrives on
-            # `last_error` if it does not.
             service.expect(sref)
-        return None
+
+    def _still_open(self):
+        """Whether work a command left for a later turn may still run.
+
+        🔴 A zap that waits for the standby screen to close runs a turn or more
+        after its command was accepted. A removal of the plugin accepted in
+        between comes first: from acceptance on, nothing is started.
+        """
+        uninstaller = getattr(self.bridge, "uninstaller", None)
+        if uninstaller is None:
+            return True
+        return not (uninstaller.underway or uninstaller.closed)
 
     def bouquet(self, text, origin=MQTT):
         """Switch the active channel-list context to one published bouquet."""

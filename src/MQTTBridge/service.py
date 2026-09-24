@@ -27,6 +27,7 @@ from .enigma2 import (
     constant,
     current_service,
     current_service_reference,
+    identity,
     missing,
     navigation,
     reference_string,
@@ -285,81 +286,381 @@ def read_tuner(session):
 
 
 # -------------------------------------------------------------------- zapping --
+#
+# A zap from outside goes the way the remote's number entry goes, so that it is
+# in the receiver's own zap history - the list KEY_NEXT and KEY_PREVIOUS open -
+# exactly as a zap made with the remote is (ADR-0014). The image only records a
+# zap that passes through its channel selection: `ChannelSelection.zap` and its
+# timeshift callback call `addToHistory`, and `Navigation.playService` never
+# does. So the plugin does not reimplement the number zap; it calls the image's
+# own `InfoBar.instance.selectAndStartService(service, bouquet)`, which enters
+# the bouquet, selects the service, zaps and corrects the channel number.
+#
+# Three situations keep the old `playService`, unrecorded, because the recorded
+# path would do something worse than not being recorded:
+#
+# - **timeshift**: `ChannelSelection.zap` asks `checkTimeshiftRunning` first,
+#   and during timeshift that opens a question on the television with no
+#   timeout. A zap from a phone must not leave a dialogue on somebody's screen;
+# - **picture-in-picture zap mode** (`servicelist.dopipzap`): the channel list
+#   would zap the small picture, and the command means the main one;
+# - **a channel in no published bouquet** (a radio service, a bouquet
+#   `bouquets_for_select` leaves out, a reference in no bouquet at all): there
+#   is no bouquet to enter it through.
+#
+# And one this plugin adds for the same reason `cmd/bouquet` refuses it: a
+# channel list in radio mode. Entering a television bouquet under the radio
+# root would build a path the receiver then saves as its radio list's root.
+
+# How long a zap waiting for the receiver to leave standby waits for the
+# standby screen to close before it says so on `last_error`.
+WAKE_WAIT_MILLISECONDS = 5000
+
+WAKE_TIMEOUT = "the receiver did not leave standby"
+UNWATCHABLE = (
+    "this image's standby screen cannot be watched, so a zap would be undone by the wake"
+)
+
+# Why a zap was played directly: the one fallback logged once per reference.
+NO_BOUQUET = "it is in no published bouquet"
+
+# References already logged as unrecordable, so a household zapping the same
+# radio station every evening does not log the same line every evening.
+_unrecorded_noted = set()
 
 
-def _zap_through_channel_list(reference):
-    """Zap the way the remote control does, when the service is in view.
+def forget_unrecorded():
+    """Test seam: the set above is module state and outlives a test."""
+    _unrecorded_noted.clear()
 
-    Worth the trouble because `playService` alone leaves the receiver's own
-    channel list where it was: tune to BBC One from Home Assistant, press
-    channel-up on the remote, and the box goes to the neighbour of whatever was
-    selected before - not the neighbour of what is on screen.
 
-    🔴 `zap()` tunes to whatever the list has *selected*, so the selection is
-    read back and compared before it is called. A `setCurrentSelection` for a
-    service that is not in the list the user is browsing does nothing at all,
-    and calling `zap()` after one would tune the television to the wrong
-    channel. That is why this returns False rather than trying harder: the
-    caller's `playService` is always correct, and this is only ever an
-    improvement on it.
-    """
+def infobar_instance():
     try:
         from Screens.InfoBar import InfoBar
     except Exception:
-        return False
-    infobar = getattr(InfoBar, "instance", None)
-    servicelist = getattr(infobar, "servicelist", None) if infobar is not None else None
-    if servicelist is None:
-        return False
-    select = getattr(servicelist, "setCurrentSelection", None)
-    current = getattr(servicelist, "getCurrentSelection", None)
-    zapper = getattr(servicelist, "zap", None)
-    if select is None or current is None or zapper is None:
+        return None
+    return getattr(InfoBar, "instance", None)
+
+
+def timeshift_active(infobar):
+    """Whether `checkTimeshiftRunning` would ask its question now.
+
+    The image's own test, read out of `Components/Timeshift.py`: the service is
+    seekable and timeshift is enabled, or a timeshift is waiting to be saved.
+    An image with no timeshift at all has none of these names and cannot be in
+    timeshift. One that has them and raises is treated as in timeshift: the
+    caller then takes the path that cannot open a question.
+    """
+    if infobar is None:
         return False
     try:
-        select(reference)
-        if not same_service(reference_string(current()), reference_string(reference)):
+        if getattr(infobar, "save_current_timeshift", False):
+            return True
+        seekable = getattr(infobar, "isSeekable", None)
+        enabled = getattr(infobar, "timeshiftEnabled", None)
+        if not callable(seekable) or not callable(enabled):
             return False
-        zapper()
+        return bool(seekable()) and bool(enabled())
     except Exception:
-        LOG.debug("the channel list would not take the zap; using playService")
-        return False
-    return True
+        LOG.debug("could not tell whether timeshift is running; assuming it is")
+        return True
 
 
-def zap(session, sref):
-    """Tune to a service. None on success, otherwise the refusal.
+def _tv_mode(servicelist):
+    try:
+        from Screens.ChannelSelection import ChannelSelection
 
-    Standby first: the channel list is not usable in standby, and a box woken
-    afterwards restores the service it was on - so a zap sent to a sleeping
-    receiver would silently undo itself.
+        expected = getattr(ChannelSelection, "MODE_TV", 0)
+    except Exception:
+        expected = 0
+    return getattr(servicelist, "mode", expected) == expected
+
+
+def _member(bouquet, wanted):
+    """The bouquet's own spelling of the service with identity `wanted`, or None."""
+    for channel in bouquet.get("channels") or ():
+        if identity(channel.get("sref")) == wanted:
+            return channel.get("sref")
+    return None
+
+
+def zap_bouquet(servicelist, channels, sref):
+    """`(bouquet, service)` for a zap to `sref`, as reference objects, or None.
+
+    The bouquet, in order: the one the channel list is on now, when it holds
+    the service - so a zap from the channel select never moves the channel
+    list's context - and otherwise the first published bouquet that holds it,
+    which is the one the service is announced under. Membership is by
+    identity, against the `channels` cache the plugin already keeps, and the
+    service comes back in that bouquet's own spelling, which is the one the
+    channel list finds when it is asked to select it.
     """
+    bouquets = getattr(channels, "bouquets", None) or []
+    wanted = identity(sref)
+    if not wanted:
+        return None
+    root = servicelist.getRoot()
+    root_string = reference_string(root)
+    if root is not None and root_string:
+        for bouquet in bouquets:
+            if reference_string(bouquet.get("sref")) == root_string:
+                member = _member(bouquet, wanted)
+                if member:
+                    return root, service_reference(member)
+    for bouquet in bouquets:
+        member = _member(bouquet, wanted)
+        if member:
+            return service_reference(bouquet.get("sref")), service_reference(member)
+    return None
+
+
+def _playing(session):
+    return current_service_reference(session)
+
+
+def _recorded_zap(session, sref, channels):
+    """Zap through the image's number-zap path. `(True, None)`, or `(False, why)`.
+
+    A False is never a refusal: the caller plays the service the old way, and
+    `why` is what the log says about it.
+    """
+    infobar = infobar_instance()
+    servicelist = getattr(infobar, "servicelist", None) if infobar is not None else None
+    start = getattr(infobar, "selectAndStartService", None) if infobar is not None else None
+    if servicelist is None or not callable(start) or not callable(
+        getattr(servicelist, "getRoot", None)
+    ):
+        return False, "this image has no channel-list zap to record it with"
+    if getattr(servicelist, "dopipzap", False):
+        return False, "the channel list is in picture-in-picture zap mode"
+    if timeshift_active(infobar):
+        return False, "timeshift is active"
+    if not _tv_mode(servicelist):
+        return False, "the channel list is not in television mode"
+    try:
+        chosen = zap_bouquet(servicelist, channels, sref)
+    except Exception:
+        LOG.exception("could not choose a bouquet to zap through")
+        return False, "the channel list could not be read"
+    if chosen is None or chosen[0] is None or chosen[1] is None:
+        return False, NO_BOUQUET
+    bouquet, service = chosen
+
+    before = _playing(session)
+    try:
+        start(service, bouquet)
+    except Exception:
+        LOG.exception("selectAndStartService raised")
+        return False, "the channel list's zap raised"
+    after = _playing(session)
+    if same_service(after, sref) or same_service(after, before) or not after:
+        # Tuned - or not yet, which is what a parental-control PIN on the
+        # television looks like. Either way `service.expect` has the last word.
+        return True, None
+    # 🔴 `selectAndStartService` zaps whatever it managed to select, and a
+    # bouquet file edited since the `channels` cache was read can leave the
+    # selection on a neighbour. The wrong channel on the television is worse
+    # than an unrecorded zap to the right one.
+    LOG.warning("the channel list tuned %s instead of %s; playing it directly", after, sref)
+    return False, "the channel list tuned another service"
+
+
+def _note_unrecorded(sref, why):
+    key = identity(sref)
+    if key in _unrecorded_noted:
+        return
+    _unrecorded_noted.add(key)
+    LOG.info("zapping to %s without the channel list, so it is not in the zap history: %s",
+             sref, why)
+
+
+def _zap_awake(session, sref, channels=None, on_zap=None):
+    """The zap itself, on a receiver that is awake. None, or the refusal."""
     nav = navigation(session)
-    if nav is None:
-        return "there is no session to zap with"
-    player = getattr(nav, "playService", None)
+    player = getattr(nav, "playService", None) if nav is not None else None
     if player is None:
         return "this image's navigation has no playService"
     reference = service_reference(sref)
     if reference is None:
         return "'" + str(sref) + "' is not a service reference"
+    recorded, why = _recorded_zap(session, sref, channels)
+    if not recorded:
+        if why == NO_BOUQUET:
+            _note_unrecorded(sref, why)
+        else:
+            LOG.info("zapping to %s without the channel list: %s", sref, why)
+        try:
+            player(reference)
+        except Exception as error:
+            LOG.exception("playService raised")
+            return type(error).__name__ + ": " + str(error)
+    if on_zap is not None:
+        on_zap(sref)
+    return None
 
-    from .power import in_standby, wake
 
-    was_asleep = bool(in_standby())
-    error = wake()
-    if error:
-        LOG.info("could not leave standby before zapping: %s", error)
+# The one zap waiting for the standby screen to close. A second request while
+# the first still waits replaces it: the household pressed twice, and the later
+# press is the one they meant.
+_pending_wake = None
 
-    if not was_asleep and _zap_through_channel_list(reference):
+
+class _AfterWake:
+    """Run one action once the receiver has really left standby.
+
+    `inStandby.Power()` closes the standby screen, and enigma2 closes a screen
+    on the **next** turn of the main loop (`Session.close` starts a 0 ms timer).
+    The standby screen's own `__onClose` then plays the service the box slept
+    on. A zap made in the same turn as the wake is overwritten by that restore.
+
+    So the plugin appends to the screen's `onClose` *before* waking it. The
+    screen registered its own `__onClose` in its constructor, so this one runs
+    after the restore, and it starts a 0 ms single-shot timer: the zap runs on
+    the turn after that, as a zap from the remote would. The restore itself is
+    a `playService` and stays out of the history - it is the channel the
+    receiver was already on.
+    """
+
+    def __init__(self, command, action, report=None, allowed=None):
+        self.command = command
+        self.action = action
+        self.report = report
+        self.allowed = allowed
+        self.screen = None
+        self.closed = False
+        self.finished = False
+        self._run = Ticker(self._fire, "zap after wake")
+        self._timeout = Ticker(self._timed_out, "wake wait")
+
+    def begin(self, screen):
+        """Hook the screen and wake it. None, or why it could not be done."""
+        from .power import wake
+
+        hook = getattr(screen, "onClose", None)
+        if hook is None:
+            return UNWATCHABLE
+        try:
+            hook.append(self._closed)
+        except Exception as error:
+            LOG.exception("could not watch the standby screen")
+            return type(error).__name__ + ": " + str(error)
+        self.screen = screen
+        self._timeout.start(WAKE_WAIT_MILLISECONDS, True)
+        error = wake()
+        if error:
+            self.cancel()
+            return error
         return None
 
-    try:
-        player(reference)
-    except Exception as error:
-        LOG.exception("playService raised")
-        return type(error).__name__ + ": " + str(error)
+    def cancel(self):
+        self.finished = True
+        self._run.stop()
+        self._timeout.stop()
+        screen, self.screen = self.screen, None
+        if screen is not None and not self.closed:
+            # Only while the screen is not closing: enigma2 walks `onClose`
+            # while it calls it, and a removal then skips the next listener.
+            try:
+                if self._closed in screen.onClose:
+                    screen.onClose.remove(self._closed)
+            except Exception:
+                LOG.debug("could not stop watching the standby screen")
+
+    def _closed(self):
+        # Called by enigma2 while it closes the standby screen; nothing here may
+        # raise into that loop, and nothing here removes itself from it.
+        try:
+            self.closed = True
+            if self.finished:
+                return
+            self._timeout.stop()
+            self._run.start(0, True)
+        except Exception:
+            LOG.exception("could not schedule the zap after the wake")
+
+    def _fire(self):
+        global _pending_wake
+        if self.finished:
+            return
+        self.finished = True
+        if _pending_wake is self:
+            _pending_wake = None
+        if self.allowed is not None and not self.allowed():
+            LOG.info("dropping the %s that waited for the wake: the plugin is going away",
+                     self.command)
+            return
+        error = self.action()
+        if error and self.report is not None:
+            self.report(self.command, error)
+
+    def _timed_out(self):
+        global _pending_wake
+        if self.finished:
+            return
+        self.cancel()
+        if _pending_wake is self:
+            _pending_wake = None
+        if self.allowed is not None and not self.allowed():
+            return
+        if self.report is not None:
+            self.report(self.command, WAKE_TIMEOUT)
+
+
+def run_after_wake(command, action, report=None, allowed=None):
+    """Wake the receiver, and run `action` once its own restore is done.
+
+    None when the action ran or is waiting for the wake; otherwise why not. A
+    refusal from the action once it runs, and a wake that never finishes, go to
+    `report(command, sentence)`. `allowed()` is asked again just before the
+    action runs, so that a removal of the plugin accepted in between is not
+    followed by a zap.
+    """
+    global _pending_wake
+    from .power import standby_module
+
+    module = standby_module()
+    screen = getattr(module, "inStandby", None) if module is not None else None
+    if screen is None:
+        # Awake already - between the caller's look and this one.
+        return action()
+    if _pending_wake is not None:
+        _pending_wake.cancel()
+        _pending_wake = None
+    waiter = _AfterWake(command, action, report, allowed)
+    error = waiter.begin(screen)
+    if error:
+        return error
+    _pending_wake = waiter
     return None
+
+
+def zap(session, sref, channels=None, on_zap=None, report=None, allowed=None):
+    """Tune to a service. None on success, otherwise the refusal.
+
+    `channels` is the `channels` publisher, whose cache chooses the bouquet the
+    zap goes through; without it every zap is played directly. `on_zap(sref)`
+    is called when the zap has actually been made - at once, or after the wake
+    - which is when its verification should start.
+
+    From standby the receiver is woken first and the zap follows its restore
+    (`run_after_wake`), so it is recorded like any other.
+    """
+    nav = navigation(session)
+    if nav is None:
+        return "there is no session to zap with"
+    if getattr(nav, "playService", None) is None:
+        return "this image's navigation has no playService"
+    if service_reference(sref) is None:
+        return "'" + str(sref) + "' is not a service reference"
+
+    from .power import in_standby
+
+    def awake():
+        return _zap_awake(session, sref, channels, on_zap)
+
+    if in_standby():
+        return run_after_wake("zap", awake, report, allowed)
+    return awake()
 
 
 # ----------------------------------------------------------------- publishers --

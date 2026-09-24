@@ -31,6 +31,8 @@ READABLE = "readable"
 # an error, and because the topic is how „not in a configured bouquet" is said.
 NO_BOUQUET = {"name": None, "sref": None}
 
+TIMESHIFT = "timeshift is active; the receiver would ask on screen whether to leave it"
+
 
 def _servicelist():
     try:
@@ -202,6 +204,16 @@ class BouquetPublisher(Publisher):
         services = bouquet.get("channels") or []
         if not services:
             return "the selected bouquet has no playable channels"
+
+        # The channel list's `zap()` asks `checkTimeshiftRunning` first, which
+        # during timeshift opens a question on the television with no timeout -
+        # and the synchronous check below would then see nothing tuned and
+        # "restore" with `playService` while that question is still on screen.
+        # Refused before anything is touched.
+        from .service import infobar_instance, timeshift_active
+
+        if timeshift_active(infobar_instance()):
+            return TIMESHIFT
 
         servicelist = _servicelist()
         required = (
