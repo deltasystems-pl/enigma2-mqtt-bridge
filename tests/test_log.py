@@ -3,8 +3,8 @@
 TROUBLESHOOTING.md tells a user that finding the password in this file is a bug
 worth a security report. That promise is only worth something if something
 checks it, so the test below writes a password into the configuration, runs a
-whole session through the plugin at `debug` — connect, publish, a command, an
-error — and then reads the file back.
+whole session through the plugin at `debug` - connect, publish, a command, an
+error - and then reads the file back.
 """
 
 import logging

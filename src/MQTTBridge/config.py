@@ -51,7 +51,7 @@ REMOTE_SETTING_NAMES = (
 )
 # Published in `info.settings` and refused by `cmd/config`, like any other key
 # that is not in the allowlist above. A setting that *enables* a command is
-# never writable over MQTT: it is set on the receiver — its setup screen, the
+# never writable over MQTT: it is set on the receiver - its setup screen, the
 # provisioning file, or the OpenWebif page, which is exactly as open as the
 # receiver's web interface (ADR-0009). Echoing it lets a consumer hide a control
 # the box would always refuse instead of offering one that fails.
@@ -155,7 +155,7 @@ CHOICES = {
 SECRET_NAMES = ("password", "oscam_password")
 
 # The range of every integer setting, for anything that validates one before it
-# reaches the element — the OpenWebif page. `_build` states the same ranges on
+# reaches the element - the OpenWebif page. `_build` states the same ranges on
 # the elements themselves, and a test holds the two to each other, so a range
 # changed in one place and not the other fails CI rather than the receiver.
 INTEGER_LIMITS = {
@@ -217,7 +217,7 @@ def _build():
     section.screenshot_delay = ConfigInteger(default=4, limits=SCREENSHOT_DELAY_LIMITS)
     # On by default, and never writable over MQTT: it is the kill-switch for a screen
     # that lives inside the GUI process, and a kill-switch reachable over the
-    # broker is not one. In neither `cmd/config` list — it enables no command of
+    # broker is not one. In neither `cmd/config` list - it enables no command of
     # its own, and the `toast` capability already tells a consumer whether the
     # style is available.
     section.osd_toast = ConfigYesNo(default=True)
@@ -235,13 +235,13 @@ def _build():
     # image's own settings, so it is asked for on the receiver. It switches the
     # image's Wake-on-LAN on where the image has one and does nothing where it
     # has not; switched off, it leaves the image's setting as it is (`wol.py`).
-    # In neither `cmd/config` list — it enables no command, and `info.wol`
+    # In neither `cmd/config` list - it enables no command, and `info.wol`
     # already says what the receiver's switch is, which is what a consumer
     # needs rather than what somebody asked for.
     section.wol_arm = ConfigYesNo(default=False)
     # Off by default, and never writable over MQTT: it is the kill-switch for
     # code that closes a screen somebody is looking at. Deliberately in neither
-    # `cmd/config` list — it enables no command, and the `cec_workaround`
+    # `cmd/config` list - it enables no command, and the `cec_workaround`
     # capability already tells a consumer whether it is at work.
     section.cec_standby_workaround = ConfigYesNo(default=False)
     # Permissions default off. This one gates a command that stops a running
@@ -358,7 +358,7 @@ def text_refusal(name, text):
     🔴 enigma2 writes `/etc/enigma2/settings` as `key=value` lines with no
     escaping at all, and reads it back line by line. A newline inside a value is
     therefore a second settings line, under a name of the writer's choosing, the
-    next time the receiver starts — `config.OpenWebif.auth=False`, or a
+    next time the receiver starts - `config.OpenWebif.auth=False`, or a
     permission. So every control character is refused, and the Unicode line and
     paragraph separators with them, since a line-splitting reader may honour
     those too. Refused, never stripped: a value that has been silently edited is
@@ -380,8 +380,8 @@ def text_refusal(name, text):
 def validate_setting(name, raw):
     """One setting's new value, validated as every writer must: the value, or ValueError.
 
-    Built from what this module already declares — `SETTING_KINDS`, `CHOICES`,
-    `INTEGER_LIMITS` and the text rules — so there is one validator for every
+    Built from what this module already declares - `SETTING_KINDS`, `CHOICES`,
+    `INTEGER_LIMITS` and the text rules - so there is one validator for every
     setting rather than one per form. The message names the setting.
     """
     if name not in SETTING_NAMES:
@@ -403,7 +403,7 @@ def validate_setting(name, raw):
 
 
 def save_settings(values, section=None):
-    """Persist `values` — setting name to value — at once, restoring memory on failure.
+    """Persist `values` - setting name to value - at once, restoring memory on failure.
 
     Each element is saved and enigma2's settings file is written once. When the
     write fails, every element named goes back to what it held, so a failed save
@@ -549,13 +549,13 @@ def import_provisioning(path=None, section=None):
         imported.append(key)
 
     if not imported:
-        # Every key was unknown, or every value was rejected — a typo in the
+        # Every key was unknown, or every value was rejected - a typo in the
         # file, not an instruction to configure nothing. Deleting it here would
         # throw away the only copy of what somebody meant to write, and they
         # would find an unchanged plugin and no file to correct.
         LOG.error(
             "%s imported nothing: no key in it is a setting this plugin has. "
-            "Leaving it in place — correct the key names, or delete it.",
+            "Leaving it in place \u2014 correct the key names, or delete it.",
             target_path,
         )
         return []
@@ -569,6 +569,6 @@ def import_provisioning(path=None, section=None):
         os.remove(target_path)
         LOG.info("removed %s (it held a password in clear)", target_path)
     except OSError as error:
-        LOG.error("could not remove %s (%s) — it still holds a password", target_path, error)
+        LOG.error("could not remove %s (%s) \u2014 it still holds a password", target_path, error)
 
     return imported

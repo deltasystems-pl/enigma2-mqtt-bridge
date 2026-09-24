@@ -2,8 +2,8 @@
 
 This module is about the whole set: that a bridge with a session registers every
 feature area, that each one lands on the topic `docs/TOPICS.md` names, and that
-`capabilities` says exactly what bound. The per-area behaviour — what a zap
-publishes, what a guard refuses — is in the module beside each publisher.
+`capabilities` says exactly what bound. The per-area behaviour - what a zap
+publishes, what a guard refuses - is in the module beside each publisher.
 """
 
 import json
@@ -220,8 +220,8 @@ def test_a_reload_does_not_leave_two_of_every_listener(live_bridge, receiver, fa
     """🔴 The lists a publisher attaches to belong to enigma2 and outlive it.
 
     Saving the settings screen reloads the bridge. Dropping the registry without
-    stopping the publishers would add a second set of listeners on every save —
-    two publishes per zap after one save, three after two — until the box was
+    stopping the publishers would add a second set of listeners on every save -
+    two publishes per zap after one save, three after two - until the box was
     restarted.
     """
     before = len(receiver.nav.event)
@@ -374,6 +374,6 @@ def test_identity_of_nothing_matches_nothing():
 
 def test_slugify_transliterates_polish():
     assert channels_module.slugify("Ulubione TV") == "ulubione_tv"
-    assert channels_module.slugify("Łódź — Kanały Główne") == "lodz_kanaly_glowne"
+    assert channels_module.slugify("Łódź \u2014 Kanały Główne") == "lodz_kanaly_glowne"
     assert channels_module.slugify("Favourites (TV)") == "favourites_tv"
     assert channels_module.slugify("   ") == ""

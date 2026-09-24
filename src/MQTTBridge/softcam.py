@@ -9,7 +9,7 @@ process", because there may not be one of them.
 
 **Why there may be several.** The manager's liveness check looks the cam up by
 process name through enigma2's own `process.ProcessList().named(<basename>)`,
-which compares against `/proc/<pid>/stat`'s `comm` field — and the kernel caps
+which compares against `/proc/<pid>/stat`'s `comm` field - and the kernel caps
 `comm` at 15 characters. A cam binary whose basename is longer than that can
 never be equal to its own truncated name, so the lookup always comes back empty
 and the manager always takes its „Couldn't find it, start one" branch. That
@@ -25,13 +25,13 @@ a frozen cam. One sequence serves both readings.
 
 **Counting is the part that is easy to get wrong.** At OSCam's default restart
 level the cam forks a supervisor parent that keeps the worker, so a healthy
-receiver shows *two* processes for *one* instance — measured: same start time to
+receiver shows *two* processes for *one* instance - measured: same start time to
 the jiffy, the child's parent is the parent, and the pidfile names the child.
 A naive process count reports a fault on a working box. `running_instances`
 therefore counts matched processes **whose parent is not itself matched**.
 
 Matching is two conditions, and both are needed. `comm` is compared against the
-first 15 characters of the basename, because that is all the kernel kept — and
+first 15 characters of the basename, because that is all the kernel kept - and
 then `/proc/<pid>/exe` must resolve to the binary's exact path, because two
 binaries differing only after character 15 truncate to the same `comm`. 🔴 What
 is never used is `pgrep -f`: measured, it matched the shell that was running the
@@ -46,7 +46,7 @@ on start, and the line the image's *manual* start screen uses would delete the
 live cam log, which is the only record of what the cam did. And it never writes
 the image's „skip this cam" marker file: that marker is shared and unowned, and
 on these images the manager's poller is the only thing that starts the cam at
-all — a marker left behind by a crash would disable it until the next graphical
+all - a marker left behind by a crash would disable it until the next graphical
 restart.
 
 Nothing here blocks the main loop and nothing sleeps. The stop is a signal, the
@@ -89,7 +89,7 @@ POLL_MILLISECONDS = 60000
 SLOW_POLL_SECONDS = 0.05
 
 # The detector's own tick. A healthy encrypted channel rewrites the ECM file
-# about every 10 seconds — measured, ten advances with gaps of 9 to 11 — so
+# about every 10 seconds - measured, ten advances with gaps of 9 to 11 - so
 # looking more often than that would only resample the same number.
 DETECTOR_MILLISECONDS = 10000
 
@@ -138,7 +138,7 @@ def _image_setting(section, name):
 
     Read through `Components.config` rather than out of `/etc/enigma2/settings`,
     because a setting left at its declared default is absent from that file and
-    present here — which is exactly the case for the two that matter most.
+    present here - which is exactly the case for the two that matter most.
     """
     try:
         from Components.config import config
@@ -161,19 +161,19 @@ def _image_setting(section, name):
 def _without_the_directory(entry, directory):
     """One autostart entry as a bare name.
 
-    🔴 The setting holds **absolute paths** — `/usr/softcams/<name>` — not bare
+    🔴 The setting holds **absolute paths** - `/usr/softcams/<name>` - not bare
     names. The image's own manager begins its loop by stripping exactly that
     prefix off, and that line exists only because the prefix is there. A
     normalisation done anywhere later than here is a normalisation the rest of
     this module does not know about: `selected` would publish a path where the
     contract promises a basename, the truncated `comm` would be the first
-    fifteen characters of `/usr/softcams/…` and match no process at all, and
+    fifteen characters of `/usr/softcams/...` and match no process at all, and
     `manager_check_on_start` would read true on every receiver because a path is
     always longer than fifteen characters.
 
     Only this one prefix is removed, deliberately. An entry pointing somewhere
     else keeps its separators and is refused by `resolve`'s name guard, rather
-    than being quietly reinterpreted as a name inside the softcam directory —
+    than being quietly reinterpreted as a name inside the softcam directory -
     which would run a different program from the one the image was told to.
     """
     prefix = str(directory).rstrip("/") + "/"
@@ -270,7 +270,7 @@ def start_command(name, directory=SOFTCAM_DIRECTORY):
 
     The table ends in a generic line, so every resolvable name has one today.
     The caller still checks, because a family that needs something else would be
-    added here — and a receiver running it must not be offered a restart that
+    added here - and a receiver running it must not be offered a restart that
     starts the wrong thing.
     """
     if not name:
@@ -322,10 +322,10 @@ def _executable(pid, proc=PROC_DIRECTORY):
     """Where a process was started from, with the kernel's unlinked marker removed.
 
     🔴 Upgrading the cam replaces the binary, so every copy already running reads
-    `…/<name> (deleted)` from that moment on. Comparing the link verbatim would
-    drop exactly those processes out of the count — reporting one instance while
+    `.../<name> (deleted)` from that moment on. Comparing the link verbatim would
+    drop exactly those processes out of the count - reporting one instance while
     two fight over the card, and leaving the collapse button unable to collapse
-    them — at the one moment most likely to precede somebody pressing it.
+    them - at the one moment most likely to precede somebody pressing it.
 
     A file genuinely named with that suffix would be read as its unlinked twin.
     That is the lesser of the two wrong answers by a wide margin, and it is not a
@@ -342,7 +342,7 @@ def scan(command, executable, proc=PROC_DIRECTORY):
     """`{pid: parent pid}` for every process that is this binary, or None.
 
     None is „the count could not be taken", which the contract publishes as
-    `null` — it is not the same answer as „nothing is running", and a caller
+    `null` - it is not the same answer as „nothing is running", and a caller
     that cannot see the processes must not go on to signal them.
 
     🔴 Both conditions are load-bearing. `comm` is all the kernel kept of the
@@ -413,7 +413,7 @@ def _ecm_modified(path):
     🔴 **Nothing else about this file is ever read.** It carries a card-sharing
     account identifier, the sharing server's hostname and port, and the live
     control words, none of which may reach the broker, a log line at any level, a
-    diagnostic or a test fixture — not even hashed. A modification time answers
+    diagnostic or a test fixture - not even hashed. A modification time answers
     the only question this module asks, so the file is never opened at all.
 
     `lstat`, and a regular file or nothing: a name that has been replaced by a
@@ -432,11 +432,11 @@ def not_decoding_seconds(path, service_since, since, now):
     """How long the cam has written no ECM, or 0.0 when there is nothing to count from.
 
     Counted from the most recent of three things: the file's own modification
-    time, the start of the service being watched, and `since` — the moment this
+    time, the start of the service being watched, and `since` - the moment this
     module itself started.
 
     🔴 Written on the *age* of the file rather than on its existence, because the
-    cam **removes** the file when it stops descrambling — measured. Age treats a
+    cam **removes** the file when it stops descrambling - measured. Age treats a
     removed file and a merely stale one identically, which is what makes absence
     safe to reason about. It is also why the caller gates on „encrypted" first:
     on a free-to-air channel absence is the normal, healthy state, and a detector
@@ -460,7 +460,7 @@ def not_decoding_seconds(path, service_since, since, now):
 
 
 class SoftcamPublisher(NavPublisher):
-    """`softcam` — which cam the image chose, how many are running, and the restarts."""
+    """`softcam` - which cam the image chose, how many are running, and the restarts."""
 
     name = "softcam"
     # The only event needed: a zap restarts the auto-heal window.
@@ -541,7 +541,7 @@ class SoftcamPublisher(NavPublisher):
         Every way out of here says, at `info`, what is actually true of this
         receiver. 🔴 The publisher also marks itself switched off on the way out,
         because the bridge's other branch logs „this image does not provide the
-        hooks" at warning — and a receiver with no softcam configured has
+        hooks" at warning - and a receiver with no softcam configured has
         perfectly good hooks and nothing to point them at. A false warning on
         every box without a cam is a support thread waiting to happen.
         """
@@ -654,8 +654,8 @@ class SoftcamPublisher(NavPublisher):
         """Why this restart may not happen, or None when it may.
 
         🔴 One guard, used identically by both paths. The asymmetry that suggests
-        itself — healing in the ten minutes before a timer, on the argument that a
-        recording deserves a working cam — was rejected: a restart landing close
+        itself - healing in the ten minutes before a timer, on the argument that a
+        recording deserves a working cam - was rejected: a restart landing close
         to a timer risks the opening seconds of the recording, and a scrambled
         recording is recoverable while a truncated one is not. So a dead cam in
         the ten minutes before a recording stays dead until the window passes,
@@ -708,7 +708,7 @@ class SoftcamPublisher(NavPublisher):
         self._deadline = time.monotonic() + TERM_DEADLINE_SECONDS
         # 🔴 Armed *before* anything is signalled, and refused if it cannot be.
         # An eTimer cannot fire until this returns to the main loop, so there is
-        # no race in doing it first — and doing it second is the one path that
+        # no race in doing it first - and doing it second is the one path that
         # ends with the cam stopped, nothing started, and `_busy` stuck true so
         # that every later attempt answers „a restart is already running".
         if not self._arm(TERM_POLL_MILLISECONDS):
@@ -736,7 +736,7 @@ class SoftcamPublisher(NavPublisher):
         read, so this is the vanishing case of `/proc` going away underneath a
         sequence already in flight. Treating it as „nothing survived" lets the
         sequence finish and start one, and the settle recount then publishes
-        whatever is really true — but it is said out loud, because a stop that
+        whatever is really true - but it is said out loud, because a stop that
         could not be verified is not a stop that was verified.
         """
         found = scan(self._command, self._executable, self.proc)

@@ -2,21 +2,21 @@
 
 The image byte-compiles a plugin after opkg has installed it, so the `.pyc`
 files in the plugin directory are not in opkg's file list and opkg will never
-remove them. An upgrade that moves a module — `paho/` to `_vendor/paho/` — takes
+remove them. An upgrade that moves a module - `paho/` to `_vendor/paho/` - takes
 the `.py` away and leaves the compiled copy, and a legacy-location `.pyc` with
 no source beside it is still importable in Python 3. The old module survives the
 upgrade that was meant to remove it.
 
 These tests run the real maintainer script, under every POSIX shell on the
-machine, against a fixture tree. `busybox sh` is the one that matters — it is
-what a receiver has — and `dash` is the standard-issue one that catches a
+machine, against a fixture tree. `busybox sh` is the one that matters - it is
+what a receiver has - and `dash` is the standard-issue one that catches a
 bashism. The shell is the unit here: rewriting the sweep in Python and testing
 that would test something the receiver never runs.
 
 Half of what is asserted below is about what the script refuses to do. A
 maintainer script runs as root, with whatever environment and whatever working
 directory the caller happened to have, over paths somebody else chose the names
-of — so „it deleted the right files" is only half the question, and „it touched
+of - so „it deleted the right files" is only half the question, and „it touched
 nothing else" is the other half.
 """
 
@@ -191,8 +191,8 @@ def test_a_directory_that_still_holds_something_survives(shell, plugin_dir):
 def test_a_directory_that_was_already_empty_survives(shell, plugin_dir):
     """The sweep gives back what it emptied, not whatever it finds empty.
 
-    A plugin may keep an empty directory on purpose — somewhere to put captures,
-    a cache that is cleared — and an upgrade that deletes it is an upgrade that
+    A plugin may keep an empty directory on purpose - somewhere to put captures,
+    a cache that is cleared - and an upgrade that deletes it is an upgrade that
     broke something for a reason nobody will ever find.
     """
     kept = plugin_dir / "screenshots"
@@ -294,7 +294,7 @@ def test_a_tree_with_no_plugin_py_is_left_alone(shell, tmp_path):
 
     oe-alliance-core's `python3-compileall.inc` moves `.py` out of a package
     into `${PN}-src`, which is not in the feed. In such a tree „every `.pyc`
-    whose `.py` is missing" is every file the plugin has — and a plugin
+    whose `.py` is missing" is every file the plugin has - and a plugin
     directory with no `plugin.py`/`.pyc`/`.pyo` left is one that enigma2's own
     PluginComponent deletes outright.
     """

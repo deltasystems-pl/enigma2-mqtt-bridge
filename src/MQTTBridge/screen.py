@@ -37,7 +37,7 @@ _INSTANCE_IDS = count()
 # Quality 80 at 720 pixels wide: about 30 KB on this hardware, measured.
 #
 # 🔴 The output file is a positional argument and **`-o` is not the way to give
-# it one** — in this utility `-o` means „the on-screen display only" and `-v`
+# it one** - in this utility `-o` means „the on-screen display only" and `-v`
 # means „the video only". `grab -o /tmp/x.jpg` therefore works, writes the file,
 # and captures a picture of the menus over a blank screen. Both layers together,
 # which is what a person means by a screenshot, is the default with neither.
@@ -57,7 +57,7 @@ def forget_legacy_output(path):
     Before the per-instance name below, every capture went to one fixed path.
     A file left there by a process that is no longer running is a picture of
     somebody's living room sitting in `/tmp` until the box is rebooted, and
-    nothing else will ever remove it — including switching screenshots off.
+    nothing else will ever remove it - including switching screenshots off.
     """
     try:
         os.unlink(path)
@@ -78,7 +78,7 @@ def grab_binary():
 
 
 class ScreenPublisher(Publisher):
-    """`screen` — a JPEG, retained, and not JSON."""
+    """`screen` - a JPEG, retained, and not JSON."""
 
     name = "screenshot"
     raw = ("screen",)
@@ -97,7 +97,7 @@ class ScreenPublisher(Publisher):
         self._commanded = False
         self._last_capture = 0.0
         self._last_image = None
-        # When the last published picture was taken — `grab` finishing, not
+        # When the last published picture was taken - `grab` finishing, not
         # starting. `_last_capture` is the start, and is set for failed grabs too.
         self.completed_at = None
         self._debounce = Ticker(self._debounced, "screenshot debounce")
@@ -261,7 +261,7 @@ class ScreenPublisher(Publisher):
         return None
 
     def capture_state(self):
-        """`(in flight, started)` — read-only, for the OpenWebif page.
+        """`(in flight, started)` - read-only, for the OpenWebif page.
 
         `started` is when the grab in flight began, or None when none is.
         """
@@ -313,7 +313,7 @@ class ScreenPublisher(Publisher):
         return container
 
     def _finished(self, retval=0):
-        """`grab` is done — read the file, publish it, and delete it."""
+        """`grab` is done - read the file, publish it, and delete it."""
         self._busy = False
         self._finished_container, self._container = self._container, None
         commanded, self._commanded = self._commanded, False

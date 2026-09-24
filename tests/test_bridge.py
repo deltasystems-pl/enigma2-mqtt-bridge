@@ -63,7 +63,7 @@ def test_info_settings_echo_the_box_only_permission(make_bridge, factory, settin
 
     It is there so a consumer can tell „the box refused this" from „the box
     cannot do this" and hide the two buttons rather than offering ones that
-    always fail — which is only possible if the key is present either way.
+    always fail - which is only possible if the key is present either way.
     """
     settings.host.value = "10.0.0.5"
     settings.node_id.value = NODE
@@ -105,7 +105,7 @@ def test_capabilities_are_empty_until_a_feature_area_is_bound(connected_bridge, 
 def test_a_publisher_adds_its_name_and_its_snapshot(make_bridge, factory, settings):
     class Power(Publisher):
         name = "power"
-        # `power` is `on`/`standby`, not JSON — the contract says so.
+        # `power` is `on`/`standby`, not JSON - the contract says so.
         raw = ("power",)
 
         def snapshot(self):
@@ -184,7 +184,7 @@ def test_a_field_the_payload_stamps_itself_is_not_a_change(connected_bridge, fac
     """A wall-clock stamp must not decide whether the box changed.
 
     Without this, a topic that says when it was built republishes itself every
-    time it is built — which is exactly the recorder churn publish-on-change
+    time it is built - which is exactly the recorder churn publish-on-change
     exists to prevent.
     """
     topic = "enigma2/" + NODE + "/demo"
@@ -208,7 +208,7 @@ def test_the_snapshot_records_what_the_change_test_will_compare(make_bridge, fac
     lost its retained store has to be able to converge. What the snapshot
     records as sent is then what the next publish is judged against, so a
     snapshot that forgot which fields are volatile would make the first rebuild
-    after every connect look like a change — the same defect once per
+    after every connect look like a change - the same defect once per
     connection rather than once per refresh.
 
     This goes through `publish_snapshot` itself rather than calling the encoder
@@ -489,7 +489,7 @@ def test_a_reload_whose_reconnect_fails_leaves_offline_retained(connected_bridge
                                                                  settings, name, changed):
     """A save that changes the connection: the old session says `offline` itself.
 
-    The clean disconnect drops the will, and the new session may never connect —
+    The clean disconnect drops the will, and the new session may never connect -
     a wrong address, a password that no longer matches.
     """
     old = factory.client
@@ -506,7 +506,7 @@ def test_a_reload_whose_reconnect_fails_leaves_offline_retained(connected_bridge
                and e.text == "offline" and e.retain]
     # Before the DISCONNECT, which is what a broker would still deliver.
     assert offline and offline[-1] < seen[0]
-    # A state topic, so QoS 0 — the will alone is asked for at QoS 1.
+    # A state topic, so QoS 0 - the will alone is asked for at QoS 1.
     assert [e.qos for e in _offline_from(old)] == [0]
 
 
@@ -539,7 +539,7 @@ def test_a_rename_publishes_no_offline_for_either_name(connected_bridge, factory
     """The old name is retracted; the new one belongs to the new session alone.
 
     An `offline` from the old session under the new name could land after the
-    new session's `online` — two client ids, which the broker does not order —
+    new session's `online` - two client ids, which the broker does not order -
     and stay retained under a name that is live. One under the old name would
     land after its retraction and stay behind for a name nobody uses. That holds
     when the same save also changes the broker.
@@ -622,7 +622,7 @@ def test_a_rename_while_disconnected_is_retracted_on_the_next_connect(
     """The rename that matters happens while nothing is connected.
 
     `reload` only sees the case where a session was open at the time. A node id
-    edited on a box with no network — or between two runs of the plugin — leaves
+    edited on a box with no network - or between two runs of the plugin - leaves
     the old tree retained on the broker with nobody to take it back, and the
     state file is the only record it ever existed.
     """

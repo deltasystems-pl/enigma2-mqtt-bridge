@@ -1,4 +1,4 @@
-"""The popup on the television — `cmd/message`, and its default style.
+"""The popup on the television - `cmd/message`, and its default style.
 
 The other style, `toast`, is `toast.py`: a screen of the plugin's own rather than
 the image's message box.
@@ -55,7 +55,7 @@ def _message_box():
 
 
 def popups_available():
-    """Whether this image can show a popup at all — the `message` capability."""
+    """Whether this image can show a popup at all - the `message` capability."""
     notifications = _notifications()
     return (
         notifications is not None

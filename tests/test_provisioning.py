@@ -64,7 +64,7 @@ def test_a_file_that_imported_nothing_is_kept(tmp_path, settings, plugin_log):
     """Every key misspelt is a typo, not an instruction to configure nothing.
 
     Deleting it would leave somebody with an unchanged plugin and no file to
-    correct — and the file is the only copy of what they meant to write.
+    correct - and the file is the only copy of what they meant to write.
     """
     target = tmp_path / "mqttbridge.json"
     write(target, {"mqtt_host": "10.0.0.5", "broker_port": 1883})

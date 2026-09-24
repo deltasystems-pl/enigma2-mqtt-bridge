@@ -2,19 +2,19 @@
 
 **Status:** accepted 2026-09-21, extended by [ADR-0003](0003-control-feedback-and-household-features.md), §5 partly superseded by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md)
 **Date:** 2026-09-21
-**Supersedes:** — (it extends [ADR-0000](0000-prd.md); nothing in that record is reversed)
+**Supersedes:** - (it extends [ADR-0000](0000-prd.md); nothing in that record is reversed)
 
 ## Context
 
 [ADR-0000](0000-prd.md) is the product requirements document as it was approved at M0. It is not
-rewritten — that is the whole point of keeping it as a record — but the plugin that now runs on a
+rewritten - that is the whole point of keeping it as a record - but the plugin that now runs on a
 receiver does several things it does not mention. Some of those came from the one operator who has
 a test box asking for them; some came out of reviews and out of what real hardware did. Either way
 they are decisions, they constrain later work, and a reader who takes ADR-0000 as the current scope
 will be wrong about them.
 
-This record names them, says why each one exists, and — because most of them publish something or
-accept something from the broker — says what each one costs in safety and in privacy. The topic
+This record names them, says why each one exists, and - because most of them publish something or
+accept something from the broker - says what each one costs in safety and in privacy. The topic
 contract itself stays in [TOPICS.md](../TOPICS.md); this is why, not what.
 
 It also says, at the end, what is **not** done, so that the gap between this repository's README and
@@ -22,7 +22,7 @@ its behaviour is written down rather than discovered.
 
 ## Decision
 
-### 1. Active bouquet context — `bouquet`, `cmd/bouquet`, capability `bouquet_context`
+### 1. Active bouquet context - `bouquet`, `cmd/bouquet`, capability `bouquet_context`
 
 Browsing a bouquet in a consumer was never changing the receiver's own channel list. The box has
 one active television bouquet, and it is what its channel-up and channel-down actions walk; picking
@@ -31,10 +31,10 @@ carried on through the previous list. A channel list a consumer can read but not
 feature.
 
 - `bouquet` is a retained topic, `{name, sref}`, **read from the receiver's real service-list
-  root** rather than inferred from the current channel. Both fields `null` is ordinary operation —
-  the box may be in the radio list, the movie list, or a bouquet the configuration leaves out — and
+  root** rather than inferred from the current channel. Both fields `null` is ordinary operation -
+  the box may be in the radio list, the movie list, or a bouquet the configuration leaves out - and
   it means „channel up and down are not walking a list I know about", not „broken".
-- `cmd/bouquet` takes `{"sref": "…"}` and matches it against the published bouquets **exactly**.
+- `cmd/bouquet` takes `{"sref": "..."}` and matches it against the published bouquets **exactly**.
   Selecting one **keeps the current channel when that channel belongs to the bouquet**, and
   otherwise tunes the bouquet's first playable channel. Doing nothing would leave the household
   looking at a channel that is not in the list its remote now walks.
@@ -51,7 +51,7 @@ Safety: the command changes what the remote walks and, in the worst case, which 
 It is on an exact allowlist, it is refused rather than approximated, and it never leaves the box in
 a bouquet it could not verify.
 
-### 2. Conditional-access telemetry — `cam` and `oscam`, both off by default
+### 2. Conditional-access telemetry - `cam` and `oscam`, both off by default
 
 A receiver whose card stops decrypting looks exactly like a receiver that is working: the same
 channel, the same programme, a black picture. There was no signal for it.
@@ -60,7 +60,7 @@ channel, the same programme, a black picture. There was no signal for it.
   and a bounded ECM time. It is read from the receiver-local `/tmp/ecm.info`, opened without
   following symlinks, capped at 8 KiB. Reader, server, user, card, CAID, provider and raw lines are
   never published. `active` means a fresh valid ECM result was seen after the latest known service
-  start — it is **not** a softcam-process check, and this topic must not drive access or recording
+  start - it is **not** a softcam-process check, and this topic must not drive access or recording
   decisions.
 - `oscam` publishes software and API status, bounded aggregate counts, and one neutral entry per
   reader or server. Every source id is an **HMAC under a hidden persisted salt** of the reader's
@@ -72,7 +72,7 @@ channel, the same programme, a black picture. There was no signal for it.
 - The OSCam probe runs **off the main loop**, queries only `status` and `readerlist` on
   `127.0.0.1`, follows no redirect, uses no environment proxy, invokes no action API, caps a
   response at 128 KiB and has a bounded deadline. A probe that has not finished is expired and
-  **abandoned** — its late answer is discarded — and at most two abandoned workers may be
+  **abandoned** - its late answer is discarded - and at most two abandoned workers may be
   outstanding, after which the state stays unknown until one returns. Old health is never presented
   as current.
 
@@ -81,7 +81,7 @@ bounded and retractable. The settings are `cam_telemetry`, `oscam_telemetry`, `o
 `oscam_username` and `oscam_password`, plus the internal `oscam_identity_salt`, which is never
 shown, provisioned or echoed.
 
-### 3. Remote settings — `cmd/config` and the `info.settings` echo
+### 3. Remote settings - `cmd/config` and the `info.settings` echo
 
 The companion integration needs an options page that actually changes the receiver, and telling a
 user to walk to the television and open a setup screen is not an options page.
@@ -109,17 +109,17 @@ broker credential and restrict it with an ACL; the recipe is in the README, and
 [TOPICS.md](../TOPICS.md) says the same thing at the command. Whether a box-side lock should exist
 anyway is an open question, recorded below.
 
-### 4. `screenshot_delay` — post-zap settling
+### 4. `screenshot_delay` - post-zap settling
 
 An on-zap capture taken when enigma2 raises its tune event is frequently a picture of the previous
 channel, or of nothing. Enigma's events say a service was tuned; they do not say a video frame has
 been decoded.
 
-The capture now waits `screenshot_delay` seconds, default **4**, range 1–30. Another zap **resets**
+The capture now waits `screenshot_delay` seconds, default **4**, range 1-30. Another zap **resets**
 the wait, and a grab still running for an older channel is **discarded and rescheduled**, so a run
 of channel changes produces one picture of where the viewer stopped rather than a series of stale
 ones. This is deliberately a bounded settling delay and not a claim to detect black video, audio or
-image readiness — there is no such signal to read.
+image readiness - there is no such signal to read.
 
 ### 5. A status page inside OpenWebif at `/mqttbridge`
 
@@ -131,7 +131,7 @@ machine they already use to administer the box.
   publisher settings the remote can change, and a bounded tail of the plugin's log with the broker
   password and every other credential scrubbed out of it.
 - It is **authenticated by OpenWebif**, and it **fails closed when OpenWebif authentication is
-  off** — a box whose web interface is open to its LAN does not get a settings page from this
+  off** - a box whose web interface is open to its LAN does not get a settings page from this
   plugin.
 - A Content-Security-Policy is set, and every write carries a one-shot CSRF token.
 - The log viewer is bounded in both bytes and lines.
@@ -150,7 +150,7 @@ The plugin logs privacy-safe reconnect epochs, main-loop dispatch delay, backlog
 per-publisher and total snapshot timings; a monitor reports both watcher-observed stalls and the
 measured heartbeat gap, because native code can resume before a watcher gets to run. This is what
 established that one such freeze was enigma2's own synchronous network-filesystem access in its
-timeshift path and not anything on the MQTT session — a conclusion nobody could have reached from
+timeshift path and not anything on the MQTT session - a conclusion nobody could have reached from
 the outside, and one that would otherwise have been guessed the other way.
 
 ### 7. `channels`, and one EPG grid topic per bouquet
@@ -176,7 +176,7 @@ The companion integration ships this plugin's IPK so that an install needs no do
 shipped inside another project is only trustworthy if anyone can rebuild it: its CI therefore
 reproduces the IPK **byte for byte from the named plugin commit**, and the package is distributed
 together with its corresponding GPL source archive. `tools/build-ipk.sh` is what makes that
-possible, and it stays reproducible on purpose — same inputs, same bytes.
+possible, and it stays reproducible on purpose - same inputs, same bytes.
 
 ## Consequences
 
@@ -190,7 +190,7 @@ possible, and it stays reproducible on purpose — same inputs, same bytes.
   an allowlist that is small on purpose, and the boundary it leaves is stated in the README, in
   TOPICS.md and here, in the same words.
 - A capability may now appear **after** the connect, so `info` and the announcement can be
-  published more than once per connection. Any consumer must accept that — it already had to,
+  published more than once per connection. Any consumer must accept that - it already had to,
   because `cmd/config` and `cmd/ha_mode` both republish them.
 - The status page ties a plugin feature to OpenWebif's authentication being enabled. That is a
   deliberate dependency: it is the only authentication on the box the plugin can honestly rely on,
@@ -202,7 +202,7 @@ Stated so that the README and the behaviour do not drift apart again:
 
 - **There is no 0.2.0 release.** Everything above is on `main` and running on the maintainer's box;
   the opkg feed and the releases page still serve **0.1.0**. A coordinated version bump with the
-  companion integration comes first — until then both report `0.1.0` and version equality cannot
+  companion integration comes first - until then both report `0.1.0` and version equality cannot
   tell two development builds apart.
 - **The call-for-testers issues do not exist.** This README claimed there was one per image. There
   is not, and the claim is removed rather than the issues invented. Until they exist: testers are
@@ -225,7 +225,7 @@ Not decided, recorded so the argument is visible:
 hours of ordinary household use the receiver's own process grew from roughly 122 MB to 245 MB. That
 growth was measured and attributed: a screen grab costs the image about 22 kB and a zap about
 50 kB, neither of which comes back, and read-only web-interface polling measured no growth per
-request at all — the plugin's own paths sit at the noise floor, and the most plausible remaining
+request at all - the plugin's own paths sit at the noise floor, and the most plausible remaining
 contributor is the image's EPG cache. What nobody can say yet is whether it **plateaus**, because
 answering that needs the curve recorded over days rather than sampled by a person.
 

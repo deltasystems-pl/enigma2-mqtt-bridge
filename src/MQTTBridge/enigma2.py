@@ -1,4 +1,4 @@
-"""The doorway to enigma2's own API — the only place in this package that guesses.
+"""The doorway to enigma2's own API - the only place in this package that guesses.
 
 Nothing here assumes an image provides anything. Every name is imported inside a
 function, every call is wrapped, and a capability that cannot be bound says so
@@ -23,13 +23,13 @@ from .log import get_logger
 LOG = get_logger("enigma2")
 
 # Eleven fields, which is ten numbers and the path. The first ten are the
-# reference proper — type, flags, service type, sid, tsid, onid, namespace and
-# the three parent fields — and everything past the eleventh is the name the
+# reference proper - type, flags, service type, sid, tsid, onid, namespace and
+# the three parent fields - and everything past the eleventh is the name the
 # bouquet gave it, which is decoration.
 #
 # The eleventh field is included because dropping it would make every stream on
 # a box identical to every other: an IPTV service is
-# `4097:0:1:0:0:0:0:0:0:0:http%3a//…`, where the ten numbers are the same for
+# `4097:0:1:0:0:0:0:0:0:0:http%3a//...`, where the ten numbers are the same for
 # all of them and the URL in field eleven is the only thing that differs. It is
 # also the number enigma2's own timer removal normalises to.
 SERVICE_FIELDS = 11
@@ -80,9 +80,9 @@ def enigma_attribute(name):
 
 
 def constant(class_name, attribute, default=None):
-    """`enigma.<class_name>.<attribute>` — an enum value, or `default`.
+    """`enigma.<class_name>.<attribute>` - an enum value, or `default`.
 
-    The interface classes (`iServiceInformation`, `iPlayableService`, …) are
+    The interface classes (`iServiceInformation`, `iPlayableService`, ...) are
     where enigma2 keeps its enumerations. Their *values* differ between images
     and must never be hard-coded; their *names* have been stable for years.
     """
@@ -103,7 +103,7 @@ class Ticker:
     """An `eTimer` whose callback cannot raise into enigma2's main loop.
 
     The timer object is created on the first `start`, so a `Ticker` can be built
-    on a machine with no `enigma` module at all — which is every machine the
+    on a machine with no `enigma` module at all - which is every machine the
     tests run on, and every machine a reviewer reads this on.
     """
 
@@ -176,7 +176,7 @@ class Ticker:
             LOG.exception("could not stop the %s timer", self._name)
             return False
         if self._firing:
-            # Called from inside our own callback — which is what a publisher
+            # Called from inside our own callback - which is what a publisher
             # that gives up on a poll does. The timer is walking its callback
             # list right now, so the detach waits for `_fire` to return.
             self._detach_wanted = True
@@ -221,7 +221,7 @@ def service_reference(sref):
 
 
 def reference_string(reference):
-    """The string form of whatever enigma2 handed us — reference, wrapper or text."""
+    """The string form of whatever enigma2 handed us - reference, wrapper or text."""
     if reference is None:
         return ""
     to_string = getattr(reference, "toString", None)

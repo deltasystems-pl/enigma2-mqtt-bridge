@@ -378,7 +378,7 @@ def test_a_bridge_with_no_feature_areas_still_announces_the_plugins_own_entities
     """A box that bound nothing can still be restarted and still has an uptime.
 
     There is no session here, so no publisher registered and no capability was
-    claimed — and the discovery payload is exactly the components that depend on
+    claimed - and the discovery payload is exactly the components that depend on
     no capability at all.
     """
     device = factory.client.last("homeassistant/device/" + NODE + "/config").json()

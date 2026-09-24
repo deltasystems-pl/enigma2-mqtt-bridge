@@ -6,7 +6,7 @@ a value is kept exactly as it was assigned, notifiers run only when it changes,
 and a selection never raises. „Changes" is the image's own comparison: the
 `str()` of the choice for a selection, and for an integer the `str()` of the
 one-element list it keeps, which tells `5` from `"5"`. A stub that tidied
-values up — `1` into `True`, `"5"` into `5`, `None` into `""` — would let the
+values up - `1` into `True`, `"5"` into `5`, `None` into `""` - would let the
 plugin write the wrong type
 and pass, while the box kept the wrong type in memory until its next start.
 """
@@ -78,7 +78,7 @@ def test_an_integer_compares_the_text_of_the_list_it_keeps():
 
 
 def test_a_selection_compares_the_text_of_the_choice():
-    """`2` finds the choice `"2"`, which is stored — and it is a change only from `"1"`."""
+    """`2` finds the choice `"2"`, which is stored - and it is a change only from `"1"`."""
     selection = ConfigSelection(choices=[("1", "one"), ("2", "two")], default="1")
     calls = _counting(selection)
     selection.value = 2

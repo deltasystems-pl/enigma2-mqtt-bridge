@@ -12,12 +12,12 @@ version that has no section here.
 ### Added
 
 - **`cmd/uninstall`: the plugin removes itself from the receiver**, behind the permission
-  `uninstall_allowed` — off by default, echoed read-only in `info.settings`, never writable over
+  `uninstall_allowed` - off by default, echoed read-only in `info.settings`, never writable over
   MQTT, set on the receiver (the setup screen, the provisioning file or the OpenWebif page, which
   gains the action behind a confirmation that states the one-way door). The payload must be this
   receiver's node id, exactly, after surrounding whitespace is stripped. Refused without the
-  permission, with any other payload, while an EPG import runs (as `restart_gui` is), without the new **`uninstall`** capability — claimed only
-  where opkg is on the box and its file list for this package names the running `plugin.py` — by the
+  permission, with any other payload, while an EPG import runs (as `restart_gui` is), without the new **`uninstall`** capability - claimed only
+  where opkg is on the box and its file list for this package names the running `plugin.py` - by the
   recording guard, where the image cannot restart, and while a removal is already running. Once
   accepted, on the next turn of the main loop: every publisher is stopped and command intake
   closed; every retained topic in the state file, and every command topic somebody left a retained
@@ -26,17 +26,17 @@ version that has no section here.
   most, in batches below paho's queue bound); the state file is saved empty; the session is closed
   cleanly; `opkg remove enigma2-plugin-extensions-mqttbridge` runs through `eConsoleAppContainer`
   with its output in the plugin's log; and the user interface is asked to restart. **A removal
-  that fails** — no acknowledgement in time, a dropped connection, opkg refusing (its lock is also
-  taken by the image's own update check) — removes nothing further, opens a fresh session that
+  that fails** - no acknowledgement in time, a dropped connection, opkg refusing (its lock is also
+  taken by the image's own update check) - removes nothing further, opens a fresh session that
   republishes everything, and says which step stopped it on `last_error`; so does an opkg that
-  reports success while the package is still there — a killed opkg reports 0 — with the advice to
+  reports success while the package is still there - a killed opkg reports 0 - with the advice to
   run `opkg install --force-reinstall enigma2-plugin-extensions-mqttbridge`, because opkg removes
   files one at a time and some may already be gone. No discovery button, on
   purpose: a core MQTT button cannot ask for a confirmation (ADR-0013, amending ADR-0004).
 - **`prerm` no longer advises a `cmd/reset` when the plugin is removing itself.** The plugin sets
   `MQTTBRIDGE_UNINSTALL=1` in opkg's environment; the advice still appears for a removal by hand.
 
-- **`info.wol`: what the image says about Wake-on-LAN** — `supported`, `armed`, `iface` and
+- **`info.wol`: what the image says about Wake-on-LAN** - `supported`, `armed`, `iface` and
   `mechanism`, read from the image at every `info` publish and never inferred from anything the
   plugin did. `supported` is the image's own probe for its front-processor switch; a receiver that
   reports `false` cannot be woken over the network from deep standby, only by its remote, its front
@@ -45,7 +45,7 @@ version that has no section here.
   where it has none. No `ethtool` and no process of any kind: on an image that powers off into deep
   standby rather than suspending, the flag it sets is read by nothing (ADR-0012).
 - **`cmd/epg_import`: ask the image's EPG-Importer for an import now**, behind the permission
-  `epg_import_allowed` — off by default, echoed read-only in `info.settings`, never writable over
+  `epg_import_allowed` - off by default, echoed read-only in `info.settings`, never writable over
   MQTT, and not needed on the OpenWebif page, which gains the action and the setting. The import
   starts exactly as the importer's own „Manual" button starts it; the payload is ignored. Refused
   while an import runs (whoever started it), by the whole recording guard, within ten minutes of the
@@ -63,16 +63,16 @@ version that has no section here.
 
 - **What the enigma2 process costs**, on `process`: resident set, its high-water mark, threads,
   open file descriptors and the epoch second the process started, read from `/proc`. It answers the
-  question a box that is never restarted eventually raises — „is it leaking?" — which cannot be
+  question a box that is never restarted eventually raises - „is it leaking?" - which cannot be
   answered by looking once, only by a curve somebody's recorder already has. Published in the
-  snapshot on every connect and then every 300 seconds — a ceiling on the gap rather than a
-  heartbeat, because like every state topic an unchanged payload is not republished — plus early
+  snapshot on every connect and then every 300 seconds - a ceiling on the gap rather than a
+  heartbeat, because like every state topic an unchanged payload is not republished - plus early
   whenever the resident set moves by 4 MiB either way, so a jump is on the curve at the minute it
   happened. The numbers are the
   process's and not the plugin's: enigma2 is one process and nothing in `/proc` can attribute a
   kilobyte to any of the things sharing it. Five diagnostic sensors in discovery mode, of which the
-  resident set is the only one enabled by default. There is no setting — the topic reveals nothing
-  about what anybody is watching — and unlike every other poll here it runs on the main loop,
+  resident set is the only one enabled by default. There is no setting - the topic reveals nothing
+  about what anybody is watching - and unlike every other poll here it runs on the main loop,
   because procfs is memory and cannot block.
 - **`cmd/softcam_restart`, and an opt-in automatic restart behind the same permission.** The
   household symptom is a channel that stops decoding; underneath it, an image whose softcam
@@ -90,12 +90,12 @@ version that has no section here.
   and they save a diagnosis that would otherwise need an SSH session on somebody else's box.
 - **`softcam_restart_allowed`**, a box-only permission echoed read-only in `info.settings` beside
   `deep_standby_allowed`, and **`softcam_autoheal`** with **`softcam_autoheal_seconds`** (default
-  90, range 30–600), which are writable through `cmd/config` because they only tune a restart the
+  90, range 30-600), which are writable through `cmd/config` because they only tune a restart the
   receiver has already permitted.
 - **An opt-in workaround for a standby the television asks for and the receiver sits on**,
   behind the box-only setting `cec_standby_workaround` (off by default, and not in `info.settings`
   or `cmd/config`). The defect is upstream enigma2's: a standby requested over HDMI-CEC is queued,
-  only the info bar carries the queue out, so with the channel list open the receiver stays on —
+  only the info bar carries the queue out, so with the channel list open the receiver stays on -
   and when the list is finally closed it goes to standby and sends `<Standby>` back to the
   television, because the image forgot the standby was the television's. With the setting on, the
   plugin closes the **channel list and nothing else** through its own exit, holding the image's
@@ -112,12 +112,12 @@ version that has no section here.
   [ADR-0007](docs/adr/0007-cec-standby-workaround.md).
 - **A discreet toast, as a second message style.** `cmd/message` takes an optional
   `"style": "toast"`: a small box in the top-right corner, headed „MQTT Bridge", that hides itself
-  after 5 seconds (1–30 on request), never takes focus, never waits behind the channel list the way
+  after 5 seconds (1-30 on request), never takes focus, never waits behind the channel list the way
   the popup does, and is replaced by the next toast rather than queued. It holds two text labels and
   nothing else, because some of enigma2's widgets bind keys natively without being executed and a
   toast built from one would eat the channel list's arrow keys. It is hidden when the receiver enters
-  standby, a toast sent in standby is refused on `last_error`, and it is deleted — never merely
-  closed — whenever the plugin stops. Its text is capped at 200 characters after **every backslash is
+  standby, a toast sent in standby is refused on `last_error`, and it is deleted - never merely
+  closed - whenever the plugin stops. Its text is capped at 200 characters after **every backslash is
   removed**, and nothing else (enigma2 applies its colour escapes after right-to-left reordering, so
   no narrower rule holds; `\cFFFF0000` shows as `cFFFF0000`); `type` is validated as for a popup and then ignored. New capability `toast`, claimed only
   once the screen has been created, and the box-only setting `osd_toast` (on by default, not in
@@ -128,7 +128,7 @@ version that has no section here.
 
 - **A popup's text loses every backslash, as a toast's does.** `cmd/message` without `"style":
   "toast"` used to pass its text to the screen as sent, and enigma2's text renderer reads a
-  backslash and what follows it as a colour change or a line break — after right-to-left
+  backslash and what follows it as a colour change or a line break - after right-to-left
   reordering, where no narrower rule can find it. Both styles now follow one rule, in one place:
   every backslash is removed and nothing else, so `\cFFFF0000Alarm` shows as `cFFFF0000Alarm` and a
   literal `\n` as `n`, while a real newline stays a line break. The 500-character cap counts what is
@@ -136,8 +136,8 @@ version that has no section here.
   `\n` for a line break in a popup has to send a real newline instead.** The decision is recorded
   in [ADR-0008](docs/adr/0008-discreet-toast.md).
 - **The OpenWebif page now opens wherever OpenWebif does, shows everything, and changes
-  everything.** It answered 403 to everybody on a receiver whose OpenWebif authentication was off —
-  OpenWebif's default, and on most households a necessity — because it demanded a logged OpenWebif
+  everything.** It answered 403 to everybody on a receiver whose OpenWebif authentication was off -
+  OpenWebif's default, and on most households a necessity - because it demanded a logged OpenWebif
   session on top of OpenWebif's own gate. OpenWebif decides who reaches the page before any of this
   plugin's code runs, and anybody it admits can already set every setting through OpenWebif's own
   endpoints, so the page now enforces no login of its own and reads no OpenWebif setting. It shows
@@ -150,29 +150,29 @@ version that has no section here.
   household-safety guards and with two-step confirmations for the destructive ones. A command from
   the page does not need `deep_standby_allowed` or `softcam_restart_allowed`; over MQTT both are
   still required, and the automatic softcam restart still needs its permission whatever the page
-  did. What guards the page against other web sites is a `Host` allowlist on every request — the
-  receiver's IP address, `localhost` or its own hostname — plus the same-origin check, the
+  did. What guards the page against other web sites is a `Host` allowlist on every request - the
+  receiver's IP address, `localhost` or its own hostname - plus the same-origin check, the
   session token and exact field sets; it adds `frame-ancestors 'self'` and stays script-free. The
   decision and the measurements behind it are in
   [ADR-0009](docs/adr/0009-the-openwebif-page-trusts-openwebif.md), which supersedes the
   fail-closed clause of ADR-0002 §5.
 - 🔴 **If you relied on the page being closed:** it is now exactly as open as your receiver's
-  OpenWebif. With OpenWebif authentication off, anybody OpenWebif admits can open it — as they could
+  OpenWebif. With OpenWebif authentication off, anybody OpenWebif admits can open it - as they could
   already change every setting through OpenWebif itself. Switch OpenWebif authentication on if that
   is not what you want. The page also refuses to answer under a DNS name of your own or behind a
   reverse proxy; open it by the receiver's address or `<hostname>.local`.
 - **OpenWebif's menu opens the page inside OpenWebif.** OpenWebif loads a menu entry into its own
   content panel by script and injects whatever comes back into its document, so a whole page there
   would leak its styles into OpenWebif and navigate the whole window on submit. The page answers that
-  load with a small fragment instead — a frame of itself, of fixed height and scrolling, and a link to
-  open it in a new tab — with no script and no styles of its own. The page opened directly is
+  load with a small fragment instead - a frame of itself, of fixed height and scrolling, and a link to
+  open it in a new tab - with no script and no styles of its own. The page opened directly is
   unchanged. The decision is in [ADR-0010](docs/adr/0010-the-page-inside-openwebif.md).
 - **The OpenWebif page shows the last screenshot.** Beside *Take a screenshot*, the last picture
   sent on `screen`, with the time the capture finished, at `<mount>/screen.jpg`; while a capture is
   running the page reloads itself every two seconds for at most twenty. The picture now survives a
   settings save, which used to drop it together with the publisher that held it.
 - **„Box-only" now reads „never writable over MQTT".** A setting that enables a command is set on
-  the receiver — the setup screen, the provisioning file or the OpenWebif page — and the broker can
+  the receiver - the setup screen, the provisioning file or the OpenWebif page - and the broker can
   still never grant one: `cmd/config`'s allowlist and `info.settings` are unchanged.
 - **`epg_grid/<bouquet_slug>.generated` now means when the grid last changed**, not when it was
   last built, which follows from the fix below: an unchanged rebuild publishes nothing, so the
@@ -184,7 +184,7 @@ version that has no section here.
 - **In `discovery` mode, a connect no longer deletes the device from Home Assistant and creates
   it again.** Since 0.2.0, the first release to publish discovery payloads, the retraction of stale topics, which runs before the first publish of
   every connect, every reload and every settings save, took everything outside the node's own
-  `enigma2/<node>/…` tree except the announcement for stale — including the node's current device
+  `enigma2/<node>/...` tree except the announcement for stale - including the node's current device
   payload and its eight device triggers. Each connect therefore emptied all nine and published
   them again a moment later; an empty device payload is a deletion in Home Assistant, so the
   device and its entities were removed and recreated, which can cost the names, areas and
@@ -194,42 +194,42 @@ version that has no section here.
   still retract what they leave behind, and `cmd/uninstall` and `cmd/reset` still retract
   everything. `integration` and `off` modes were not affected.
 - **Switching `publish_keys` off over `cmd/config` or on the OpenWebif page retracts the eight
-  device triggers at once.** Neither path reconnects, so the triggers stayed retained — and
-  offered in Home Assistant's automation editor — until the next connect. They now go before
+  device triggers at once.** Neither path reconnects, so the triggers stayed retained - and
+  offered in Home Assistant's automation editor - until the next connect. They now go before
   `info` and the device payload are republished; the device itself stays.
 - **A Save on the receiver's setup screen or the OpenWebif page no longer reopens the broker
   session while `cmd/uninstall` is under way.** It republished everything underneath a removal
   that had just retracted it, and a page save made before the removal's first step left it an
   unconnected session, so the removal failed. The settings are still saved, the screen and the
   page say they are not applied yet, and the removal's own failure path reconnects with them if
-  it stops. `cmd/config` accepted in the same window is saved and not applied either — it used
+  it stops. `cmd/config` accepted in the same window is saved and not applied either - it used
   to republish `info` and discovery and retract device triggers at QoS 0 outside the removal's
-  acknowledged retraction — and answers with a `last_error` that says so.
+  acknowledged retraction - and answers with a `last_error` that says so.
 - **„Next timer" has been unreadable in discovery mode since 0.2.0.** Its value template appended
   `+00:00` to `timestamp_utc`, which already ends in the offset, so the state arrived as
   `2026-09-10T12:08:29+00:00+00:00`. Home Assistant cannot parse that: it logs „Invalid state
   message" and stores nothing, so the sensor read unknown for ever rather than reading wrong. One
   character in one template. It was found by the review of the process telemetry above, which had
-  copied the same shape from it — and it was invisible to both test suites because they compared
+  copied the same shape from it - and it was invisible to both test suites because they compared
   the template as a string and never rendered it. Every template the discovery payloads carry is
   now rendered in the tests, against what the plugin's own publishers produce, with Home
-  Assistant's versions of the filters it replaces — and a template that uses a filter the tests do
+  Assistant's versions of the filters it replaces - and a template that uses a filter the tests do
   not reproduce fails the build instead of rendering with plain Jinja's.
 - **An EPG grid that has not changed is no longer republished.** The contract has always said it
   was not, and it was not true: every payload carries `generated`, stamped from the clock at the
-  moment the grid was built, and the change comparison is made on the encoded payload — so two
+  moment the grid was built, and the change comparison is made on the encoded payload - so two
   builds a second apart differed by those bytes alone. The refresh runs every quarter of an hour,
-  so a bouquet whose programmes did not move in that window — one carrying no EPG at all, or any
-  bouquet overnight — rewrote its retained topic for nothing, delivering a state change to every
+  so a bouquet whose programmes did not move in that window - one carrying no EPG at all, or any
+  bouquet overnight - rewrote its retained topic for nothing, delivering a state change to every
   consumer and a row to every recorder. A field a payload stamps from the wall clock now takes no
   part in the change comparison; it is still published, so nothing a consumer reads has moved.
 - **A settings change whose reconnect fails no longer leaves the box „online".** Saving the setup
   screen, or a setting on the OpenWebif page that restarts the session, ended the old session with
-  a clean disconnect — which tells the broker to discard the last will — without saying `offline`
+  a clean disconnect - which tells the broker to discard the last will - without saying `offline`
   first, as a shutdown does. When the new session then never connected (a mistyped broker address,
   a password that no longer matches, or the plugin switched off on the same screen), the retained
   `availability` stayed `online` with nothing connected, and a consumer showed a live receiver
-  until somebody looked. A save that changes the connection — broker address or port, login, TLS —
+  until somebody looked. A save that changes the connection - broker address or port, login, TLS -
   or switches the plugin off now publishes a retained `offline` before the old session
   disconnects, so **the receiver shows as unavailable while it reconnects**, and stays so if the
   new session never connects; the new session replaces it with `online` the moment it does. Every
@@ -240,20 +240,20 @@ version that has no section here.
 
 ### Notes
 - **An EPG import freezes the menus for two to three seconds at its end**, whoever starts it. The
-  importer saves the guide on the thread that draws the picture — measured at 2.3 and 2.6 seconds
-  during its scheduled runs — and the plugin cannot move that. The plugin adds nothing blocking of
+  importer saves the guide on the thread that draws the picture - measured at 2.3 and 2.6 seconds
+  during its scheduled runs - and the plugin cannot move that. The plugin adds nothing blocking of
   its own: it asks whether the import is still running every two seconds while it runs and once a
   minute otherwise, and never replaces the importer's completion callback.
 - **The importer has no failure signal**, so `epg_import` can say only that an import did not run,
-  finished with no events, or has not finished after 30 minutes — never which source failed.
+  finished with no events, or has not finished after 30 minutes - never which source failed.
 - **The importer's own deep-standby behaviour applies to every import**, including one started from
   here, but only when all four of its conditions hold: its „shutdown" setting on, deep standby set
-  to „wake up", „deep standby after import" on, and the receiver woken by a timer — and then only in
+  to „wake up", „deep standby after import" on, and the receiver woken by a timer - and then only in
   standby, with nothing recording and not already shutting down. The three settings are off by
   default.
 - **An instance is not a process.** A cam that forks a supervisor to keep its worker shows two
   processes for one instance, so `running_instances` counts matched processes whose parent is not
-  itself matched — a plain process count reports a fault on a healthy receiver. A process is
+  itself matched - a plain process count reports a fault on a healthy receiver. A process is
   matched on its `comm` **and** on `/proc/<pid>/exe`: the kernel keeps only fifteen characters of
   a command name, so two binaries differing after the fifteenth are otherwise indistinguishable.
   `pgrep -f` is not used anywhere, because it matches the shell running the search.
@@ -261,8 +261,8 @@ version that has no section here.
   while recording, with a timer due within ten minutes, and when the image will not say. A restart
   landing close to a timer risks the opening seconds of the recording, and a scrambled recording
   is recoverable while a truncated one is not.
-- **The decode signal is read even with `cam_telemetry` off** — a repair must not require a
-  privacy switch to be turned on — and only the modification time of `/tmp/ecm.info` is ever read.
+- **The decode signal is read even with `cam_telemetry` off** - a repair must not require a
+  privacy switch to be turned on - and only the modification time of `/tmp/ecm.info` is ever read.
   Nothing else in that file reaches the broker, `last_error`, a log line or a diagnostic.
   Absence is read as age rather than as a fault, because the cam removes the file when it stops
   descrambling and on a free-to-air channel that is the healthy state.
@@ -270,11 +270,11 @@ version that has no section here.
   check fires about a second after every interface start, and restarting inside that window races
   a copy already on its way.
 - **The autostart setting holds absolute paths**, and the prefix is stripped where the setting is
-  read — the same place the image's own manager strips it — so that nothing downstream ever sees a
+  read - the same place the image's own manager strips it - so that nothing downstream ever sees a
   path. An entry pointing outside the softcam directory keeps its separators and is refused,
   rather than being rebased onto that directory and started as a different program.
 - **An upgraded cam is still counted.** Once `opkg` replaces the binary, every copy already
-  running reads `…/<name> (deleted)` from its `exe` link; that marker is removed before the
+  running reads `.../<name> (deleted)` from its `exe` link; that marker is removed before the
   comparison, so the copies an upgrade left behind are exactly the ones the button can collapse.
 - **The restart is refused rather than half-performed when the image will not give it a timer.**
   The sequence is armed before anything is signalled, so the one failure that would otherwise end
@@ -287,25 +287,25 @@ version that has no section here.
   did not have the plugin, and its rollback exercised for real: a deliberately wrong broker
   password, the plugin refused, the receiver restored to the byte, the lock released, and „the
   receiver was restored" reported because it had been checked rather than assumed. The correct run
-  then ended on the success screen. The four defects the earlier runs found — a pending discovery
+  then ended on the success screen. The four defects the earlier runs found - a pending discovery
   offer blocking the installer, a lost success screen, a rollback that misjudged the restart and
-  left its lock behind, and a receiver at default settings refused as „different" — are fixed. The
+  left its lock behind, and a receiver at default settings refused as „different" - are fixed. The
   installer lives in the companion integration, so nothing in this package changed; the roadmap
   here was simply still describing a milestone as unproven.
 - **The companion integration's 0.2.0 is released**, so the README no longer says it „follows"
   this one. Both halves of the pair are out: the compatibility table marks 0.2.0 as current on
   both sides, M3 is ticked, and the paragraph under the milestone list says everything after M4 is
-  unreleased rather than everything after M2. M2's own open items — the long passive soak and the
-  deep-standby drill — are unchanged, and nothing in this package changed.
+  unreleased rather than everything after M2. M2's own open items - the long passive soak and the
+  deep-standby drill - are unchanged, and nothing in this package changed.
 
 ## [0.2.0] - 2026-09-22
 
 The release that makes the box useful: everything it is doing, on the broker, and everything it
 can be asked to do, answered as state rather than as a return code.
 
-0.1.0 was the session and the identity. This one fills in the feature areas it promised —
+0.1.0 was the session and the identity. This one fills in the feature areas it promised -
 `power`, `service`, `epg`, `tuner`, `recording`, `timers`, `volume`, `hdd`, `key` and `screen`,
-each driven from the enigma2 hook that knows about it rather than from a poll — and adds the
+each driven from the enigma2 hook that knows about it rather than from a poll - and adds the
 channel list, active bouquet context, a per-bouquet EPG grid, and every command in the contract
 with its guard. `info.capabilities` is no longer empty: it names the feature areas that actually
 bound on this box, so a consumer hides what is missing instead of offering a control nothing will
@@ -313,13 +313,13 @@ ever update.
 
 Commands are verified by effect. The plugin reads the resulting state back rather than trusting a
 return value, and a refusal is a sentence on `last_error` written for the person who will read it
-— which is also how a consumer tells „the box refused this" from „the box cannot do this", now
+- which is also how a consumer tells „the box refused this" from „the box cannot do this", now
 that `info.settings` echoes the read-only `deep_standby_allowed` permission.
 
 Three things are optional and off by default, because they are the ones worth thinking about:
 screenshots, remote-key reporting, and the conditional-access and OSCam telemetry. They can be
-switched on from the broker through `cmd/config`, deliberately — the companion integration's
-options flow is built on that path — which makes the broker login and its ACL the privacy
+switched on from the broker through `cmd/config`, deliberately - the companion integration's
+options flow is built on that path - which makes the broker login and its ACL the privacy
 boundary, and the README and `docs/TOPICS.md` both say so in as many words. The broker address
 and credentials, the node identity, the topic names and the destructive-command permission are
 not in that subset and cannot be changed from the broker at all.
@@ -349,7 +349,7 @@ Wake-on-LAN have not been drilled. The code uses no syntax above Python 3.9 and 
   recordings from the record events and from a wrapper around the call enigma2 makes after every
   change to its timer list, and the volume from wrappers on the receiver's own volume control plus
   a five-second reconciliation that catches whatever changed it from somewhere else.
-- **`channels`**, the configured bouquets and the services in them — the list a channel selector is
+- **`channels`**, the configured bouquets and the services in them - the list a channel selector is
   built from and the one `cmd/zap` by name resolves against. Rebuilt when a bouquet file changes,
   which is a modification-time comparison once a minute because enigma2 offers no event for it.
 - **Active bouquet context** on `bouquet` plus guarded `cmd/bouquet`: selecting a published TV
@@ -360,8 +360,8 @@ Wake-on-LAN have not been drilled. The code uses no syntax above Python 3.9 and 
   took is logged.
 - **Every command in the contract**: `power`, `deep_standby`, `reboot`, `restart_gui`, `zap`,
   `volume`, `mute`, `key`, `message`, `timer`, `record`, `screenshot`, `epg_grid`, and `discovery`
-  now republishes the channel list as well. Each is verified by effect — the plugin reads the
-  resulting state back rather than trusting a return value — and each refusal is a sentence on
+  now republishes the channel list as well. Each is verified by effect - the plugin reads the
+  resulting state back rather than trusting a return value - and each refusal is a sentence on
   `last_error` written for the person who will read it.
 - **Home Assistant discovery**: one device payload with nineteen components and eight device
   triggers for the colour keys. A component whose capability is missing is not announced, and one
@@ -376,7 +376,7 @@ Wake-on-LAN have not been drilled. The code uses no syntax above Python 3.9 and 
   values coming back in `info.settings`. The broker address and credentials, the node identity,
   the topic names, the bouquet filter, logging and destructive-command permission are not in that
   subset and cannot be changed from the broker at all. What *is* in it includes the privacy
-  switches — screenshots, key reporting and both telemetry options — so a client allowed to
+  switches - screenshots, key reporting and both telemetry options - so a client allowed to
   publish on `cmd/config` can switch them on, deliberately and by design, because the companion
   integration's options flow is built on this path. The broker login and its ACL are therefore the
   privacy boundary; `docs/TOPICS.md` and the README both say so in as many words.
@@ -394,7 +394,7 @@ Wake-on-LAN have not been drilled. The code uses no syntax above Python 3.9 and 
 - **`info.settings` echoes `deep_standby_allowed`**, the box-only permission that decides whether
   `cmd/deep_standby` and `cmd/reboot` are obeyed at all. It is always present and always
   read-only: `cmd/config` refuses it like any other key outside its allowlist, and it is granted
-  on the receiver's own setup screen or in the provisioning file at first install — never over
+  on the receiver's own setup screen or in the provisioning file at first install - never over
   MQTT and never from the OpenWebif page. A consumer can now hide the two buttons the box would
   refuse instead of offering controls that always fail, and the fresh `info` that a save publishes
   is how it learns the permission was granted.
@@ -403,7 +403,7 @@ Wake-on-LAN have not been drilled. The code uses no syntax above Python 3.9 and 
 
 - 🔴 **`info.settings` no longer means „the remotely writable subset".** It is the non-secret
   settings a consumer may **read**, of which the writable ones are the `cmd/config` allowlist and
-  nothing else. Writability must not be inferred from presence — an unknown key fails the whole
+  nothing else. Writability must not be inferred from presence - an unknown key fails the whole
   object, so a client that writes back everything it reads loses the settings it did mean to
   change. `docs/TOPICS.md` §1 names which members are read-only.
 - On-zap screenshots now wait a configurable four seconds by default. Rapid channel changes reset
@@ -432,25 +432,25 @@ Wake-on-LAN have not been drilled. The code uses no syntax above Python 3.9 and 
   the shape that keeps an object reachable from enigma2's side for no reason; measurement found
   no growth from either, and this is tidiness rather than a fix for anything observed.
 - `docs/SETUP.md` and `docs/TROUBLESHOOTING.md` record what a screenshot actually costs: about
-  22 kB of enigma2's memory per capture, permanently, whoever takes it — the image's own `grab`,
-  not this plugin — with the measurement behind the number and the advice for a receiver that is
+  22 kB of enigma2's memory per capture, permanently, whoever takes it - the image's own `grab`,
+  not this plugin - with the measurement behind the number and the advice for a receiver that is
   never restarted.
 - `docs/TOPICS.md` gained the `channels`, `cam` and `oscam` topics, the names those areas add to
   the capability vocabulary, the discovery entity table, and the four things about Home Assistant
-  2026.9 that were measured rather than assumed — `default_entity_id` in place of `object_id`,
+  2026.9 that were measured rather than assumed - `default_entity_id` in place of `object_id`,
   removal by platform key, QoS 1 for commands, and shared availability.
 
 ### Fixed
 
 - Removing the package now removes the plugin. `opkg remove` deletes the files it installed, which
   are the `.py` ones; the `.pyc` files beside them were written by the receiver after the install
-  and are in nobody's file list. On an OpenViX 6.6 receiver forty of them survived a removal — the
+  and are in nobody's file list. On an OpenViX 6.6 receiver forty of them survived a removal - the
   whole plugin, still compiled, in the legacy same-directory form that Python 3 imports on its own
-  — and because enigma2's plugin loader enumerates by module name, the next GUI restart loaded the
+  - and because enigma2's plugin loader enumerates by module name, the next GUI restart loaded the
   plugin that had just been removed and it reconnected to the broker while `opkg status` said
   nothing was installed. `prerm` now deletes every `.pyc` and `.pyo` under the plugin directory and
   the compiled OpenWebif hook beside it, then removes every directory it leaves empty, deepest
-  first and the plugin directory last. It sweeps on a removal only — the removal half of an upgrade
+  first and the plugin directory last. It sweeps on a removal only - the removal half of an upgrade
   is `postinst`'s, after the new tree is unpacked, which is the only moment at which a compiled
   file with no source is an orphan rather than one the new package is about to reuse. It deletes no
   `.py` and nothing else that is not bytecode; a file of your own keeps the plugin directory and is
@@ -460,12 +460,12 @@ Wake-on-LAN have not been drilled. The code uses no syntax above Python 3.9 and 
   finds its configuration; and nothing in it can fail an `opkg remove`.
 - An upgrade no longer leaves a removed module behind as importable bytecode. The image
   byte-compiles the plugin after opkg has installed it, so the `.pyc` files are not in opkg's file
-  list and opkg — which removes only what it installed — leaves them. Moving `paho/` under
+  list and opkg - which removes only what it installed - leaves them. Moving `paho/` under
   `_vendor/` took the sources away and left the compiled copies, and in Python 3 a legacy-location
   `.pyc` with no `.py` beside it is still importable, so the old module survived the upgrade meant
   to remove it. `postinst` now deletes every `.pyc` and `.pyo` in the plugin directory whose source
   is gone, in both the same-directory and the `__pycache__` form, and gives back the directories
-  that sweep emptied — walking upward from each deleted file and stopping at the first directory
+  that sweep emptied - walking upward from each deleted file and stopping at the first directory
   that still holds something, so one that was already empty before the upgrade is left alone. It
   keeps every compiled file whose source is present; it checks that every path is under the plugin
   directory before touching it, because a directory name may contain a newline and a line-by-line
@@ -485,8 +485,8 @@ Wake-on-LAN have not been drilled. The code uses no syntax above Python 3.9 and 
   list may still appear seconds after the plugin connects; when it does, `info` and the
   announcement are published again with the capability in them, and an image that has not offered
   one after a minute is checked once a minute from then on rather than given up on.
-- A receiver that is not in any configured bouquet — on the radio list, in the movie list, or in a
-  bouquet the filter leaves out — publishes `bouquet` with both fields null instead of nothing at
+- A receiver that is not in any configured bouquet - on the radio list, in the movie list, or in a
+  bouquet the filter leaves out - publishes `bouquet` with both fields null instead of nothing at
   all. That is ordinary operation, and treating it as a missing hook used to retire the whole
   feature a few seconds after somebody opened the radio list.
 - The OSCam publisher hands its probe slot back when it stops. Saving the setup screen replaces it
@@ -494,20 +494,20 @@ Wake-on-LAN have not been drilled. The code uses no syntax above Python 3.9 and 
   back. No more than two abandoned workers are left outstanding, so a listener that answers slowly
   for ever cannot accumulate threads.
 - The status page in the web interface answers with its own failure page, logged, if building it
-  raises — rather than handing OpenWebif a traceback to render — and it derives its icon URL from
+  raises - rather than handing OpenWebif a traceback to render - and it derives its icon URL from
   the request instead of assuming where OpenWebif mounted it.
 - An omitted optional key in `cmd/config` takes its current value from the settings the result
   will be saved into, rather than from the module-global settings.
 - A capture file left in `/tmp` by a plugin older than 0.2.0 is removed at start-up. Nothing else
   would ever have deleted it, including switching screenshots off.
-- An OSCam version whose revision carries a suffix — `1.20_svn build r11718-079`, which is what a
-  receiver running the current OpenViX build reports — is published instead of being dropped as
+- An OSCam version whose revision carries a suffix - `1.20_svn build r11718-079`, which is what a
+  receiver running the current OpenViX build reports - is published instead of being dropped as
   unrecognised. The allowlist still refuses anything that is not a version.
 - The status page answers on `/mqttbridge/` as well as `/mqttbridge`. The trailing slash resolves
   to an empty child in Twisted, and without one the receiver answered 404 to an ordinary URL.
 - Selecting a bouquet now enters it under the root its channel list was read from. On a box with
   „multiple bouquets" switched off there is no bouquet list at all and everything is read from the
-  favourites list, so entering `bouquets.tv` first built — and then persisted — a channel-list path
+  favourites list, so entering `bouquets.tv` first built - and then persisted - a channel-list path
   the receiver does not use.
 - An OSCam probe that stops answering is abandoned instead of holding the plugin's single probe
   slot forever. The deadline only ever governed reading the response body; a connect or an
@@ -523,38 +523,38 @@ Wake-on-LAN have not been drilled. The code uses no syntax above Python 3.9 and 
 - **[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md) records that its first
   decision is implemented on `main`, and corrects one line of it.** `info.settings` carries
   `deep_standby_allowed` as a read-only member; the permission can be set on the setup screen **or
-  in the provisioning file at first install**, and never over MQTT or from the status page — the
+  in the provisioning file at first install**, and never over MQTT or from the status page - the
   record said „only on the setup screen". A consumer needs three states rather than two, because
   the announcement arrives before `info` and carries no settings at all. The record also gains a
   **Found since** section: a deliberate disconnect suppresses the last will, so `Bridge.reload()`
   can leave retained availability saying `online` with nothing connected, and the fix is to publish
   `offline` before any deliberate disconnect.
-- **[ADR-0002](docs/adr/0002-scope-after-m0.md) records the scope added and changed after M0** —
+- **[ADR-0002](docs/adr/0002-scope-after-m0.md) records the scope added and changed after M0** -
   bouquet context, the optional CAM and OSCam telemetry, `cmd/config` and the privacy boundary it
   moves to the broker login, the post-zap screenshot delay, the OpenWebif status page, the runtime
-  diagnostics, `channels`, and the reproducible build — each with why it exists and what it costs.
+  diagnostics, `channels`, and the reproducible build - each with why it exists and what it costs.
   It also states what was **not** done at the time: no 0.2.0 release, no call-for-testers issues,
   no sweep of `.pyc` files orphaned by an upgrade, and M2's long soak and the deep-standby drill
   open. This release closes the first and the third. The README's roadmap and its claim that a
-  call-for-testers thread exists per image are corrected to match — testers are wanted, and
+  call-for-testers thread exists per image are corrected to match - testers are wanted, and
   opening the issue is the way to volunteer.
 - **[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md) records the 0.2.0 and
   0.3.0 plan** that came out of two days of household use: a read-only `deep_standby_allowed` echo
   so a consumer can hide a control the box will refuse (0.2.0), and then the discreet toast, the
   softcam restart with its opt-in auto-heal, the EPG import, the opt-in CEC standby workaround,
-  Wake-on-LAN arming and the process topic (0.3.0). Every contract addition — three topics, two
-  commands, `cmd/message`'s `style`, the new `info` members — is written out in
+  Wake-on-LAN arming and the process topic (0.3.0). Every contract addition - three topics, two
+  commands, `cmd/message`'s `style`, the new `info` members - is written out in
   [docs/TOPICS.md](docs/TOPICS.md) under **Planned (not implemented yet)**, with the payload fields
   and their types, so the contract keeps one home and a consumer can be written against it before
   it exists. 🔴 One of those additions changes what `info.settings` means: presence there no longer
   implies that a setting is writable. **Only the `deep_standby_allowed` echo is implemented so
-  far** — it has moved out of that section and into the contract — and the README's roadmap says
+  far** - it has moved out of that section and into the contract - and the README's roadmap says
   so.
 - **[ADR-0004](docs/adr/0004-remote-uninstall.md) records the remote uninstall**, and the roadmap
   and the contract gain it as a seventh 0.3.0 item. `cmd/uninstall` removes the plugin from the
-  receiver on request — retracting every retained topic it owns, publishing a final `offline`,
+  receiver on request - retracting every retained topic it owns, publishing a final `offline`,
   removing the package and restarting the interface, in that order, because after the package is
-  gone there is nothing left to ask — behind a box-only `uninstall_allowed` permission echoed
+  gone there is nothing left to ask - behind a box-only `uninstall_allowed` permission echoed
   read-only in `info.settings`. Its payload is the node id, which confirms *which* receiver was
   meant rather than who is asking; the permission is the security boundary. 🔴 It is a one-way
   door: once it has run there is no plugin left to listen, so only SSH or the receiver's own
@@ -566,17 +566,17 @@ Wake-on-LAN have not been drilled. The code uses no syntax above Python 3.9 and 
 The first release: a receiver that publishes what it is doing to MQTT, and stays out of the way.
 
 Install it, point it at your broker, and the box appears on the broker within seconds of enigma2
-starting — `availability` so you can tell a sleeping box from a broken one, `info` with the image,
+starting - `availability` so you can tell a sleeping box from a broken one, `info` with the image,
 the box type, its address and what the plugin found it could do, and an announcement a consumer
 can discover it by. Commands come back on the same session: switch the Home Assistant mode, ask
 it to re-announce itself, or retract every retained topic it owns and publish them again. There
-is a setup screen under *Menu → Plugins → MQTT Bridge* for the broker details, and a provisioning
+is a setup screen under *Menu -> Plugins -> MQTT Bridge* for the broker details, and a provisioning
 file for installing a box without touching a remote control.
 
 It is deliberately quiet about what it cannot do. Bad configuration produces one line in the log
 and an idle plugin, never a dialog and never a retry storm, because the graphical interface has to
-come up whatever the broker is doing. The feature areas that publish live state — the channel, the
-EPG, the tuner, recordings, volume, keys — arrive in 0.2.0; this release is the session, the
+come up whatever the broker is doing. The feature areas that publish live state - the channel, the
+EPG, the tuner, recordings, volume, keys - arrive in 0.2.0; this release is the session, the
 identity and the plumbing they hang off, and `capabilities` says so by being empty.
 
 Tested on a Vu+ Uno 4K SE running OpenViX 6.6. The code uses no syntax above Python 3.9 and is
@@ -587,8 +587,8 @@ tested on 3.9, 3.12 and 3.14.
 - Repository scaffold: the licence (GPL-2.0-or-later), `NOTICE` recording the vendored
   paho-mqtt 2.1.0 and its archive hash, the security policy, the contributor guide and the code
   of conduct.
-- The topic contract in `docs/TOPICS.md` — every topic, its retain flag and QoS, every payload
-  field with its type, every command with its guard — plus install, setup and troubleshooting
+- The topic contract in `docs/TOPICS.md` - every topic, its retain flag and QoS, every payload
+  field with its type, every command with its guard - plus install, setup and troubleshooting
   guides.
 - Architecture decision records in `docs/adr/`: the product requirements as ADR-0000, and
   ADR-0001 closing the three questions left open at M0 (the EPG grid ships in v1, both project
@@ -600,21 +600,21 @@ tested on 3.9, 3.12 and 3.14.
 - Continuous integration: ruff and pyflakes, the unit tests on Python 3.9, 3.12 and 3.14, and an
   IPK build on every push and pull request; a release workflow that publishes the IPK and
   regenerates the opkg feed on a tag.
-- The plugin package skeleton — `src/MQTTBridge/` with the single-sourced version and the
+- The plugin package skeleton - `src/MQTTBridge/` with the single-sourced version and the
   vendored MQTT client.
 - The runtime: the plugin loads under `WHERE_SESSIONSTART`, keeps one MQTT session with a
   retained last will, and on every connect publishes `availability`, `info` and the
   announcement on `enigma2mqtt/discovery/<node>/config` before subscribing to `cmd/#`. A clean
   shutdown publishes `offline` rather than leaving it to the will.
-- Settings under `config.plugins.mqttbridge.*` — every key the contract names, including the
-  ones later milestones will read — with a `ConfigListScreen` under *Menu → Plugins → MQTT
+- Settings under `config.plugins.mqttbridge.*` - every key the contract names, including the
+  ones later milestones will read - with a `ConfigListScreen` under *Menu -> Plugins -> MQTT
   Bridge* that shows whether the bridge is connected and which node id it is using.
 - Provisioning: `/etc/enigma2/mqttbridge.json` is imported before the first connection and then
   deleted, because it holds a broker password in clear. A file that cannot be parsed is left
   alone and logged. Only the key names are ever logged, never the values.
 - The node id is derived once from the box type and the last six digits of the MAC and then
   kept, so it survives a reinstall. The box type is taken from `boxbranding`, then
-  `/proc/stb/info/boxtype`, then `/etc/image-version` — deliberately ahead of
+  `/proc/stb/info/boxtype`, then `/etc/image-version` - deliberately ahead of
   `/proc/stb/info/model`, which on a Vu+ Uno 4K SE running OpenViX 6.6 reads `dm8000`.
 - `cmd/ha_mode` and `cmd/reset`, with `cmd/discovery` to republish the announcement. A command
   that arrives retained is discarded and logged; so is one over 4 KB. A refusal goes to
@@ -643,7 +643,7 @@ tested on 3.9, 3.12 and 3.14.
 - Topics published under a previous node id or base topic are now retracted on the next connect,
   not only when the name is changed with a session open. Renaming a box that was switched off
   used to leave its old topics on the broker forever.
-- A provisioning file from which nothing could be imported — every key misspelt — is kept and
+- A provisioning file from which nothing could be imported - every key misspelt - is kept and
   reported instead of being deleted with the settings it was meant to carry.
 - On an image that offers no way to reach the main loop from a background thread, the plugin now
   says so and stays idle rather than running MQTT callbacks on the network thread.
@@ -667,12 +667,12 @@ tested on 3.9, 3.12 and 3.14.
   no feature area bound publishes an empty list.
 - `info.enigma` is documented as enigma2's build-date string rather than a version number, which
   is what `getEnigmaVersionString()` returns on OE-Alliance images.
-- The documentation names the retained-topic record correctly — `/etc/enigma2/mqttbridge-state.json`
-  — and describes what it holds and what a reset does with it.
+- The documentation names the retained-topic record correctly - `/etc/enigma2/mqttbridge-state.json`
+  - and describes what it holds and what a reset does with it.
 - The EPG grid is published as one retained topic per configured bouquet,
   `epg_grid/<bouquet_slug>`, and a bouquet that stops being configured has its topic retracted.
-- `cmd/reset` republishes everything immediately after retracting it — availability, the state
-  snapshot, the announcement and the discovery payloads — which is what makes it safe to run at
+- `cmd/reset` republishes everything immediately after retracting it - availability, the state
+  snapshot, the announcement and the discovery payloads - which is what makes it safe to run at
   any time rather than only before uninstalling.
 - A command that arrives with the retain flag set is logged and discarded, never executed.
 - The topic contract names the attributes the Home Assistant channel and programme sensors carry,

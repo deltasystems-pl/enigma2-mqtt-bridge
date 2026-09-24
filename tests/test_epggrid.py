@@ -28,7 +28,7 @@ class Clock:
     The grid stamps `generated` from `time.time()`, so „were these two builds
     in the same second?" decides what the change test sees. Left to the real
     clock that is a coin toss, and a test whose answer depends on a coin toss
-    proves nothing either way — it only hides the defect most of the time.
+    proves nothing either way - it only hides the defect most of the time.
     """
 
     def __init__(self, now):
@@ -56,7 +56,7 @@ def test_the_slug_is_the_bouquet_name_made_addressable(live_bridge):
 
 def test_a_polish_bouquet_name_slugs_to_ascii(live_bridge, factory, receiver):
     receiver.service_center.contents[conftest.BOUQUET_ROOT] = [
-        (conftest.FIRST_BOUQUET, "Kanały Główne — Łódź"),
+        (conftest.FIRST_BOUQUET, "Kanały Główne \u2014 Łódź"),
     ]
     live_bridge.publisher("channels").refresh()
     generate(live_bridge)

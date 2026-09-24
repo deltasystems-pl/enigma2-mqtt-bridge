@@ -69,7 +69,7 @@ def test_a_zap_publishes_the_new_service(live_bridge, factory, receiver):
 def test_an_event_this_publisher_does_not_care_about_publishes_nothing(live_bridge, factory,
                                                                       receiver):
     factory.client.clear()
-    receiver.nav.fire(6)  # evUpdatedEventInfo — the EPG publisher's business
+    receiver.nav.fire(6)  # evUpdatedEventInfo - the EPG publisher's business
     assert factory.client.all_for(SERVICE) == []
 
 

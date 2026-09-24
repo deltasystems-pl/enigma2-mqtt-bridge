@@ -1,7 +1,7 @@
 """The recording disk.
 
 There is no event for a disk going away. A network mount that does not come back
-after a reboot, a USB disk somebody unplugged, a drive that dropped off the bus —
+after a reboot, a USB disk somebody unplugged, a drive that dropped off the bus -
 each leaves a receiver that looks perfectly healthy and records nothing. So this
 is a poll, once a minute, and it publishes only when the answer changes.
 
@@ -53,7 +53,7 @@ def read(path=RECORDING_PATH):
 
 
 class HddPublisher(Publisher):
-    """`hdd` — mounted, where, and how much room is left."""
+    """`hdd` - mounted, where, and how much room is left."""
 
     name = "hdd"
 

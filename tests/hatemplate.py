@@ -7,7 +7,7 @@ the string it expected to see, and none looked at what the string produces. The
 tests render the templates instead, and this module is what they render with.
 
 It is plain Jinja plus the part of Home Assistant that differs from plain Jinja
-— and only the part these templates use. Home Assistant **adds** filters (such
+- and only the part these templates use. Home Assistant **adds** filters (such
 as `timestamp_utc`) and **replaces** some of Jinja's own: `int`, `round`,
 `float` and `random`. (Its `range` global differs from plain Jinja's too, but
 that is the sandbox's doing, not Home Assistant's; the environment here is the
@@ -20,7 +20,7 @@ So the environment starts **empty**. Every filter, test and global a template
 may use is listed below by name, with where its behaviour comes from, and
 `check()` refuses a template that reaches for anything else before it is
 rendered. A template that needs a new filter means adding the filter here, on
-purpose and with its provenance — never inheriting whatever Jinja happens to
+purpose and with its provenance - never inheriting whatever Jinja happens to
 call by that name.
 
 🔴 The copies are of Home Assistant **2026.9.2**, the release the companion
@@ -86,7 +86,7 @@ def forgiving_int(value, default=_SENTINEL, base=10):
 def forgiving_round(value, precision=0, method="common", default=_SENTINEL):
     """Home Assistant's `round`: an int at precision 0, and no rounding of None.
 
-    Jinja's own returns a float at every precision — `1.0`, not `1`.
+    Jinja's own returns a float at every precision - `1.0`, not `1`.
     """
     try:
         multiplier = float(10 ** precision)
@@ -125,7 +125,7 @@ FILTERS = {
     "round": forgiving_round,
     # Added by Home Assistant; copied above.
     "timestamp_utc": timestamp_utc,
-    # Jinja's own, which Home Assistant keeps — the very same objects sit in its
+    # Jinja's own, which Home Assistant keeps - the very same objects sit in its
     # environment. `default` is the one the plugin leans on hardest, and it
     # fires on an ABSENT key (Jinja's Undefined), not on a JSON null, which is a
     # value like any other.
@@ -185,8 +185,8 @@ def check(template):
     """Refuse a template that uses anything this module does not explicitly own.
 
     Without this, a template reaching for a filter nobody has copied would still
-    render wherever Jinja has one by that name — with Jinja's semantics, not
-    Home Assistant's — and read as coverage. The empty environment makes most
+    render wherever Jinja has one by that name - with Jinja's semantics, not
+    Home Assistant's - and read as coverage. The empty environment makes most
     of that fail anyway; this makes it fail **before** rendering, for every
     branch of the template rather than only the branch one payload takes, and
     names what is missing.

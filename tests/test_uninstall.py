@@ -1,7 +1,7 @@
 """`cmd/uninstall`: the refusals, the order on the way out, and the way back when it fails.
 
 The broker here is `FakeMQTTClient`, whose QoS 1 publishes stay unacknowledged
-until a test calls `acknowledge()` — which is exactly the question the teardown
+until a test calls `acknowledge()` - which is exactly the question the teardown
 asks before it removes anything. Timers are `conftest.MainLoop`'s, so „the next
 turn of the main loop" and „100 ms later" are things a test does by hand, and
 opkg is `conftest.ConsoleAppContainer`, which runs nothing and remembers the
@@ -842,7 +842,7 @@ def test_a_long_opkg_line_is_cut_on_last_error(box, factory, plugin_log):
     sentence = error(_fresh_session(factory, old))
     quoted = sentence.split("(", 1)[1].split(")", 1)[0]
     assert len(quoted) == uninstall.OUTPUT_LINE_LIMIT
-    assert quoted.endswith("…")
+    assert quoted.endswith("\u2026")
     assert "x" * 400 in plugin_log()
 
 

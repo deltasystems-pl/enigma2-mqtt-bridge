@@ -2,7 +2,7 @@
 
 **This page trusts the web interface that mounted it.** OpenWebif builds one
 resource tree, mounts this page on it, and wraps that tree in its own
-authentication — for HTTP and again for HTTPS — deciding on the first path
+authentication - for HTTP and again for HTTPS - deciding on the first path
 segment, before this code is ever asked for anything. A client OpenWebif refuses
 never reaches the page; a client it admits reaches OpenWebif's own `saveconfig`,
 which sets any `config.*` key, and its settings listing, which prints every
@@ -12,8 +12,8 @@ web interface already admits protects nothing (ADR-0009).
 
 What it does keep is what stops *another* web page from using it through a
 household member's browser. Every request must name the receiver itself in
-`Host` — an IP literal, `localhost`, or the box's own hostname bare or with
-`.local` — which is what defeats DNS rebinding, where a hostile name is later
+`Host` - an IP literal, `localhost`, or the box's own hostname bare or with
+`.local` - which is what defeats DNS rebinding, where a hostile name is later
 pointed at the receiver and is same-origin with itself. Every write must also
 be same-origin, carry the session's token and exactly the form's
 fields. Sessions exist without a login: OpenWebif opens one for every request
@@ -25,7 +25,7 @@ through OpenWebif's own endpoints; this page must not be the weakest link, and
 it cannot be the strongest.
 
 What the page changes, it changes through what exists. A setting goes through
-`config.validate_setting`, then the path the rest of the plugin uses for it —
+`config.validate_setting`, then the path the rest of the plugin uses for it -
 `apply_remote_settings` for `cmd/config`'s subset, the setup screen's
 save-and-reload for everything else. A command goes through the dispatcher's
 own handler with the origin `page` (`origin.py`), which answers the box-side
@@ -37,13 +37,13 @@ second page rendered by the server, never a dialog.
 **How the page is opened.** OpenWebif's menu entry loads it into its own
 content panel with jQuery (`$("#content_container").load(url)`), which injects
 whatever comes back into OpenWebif's document and runs any script in it. So a
-panel load — `X-Requested-With: XMLHttpRequest`, or `Sec-Fetch-Dest: empty` for
-a theme that uses `fetch()` — is answered, before the `Host` check, with a
+panel load - `X-Requested-With: XMLHttpRequest`, or `Sec-Fetch-Dest: empty` for
+a theme that uses `fetch()` - is answered, before the `Host` check, with a
 fragment and nothing else: an
 `<iframe>` of this page and a link to open it in a new tab, with no script, no
 style element and no data. The frame is the full page, under its own headers,
-which admit OpenWebif's origin and nobody else's. Every navigation — a tab, a
-bookmark, the frame itself — gets the full page (ADR-0010).
+which admit OpenWebif's origin and nobody else's. Every navigation - a tab, a
+bookmark, the frame itself - gets the full page (ADR-0010).
 """
 
 import hmac
@@ -121,7 +121,7 @@ FRAME_STYLE = "display:block;width:100%;height:calc(100vh - 140px);min-height:48
 SETTINGS_ACTION = "settings"
 
 # The setup screen's order, in the groups the page shows. A setting in none of
-# them is still shown — under behaviour — and a test fails, so a new setting is
+# them is still shown - under behaviour - and a test fails, so a new setting is
 # placed on purpose rather than by accident.
 SETTING_GROUPS = (
     ("identity", ("enabled", "node_id", "friendly_name")),
@@ -299,8 +299,8 @@ def _csrf_token(request):
 def _rotate(request):
     """Replace the session's token, remembering the few it replaced.
 
-    The retired ones are kept only to tell a tab left open in this session —
-    which gets „the page is out of date" — from a token that was never this
+    The retired ones are kept only to tell a tab left open in this session -
+    which gets „the page is out of date" - from a token that was never this
     session's, which gets the plain refusal. None of them is ever accepted.
     """
     session = _session(request)
@@ -316,11 +316,11 @@ class _OutOfDate(PermissionError):
 
 
 def _body_fields(request):
-    """The POST body's fields, `{name: [value, …]}` in bytes — and nothing else.
+    """The POST body's fields, `{name: [value, ...]}` in bytes - and nothing else.
 
     🔴 Twisted's `request.args` is the query string and the body merged, and its
     parser splits on `;` as well as `&`, so a token could arrive in the URL in
-    spellings a query check would have to enumerate — and a URL ends up in logs,
+    spellings a query check would have to enumerate - and a URL ends up in logs,
     in history and in a `Referer`. So the page never reads `request.args`: it
     parses the body itself, as `application/x-www-form-urlencoded` is defined,
     with `&` as the only separator. A field in the query string is simply not a
@@ -400,7 +400,7 @@ def _bool_arg(request, name):
 
 
 def _exact(request, names):
-    """Exactly these fields and no other — no extra, no missing."""
+    """Exactly these fields and no other - no extra, no missing."""
     if set(_body_fields(request)) != {name.encode("ascii") for name in names}:
         raise ValueError("unexpected or missing form field")
 
@@ -765,7 +765,7 @@ def _group_label(group):
 
 
 def _rendered_values(section):
-    """What the settings form shows, name to value — every setting but the secrets."""
+    """What the settings form shows, name to value - every setting but the secrets."""
     return {
         name: settings_module.value(name, section)
         for name in settings_module.SETTING_NAMES
@@ -777,8 +777,8 @@ def _seal(token, values):
     """The rendered values as the form carries them, sealed with the session token.
 
     A form submits every field, touched or not. Without knowing what it was
-    rendered with, a form left open while a setting changed elsewhere — over
-    `cmd/config`, or a permission revoked at the television — would write its
+    rendered with, a form left open while a setting changed elsewhere - over
+    `cmd/config`, or a permission revoked at the television - would write its
     stale copy back as though somebody had chosen it. The seal only says this
     server produced the snapshot for this token; the token itself is what keeps
     another web site out.
@@ -807,7 +807,7 @@ def _unseal(request):
 def _untouched(name, raw, rendered):
     """True when a submitted field still says what the form was rendered with.
 
-    Compared after the type coercion alone — the limits are not asked, because a
+    Compared after the type coercion alone - the limits are not asked, because a
     field that was not edited is not being written.
     """
     try:
@@ -820,7 +820,7 @@ def _changes(request, section):
     """The settings the form changes, validated.
 
     🔴 A field counts only when its submitted value differs from the value the
-    form was rendered with — an untouched field never overwrites a newer value
+    form was rendered with - an untouched field never overwrites a newer value
     set elsewhere since. Secrets are never rendered, so for them empty means
     unchanged and anything else is a change.
     """
@@ -836,8 +836,8 @@ def _changes(request, section):
             # „leave it as it is". Clearing a password is the setup screen's job.
             continue
         if name in rendered and _untouched(name, raw, rendered[name]):
-            # Not validated either: a value stored before today's rules — a
-            # host longer than the page allows, say — must not make every
+            # Not validated either: a value stored before today's rules - a
+            # host longer than the page allows, say - must not make every
             # other save on the page fail over a field nobody touched.
             continue
         wanted = settings_module.validate_setting(name, raw)
@@ -1019,7 +1019,7 @@ def _set_headers(request, content_type="text/html; charset=utf-8"):
     request.setHeader("x-frame-options", "SAMEORIGIN")
     # 🔴 `same-origin`, never `no-referrer`. By the Fetch standard a browser
     # that POSTs a form from a document whose policy is `no-referrer` sends
-    # `Origin: null` — and the same-origin check rightly refuses that, so every
+    # `Origin: null` - and the same-origin check rightly refuses that, so every
     # save and every command from a real browser was a 403. `same-origin`
     # still sends nothing to another site.
     request.setHeader("referrer-policy", "same-origin")
@@ -1080,7 +1080,7 @@ def _shown(text):
     """A payload as the page may show it: redacted, and cut to a readable size."""
     text = log_module.redact(str(text))
     if len(text) > MAX_SHOWN_PAYLOAD:
-        text = text[:MAX_SHOWN_PAYLOAD] + "…"
+        text = text[:MAX_SHOWN_PAYLOAD] + "\u2026"
     return text
 
 
@@ -1127,7 +1127,7 @@ def _setting_control(name, current):
     limit = settings_module.TEXT_LIMITS.get(name, settings_module.TEXT_LIMIT)
     if name in settings_module.SECRET_NAMES:
         # 🔴 Write-only. The stored value is never put into the page in any
-        # form — not as a value, not as a placeholder, not as a length.
+        # form - not as a value, not as a placeholder, not as a length.
         return (
             f"<input type='password' name='{_e(name)}' value='' maxlength='{limit}' "
             "autocomplete='new-password'>"
@@ -1350,7 +1350,7 @@ def _page(request, message=""):
     )
     head = ""
     if bridge is not None and bridge.running and _capture_in_flight(bridge):
-        # „Taking…" without script: the page reloads itself by GET, which never
+        # „Taking..." without script: the page reloads itself by GET, which never
         # mutates anything, so a refresh can never repeat the command.
         target = _e(_mount_path(request) + "/")
         head = f"<meta http-equiv='refresh' content='{REFRESH_EVERY_SECONDS};url={target}'>"
@@ -1394,7 +1394,7 @@ class PluginIconResource(resource.Resource):
 
 
 class ScreenshotResource(resource.Resource):
-    """`<mount>/screen.jpg` — the last picture this process put on `screen`.
+    """`<mount>/screen.jpg` - the last picture this process put on `screen`.
 
     Never a fresh capture: it runs no `grab`. Whoever reaches it reaches
     OpenWebif's own `/grab`, which takes a new picture on every request, so it
@@ -1462,7 +1462,7 @@ class MQTTBridgeWebResource(resource.Resource):
         self.putChild(b"screen.jpg", ScreenshotResource())
         # `/mqttbridge/` is the same page as `/mqttbridge`. Twisted resolves the
         # trailing slash to an empty child, and without this the receiver
-        # answers 404 to a perfectly ordinary URL — measured on the box.
+        # answers 404 to a perfectly ordinary URL - measured on the box.
         self.putChild(b"", self)
 
     def render_GET(self, request):

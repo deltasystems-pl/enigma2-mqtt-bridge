@@ -47,15 +47,15 @@ INFO = ROOT + "/info"
 
 
 class Recorded(ModelScreen):
-    """A screen that remembers its own exit — and whether the echo was held then."""
+    """A screen that remembers its own exit - and whether the echo was held then."""
 
     def __init__(self, session, *args, **kwargs):
         ModelScreen.__init__(self, session)
         self.cancelled = []
 
     def cancel(self):
-        # Recorded as the image reads it — a yes or no (`HdmiCec` source line
-        # 618) — because the plugin's hold is truthy without being `True`.
+        # Recorded as the image reads it - a yes or no (`HdmiCec` source line
+        # 618) - because the plugin's hold is truthy without being `True`.
         instance = HdmiCec.instance
         self.cancelled.append(None if instance is None else bool(instance.handlingStandbyFromTV))
         self.close(None)
@@ -285,7 +285,7 @@ def test_the_flag_is_put_back_to_the_value_it_had(world):
     box = world()
     box.show(ChannelSelection)
     box.tv_standby()
-    # Whatever the image had there, that is what comes back — not `False`.
+    # Whatever the image had there, that is what comes back - not `False`.
     box.hdmi.handlingStandbyFromTV = "sentinel"
 
     MainLoop.advance(0)
@@ -386,7 +386,7 @@ def test_a_subclass_of_a_channel_list_is_matched_through_its_bases(world):
     """A skin or plugin that subclasses the channel list is still the channel list.
 
     Its own name is on no list, so only the match against the class's bases
-    finds it — `PiPZapSelection` cannot show that, because it is listed by name.
+    finds it - `PiPZapSelection` cannot show that, because it is listed by name.
     """
     Skinned = _screen("SkinnedChannelSelection", (ChannelSelection,), "Plugins.Extensions.Skin")
     box = world()
@@ -497,7 +497,7 @@ def test_a_household_standby_during_the_hold_is_not_taken_for_the_televisions(wo
 
     The list is closed and the flag held, but a popup was already queued ahead
     of the television's standby, so the info bar opens that first and the
-    standby keeps waiting. A second later Home Assistant asks for standby —
+    standby keeps waiting. A second later Home Assistant asks for standby -
     exactly the „television off, so receiver off" automation. That standby is
     queued while the flag is held, and must not be identified as the
     television's, or its deadline would silently throw the household's request
@@ -530,7 +530,7 @@ def test_a_household_standby_during_the_hold_is_not_taken_for_the_televisions(wo
 def test_a_second_close_inside_one_hold_keeps_the_value_to_put_back(world):
     """🔴 A hold already in place never records its own marker as the value to restore.
 
-    Otherwise the marker would be put back at the end — and stay in the flag
+    Otherwise the marker would be put back at the end - and stay in the flag
     for the rest of the session, which is exactly the leak the deadline exists
     to prevent.
     """
@@ -553,7 +553,7 @@ def test_two_closes_inside_one_hold_both_keep_the_echo_suppressed(world):
     The list is closed for the first standby, but a popup queued ahead is shown
     first. Within the hold somebody opens the list again and the television
     asks again, so the list is closed a second time. When the popup is then
-    dismissed, the first standby finally runs — and must still not be echoed.
+    dismissed, the first standby finally runs - and must still not be echoed.
     """
     box = world()
     first = box.show(ChannelSelection)
@@ -589,7 +589,7 @@ def test_a_second_close_restarts_the_hold_deadline(world):
 
     The list is closed at 0 s for a standby that then waits behind a popup, and
     closed again at 4 s for the television's second standby. The popup is
-    dismissed at 6 s — after the first close's deadline, inside the second's —
+    dismissed at 6 s - after the first close's deadline, inside the second's -
     and the standby that finally runs must still not be echoed. A deadline that
     kept counting from the first close would have put the flag back at 5 s.
     """
@@ -671,7 +671,7 @@ def test_a_notification_that_is_not_a_standby_is_ignored_even_inside_the_bracket
 
 
 def test_a_stale_standby_is_dropped_by_identity(world):
-    """🔴 An equal tuple — the household's own standby — survives the drop."""
+    """🔴 An equal tuple - the household's own standby - survives the drop."""
     box = world()
     menu = box.show(Menu)
     _cmd_power_standby()
@@ -786,7 +786,7 @@ def test_a_television_standby_overtaken_by_the_remote_is_counted_once_as_a_drop(
     Either the list was closed for it but a popup queued ahead is showing, or it
     sits behind a menu. The remote's power button opens the standby screen
     directly; none of the television's standbys ran. Removing it is the plugin
-    throwing it away — a drop, counted once, and not a close, which released
+    throwing it away - a drop, counted once, and not a close, which released
     nothing.
     """
     box = world()
@@ -948,7 +948,7 @@ def test_the_hook_returns_at_once_for_a_screen_that_is_not_the_standby(world, mo
     notifications_module.AddNotification(MessageBox, "hello")
     notifications_module.AddNotification(standby_module.Standby)
 
-    # Read once — for the standby — and not at all for the message box.
+    # Read once - for the standby - and not at all for the message box.
     assert reads == [1]
 
 

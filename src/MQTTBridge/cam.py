@@ -146,7 +146,7 @@ def read_cam(session, path=ECM_PATH, service_since=0.0, now=None):
 
 
 class CamPublisher(NavPublisher):
-    """`cam` — bounded fresh ECM activity, never CAM credentials or controls."""
+    """`cam` - bounded fresh ECM activity, never CAM credentials or controls."""
 
     name = "cam"
     events = ("evStart", "evTunedIn", "evUpdatedInfo")

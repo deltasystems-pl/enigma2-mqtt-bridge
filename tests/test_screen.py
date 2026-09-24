@@ -27,7 +27,7 @@ def publisher(bridge, tmp_path):
 def test_a_capture_left_by_an_older_version_is_removed_at_start(
     make_bridge, settings, receiver, tmp_path, monkeypatch
 ):
-    """Nothing else ever deleted it — not even switching screenshots off."""
+    """Nothing else ever deleted it - not even switching screenshots off."""
     legacy = tmp_path / "mqttbridge.jpg"
     write_a_picture(str(legacy))
     monkeypatch.setattr(screen_module, "LEGACY_OUTPUT_PATH", str(legacy))
@@ -244,7 +244,7 @@ def test_a_new_zap_discards_an_inflight_automatic_capture(
 
     `_arm_zap_capture` computes `max(4000, ceil((5 - (time.time() - last)) * 1000))`,
     so the 5000 this asserts only holds while less than a millisecond has passed
-    since the first capture. On a loaded machine it is 4999 — three failures in
+    since the first capture. On a loaded machine it is 4999 - three failures in
     320 runs under CPU contention, and every time with a forced 2 ms gap. The
     clock is frozen here the way its siblings freeze it; the assertion is the
     thing being tested and is left exact.

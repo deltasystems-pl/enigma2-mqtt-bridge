@@ -85,7 +85,7 @@ class _ProbeSlot:
 
 _PROBE_SLOT = _ProbeSlot()
 
-# The allowlist a version string has to match before it is published at all —
+# The allowlist a version string has to match before it is published at all -
 # anything else becomes null rather than an echo of whatever the API said.
 # 🔴 The revision can carry a suffix: a receiver here reports
 # `1.20_svn build r11718-079`, and without the last group that whole version
@@ -426,7 +426,7 @@ def probe(
 
 
 class OscamPublisher(Publisher):
-    """`oscam` — local software, API and neutral reader health."""
+    """`oscam` - local software, API and neutral reader health."""
 
     name = "oscam"
 
@@ -503,8 +503,8 @@ class OscamPublisher(Publisher):
         A worker can block for longer than its own deadline governs, and while
         it does it holds the one slot: without this, one stuck probe freezes
         OSCam telemetry until the plugin is restarted. Nothing here can kill
-        the thread, so its generation is retired instead — whatever it
-        eventually answers is ignored — and the slot is released on its behalf
+        the thread, so its generation is retired instead - whatever it
+        eventually answers is ignored - and the slot is released on its behalf
         so the next tick can start a fresh probe.
         """
         if self._stopped or not self._running or not self._last_completion:

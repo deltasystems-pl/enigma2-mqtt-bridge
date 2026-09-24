@@ -1,4 +1,4 @@
-"""The setup screen under *Menu → Plugins → MQTT Bridge*.
+"""The setup screen under *Menu -> Plugins -> MQTT Bridge*.
 
 Built on `ConfigListScreen` and nothing else. `Screens.Setup` needs an entry in
 the image's `setup.xml`, which not every image will accept from a third-party
@@ -216,7 +216,7 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
             # everything underneath a removal that has just retracted it. The
             # settings are kept, not refused: they were typed on a remote
             # control, they are what a reinstall will start from, and if the
-            # removal stops its own failure path reloads the bridge — with
+            # removal stops its own failure path reloads the bridge - with
             # them. So nothing is lost and nothing is applied twice; the
             # household is told why the change does not show yet.
             LOG.warning("settings saved during an uninstall; not reloading the bridge")

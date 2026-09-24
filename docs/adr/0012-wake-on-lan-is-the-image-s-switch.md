@@ -2,7 +2,7 @@
 
 **Status:** accepted 2026-09-23
 **Date:** 2026-09-23
-**Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §6 — the mechanism
+**Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §6 - the mechanism
 (`ethtool` at start and again before deep standby, through `eConsoleAppContainer`) and the shape of
 `info.wol`. The setting `wol_arm`, its default and the rule that it is never writable over MQTT
 stand.
@@ -21,29 +21,29 @@ that receiver, has never fired.
 
 **An enigma2 image never suspends.** Deep standby is the GUI exiting with code 1, `enigma2.sh`
 calling `/sbin/halt`, runlevel 0 taking the network down (`ifdown -a`), the vendor's shutdown tool
-handing the box to the front processor, and `halt -p` — a power-off. Nothing on that path reads the
+handing the box to the front processor, and `halt -p` - a power-off. Nothing on that path reads the
 flag `ethtool -s eth0 wol g` sets, and no point a plugin can reach before it is late enough to
 matter.
 
 **The image has its own Wake-on-LAN, and it is a front-processor switch.** `Components.SystemInfo`
-records `SystemInfo["WakeOnLAN"]` as the path of `/proc/stb/fp/wol` — or `/proc/stb/power/wol`, on
-the two machines that have it — when the driver created one, and `False` when it did not. Only then
+records `SystemInfo["WakeOnLAN"]` as the path of `/proc/stb/fp/wol` - or `/proc/stb/power/wol`, on
+the two machines that have it - when the driver created one, and `False` when it did not. Only then
 does the image build `config.usage.wakeOnLAN` („Wake On LAN", expert level), whose notifier writes
 `enable`/`disable` (or `on`/`off`) into that file at every start. On the measured receiver neither
 file exists, so the image hides its own setting there. Vendor and community answers agree that the
 model has no Wake-on-LAN from deep standby; the physical outcome on that box is still to be drilled.
 
 So an implementation of §6 would have run a command that succeeds, read back `Wake-on: g`, and
-published `armed: true` for a receiver that cannot be woken — a success message that means nothing,
+published `armed: true` for a receiver that cannot be woken - a success message that means nothing,
 retained on a topic.
 
 ## Decision
 
 - **`info.wol` is `{supported, armed, iface, mechanism}`, read from the image at every `info`
-  publish.** `supported` is `SystemInfo.get("WakeOnLAN")` being a path — `false` only when the
+  publish.** `supported` is `SystemInfo.get("WakeOnLAN")` being a path - `false` only when the
   image answered `False`, and `null` when it could not be asked or gave anything else, because
   `false` is what a consumer turns into „this receiver cannot be woken". `armed` is that file read
-  back — `enable`/`on` true, `disable`/`off` false, either vocabulary from either file — and, where
+  back - `enable`/`on` true, `disable`/`off` false, either vocabulary from either file - and, where
   the file cannot be read or says neither, the image's own `config.usage.wakeOnLAN`, since its
   notifier is what writes the file; `null` when not supported or when neither answers. `iface` is
   the interface `info.mac` is read from, by the same rule; `mechanism` is `fp` or `power`, named by
@@ -54,7 +54,7 @@ retained on a topic.
   that a setting was written.
 - **`wol_arm` switches on the image's own setting, and nothing else.** Default off, box-only: the
   setup screen, the provisioning file and the OpenWebif page, never `cmd/config`. At every start of
-  the bridge — which is also how the setup screen and the page apply a change — it sets
+  the bridge - which is also how the setup screen and the page apply a change - it sets
   `config.usage.wakeOnLAN` to on and saves it, where the image found its switch and built that
   setting. A setting that is already on is left alone. It is not in `info.settings`: it is a
   request, and `info.wol` already says what the receiver is.
@@ -71,12 +71,12 @@ retained on a topic.
 
 - **On the maintainer's receiver the feature is the report**: `{"supported": false, "armed": null,
   "iface": "eth0", "mechanism": null}`. The README states that a receiver reporting
-  `supported: false` cannot be woken over the network from deep standby — only by its remote, its
-  front button or a timer — which is what closes the „deep standby may be one-way" question for that
+  `supported: false` cannot be woken over the network from deep standby - only by its remote, its
+  front button or a timer - which is what closes the „deep standby may be one-way" question for that
   box: by documenting it, not by fixing it.
 - **`supported: true` is not evidence that a packet wakes the box.** It says the image found a
-  switch. Nothing may describe this feature as waking a receiver until a deep standby → magic packet
-  drill has passed on an image that has the switch — a call-for-testers item, since the
+  switch. Nothing may describe this feature as waking a receiver until a deep standby -> magic packet
+  drill has passed on an image that has the switch - a call-for-testers item, since the
   maintainer's receiver does not.
 - **`armed` on a supported box rests on a file whose read format nobody here has measured.** If a
   driver makes it write-only, the fallback to the image's setting answers instead; `docs/TOPICS.md`

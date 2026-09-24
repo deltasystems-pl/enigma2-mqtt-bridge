@@ -3,10 +3,10 @@
 The receiver this was written against is modelled here rather than described:
 `FakeProc` is a `/proc` tree on disk, with real `exe` symlinks, and a signal sent
 to it removes a process the way a signal to a real one would. That is deliberate.
-The three things this feature gets wrong if it is written from intuition —
+The three things this feature gets wrong if it is written from intuition -
 counting a supervisor and its worker as two instances, telling two binaries apart
 whose names agree for the first fifteen characters, and reading a missing ECM
-file as a fault — are all things a mocked process list would have agreed with.
+file as a fault - are all things a mocked process list would have agreed with.
 
 🔴 Nothing in this module may carry a real value from a receiver's `/tmp/ecm.info`.
 The markers below are invented, and the point of the privacy test is that they
@@ -66,7 +66,7 @@ class FakeProc:
             handle.write("1 1\n")
 
     def set(self, processes):
-        """`{pid: (comm, parent pid, executable)}` — the whole table at once."""
+        """`{pid: (comm, parent pid, executable)}` - the whole table at once."""
         for entry in os.listdir(self.path):
             if entry.isdigit():
                 shutil.rmtree(os.path.join(self.path, entry))
@@ -355,8 +355,8 @@ def test_a_binary_replaced_under_a_running_process_is_still_matched(lab):
     """🔴 Upgrading the cam is exactly when somebody reaches for this button.
 
     From the moment `opkg` replaces the file, every copy already running reads
-    `… (deleted)` from its `exe` link. Comparing verbatim drops them out of the
-    count — one instance reported while two fight over the card, and a collapse
+    `... (deleted)` from its `exe` link. Comparing verbatim drops them out of the
+    count - one instance reported while two fight over the card, and a collapse
     button that cannot collapse them.
     """
     lab.proc.set({
@@ -743,8 +743,8 @@ def test_a_restart_that_can_get_no_timer_signals_nothing_at_all(
 ):
     """🔴 The one path that would otherwise end with a dead cam and no error.
 
-    The sequence is armed before anything is signalled — an `eTimer` cannot fire
-    until this returns to the main loop, so there is no race in doing it first —
+    The sequence is armed before anything is signalled - an `eTimer` cannot fire
+    until this returns to the main loop, so there is no race in doing it first -
     which turns „stopped the cam, never started one, and wedged `_busy` so every
     later attempt is refused" into an ordinary refusal that changed nothing.
     """
@@ -1075,7 +1075,7 @@ def test_nothing_from_the_ecm_file_reaches_a_payload_a_refusal_or_the_log(
     """🔴 The file carries a card-sharing account, a server and live control words.
 
     None of it may reach the broker, `last_error`, a log record at any level or a
-    diagnostic — not even hashed. The detector asks one question, „when was this
+    diagnostic - not even hashed. The detector asks one question, „when was this
     last written", and a modification time is the whole answer, so the file is
     never opened at all.
     """
@@ -1228,7 +1228,7 @@ def test_a_missing_field_renders_as_unknown_and_not_as_an_empty_message(
     A `null` renders as `None` with or without the filter, so a test written on
     a null value passes either way and proves nothing. An **absent** key renders
     as an empty string, and Home Assistant reads an empty state as „ignore this
-    message" — leaving the previous value on screen for ever rather than going
+    message" - leaving the previous value on screen for ever rather than going
     unknown. That is what an older plugin, or a truncated payload, would send.
     """
     softcam_bridge()

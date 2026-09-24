@@ -7,7 +7,7 @@ produces one log line and an idle plugin, never a retry storm and never a
 dialog, because the graphical interface must come up whatever the state of the
 broker.
 
-**`on_connect` publishes everything, every time** — availability, the full
+**`on_connect` publishes everything, every time** - availability, the full
 snapshot, the announcement, and in discovery mode the discovery payloads. Not
 once at start-up: a daemon that announces only at start-up never registers what
 it learned after it last connected, and a broker that lost its retained store
@@ -53,8 +53,8 @@ from .uninstall import RUNNING as UNINSTALL_RUNNING
 from .uninstall import Uninstaller
 from .version import __version__
 
-# `Publisher` is re-exported: it is part of this module's interface — every
-# publisher subclasses it and the tests import it from here — and it lives in
+# `Publisher` is re-exported: it is part of this module's interface - every
+# publisher subclasses it and the tests import it from here - and it lives in
 # its own module only to keep the imports acyclic.
 __all__ = ["Bridge", "Publisher"]
 
@@ -66,7 +66,7 @@ def _capped(text, limit):
     text = str(text or "")
     if len(text) <= limit:
         return text
-    return text[: limit - 1] + "…"
+    return text[: limit - 1] + "\u2026"
 
 
 def _encoded(payload):
@@ -81,8 +81,8 @@ def _change_key(encoded, payload, volatile):
     receiver did, so comparing bytes that carry one answers „did this run
     again?" instead of „is this different?". On a retained topic rebuilt by a
     timer that means a republish every time the timer fires however little has
-    moved — a state change delivered to every consumer and a row in somebody's
-    recorder, for a payload saying exactly what it said before — and nothing
+    moved - a state change delivered to every consumer and a row in somebody's
+    recorder, for a payload saying exactly what it said before - and nothing
     bounds it, because the timer does not stop.
 
     So the named fields are left out of the comparison and kept in what goes
@@ -106,8 +106,8 @@ COMMAND_QOS = 1
 # The will is the one publish nobody gets to retry, so it is asked for at QoS 1.
 WILL_QOS = 1
 
-# Capabilities are the feature-area names in docs/TOPICS.md and nothing else —
-# `power`, `service`, `epg`, `tuner`, … — each added by the publisher that bound
+# Capabilities are the feature-area names in docs/TOPICS.md and nothing else -
+# `power`, `service`, `epg`, `tuner`, ... - each added by the publisher that bound
 # its hooks. The connection itself is not a capability, so this tuple is empty
 # and stays empty: everything in the list got there by working.
 CORE_CAPABILITIES = ()
@@ -117,14 +117,14 @@ CORE_CAPABILITIES = ()
 MESSAGE_CAPABILITY = "message"
 
 # Claimed where the package manager installed this very copy of the plugin
-# (`uninstall.py`), and by nothing else — there is no publisher behind it.
+# (`uninstall.py`), and by nothing else - there is no publisher behind it.
 UNINSTALL_CAPABILITY = "uninstall"
 
 SHUTDOWN_FLUSH_SECONDS = 1.0
 
 # What a session is: where the broker is, who logs in, how, and under which
-# name. A reload after a save that changed one of these — or switched the plugin
-# off — says `offline` first; any other save reconnects silently. The last two
+# name. A reload after a save that changed one of these - or switched the plugin
+# off - says `offline` first; any other save reconnects silently. The last two
 # name the will's topic, which makes a change to them a rename (see `reload`).
 IDENTITY_CONNECTION_SETTING_NAMES = ("node_id", "base_topic")
 CONNECTION_SETTING_NAMES = (
@@ -183,7 +183,7 @@ class Bridge:
         # for the OpenWebif page. Held here and not on the publisher, because
         # the publisher is replaced by every settings save while the retained
         # picture on the broker outlives all of them. The same bytes object the
-        # publisher sent — no copy.
+        # publisher sent - no copy.
         self._screenshot = None
         self._screenshot_topic = None
         # The open session's will topic, and the settings it connected with:
@@ -217,13 +217,13 @@ class Bridge:
 
         Presence is not permission. The writable ones are the `cmd/config`
         allowlist and nothing else; the rest are read-only over MQTT and are set
-        on the receiver — its setup screen, the provisioning file or the
-        OpenWebif page — which `docs/TOPICS.md` says member by member.
+        on the receiver - its setup screen, the provisioning file or the
+        OpenWebif page - which `docs/TOPICS.md` says member by member.
         """
         values = self.remote_settings()
         for name in settings_module.READ_ONLY_SETTING_NAMES:
-            # Published the way the command guard applies it — anything falsy is
-            # a refusal — so it is a boolean even on an image where the element
+            # Published the way the command guard applies it - anything falsy is
+            # a refusal - so it is a boolean even on an image where the element
             # did not build, and a consumer reading it hides the control.
             values[name] = bool(self.value(name))
         return values
@@ -231,7 +231,7 @@ class Bridge:
     def apply_remote_settings(self, values):
         """Persist one validated replacement, then apply its publisher lifecycle.
 
-        🔴 Not while the plugin removes itself — from acceptance, not only once
+        🔴 Not while the plugin removes itself - from acceptance, not only once
         the doors close. Applying swaps publishers, republishes `info` and
         discovery and retracts stale topics at QoS 0, none of it inside the set
         the teardown retracts and has acknowledged. So the values are saved as
@@ -251,8 +251,8 @@ class Bridge:
         # No reconnect follows this path, so nothing else would retract what the
         # new settings stopped publishing: `publish_keys` switched off here takes
         # the `keys` capability, and with it the eight device triggers, which
-        # would otherwise stay retained — and offered in Home Assistant's
-        # automation editor — until the next connect. Before the republish, so
+        # would otherwise stay retained - and offered in Home Assistant's
+        # automation editor - until the next connect. Before the republish, so
         # the node retracts before it announces, as a mode switch does.
         self.retract_stale()
         info = self.build_info()
@@ -265,7 +265,7 @@ class Bridge:
 
         The setup screen's path, taken for any change outside `cmd/config`'s
         allowlist: save, write the settings file once, `reload()`. The reconnect
-        publishes `info` — and in discovery mode the buttons a permission gates —
+        publishes `info` - and in discovery mode the buttons a permission gates -
         so a setting changed on the OpenWebif page reaches a consumer exactly as
         one changed on the television does, and a kill-switch rebinds its hook
         the same way. `values` must already be validated.
@@ -282,7 +282,7 @@ class Bridge:
     def defer_settings(self, values):
         """Save settings while the plugin removes itself, and apply nothing now.
 
-        🔴 A reload here would open a fresh session underneath the removal —
+        🔴 A reload here would open a fresh session underneath the removal -
         republishing what it retracts, or, before its first turn, leaving it a
         session that is not connected yet, so it fails and the removal is lost.
         The values are kept: a reinstall starts from them, and if the removal
@@ -295,7 +295,7 @@ class Bridge:
         return None
 
     def run_command(self, name, text, origin):
-        """A command from somewhere other than the broker — the dispatcher's refusal, or None.
+        """A command from somewhere other than the broker - the dispatcher's refusal, or None.
 
         Nothing runs while the plugin is removing itself, and the refusal is not
         published: `last_error` would be a retained topic created after the
@@ -346,7 +346,7 @@ class Bridge:
         """Keep the last JSON of one retained topic, within the page's bounds."""
         self._raw_topics.discard(topic)
         if len(encoded) > REMEMBERED_BYTES:
-            encoded = encoded[: REMEMBERED_BYTES - 1] + "…"
+            encoded = encoded[: REMEMBERED_BYTES - 1] + "\u2026"
         self._last_json.pop(topic, None)
         self._last_json[topic] = encoded
         while len(self._last_json) > REMEMBERED_TOPICS:
@@ -557,8 +557,8 @@ class Bridge:
 
         🔴 Emptying the registry without this is how a receiver ends up with two
         of every listener. Publishers attach themselves to lists that belong to
-        enigma2 — `session.nav.event`, the standby counter's notifiers, the
-        action map — and those lists outlive the plugin's own objects. Dropping
+        enigma2 - `session.nav.event`, the standby counter's notifiers, the
+        action map - and those lists outlive the plugin's own objects. Dropping
         the registry on a settings save would leave the old listeners attached
         and add a second set beside them, once per save, until the box is
         restarted.
@@ -579,11 +579,11 @@ class Bridge:
 
         🔴 The old session ends with a clean disconnect, and a clean disconnect
         is exactly what tells the broker to throw the will away. When the save
-        changed the connection itself — see `_says_offline_on_reload` — the
+        changed the connection itself - see `_says_offline_on_reload` - the
         session therefore says `offline` first, as `stop` does. Without it the
         retained `availability` stays `online` from the old session, and if the
-        new one never connects — a mistyped broker, a password that is now
-        wrong, or the plugin switched off on the same screen — a consumer sees a
+        new one never connects - a mistyped broker, a password that is now
+        wrong, or the plugin switched off on the same screen - a consumer sees a
         receiver that is online with nothing connected, for as long as nobody
         looks. The new session's own `online` replaces it the moment it connects.
 
@@ -596,7 +596,7 @@ class Bridge:
         Unlike `stop`, this does not wait for the publish to leave: the process
         goes on running, paho's network thread writes its queue in order and
         does not end before the queue is empty, so the `offline` reaches the
-        socket ahead of the DISCONNECT — and a reload runs on enigma2's main
+        socket ahead of the DISCONNECT - and a reload runs on enigma2's main
         thread, where waiting on a broker is what the user would feel.
         """
         try:
@@ -623,14 +623,14 @@ class Bridge:
         """Whether the session being replaced should publish `offline` first.
 
         Yes when the save switched the plugin off, or changed how the box
-        reaches the broker — the new session may never connect, and nothing
+        reaches the broker - the new session may never connect, and nothing
         else would take the old `online` back. No when nothing of the
         connection changed, and no on a rename either: the node id and the base
         topic name the will's topic, the settings already carry the new name,
         and the old topic has just been retracted by `retract_stale`. An
         `offline` for the new name from the old session could reach the broker
-        after the new session's `online` — they are two client ids, so the
-        broker does not order them — and would then stay retained under a name
+        after the new session's `online` - they are two client ids, so the
+        broker does not order them - and would then stay retained under a name
         that is live.
         """
         before = self._session_settings
@@ -647,15 +647,15 @@ class Bridge:
         """Remembered topics outside this node's tree that this session will not publish.
 
         Outside the tree there are two kinds of topic the node owns under its
-        current name: the announcement, and — in `discovery` mode — the Home
+        current name: the announcement, and - in `discovery` mode - the Home
         Assistant discovery payloads for the current prefix, node id and
         capabilities. 🔴 Those have to be left alone here. This runs before the
         first publish of every connect and every reload, and an empty retained
         device payload deletes the device and all its entities in Home
         Assistant; the republish a moment later brings them back without the
-        names, areas and dashboards they had. What is left over — an older
+        names, areas and dashboards they had. What is left over - an older
         prefix, an older node id, a mode that no longer publishes them, a
-        trigger whose capability is gone — is stale, and is retracted.
+        trigger whose capability is gone - is stale, and is retracted.
         """
         root = self.base_topic + "/" + self.node_id + "/"
         current = {discovery.announcement_topic(self.node_id)}
@@ -675,11 +675,11 @@ class Bridge:
         Renaming the node or the base topic orphans everything published under
         the old one: retained payloads nothing will ever update, and in Home
         Assistant a device that looks alive. The state file is what makes them
-        findable at all, and it survives a restart — which is why this runs on
+        findable at all, and it survives a restart - which is why this runs on
         every connect and not only from `reload`. The rename is just as likely
         to happen while the box is disconnected, or while the plugin is not even
         running, as it is to happen with a session open. What the session is
-        about to publish again is not stale — see `_stale_topics`.
+        about to publish again is not stale - see `_stale_topics`.
         """
         stale = self._stale_topics()
         if not stale or self.client is None:
@@ -722,7 +722,7 @@ class Bridge:
         """One registered publisher by name, or None when it did not bind.
 
         Commands ask for the publisher of the state they are about to change,
-        because a command is verified by reading the state back — and a state
+        because a command is verified by reading the state back - and a state
         nothing publishes cannot be read back.
         """
         for publisher in self._publishers:
@@ -763,13 +763,13 @@ class Bridge:
                 self._publishers.remove(publisher)
 
     def capabilities(self):
-        """What this box can actually do — never what the contract says it might.
+        """What this box can actually do - never what the contract says it might.
 
         A name gets in here by a hook binding on *this* image. Consumers hide
         what is missing, so a capability claimed and not delivered is a dead
         entity in somebody's dashboard. Registered is not the same as bound:
         a publisher that is still waiting for a hook stays in the registry and
-        out of this list until it has one — see `Publisher.claimed`.
+        out of this list until it has one - see `Publisher.claimed`.
         """
         names = list(CORE_CAPABILITIES)
         for publisher in self._publishers:
@@ -788,8 +788,8 @@ class Bridge:
         """Say again what this box can do, after a late bind changed the answer.
 
         `info` and the announcement are published on connect, so a capability
-        that appears a few seconds later — a hook that could only bind once
-        enigma2 had built the screen behind it — would otherwise stay invisible
+        that appears a few seconds later - a hook that could only bind once
+        enigma2 had built the screen behind it - would otherwise stay invisible
         until the next reconnect.
         """
         if not self.connected:
@@ -864,7 +864,7 @@ class Bridge:
         if retain:
             self.state.remember(topic)
             # What is remembered is what the next comparison will be made
-            # against — never the bytes that went out, when the two differ. A
+            # against - never the bytes that went out, when the two differ. A
             # snapshot publish and a state publish reach the same topic, and if
             # they recorded it two different ways the first publish after every
             # connect would look like a change.
@@ -879,7 +879,7 @@ class Bridge:
     def _record_screenshot(self, payload):
         """Remember the picture just sent on `screen`, with the time it was taken.
 
-        The time is the publisher's — when `grab` finished — so a snapshot that
+        The time is the publisher's - when `grab` finished - so a snapshot that
         republishes an older picture keeps that picture's time.
         """
         publisher = self.publisher("screenshot")
@@ -911,21 +911,21 @@ class Bridge:
         """Forget what was published, so the next publish goes out regardless.
 
         Used wherever the broker's copy stops being what this process last sent
-        it — a new connection, and a reset.
+        it - a new connection, and a reset.
         """
         self._published = {}
 
     def publish_state(self, suffix, payload, raw=False, retain=True, volatile=()):
-        """A feature area's state topic — published only when it has changed.
+        """A feature area's state topic - published only when it has changed.
 
         `sort_keys` in `_encoded` is what makes the comparison meaningful: two
         dictionaries built in a different order encode to the same bytes, so
         „changed" means the box changed, not that the code walked it differently.
         `volatile` is that argument carried one step further, and it is the
-        publisher owning the topic that names the fields — so a reader sees at
+        publisher owning the topic that names the fields - so a reader sees at
         the call site which topic tolerates what, rather than finding a list of
         exceptions here.
-        A topic that is not retained (`key`) is never compared — every press is
+        A topic that is not retained (`key`) is never compared - every press is
         an event, including the same press twice.
         """
         topic = self.topic(suffix)
@@ -964,7 +964,7 @@ class Bridge:
             "ip": boxinfo.local_ip(self.value("host")),
             "uptime": boxinfo.uptime_seconds(),
             # Read from the image at every publish, never from what `wol_arm`
-            # asked for — the image's switch can be changed in its own menu.
+            # asked for - the image's switch can be changed in its own menu.
             "wol": wol.report(),
             "ha_mode": self.value("ha_mode"),
             "settings": self.published_settings(),
@@ -1078,7 +1078,7 @@ class Bridge:
         A bouquet that was renamed is two things at once: a new slug nobody has
         published yet and an old slug nothing will ever update again. The second
         one is the retained ghost, and the state file is what makes it findable
-        — including from a process that was restarted between the rename and
+        - including from a process that was restarted between the rename and
         now. Called with no grid publisher at all, this retracts the lot, which
         is what turning `epg_grid_events` down to `0` has to mean.
         """
@@ -1154,7 +1154,7 @@ class Bridge:
         self.state.save(force=True)
         self._last_error_published = False
         # Everything on the broker was just emptied, so nothing this process
-        # believes it published is true any more — including the screenshot and
+        # believes it published is true any more - including the screenshot and
         # every grid.
         self.forget_published()
         self._last_json.clear()
@@ -1200,7 +1200,7 @@ class Bridge:
 
         `reload()` opens a fresh session, whose connect republishes availability,
         the snapshot, the announcement and discovery. The reason goes on
-        `last_error` after that, on the new session — before it there is nobody
+        `last_error` after that, on the new session - before it there is nobody
         to publish it to.
         """
         self._pending_error = (command, message)

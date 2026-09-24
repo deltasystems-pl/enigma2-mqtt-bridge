@@ -1,6 +1,6 @@
 """Every command that acts on the receiver, and every guard that stops one.
 
-`test_commands.py` covers the dispatcher itself — the retained-command guard,
+`test_commands.py` covers the dispatcher itself - the retained-command guard,
 the size limit, `last_error`. This module is about what the commands *do*, and
 about what they refuse to do: a command is „verified by effect", so each test
 here asks what changed on the receiver rather than what the handler returned.

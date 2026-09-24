@@ -2,7 +2,7 @@
 
 Three things are worth a test here rather than a comment. The vendored paho
 imports itself as the top-level name `paho`, which only works because the
-directory holding it goes on `sys.path` first — if that ever stops being true
+directory holding it goes on `sys.path` first - if that ever stops being true
 the plugin fails on a receiver and nowhere else, and if the *wrong* directory
 goes there the plugin's own modules shadow the standard library for every other
 plugin in the process. Every paho callback must hand its work to the main thread
@@ -251,7 +251,7 @@ def test_a_client_without_a_dispatcher_never_connects(monkeypatch, factory, plug
 
 
 class SlowToStopClient:
-    """paho's `loop_stop()` joins the network thread — and that thread can be
+    """paho's `loop_stop()` joins the network thread - and that thread can be
     inside a five-second `socket.create_connection` to an address that answers
     nothing. This is that client, without the socket."""
 

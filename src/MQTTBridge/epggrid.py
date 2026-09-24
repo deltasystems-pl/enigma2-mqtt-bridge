@@ -1,4 +1,4 @@
-"""What is on, across a bouquet — one retained topic per bouquet.
+"""What is on, across a bouquet - one retained topic per bouquet.
 
 The grid is the one payload in this project that can reach tens of kilobytes, so
 everything here is about not doing it all at once and not doing it often.
@@ -19,8 +19,8 @@ the discovery payloads have, answered the same way.
 stamped afresh on every pass and is declared `volatile` so that it cannot be the
 only thing that differs. Against a live guide a quarter of an hour usually does
 move something, so this is not a claim about most passes; it matters where the
-guide is static — a bouquet whose channels carry no EPG, an overnight window, an
-import that has failed — and there it is unbounded, because a grid is the
+guide is static - a bouquet whose channels carry no EPG, an overnight window, an
+import that has failed - and there it is unbounded, because a grid is the
 largest payload here and nothing would ever stop it being rewritten.
 """
 
@@ -72,8 +72,8 @@ def _rows(cache, srefs, minutes, begin=-1):
 
     The multi-service form is a single call into the EPG cache for every channel
     in the bouquet, which is why it is worth trying first. Not every image has
-    answered it the same way, so a `None` — enigma2's way of saying „I did not
-    understand the query" — falls back to asking per channel.
+    answered it the same way, so a `None` - enigma2's way of saying „I did not
+    understand the query" - falls back to asking per channel.
     """
     query = [QUERY_FIELDS]
     for sref in srefs:
@@ -205,7 +205,7 @@ def _finish_state(state):
 
 
 class EpgGridPublisher(Publisher):
-    """`epg_grid/<bouquet_slug>` — one topic for each configured bouquet."""
+    """`epg_grid/<bouquet_slug>` - one topic for each configured bouquet."""
 
     name = "epg_grid"
 
@@ -349,7 +349,7 @@ class EpgGridPublisher(Publisher):
         LOG.info("epg grid: %d bouquet(s) in %d ms", len(self._slugs), total)
         if self.bridge is not None:
             # Whatever was published under a slug that is no longer configured
-            # is retracted here — a renamed bouquet is a new slug and an old one.
+            # is retracted here - a renamed bouquet is a new slug and an old one.
             self.bridge.sync_grid_slugs()
 
     def snapshot(self):

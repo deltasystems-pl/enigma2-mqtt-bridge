@@ -4,8 +4,8 @@ The importer here is `conftest.install_epg_importer`: a module in `sys.modules`
 where enigma2's plugin loader would have left it, shaped on the bytecode of the
 receiver this was measured on. Its `isImportRunning()` is the image's own test
 (`source is not None`), and `finish()` does what the end of the image's download
-chain does — clears the running flag, and calls the completion that records
-`lastImportResult` — in one turn, which is why one poll afterwards is enough.
+chain does - clears the running flag, and calls the completion that records
+`lastImportResult` - in one turn, which is why one poll afterwards is enough.
 """
 
 import builtins
@@ -769,7 +769,7 @@ def test_the_power_block_lapses_after_our_own_start_raised(
     assert receiver.session.opened
 
     # The idle poll still reports what the importer says, and a second import
-    # is still refused — only the power guard has lapsed.
+    # is still refused - only the power guard has lapsed.
     tick(bridge)
     assert state(factory)["state"] == "running"
     send(factory)

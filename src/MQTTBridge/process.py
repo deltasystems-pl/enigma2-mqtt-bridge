@@ -1,21 +1,21 @@
 """What the enigma2 process costs: memory, threads, open files, and since when.
 
 A receiver that is never restarted is the normal case, so the question somebody
-eventually asks about this plugin is „is it leaking?" — and that question cannot
+eventually asks about this plugin is „is it leaking?" - and that question cannot
 be answered by looking once. It needs a curve, which means a number on the
 broker at a steady cadence, recorded by whatever the consumer already records.
 
 The numbers are the *process's*, not the plugin's. enigma2 is one process: the
 image, every other plugin and this one share the same resident set, and nothing
 in `/proc` can attribute a kilobyte to any of them. A rising line here is a
-question, not a verdict — `docs/TROUBLESHOOTING.md` says what is already known
+question, not a verdict - `docs/TROUBLESHOOTING.md` says what is already known
 to sit under it, starting with the ~22 kB every screenshot costs whoever takes
 it.
 
 **Everything here reads procfs, and procfs is memory.** There is no disk behind
 `/proc/self/status`, no network, and no lock that another process holds, which
 is what makes this the one poll in the plugin that is allowed to run on the main
-loop instead of on a thread of its own — the opposite of `hdd.py`, whose one
+loop instead of on a thread of its own - the opposite of `hdd.py`, whose one
 `statvfs` can sit in an NFS timeout for thirty seconds. The reads are still each
 wrapped: a field that cannot be read is `null` and never an exception, because
 the value of this topic is that it is boring.
@@ -49,7 +49,7 @@ PROC_ROOT = "/proc"
 POLL_MILLISECONDS = 60000
 
 # The slow cadence: at most five minutes between points on the curve, and
-# longer when nothing has changed — the publish is still subject to the
+# longer when nothing has changed - the publish is still subject to the
 # bridge's publish-on-change rule.
 FULL_INTERVAL_SECONDS = 300
 
@@ -59,7 +59,7 @@ FULL_INTERVAL_SECONDS = 300
 RSS_STEP_KB = 4096
 
 # The payload's keys, in the order `docs/TOPICS.md` documents them. Every one is
-# always present — a missing key renders as an empty string in a Home Assistant
+# always present - a missing key renders as an empty string in a Home Assistant
 # template, which means „ignore this message" and leaves the previous value on
 # screen for ever, while an explicit `null` renders as unknown.
 FIELDS = ("rss_kb", "hwm_kb", "threads", "fds", "started")
@@ -70,7 +70,7 @@ STATUS_FIELDS = (("rss_kb", "VmRSS:"), ("hwm_kb", "VmHWM:"), ("threads", "Thread
 # `/proc/<pid>/stat` field 22 (1-based) is the process's start time in clock
 # ticks since boot. Fields 1 and 2 are the pid and the comm, and the comm is in
 # parentheses and may contain anything at all including spaces and a closing
-# parenthesis — so the tail is taken from the *last* `)` and field 22 is index
+# parenthesis - so the tail is taken from the *last* `)` and field 22 is index
 # 19 of what follows (field 3 being index 0).
 STARTTIME_INDEX = 19
 
@@ -85,7 +85,7 @@ def _text(path):
 
 
 def status_text(proc_root=PROC_ROOT):
-    """`/proc/self/status`, or None — which is what „no `process` capability" means."""
+    """`/proc/self/status`, or None - which is what „no `process` capability" means."""
     return _text(os.path.join(proc_root, "self", "status"))
 
 
@@ -99,7 +99,7 @@ def _whole_number(word):
 def status_values(text):
     """VmRSS, VmHWM and Threads out of `/proc/self/status`; each None if absent.
 
-    The memory lines are a label, a tab, the number and a unit — `VmRSS:` then
+    The memory lines are a label, a tab, the number and a unit - `VmRSS:` then
     `12345 kB`. The unit is kB on every architecture Linux runs on, which is why
     the contract says kB and this does not convert.
     """
@@ -137,7 +137,7 @@ def boot_time(proc_root=PROC_ROOT):
 
 
 def clock_ticks():
-    """`SC_CLK_TCK` — 100 on every receiver, and never assumed to be."""
+    """`SC_CLK_TCK` - 100 on every receiver, and never assumed to be."""
     try:
         ticks = os.sysconf("SC_CLK_TCK")
     except (AttributeError, ValueError, OSError):
@@ -186,7 +186,7 @@ def read(proc_root=PROC_ROOT):
 
 
 class ProcessPublisher(Publisher):
-    """`process` — the enigma2 process's own counters, on a steady cadence."""
+    """`process` - the enigma2 process's own counters, on a steady cadence."""
 
     name = "process"
 
@@ -233,7 +233,7 @@ class ProcessPublisher(Publisher):
         """
         self._cached = self._read()
         # The bridge publishes this itself, so the cadence is measured from here
-        # — „then every 300 s" is 300 seconds after the connect, not 300 seconds
+        # - „then every 300 s" is 300 seconds after the connect, not 300 seconds
         # after whenever the last tick happened to fall.
         self._remember(self._cached)
         return {"process": self._cached}

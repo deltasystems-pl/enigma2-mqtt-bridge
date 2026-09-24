@@ -82,7 +82,7 @@ def test_maintainer_scripts_are_executable_in_the_checkout():
     """A maintainer script opkg cannot execute is a maintainer script that never runs.
 
     The mode is carried by git, and it is the only thing between `postinst` and
-    being a file opkg unpacks and ignores — which on an upgrade would mean the
+    being a file opkg unpacks and ignores - which on an upgrade would mean the
     orphaned-bytecode sweep silently not happening.
     """
     for name in MAINTAINER_SCRIPTS:

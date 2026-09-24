@@ -4,15 +4,15 @@ A template matched as a string is a template nobody has run. That is how
 „next timer" shipped with the offset written twice and read unknown for two
 releases: the assertion checked that the string said what the author meant,
 and the string did. So nothing here compares template text. Each template is
-rendered with the engine in `hatemplate.py` — Home Assistant's filters where
-they differ from Jinja's, and nothing it does not own — against the bytes the
+rendered with the engine in `hatemplate.py` - Home Assistant's filters where
+they differ from Jinja's, and nothing it does not own - against the bytes the
 plugin's own publishers produce, and the assertion is about what the entity
 would receive.
 
 Two rules keep this honest:
 
 * **The payloads come from the code that publishes them**, encoded by the
-  bridge's own encoder — never from a dictionary typed here. A hand-written
+  bridge's own encoder - never from a dictionary typed here. A hand-written
   payload tests the template against the author's idea of the payload, which is
   the same mistake one level down. Where a case needs a key to be *absent*, the
   real payload is taken and the key removed from it, because an older plugin or
@@ -450,7 +450,7 @@ def test_the_recording_disk(live_bridge):
 def test_the_process(proc, tmp_path):
     payload = encoded(process.ProcessPublisher(proc_root=str(proc)).snapshot()["process"])
 
-    # 164208 kB and 187432 kB, in MiB to one place — a float, as Home Assistant's
+    # 164208 kB and 187432 kB, in MiB to one place - a float, as Home Assistant's
     # `round(1)` returns it.
     assert render("process_memory.val_tpl", payload) == "160.4"
     assert render("process_memory_peak.val_tpl", payload) == "183.0"
@@ -468,7 +468,7 @@ def test_the_process(proc, tmp_path):
                  "process_open_files", "process_started"):
         assert render(name + ".val_tpl", nulls) == "None", name
 
-    # 🔴 Absent — the case `| default(none)` exists for. Without it an absent
+    # 🔴 Absent - the case `| default(none)` exists for. Without it an absent
     # key renders empty, which Home Assistant reads as „ignore this message".
     for name, key in (("process_memory", "rss_kb"), ("process_memory_peak", "hwm_kb"),
                       ("process_threads", "threads"), ("process_open_files", "fds"),

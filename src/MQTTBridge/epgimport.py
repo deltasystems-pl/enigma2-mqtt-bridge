@@ -17,7 +17,7 @@ button does, and then only asks `isImportRunning()` on a timer.
 
 **Completion is observed, never hooked.** `startImport()` overwrites the
 importer's completion callback on every run, the scheduler's runs included, so
-replacing it would be undone by the next scheduled import — and patching the
+replacing it would be undone by the next scheduled import - and patching the
 module's completion function would change the image's behaviour for everybody.
 Instead a timer asks `isImportRunning()` every two seconds while an import runs,
 the same test at the same period the importer's own screen uses. The importer
@@ -27,8 +27,8 @@ callback, so by the next tick the result is already there.
 **The importer has no failure signal.** Its completion is called with a count of
 zero when every download failed, and its per-source errors go to a stdout that
 is `/dev/null` on the images measured. So the topic can say three things went
-wrong — the import did not start, it finished with no events, or it did not
-finish within the watchdog — and never which source failed.
+wrong - the import did not start, it finished with no events, or it did not
+finish within the watchdog - and never which source failed.
 
 **The topic follows every import**, not only the ones asked for here: an idle
 poll once a minute notices an import the image's schedule or the importer's own
@@ -205,7 +205,7 @@ def resolve():
 
 
 class EpgImportPublisher(Publisher):
-    """`epg_import` — the state of the image's EPG import, whoever started it."""
+    """`epg_import` - the state of the image's EPG import, whoever started it."""
 
     name = "epg_import"
 
@@ -223,12 +223,12 @@ class EpgImportPublisher(Publisher):
         self._baseline = None
         # Set when this plugin's own start raised or the watchdog fired, and
         # cleared once the importer says nothing is running. While it is set the
-        # power commands are not held back by this import — see `blocks_power`.
+        # power commands are not held back by this import - see `blocks_power`.
         self._power_lapsed = False
         self._running_error_logged = False
         self._poll = Ticker(self._tick, "epg import")
         # One main-loop turn after a refused press, so the refusal is on
-        # `last_error` before the topic says `running` — see `_refusal`.
+        # `last_error` before the topic says `running` - see `_refusal`.
         self._announce = Ticker(self._publish, "epg import announce")
 
     # ---------------------------------------------------------------- lifecycle --
@@ -299,7 +299,7 @@ class EpgImportPublisher(Publisher):
         ✅ Not once this plugin's own start raised, and not once the watchdog has
         fired for the current run. The image's importer marks itself running
         before its first download, so a start that failed part-way can leave it
-        saying „running" until its next scheduled run — up to a day of refused
+        saying „running" until its next scheduled run - up to a day of refused
         reboots for an import that is not happening. The topic still reports
         what the importer says; only this guard lapses.
         """
@@ -496,8 +496,8 @@ class EpgImportPublisher(Publisher):
     def _failed_to_start(self, error):
         sentence = "EPG-Importer could not start: " + type(error).__name__
         # Only a failure that left the importer saying „running" lapses the
-        # power block. One that came first — the settings, the sources, or a
-        # start that raised before marking itself — leaves nothing stuck, and a
+        # power block. One that came first - the settings, the sources, or a
+        # start that raised before marking itself - leaves nothing stuck, and a
         # lapse set then would cover whatever import starts next.
         self._power_lapsed = self._running() is True
         self._state = FAILED

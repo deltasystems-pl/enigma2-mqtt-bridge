@@ -6,7 +6,7 @@ that happen to meet.
 The first is **the wait**. When the television switches itself off it tells the
 receiver over HDMI-CEC, and the image's `HdmiCec` answers by *queueing* a standby:
 `Notifications.AddNotification(Screens.Standby.Standby)`. That queue is drained by
-the info bar, and only while the info bar is the screen executing — its
+the info bar, and only while the info bar is the screen executing - its
 `notificationAdded` callback returns at once otherwise. With the channel list
 open, the standby therefore waits, and fires whenever somebody next closes the
 list: a minute later, or an hour.
@@ -15,7 +15,7 @@ The second is **the echo**. `HdmiCec` marks the standby as the television's own
 with `handlingStandbyFromTV`, and that flag is what stops the receiver sending
 `<Standby>` back to the television when it enters standby. But the flag is set
 and cleared around the *queueing* call rather than around the standby itself:
-`True`, queue it, `False`. When the queue is drained at once — the ordinary case —
+`True`, queue it, `False`. When the queue is drained at once - the ordinary case -
 the whole chain runs inside that bracket and the flag holds. When the standby
 waits, the chain runs long after the bracket closed, the receiver takes it for a
 standby of its own, and tells the television to switch off.
@@ -25,8 +25,8 @@ standby of its own, and tells the television to switch off.
 1. When the television's standby is queued behind the **channel list**, it
    closes the list through the list's own exit, so the queued standby proceeds
    now instead of whenever somebody next presses EXIT.
-2. When that standby is still queued thirty seconds later — because something
-   other than the channel list was open, and this module left it alone — it
+2. When that standby is still queued thirty seconds later - because something
+   other than the channel list was open, and this module left it alone - it
    drops the entry from the queue, so it cannot fire hours later when somebody
    closes the menu they were in and take the television with it.
 
@@ -40,13 +40,13 @@ while it is being queued: the image calls every `notificationAdded` callback fro
 inside `__AddNotification`, which runs inside `HdmiCec.standby()`, which runs
 inside the `handlingStandbyFromTV` bracket. So the flag is the `True` singleton
 there **if and only if** the television queued the entry. The entry is then kept
-**by identity** — the tuple itself, not its `id()` — and no other entry is ever
+**by identity** - the tuple itself, not its `id()` - and no other entry is ever
 touched.
 
 🔴 That „if and only if" holds only while the image is the flag's one writer,
 and this module writes it too (see the hold, below). So the hold never writes
-`True`: it writes `HELD`, a private marker that is truthy — which is all the
-image asks of the flag when it decides whether to echo — but is not `True`. A
+`True`: it writes `HELD`, a private marker that is truthy - which is all the
+image asks of the flag when it decides whether to echo - but is not `True`. A
 household standby queued while the hold is in place therefore still fails the
 `is True` test and is never mistaken for the television's.
 
@@ -58,12 +58,12 @@ radius than joining a list it already iterates.
 
 **Why the flag is held rather than the close made fast.** Closing a screen in
 enigma2 does not pop it. `Session.close()` starts a zero-millisecond timer and
-returns, and the pop — and with it the info bar resuming and draining the queue —
+returns, and the pop - and with it the info bar resuming and draining the queue -
 happens on a later turn of the main loop, by which time `messageReceived` has long
 since put the flag back to `False`. However quickly the list is closed, the
 standby it releases runs outside the bracket. So immediately before closing, the
 flag is set to `HELD` and its previous value remembered, and it is put back once
-the standby has happened — or after five seconds, whichever comes first. The deadline
+the standby has happened - or after five seconds, whichever comes first. The deadline
 is there because a hold that leaked would silently stop „switch the receiver to
 standby and the television goes off too" for the rest of the session, which a
 household would notice and nobody would connect to this feature.
@@ -74,7 +74,7 @@ same list this module watches. Putting the value back from inside that
 notification would make the result depend on which of the two notifiers happens to
 be first in the list, and in the wrong order would produce exactly the echo this
 module exists to stop. The restore therefore waits `SETTLE_MILLISECONDS` after the
-counter moves — longer than the one second the image itself waits before sending
+counter moves - longer than the one second the image itself waits before sending
 when it is configured to look for other receivers on the bus, so that deferred
 read is covered too.
 
@@ -82,11 +82,11 @@ read is covered too.
 allowlist is three class names matched against the dialog's class and its bases,
 and nothing else: closing a screen somebody is typing in, or a picker another
 dialog is waiting on, would be a worse bug than the one being fixed. Only
-`session.current_dialog` is ever looked at — `Session.close()` asserts that the
-screen being closed is that one — and the stack underneath it never is.
+`session.current_dialog` is ever looked at - `Session.close()` asserts that the
+screen being closed is that one - and the stack underneath it never is.
 
-**The power-on trigger is deferred.** The obvious rule for part 2 — drop the
-stale standby when the television reports it is on again — has no event to hang
+**The power-on trigger is deferred.** The obvious rule for part 2 - drop the
+stale standby when the television reports it is on again - has no event to hang
 on: the image discards every wake-up message while the receiver is awake, which
 is the whole premise of a stale standby. Reaching it would need the raw CEC
 signal and a guess at which message this particular television sends, which the
@@ -99,12 +99,12 @@ carries out one per turn. Whatever is still queued and identified when the
 standby counter moves is removed then, by identity, so that waking the receiver
 does not run the second one and put it straight back to sleep. The same happens
 when none of the television's standbys ran because the receiver went to standby
-some other way — the remote's power button — and then the removal is a drop.
+some other way - the remote's power button - and then the removal is a drop.
 
 **One standby, at most one intervention.** A close is counted when the standby
 it released has actually happened, not when the close is issued: a close that
-released nothing — something else was queued ahead, or the screen underneath does
-not drain the queue — is not a success, and the standby it failed to release is
+released nothing - something else was queued ahead, or the screen underneath does
+not drain the queue - is not a success, and the standby it failed to release is
 counted once, as dropped: at its deadline, or when the receiver goes to standby
 some other way first, whichever comes first. Removing a repeat of a standby that
 did run is not counted.
@@ -135,7 +135,7 @@ TOPIC = "cec"
 # in its MRO. `ChannelSelectionBase` is deliberately absent although both real
 # channel lists inherit it: `SimpleChannelSelection` inherits it too, and that is
 # the service *picker* embedded in the timer editor, stream-relay setup and
-# several plugins — closing it answers somebody's half-finished question with
+# several plugins - closing it answers somebody's half-finished question with
 # „nothing". Nothing else from the channel list's module is here either: the
 # context menu, the bouquet selectors and the zap history are all separate
 # screens stacked on top of the list, and are left alone.
@@ -239,7 +239,7 @@ class _Queued:
 
 
 class CecPublisher(Publisher):
-    """`cec` — what the standby workaround did, and whether a standby is waiting."""
+    """`cec` - what the standby workaround did, and whether a standby is waiting."""
 
     name = "cec_workaround"
 
@@ -391,7 +391,7 @@ class CecPublisher(Publisher):
     # -------------------------------------------------------------- identifying --
 
     def _notification_added(self):
-        """Called by the image for every notification it queues — every popup too.
+        """Called by the image for every notification it queues - every popup too.
 
         So it has to be cheap and it has to be quiet: a screen other than the
         standby screen returns after one comparison, and nothing in here may
@@ -400,15 +400,15 @@ class CecPublisher(Publisher):
         try:
             queue = self._notifications.notifications
             if not queue:
-                # Another callback — the info bar's — already drained it.
+                # Another callback - the info bar's - already drained it.
                 return
             entry = queue[-1]
             if entry[1] is not self._standby_screen:
                 return
             instance = self._cec_class.instance
             if instance is None or getattr(instance, "handlingStandbyFromTV", False) is not True:
-                # The household's own standby — `cmd/power`, or anything else
-                # that queues one — never ours. `is True`, not truth: while this
+                # The household's own standby - `cmd/power`, or anything else
+                # that queues one - never ours. `is True`, not truth: while this
                 # module holds the flag it reads `HELD`, and a standby queued then
                 # is not the television's.
                 return
@@ -579,7 +579,7 @@ class CecPublisher(Publisher):
             # None of the television's standbys ran: the receiver went to
             # standby some other way (the remote's power button opens the
             # standby screen directly). The plugin threw the television's
-            # standby away, closed list or not, so this is a drop — counted
+            # standby away, closed list or not, so this is a drop - counted
             # once, as the deadline would have counted it.
             self._count_intervention(KIND_DROPPED, int(time.time()))
             LOG.info("dropped a standby the television asked for; the receiver went to "
@@ -602,7 +602,7 @@ class CecPublisher(Publisher):
                      "carried out", STALE_SECONDS)
         elif queued.closed_at is not None:
             # Taken off the queue after the close, but the standby counter was
-            # never seen to move — on an image where it could not be watched.
+            # never seen to move - on an image where it could not be watched.
             # Being drained is the best evidence there is that the close worked.
             self._count_intervention(KIND_CLOSED, queued.closed_at)
             LOG.info("the television's standby went ahead after the channel list was closed")

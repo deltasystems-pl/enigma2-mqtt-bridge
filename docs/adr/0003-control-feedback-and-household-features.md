@@ -1,8 +1,8 @@
-# ADR-0003: Control feedback and household features — the 0.2.0 and 0.3.0 plan
+# ADR-0003: Control feedback and household features - the 0.2.0 and 0.3.0 plan
 
 **Status:** accepted 2026-09-21, amended 2026-09-22, extended by [ADR-0004](0004-remote-uninstall.md), partly superseded by [ADR-0005](0005-softcam-restart.md) (§3), [ADR-0007](0007-cec-standby-workaround.md) (§5) and [ADR-0008](0008-discreet-toast.md) (§2), amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) (the box-only rule and the status page), §4 partly superseded by [ADR-0011](0011-epg-import-on-demand.md), §6 superseded by [ADR-0012](0012-wake-on-lan-is-the-image-s-switch.md)
 **Date:** 2026-09-21
-**Supersedes:** — (it extends [ADR-0000](0000-prd.md) and [ADR-0002](0002-scope-after-m0.md))
+**Supersedes:** - (it extends [ADR-0000](0000-prd.md) and [ADR-0002](0002-scope-after-m0.md))
 
 ## Context
 
@@ -29,15 +29,15 @@ and the two must be read together for anything that spans both.
 
 ## Decision
 
-### 1. `deep_standby_allowed` is echoed, read-only — 0.2.0
+### 1. `deep_standby_allowed` is echoed, read-only - 0.2.0
 
 > **Merged to `main` 2026-09-21, unreleased; noted 2026-09-22, with one line corrected.**
 >
 > This decision is implemented and on `main`; it is in no release. `info.settings` carries
 > `deep_standby_allowed` as a
 > boolean, always present, writable through neither `cmd/config` nor the OpenWebif status page.
-> `docs/TOPICS.md` lists it among the read-only members, and the rule it establishes — **presence
-> in `info.settings` does not imply writability** — is now part of the contract.
+> `docs/TOPICS.md` lists it among the read-only members, and the rule it establishes - **presence
+> in `info.settings` does not imply writability** - is now part of the contract.
 >
 > **Corrected:** the problem statement says the permission „can only be turned on from the
 > receiver's own setup screen". That is imprecise. It can also be set **in the provisioning file
@@ -48,7 +48,7 @@ and the two must be read together for anything that spans both.
 > **One consequence found on the consumer side**, recorded here because it constrains anything
 > reading this member: the announcement arrives before `info` does and carries **no settings at
 > all**, so „the box has answered" is not the same question as „the box has stated this". A
-> consumer needs three states rather than two — not yet stated, stated true, stated false — and a
+> consumer needs three states rather than two - not yet stated, stated true, stated false - and a
 > value that is not a boolean belongs in the first of them, because a payload nobody can parse is
 > not a decision. The companion integration builds its two power-off buttons exactly that way.
 
@@ -69,27 +69,27 @@ writable ones are the `cmd/config` allowlist". `docs/TOPICS.md` marks which memb
 and a consumer must not infer writability from presence. 0.3.0 adds two more read-only members on
 the same terms, below.
 
-### 2. A discreet toast, as a second message style — 0.3.0
+### 2. A discreet toast, as a second message style - 0.3.0
 
 **The problem.** `cmd/message` shows the image's standard centre message box. It takes focus, and
-it goes through the image's notification queue — which is drained only while the info bar is
+it goes through the image's notification queue - which is drained only while the info bar is
 running, so a message sent while the channel list is open **waits until the list is closed**. For a
 „the washing machine has finished" notification that is the wrong shape twice over.
 
 The plugin gets its own non-modal screen, instantiated as a dialog it never executes:
 
-- **Top-right, auto-hide only.** Default 5 seconds, 1–30 per message.
+- **Top-right, auto-hide only.** Default 5 seconds, 1-30 per message.
 - **It never becomes the current dialog and binds no action map**, so it cannot take focus, cannot
   swallow a key press and cannot be dismissed by the remote. It also cannot wait behind anything,
   because it never enters the notification queue.
 - **Newest replaces current**: the same screen takes the new text and restarts its timer. A toast
   that queues is a message box with extra steps.
 - **Torn down on standby and on shutdown.** Text capped at 200 characters.
-- `cmd/message` gains an optional `style`, `"popup"` (**default — exactly today's behaviour**) or
-  `"toast"`. Existing payloads are unaffected. For a toast the timeout is clamped to 1–30 and
+- `cmd/message` gains an optional `style`, `"popup"` (**default - exactly today's behaviour**) or
+  `"toast"`. Existing payloads are unaffected. For a toast the timeout is clamped to 1-30 and
   defaults to 5; the popup's „0 = until dismissed" has no meaning for something that auto-hides and
   is refused. `type` is accepted and **ignored** for toasts.
-- **Capability `toast`**, claimed only once the screen has actually instantiated — an image where
+- **Capability `toast`**, claimed only once the screen has actually instantiated - an image where
   that fails keeps popups rather than gaining a style that silently does nothing.
 - **Setting `osd_toast`**, default on, not remotely writable: it is the kill-switch for a screen
   that lives inside the GUI process, and a kill-switch reachable over the broker is not one.
@@ -98,17 +98,17 @@ The plugin gets its own non-modal screen, instantiated as a dialog it never exec
 label. That is what stops a message being dressed up as a system dialog asking for something. It
 cannot be mistaken for one that is waiting for an answer either, because it does not wait.
 
-### 3. Restarting the softcam, manually and optionally by itself — 0.3.0, first
+### 3. Restarting the softcam, manually and optionally by itself - 0.3.0, first
 
 **The problem.** The household symptom is a channel that stops decoding. Underneath it, an image's
 softcam manager can start the cam binary directly rather than through an init script, and its
-liveness check can fail in a way that starts **another** one on every interface restart — leaving
+liveness check can fail in a way that starts **another** one on every interface restart - leaving
 several independent instances running and none of them working. So „restart the softcam" cannot
 mean „run the init script", and it cannot mean „restart the process", because there is not one.
 
 - **`cmd/softcam_restart`**, payload `PRESS` by convention.
 - 🔴 **The cam is resolved on the receiver and never named over MQTT.** The plugin reads which cam
-  the *image* has selected for autostart — generic across OSCam, NCam and CCcam — and restarts that
+  the *image* has selected for autostart - generic across OSCam, NCam and CCcam - and restarts that
   one. **No part of the command line comes from the payload.** A binary name arriving over a broker
   would be remote code execution with extra steps.
 - **Sequence**: stop every running instance of that binary, wait up to 5 seconds for them to go,
@@ -118,9 +118,9 @@ mean „run the init script", and it cannot mean „restart the process", becaus
 - **Guards**: refused while recording; manual restarts rate-limited to one per minute, with the
   refusal as a sentence on `last_error`.
 - **Opt-in auto-heal**: `softcam_autoheal` (default off) and `softcam_autoheal_seconds` (default
-  90, range 30–600), **both remotely writable**. When the current service is encrypted and has not
+  90, range 30-600), **both remotely writable**. When the current service is encrypted and has not
   been decoding for that long, while the receiver is on and not recording, the plugin performs one
-  clean restart — **at most one per ten minutes**, whatever the detector says.
+  clean restart - **at most one per ten minutes**, whatever the detector says.
 - 🔴 **The decode signal is read internally even when CAM telemetry publishing is off.** Reading the
   receiver's own ECM state to decide whether to heal is not the same as putting what is on the
   television onto the broker, and a repair feature must not require a privacy switch to be turned
@@ -133,27 +133,27 @@ follows: **a setting that enables a command is box-only; a setting that tunes a 
 permitted may be remote.** Enabling auto-heal on a receiver whose owner has not permitted softcam
 restarts at all does nothing, because the permission is the gate.
 
-### 4. Running the EPG importer on demand — 0.3.0
+### 4. Running the EPG importer on demand - 0.3.0
 
 **The problem.** Images ship an EPG importer that runs on its own schedule. After a channel change
 or a fresh install the guide stays thin until the receiver decides otherwise, and nothing could ask
 it.
 
 - **`cmd/epg_import`**, payload `PRESS`. **Permission `epg_import_allowed`**, default **off**, not
-  remotely settable — an import is minutes of work on a small machine.
+  remotely settable - an import is minutes of work on a small machine.
 - **Guards**: refused while recording, and refused while an import is already running.
 - Runs off the main loop. The concrete entry point is **resolved on the receiver**; the plugin
   hard-codes none and takes nothing from MQTT, and **capability `epg_import`** is claimed only when
   one was found. An image without an importer gets no capability and no command.
 - On success the EPG grid is rebuilt and republished, as `cmd/epg_grid` does.
-- **New retained topic `epg_import`** carrying the state, the timestamps, and — when it fails — a
+- **New retained topic `epg_import`** carrying the state, the timestamps, and - when it fails - a
   sentence written for the person who will read it.
 
-### 5. An opt-in workaround for a CEC standby defect — 0.3.0, second
+### 5. An opt-in workaround for a CEC standby defect - 0.3.0, second
 
 **The problem.** This one is **upstream enigma2, not this plugin.** A standby requested by the
 television over HDMI-CEC is *queued* as a notification, and that queue is drained only while the
-info bar is executing. With the channel list open, the standby waits — and fires when the list
+info bar is executing. With the channel list open, the standby waits - and fires when the list
 closes. Worse, the flag that marks „this standby came from the television" is set and cleared
 around the *queueing* call rather than around the execution, so the late standby is treated as
 locally originated and is **echoed back to the television**, which then switches itself off.
@@ -174,7 +174,7 @@ locally originated and is **echoed back to the television**, which then switches
 user's hands, and it is only correct on images that have the defect. Off by default is the only
 honest default, and the setting is box-only because it is the kill-switch.
 
-### 6. Arming Wake-on-LAN — 0.3.0
+### 6. Arming Wake-on-LAN - 0.3.0
 
 **The problem.** A receiver can report Wake-on-LAN as supported and have it **disabled** on the
 interface. Deep standby is then one-way: the box can be sent to sleep and no magic packet will
@@ -183,20 +183,20 @@ plugin can see and fix rather than warn about.
 
 - **Setting `wol_arm`**, default **off**, not remotely writable.
 - With it on, the plugin arms the interface **at start** and **again immediately before deep
-  standby** — the second time because some images reset the flag, and arming it once at boot is not
+  standby** - the second time because some images reset the flag, and arming it once at boot is not
   evidence it is still armed hours later. Fixed command line, through `eConsoleAppContainer`, with
   the interface resolved on the receiver.
 - **`info.wol`** reports `supported`, `armed` and the interface, **read back from the system**
   rather than assumed from the fact that a command was issued.
-- 🔴 **Until the deep standby → magic packet drill passes on hardware, the README keeps its warning
+- 🔴 **Until the deep standby -> magic packet drill passes on hardware, the README keeps its warning
   that deep standby may be one-way.** A setting that issues the right command is not a receiver
   that wakes up.
 
-### 7. Process telemetry ships — 0.3.0
+### 7. Process telemetry ships - 0.3.0
 
 [ADR-0002](0002-scope-after-m0.md) proposed publishing what the enigma2 process costs, so that the
 memory curve could be recorded rather than sampled by a person. **Decided: yes, in 0.3.0.** It is
-already in review, with the `process` topic, the `process` capability and no setting — the topic
+already in review, with the `process` topic, the `process` capability and no setting - the topic
 reveals nothing about what anybody is watching, so there is nothing to switch off.
 
 ## Planned contract changes
@@ -207,16 +207,16 @@ that the contract keeps one home and a consumer can be written against it before
 
 | Release | Addition | Kind | Capability | Notes |
 |---|---|---|---|---|
-| 0.2.0 | `info.settings.deep_standby_allowed` | read-only member | — | **On `main` since 2026-09-21; unreleased.** Not writable by `cmd/config` or the status page; changes what `info.settings` means |
+| 0.2.0 | `info.settings.deep_standby_allowed` | read-only member | - | **On `main` since 2026-09-21; unreleased.** Not writable by `cmd/config` or the status page; changes what `info.settings` means |
 | 0.3.0 | `cmd/message` optional `style`: `popup` \| `toast` | command field | `toast` | `popup` is the default and is today's behaviour |
 | 0.3.0 | `cmd/softcam_restart` | command | `softcam` | Permission `softcam_restart_allowed`; refused while recording; 1/min |
 | 0.3.0 | `softcam` | retained topic | `softcam` | `{selected, running_instances, last_restart, last_restart_reason, restarts_today}` |
-| 0.3.0 | `info.settings.softcam_autoheal`, `…_autoheal_seconds` | writable members | `softcam` | The two new members of the `cmd/config` allowlist |
-| 0.3.0 | `info.settings.softcam_restart_allowed`, `…epg_import_allowed` | read-only members | — | Permissions, so a consumer can hide what the box will refuse |
+| 0.3.0 | `info.settings.softcam_autoheal`, `..._autoheal_seconds` | writable members | `softcam` | The two new members of the `cmd/config` allowlist |
+| 0.3.0 | `info.settings.softcam_restart_allowed`, `...epg_import_allowed` | read-only members | - | Permissions, so a consumer can hide what the box will refuse |
 | 0.3.0 | `cmd/epg_import` | command | `epg_import` | Permission `epg_import_allowed`; refused while recording or running |
 | 0.3.0 | `epg_import` | retained topic | `epg_import` | `{state, started, finished, error}` |
 | 0.3.0 | `cec` | retained topic | `cec_workaround` | `{last_intervention, kind, count, pending}` |
-| 0.3.0 | `info.wol` | object | — | `{supported, armed, iface}` |
+| 0.3.0 | `info.wol` | object | - | `{supported, armed, iface}` |
 | 0.3.0 | `process` | retained topic | `process` | Already in review |
 
 Nothing is removed, nothing changes shape, and every rule the contract already sets still holds:
@@ -235,14 +235,14 @@ refusals on `last_error`.
   class, and every hook is wrapped. This is the risk this project takes most seriously, because the
   worst thing it can do to somebody is make their television unusable.
 - **Auto-heal restarts something on a timer**, which is a shape that can loop. It is off by default,
-  limited to one restart per ten minutes, and every restart is counted on a topic — so a loop shows
+  limited to one restart per ten minutes, and every restart is counted on a topic - so a loop shows
   up on a dashboard rather than only in a log.
 - **Three permissions now sit outside `cmd/config`**, and the rule that put them there is written
   down: a setting that enables a command is box-only; a setting that tunes a permitted command may
   be remote. New settings get sorted by that rule rather than case by case.
 - **The capability list grows by five** (`toast`, `softcam`, `epg_import`, `cec_workaround`,
   `process`), and every one of them is claimed only when the thing behind it actually worked on
-  that receiver — a resolved cam, an instantiated screen, an importer that was found. That is the
+  that receiver - a resolved cam, an instantiated screen, an importer that was found. That is the
   same promise `capabilities` has always made and it is why the new features can be optional
   without a consumer guessing.
 
@@ -255,7 +255,7 @@ refusals on `last_error`.
   happened ([ADR-0002](0002-scope-after-m0.md)).
 - **There is still no 0.2.0 release**, and both halves still report `0.1.0`.
 - **Everything here will be verified on one receiver and one image.** Every hook is wrapped and
-  every feature is behind a capability that has to bind, which is what keeps that honest — but a
+  every feature is behind a capability that has to bind, which is what keeps that honest - but a
   second image is still the thing this project most needs.
 
 ## Found since, 2026-09-22
@@ -266,31 +266,31 @@ above and none of them reverses a decision.
 - 🔴 **A deliberate disconnect suppresses the last will, and `Bridge.reload()` performs one.** A
   clean MQTT disconnect is a goodbye, so the broker does **not** publish the retained last-will
   payload. 🔴 **`Bridge.stop()` already knows this and publishes a retained `offline` before its
-  own clean disconnect — `reload()` does not.** That asymmetry is the whole defect and the whole
-  fix. `reload()` — which the setup screen calls after every save — stops the client cleanly and
+  own clean disconnect - `reload()` does not.** That asymmetry is the whole defect and the whole
+  fix. `reload()` - which the setup screen calls after every save - stops the client cleanly and
   then starts a new session; if that reconnect fails, retained `availability` stays **`online`
   with nothing connected**, and every consumer believes the receiver is there. Publish `offline`
   **explicitly before** any deliberate disconnect, so that the retained state is true whether or
   not the reconnect succeeds. This is the retained-availability trap approached from the side
   nobody watches: the familiar version is a last will that fires and is never cleared, and this is
   a last will that never fires at all. It is a live defect rather than a decision, it predates
-  this record, and it is **to be tracked as an issue** — this bullet is a pointer, not its home.
+  this record, and it is **to be tracked as an issue** - this bullet is a pointer, not its home.
 - **The companion integration's update entity compares version strings**, so a receiver running an
   earlier development build of the same version is never offered a newer one. Comparing the built
-  commit instead would need this plugin to publish a build identifier alongside its version — a
+  commit instead would need this plugin to publish a build identifier alongside its version - a
   contract addition, and one nobody has asked for yet. Noted so that the option is not rediscovered
   from scratch.
 - **The OpenWebif status page shows only the writable settings.** The read-only permission above is
   deliberately not surfaced there; the page is for changing things, and the permission is set on
   the setup screen or in the provisioning file.
 
-## Amendment, 2026-09-22 — removal has to remove the plugin
+## Amendment, 2026-09-22 - removal has to remove the plugin
 
 **Observed.** `opkg remove` left the plugin loadable. It deletes the files it installed, which are
 the `.py` ones; the `.pyc` files beside them are written by the image after the install and are in
 nobody's file list. On an OpenViX 6.6 receiver forty files survived the removal, in the legacy
 same-directory form that Python 3 imports without a source next to it, and enigma2's plugin loader
-enumerates by module name — so the next GUI restart loaded the removed plugin and it reconnected to
+enumerates by module name - so the next GUI restart loaded the removed plugin and it reconnected to
 the broker while `opkg status` said nothing was installed. The compiled OpenWebif hook in
 `WebChilds/External/` survived the same way. This is the removal-side twin of the upgrade orphan
 that `postinst` already sweeps, and it was missed because the sweep was designed against the
@@ -300,7 +300,7 @@ upgrade, which is the case that had actually gone wrong on hardware.
 plugin directory's basename is checked, no symlink is followed, no different filesystem mounted
 under it is walked into, and every path is checked to be under the resolved root before anything
 happens to it, because a directory name may contain a newline. It deletes `.pyc` and `.pyo` and nothing
-else — the `.py` files are opkg's and are all still on disk while it runs — and then removes the
+else - the `.py` files are opkg's and are all still on disk while it runs - and then removes the
 directories it leaves empty, deepest first, the plugin directory last.
 
 Three things are deliberately not shared with `postinst`, and each is a consequence of the
@@ -318,5 +318,5 @@ difference between an upgrade and a removal:
   is one the plugin means to keep; during a removal the plugin is going away.
 
 **What it still does not do.** It does not touch `/etc/enigma2/settings`, so a reinstall finds its
-configuration, and it does not retract retained topics — that is `cmd/reset`, published while the
+configuration, and it does not retract retained topics - that is `cmd/reset`, published while the
 plugin is still connected, and a package script has no business making network calls.

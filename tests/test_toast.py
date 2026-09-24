@@ -182,7 +182,7 @@ def test_a_capped_timeout_is_noted_in_the_log(live_bridge, factory, plugin_log):
 @pytest.mark.parametrize("given", [0, -5, 0.5, "0", -1])
 def test_a_toast_that_would_never_hide_is_refused(live_bridge, factory, given):
     send(factory, {"text": "hello", "style": "toast", "timeout": given})
-    assert error(factory) == "a toast hides itself; timeout must be 1–30 seconds"
+    assert error(factory) == "a toast hides itself; timeout must be 1\u201330 seconds"
     assert not on_screen(live_bridge)
 
 
@@ -217,7 +217,7 @@ def test_an_empty_or_false_style_is_refused_not_taken_as_absent(live_bridge, fac
 
 
 @pytest.mark.parametrize("payload, sentence", [
-    ({"timeout": 0}, "a toast hides itself; timeout must be 1–30 seconds"),
+    ({"timeout": 0}, "a toast hides itself; timeout must be 1\u201330 seconds"),
     ({"type": "shouting"}, "unknown message type 'shouting'; expected one of info, warning, error"),
     ({"text": "  "}, "message text is empty"),
 ])
@@ -308,10 +308,10 @@ def test_an_escape_only_the_renderer_would_see_leaves_no_backslash(live_bridge, 
     In the string the backslash comes *after* `cFFFF0000`, so no pattern over the
     string sees an escape; on screen it was consumed as one and never drawn.
     """
-    send(factory, {"text": "א cFFFF0000\\ב – test RTL", "style": "toast"})
+    send(factory, {"text": "א cFFFF0000\\ב \u2013 test RTL", "style": "toast"})
     assert error(factory) is None
     assert "\\" not in shown_text(live_bridge)
-    assert shown_text(live_bridge) == "א cFFFF0000ב – test RTL"
+    assert shown_text(live_bridge) == "א cFFFF0000ב \u2013 test RTL"
 
 
 def test_a_literal_backslash_n_shows_as_n(live_bridge, factory):
@@ -453,7 +453,7 @@ def test_the_widget_rule_check_catches_a_list(receiver):
 
 
 def test_the_toast_is_above_the_channel_list_whichever_was_made_first(live_bridge, factory):
-    """z 10 against the channel list's 0 — and after a skin reload, which makes it newer."""
+    """z 10 against the channel list's 0 - and after a skin reload, which makes it newer."""
     channel_list = eWindow(DESKTOP, 0)
     channel_list.show()
     send(factory, {"text": "one", "style": "toast", "timeout": 30})
@@ -516,7 +516,7 @@ def test_stop_stops_the_timer_before_it_deletes_the_screen(live_bridge, receiver
 
 def test_a_toast_on_screen_is_gone_when_the_plugin_is_shut_down(live_bridge, factory,
                                                                 monkeypatch):
-    """`WHERE_AUTOSTART` reason 1 — before enigma2 paints its last frame."""
+    """`WHERE_AUTOSTART` reason 1 - before enigma2 paints its last frame."""
     monkeypatch.setattr(plugin_module, "_bridge", live_bridge)
     send(factory, {"text": "hello", "style": "toast", "timeout": 30})
     assert DESKTOP.front_to_back() != []

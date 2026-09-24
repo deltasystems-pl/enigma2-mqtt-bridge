@@ -1,7 +1,7 @@
 """The Home Assistant discovery payloads, against what HA 2026.9 actually accepts.
 
-Home Assistant is not a test dependency of this plugin — it would be a hundred
-megabytes of it to check a dictionary — so these assertions are written against
+Home Assistant is not a test dependency of this plugin - it would be a hundred
+megabytes of it to check a dictionary - so these assertions are written against
 its source, read at the time this was built:
 
 * the device payload's top level takes `dev`, `o`, `cmps`, the availability
@@ -13,7 +13,7 @@ its source, read at the time this was built:
 * a component reduced to `{"p": "<platform>"}` is how one is removed, and
   leaving it out entirely removes nothing;
 * device triggers keep only `atype`, `dev`, `t`, `type`, `stype`, `pl`,
-  `val_tpl`, `qos` and `encoding` — anything else, availability included, is
+  `val_tpl`, `qos` and `encoding` - anything else, availability included, is
   silently dropped.
 """
 
@@ -131,7 +131,7 @@ def test_every_component_names_the_entity_id_it_wants(live_bridge, factory):
 
 
 def test_object_id_is_not_used(live_bridge, factory):
-    """It was accepted and silently discarded on this version — a no-op."""
+    """It was accepted and silently discarded on this version - a no-op."""
     for component in components(factory).values():
         assert "obj_id" not in component
         assert "object_id" not in component
@@ -188,9 +188,9 @@ def test_the_next_timer_is_a_timestamp_home_assistant_will_take(live_bridge, fac
     """🔴 A timestamp sensor refuses epoch seconds and refuses a time with no zone.
 
     Rendered rather than matched as a string. The string was matched for two
-    releases and said everything a reader wanted to hear — `timestamp_utc` is in
-    there, `+00:00` is in there — while the template appended a second offset to
-    a filter that already ends in one. Home Assistant answers `…+00:00+00:00`
+    releases and said everything a reader wanted to hear - `timestamp_utc` is in
+    there, `+00:00` is in there - while the template appended a second offset to
+    a filter that already ends in one. Home Assistant answers `...+00:00+00:00`
     with „Invalid state message" and stores nothing, so the sensor read unknown
     for ever and no test could tell.
     """
@@ -423,7 +423,7 @@ def test_the_payload_is_valid_json_with_polish_in_it(live_bridge, factory, recei
 #
 # The stale-topic retraction runs before the first publish of every connect and
 # every reload. An empty retained device payload is a deletion in Home
-# Assistant — of the device and every entity on it — so whatever the session is
+# Assistant - of the device and every entity on it - so whatever the session is
 # about to publish again must not be emptied first, however briefly.
 
 TRIGGERS = [
@@ -453,7 +453,7 @@ def reload(bridge, factory):
 
 
 def restart(bridge, factory, make_bridge, receiver):
-    """A new process on the same state file — the connect after a GUI restart."""
+    """A new process on the same state file - the connect after a GUI restart."""
     factory.client.fire_disconnect()
     bridge.stop()
     fresh = make_bridge(session=receiver.session)

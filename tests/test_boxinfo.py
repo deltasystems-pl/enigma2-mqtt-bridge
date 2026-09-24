@@ -173,7 +173,7 @@ def test_image_version_is_unknown_when_nothing_answers(monkeypatch):
 
 
 def test_enigma_version_comes_from_the_binary():
-    """A build date on OE-Alliance images, not a version number — the contract
+    """A build date on OE-Alliance images, not a version number - the contract
     calls it a string for exactly this reason."""
     assert boxinfo.enigma_version() == "2024-09-11-Release"
 

@@ -2,7 +2,7 @@
 
 **Status:** accepted 2026-09-22, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) (the box-only setting)
 **Date:** 2026-09-22
-**Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §5, in part — it
+**Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §5, in part - it
 described this feature, and three parts of it turned out to be wrong when they were read against
 the compiled modules a real image runs. Everything else in ADR-0003 stands, including why the
 feature is opt-in.
@@ -20,7 +20,7 @@ sources:
 - The queue is drained by `InfoBarNotifications`, whose `notificationAdded` callback returns at once
   unless the info bar is executing. With the channel list open, nothing drains it.
 - `handlingStandbyFromTV` is set to `True`, the standby is queued, and the flag is set back to
-  `False` — around the *queueing* call. It is read much later, by `sendStandbyMessages`, which sends
+  `False` - around the *queueing* call. It is read much later, by `sendStandbyMessages`, which sends
   `<Standby>` to the television unless the flag is set. When the queue is drained at once the whole
   chain runs inside the bracket; when the standby waited, it does not, and the receiver echoes the
   standby back to the television.
@@ -37,11 +37,11 @@ quickly the list is closed, the standby it releases runs outside the bracket.
 **„The television reports power-on" is not an event while the receiver is awake.** `HdmiCec`'s entire
 wake-up branch sits inside `if Screens.Standby.inStandby`. A stale standby means the receiver is
 awake, so every wake-up message from the television is discarded and nothing is called. The only
-route is the raw CEC signal plus a guess at which message a given television sends on power-on —
+route is the raw CEC signal plus a guess at which message a given television sends on power-on -
 and the image itself declines to guess: it offers a nine-way setting for it, because it varies.
 
 **The queued standby is indistinguishable from the household's own.** `cmd/power standby` queues
-`(None, Standby, (), {}, None)` — the same tuple, equal in every field. Anything that later scans
+`(None, Standby, (), {}, None)` - the same tuple, equal in every field. Anything that later scans
 the queue for „a standby" can cancel one somebody has just asked for. (The remote's power button is
 not a second case: on the image read, it opens the standby screen directly and never enters the
 queue.)
@@ -49,7 +49,7 @@ queue.)
 ## Decision
 
 **The hook is the image's own list.** The plugin appends a zero-argument callable to
-`Tools.Notifications.notificationAdded` — the list `InfoBarNotifications` registers on — and
+`Tools.Notifications.notificationAdded` - the list `InfoBarNotifications` registers on - and
 removes it when it stops. `__AddNotification` appends the entry and then calls every listener with
 no arguments, so the callback reads the last entry itself. Wrapping `AddNotification` is rejected:
 replacing a function the whole interface calls is a larger blast radius than joining a list it
@@ -59,11 +59,11 @@ already iterates.
 counts only when, inside that callback, its screen **is** `Screens.Standby.Standby` and
 `Components.HdmiCec.HdmiCec.instance.handlingStandbyFromTV` **is** `True`. The callback runs inside
 `HdmiCec.standby()`, which runs inside the bracket, so the flag is `True` if and only if the
-television queued the entry — as long as the image is the only thing that writes it. The plugin
+television queued the entry - as long as the image is the only thing that writes it. The plugin
 writes it too (the hold, below), so the hold never writes `True`: it writes a private marker that is
 truthy, which is all the image asks of the flag before it echoes, and fails the identity test. A
 household standby queued during a hold is therefore not mistaken for the television's. The entry is
-then kept **by identity** — the tuple object itself, not its `id()` — and no other entry is ever
+then kept **by identity** - the tuple object itself, not its `id()` - and no other entry is ever
 closed on, removed or counted. The callback runs for every notification the image queues, so a
 screen other than the standby screen returns after one comparison.
 
@@ -71,18 +71,18 @@ screen other than the standby screen returns after one comparison.
 `ChannelSelectionRadio` and `PiPZapSelection`, matched against the dialog's class name and the names
 in its method resolution order. `ChannelSelectionBase` is **excluded** although both real channel
 lists inherit it, because `SimpleChannelSelection` inherits it too, and that is the service picker
-embedded in the timer editor and other workflows — closing it answers somebody's half-finished
+embedded in the timer editor and other workflows - closing it answers somebody's half-finished
 question with „nothing". Nothing is matched by module either: the list's context menu, the bouquet
 selectors and the zap history live in the same module and are left alone. Any screen not on the list
 is left alone and the fact is logged at debug.
 
 **Only `session.current_dialog`, once.** It is re-read immediately before acting, `session.in_exec`
 is required, the dialog stack is never walked, and each identified standby is acted on at most once
-(a flag on its own record). A dialog stacked on the channel list — the context menu, a bouquet
-selector, a message box — is therefore the current dialog, is not on the list, and nothing happens.
+(a flag on its own record). A dialog stacked on the channel list - the context menu, a bouquet
+selector, a message box - is therefore the current dialog, is not on the list, and nothing happens.
 Every exception from the close is swallowed: a close that did not happen because the user got there
 first is the outcome that was wanted anyway. The action runs on the turn of the main loop after the
-standby was queued, not inside the television's own message handler — when the info bar is in front
+standby was queued, not inside the television's own message handler - when the info bar is in front
 it drains the entry in that same turn, and there is then nothing to do.
 
 **`cancel()` before `close()`.** The dialog's own `cancel()` is what EXIT runs; on the channel list it
@@ -93,12 +93,12 @@ on whichever one the cursor happened to be over.
 **The echo is suppressed by holding the flag, not by closing fast.** Immediately before closing, the
 plugin records `handlingStandbyFromTV`, sets it to its truthy marker (never `True`, see above), and
 restores the recorded value either once
-the standby has happened — `config.misc.standbyCounter` moved — or after **five seconds**, whichever
+the standby has happened - `config.misc.standbyCounter` moved - or after **five seconds**, whichever
 comes first. The deadline exists because a hold that leaked would silently stop „switching the
 receiver to standby switches the television off" for the rest of the session. 🔴 The restore never
 happens inside the counter's notification: the image reads the flag from its own notifier on the same
 counter, so restoring there would make the outcome depend on notifier order. It waits **1.5 seconds**
-after the counter moves, which also covers an image set to look for other receivers on the bus —
+after the counter moves, which also covers an image set to look for other receivers on the bus -
 there the flag is read from a one-second timer the image starts in that notifier. If `HdmiCec` has
 become unreachable the list is closed anyway and the log says the echo could not be suppressed; a
 late standby is better than none. Stopping the plugin restores a held flag immediately.
@@ -113,13 +113,13 @@ in a feature whose failure mode is „a standby somebody asked for was cancelled
 moves, any identified standby still queued is removed by identity, so that waking the receiver does
 not put it straight back to sleep. Nothing that was not identified is touched. If one of the
 television's standbys ran, the leftovers are repeats (a television that sent `<Standby>` twice,
-while the info bar carries out one entry per turn) and their removal is not counted. If none ran —
+while the info bar carries out one entry per turn) and their removal is not counted. If none ran -
 the receiver went to standby some other way, typically the remote's power button, which opens the
-standby screen directly — the plugin has thrown the television's standby away, and that is counted
+standby screen directly - the plugin has thrown the television's standby away, and that is counted
 once as `dropped_stale_standby`.
 
 **One television standby, at most one intervention.** A close is counted when the standby it
-released has happened — the counter moved and the entry is gone — or, where the counter cannot be
+released has happened - the counter moved and the entry is gone - or, where the counter cannot be
 watched, when the entry is found drained at its deadline (and only if there was a close). A close
 that released nothing is not a success: that standby is counted once, as `dropped_stale_standby`,
 when its deadline drops it or when the receiver goes to standby some other way first. The kind is
@@ -151,8 +151,8 @@ The topic is retracted on every connect on which the capability is absent.
 - **The plugin writes an attribute of an image singleton.** That is the cost of suppressing the
   echo, and it is why the write is bounded by a deadline, restores the value it found rather than
   `False`, and is only reachable with the opt-in setting on.
-- **Anything that later touches the notification queue identifies by identity.** An equality test —
-  including `list.remove`, which removes the first *equal* entry — would remove the household's own
+- **Anything that later touches the notification queue identifies by identity.** An equality test -
+  including `list.remove`, which removes the first *equal* entry - would remove the household's own
   standby from a queue that holds both. This is now a rule, not a detail.
 - **One race is not covered.** When the user closes the channel list in the same instant the
   television's standby arrives, the plugin correctly does nothing, and the standby released by the
@@ -163,7 +163,7 @@ The topic is retracted on every connect on which the capability is absent.
 - **A second close inside one hold re-asserts the marker and keeps the recorded value.** The
   television's bracket around its second standby writes `False` over the hold before the second
   close; the marker is written again, and the value put back at the end is still the one recorded
-  when the hold began — never the marker itself, which would otherwise stay in the flag for the
+  when the hold began - never the marker itself, which would otherwise stay in the flag for the
   rest of the session.
 - **The hold also changes what the image sends for a standby from the remote during it.** The
   remote's power button opens the standby screen directly; with the flag held, the image sends

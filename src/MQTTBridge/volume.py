@@ -50,7 +50,7 @@ def _control():
 
 
 def _hardware():
-    """The volume as the hardware has it — the authority both paths end at."""
+    """The volume as the hardware has it - the authority both paths end at."""
     try:
         from enigma import eDVBVolumecontrol
     except Exception as error:
@@ -102,7 +102,7 @@ def set_level(level):
     The bar is the reason this is five calls rather than one. `volUp` and
     `volDown` draw it themselves; setting an absolute value does not, so the
     dialogue is opened, given the number, and put on its own three-second timer
-    — which is precisely what the receiver's own web interface does, and what a
+    - which is precisely what the receiver's own web interface does, and what a
     household expects to see when the volume changes.
     """
     wanted = clamp(level)
@@ -132,7 +132,7 @@ def set_level(level):
 
 
 def set_muted(muted):
-    """Mute or unmute — and only when that is not already the state.
+    """Mute or unmute - and only when that is not already the state.
 
     `volMute` is a toggle, so calling it to reach a state it is already in is
     how a command to mute unmutes somebody's television.
@@ -163,7 +163,7 @@ def set_muted(muted):
 
 
 class VolumePublisher(Publisher):
-    """`volume` — {level, muted}, from whoever changed it."""
+    """`volume` - {level, muted}, from whoever changed it."""
 
     name = "volume"
 

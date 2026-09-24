@@ -2,7 +2,7 @@
 
 Everything is read against a fixture `/proc` rather than against the machine
 running the tests, because the question these tests answer is „does this parse
-what a receiver's kernel writes" — including the parts of that format nobody
+what a receiver's kernel writes" - including the parts of that format nobody
 thinks about until it bites: a `comm` field with a closing parenthesis in it, a
 `SC_CLK_TCK` that is not 100, and a file that has stopped being readable
 halfway through the life of the process.
@@ -433,7 +433,7 @@ def test_neither_memory_template_divides_something_that_might_be_null(live_bridg
     """`null / 1024` is a template error, and a template error is not „unknown".
 
     It leaves the previous reading on screen for ever with a line in a log
-    nobody reads — which is exactly the failure a diagnostic sensor exists to
+    nobody reads - which is exactly the failure a diagnostic sensor exists to
     make visible. `| default(none)` comes first so that an absent key takes the
     same branch as an explicit null rather than being Undefined and going down
     the arithmetic path after all.

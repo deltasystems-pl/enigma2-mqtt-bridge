@@ -1,4 +1,4 @@
-# ADR-0001: M0 sign-off — the three open questions
+# ADR-0001: M0 sign-off - the three open questions
 
 **Status:** accepted 2026-09-16, amended 2026-09-16 (see [the amendment](#amendment-2026-09-16--one-epg-grid-topic-per-bouquet))
 **Date:** 2026-09-16
@@ -17,7 +17,7 @@ third changes what the installer has to support. Answered below, in the order th
 **This reverses the PRD's proposal.** §12 suggested leaving grids on OpenWebif on the grounds
 that a grid is pull-shaped. That reasoning holds for *EPG search* and for browsing arbitrary time
 windows, and those do stay on OpenWebif. It does not hold for the one grid a household actually
-looks at — what is on now and next across the channels it watches — which is small, changes
+looks at - what is on now and next across the channels it watches - which is small, changes
 slowly, and is exactly what a retained topic is for. Fetching it over HTTP means a consumer needs
 a second transport, credentials for it, and a reason to poll; the plugin already has the EPG
 cache open.
@@ -34,7 +34,7 @@ Scope:
   grid, not a database.
 
 Delivery: the plugin side lands in **M2**, with the rest of the state topics. The integration
-consumes it in **M3** through an **action that returns a response** — deliberately *not* as a
+consumes it in **M3** through an **action that returns a response** - deliberately *not* as a
 state attribute. An 80 KB attribute is rewritten into the recorder database on every update; a
 response is fetched when something asks for it and stored nowhere.
 
@@ -45,7 +45,7 @@ shelf. This project does not get one: the PRD and the design document stay in th
 book**, where the reader looking for „how does the receiver talk to Home Assistant" will be. A
 book of two documents would be a shelf entry that exists to be tidy rather than to be found.
 
-Revisit if the project grows operator-facing runbooks of its own — which is a different kind of
+Revisit if the project grows operator-facing runbooks of its own - which is a different kind of
 document from these two.
 
 ### 3. Telnet-only boxes: document „enable SSH first" in v1
@@ -60,7 +60,7 @@ installer is real enough to have a transport worth adding one to.
 ## Consequences
 
 - The EPG grid adds a state topic, a setting, a command and a capability name to the v1 contract
-  — all of which are in `docs/TOPICS.md` from today, marked „since M2", so the integration is
+  - all of which are in `docs/TOPICS.md` from today, marked „since M2", so the integration is
   written against a contract that will not move under it.
 - It also adds the project's only payload that can reach tens of kilobytes. The consumer-side
   rule (an action's response, never a state attribute) is part of the decision, not an
@@ -72,27 +72,27 @@ installer is real enough to have a transport worth adding one to.
 - Telnet-only users are turned away at the install step in v1. That is a real gap; it is written
   down as one rather than discovered by somebody whose box cannot run the installer.
 
-## Amendment 2026-09-16 — one EPG grid topic per bouquet
+## Amendment 2026-09-16 - one EPG grid topic per bouquet
 
 *Written the same day, while the contract above was being set out in full in
 [TOPICS.md](../TOPICS.md). The decision stands as taken; what follows resolves an ambiguity in how
 it is published. The text above is left exactly as it was agreed.*
 
 §1 says „retained JSON on `enigma2/<node>/epg_grid`" and, a line earlier, „a compact grid for the
-**configured bouquets**" — plural. One topic and several bouquets cannot both be true unless the
+**configured bouquets**" - plural. One topic and several bouquets cannot both be true unless the
 bouquets are nested inside the payload or the last one written wins, and neither was intended. The
 published contract is therefore:
 
 - **One retained topic per configured bouquet**: `enigma2/<node>/epg_grid/<bouquet_slug>`.
 - **`<bouquet_slug>`** is the bouquet's name lower-cased, transliterated to ASCII, with every run
-  of non-alphanumeric characters collapsed to a single `_` and leading and trailing `_` trimmed —
+  of non-alphanumeric characters collapsed to a single `_` and leading and trailing `_` trimmed -
   „Ulubione TV" becomes `ulubione_tv`. A slug is an address, never a label.
-- **The payload keeps the shape §1 gave it**, `{bouquet, generated, channels: […]}`, and `bouquet`
+- **The payload keeps the shape §1 gave it**, `{bouquet, generated, channels: [...]}`, and `bouquet`
   is the bouquet's original name rather than the slug. Nothing a consumer parses changes.
 - **`cmd/epg_grid` regenerates every configured bouquet**, not one of them. There is no
   per-bouquet command.
 - **The plugin remembers the slugs it has published** in its state file, beside the discovery
-  component list, and **retracts** — an empty retained payload — every slug that is no longer
+  component list, and **retracts** - an empty retained payload - every slug that is no longer
   configured. A renamed bouquet is a new slug plus an old one to retract.
 
 Why this rather than one combined topic: a bouquet is the unit a household browses and the unit
@@ -102,6 +102,6 @@ the project's only payload that can reach tens of kilobytes. Splitting them also
 bouquet be answered exactly the way a dropped discovery component already is, instead of inventing
 a second mechanism for the same problem.
 
-The cost is that the retained-ghost trap now has a second shape — a slug nobody configures any
+The cost is that the retained-ghost trap now has a second shape - a slug nobody configures any
 more. That is why remembering the published slugs is part of this decision and not left as an
 implementation detail.

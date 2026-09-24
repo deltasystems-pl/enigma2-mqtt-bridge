@@ -4,7 +4,7 @@ The table below is the Linux input event name every enigma2 image uses, which is
 what the `key` topic carries and what `cmd/key` accepts.
 
 The receiver has its own copy of this mapping in `keyids`, with a few hundred
-entries to this file's forty, and it is merged in at first use — so a box with
+entries to this file's forty, and it is merged in at first use - so a box with
 a remote this plugin has never heard of still publishes `KEY_PVR` rather than
 `KEY_393`. This file is not thereby redundant: it is what the contract means by
 a key name off a receiver, it is what the tests run against, and it decides
@@ -70,7 +70,7 @@ def _load():
     """Merge the receiver's own key table into this one, once.
 
     `keyids.KEYIDS` maps a name to a code, and more than one name can share a
-    code — `KEY_OK` and `KEY_ENTER` are the same button on some remotes. The
+    code - `KEY_OK` and `KEY_ENTER` are the same button on some remotes. The
     table above wins wherever it has an opinion, so the name on the `key` topic
     does not depend on the order a dictionary happened to be built in, and the
     image fills in everything else.

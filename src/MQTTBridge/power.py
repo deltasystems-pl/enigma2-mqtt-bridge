@@ -1,8 +1,8 @@
 """Standby, and the three ways of leaving the room.
 
 The power model is the household's, not the hardware's. `on` and `standby` are
-the two states the box has while it is still doing its job — recordings run, the
-disk stays mounted, this plugin stays connected — and deep standby is not a
+the two states the box has while it is still doing its job - recordings run, the
+disk stays mounted, this plugin stays connected - and deep standby is not a
 third state but the absence of one: the box is off, the session is gone, and
 `availability` says `offline`. A consumer infers "off" from availability rather
 than from a `power` payload that could never be published.
@@ -58,7 +58,7 @@ def wake():
     """Leave standby. None on success, otherwise the reason it could not.
 
     `inStandby.Power()` is the standby screen's own handler for the power
-    button, so waking this way is exactly what the remote does — including the
+    button, so waking this way is exactly what the remote does - including the
     parts of it a plugin has no business reimplementing, like restoring the
     service that was playing.
     """
@@ -146,7 +146,7 @@ def quit_mainloop(session, retvalue):
 
 
 class PowerPublisher(Publisher):
-    """`power` — `on` or `standby`, and not JSON."""
+    """`power` - `on` or `standby`, and not JSON."""
 
     name = "power"
     raw = ("power",)
