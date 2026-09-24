@@ -21,6 +21,7 @@ import datetime
 import json
 
 import conftest
+import pytest
 
 from MQTTBridge import discovery
 
@@ -416,3 +417,149 @@ def test_the_payload_is_valid_json_with_polish_in_it(live_bridge, factory, recei
     live_bridge.publish_discovery()
     text = factory.client.last(DEVICE_TOPIC).text
     assert json.loads(text)
+
+
+# ------------------------------------------------ what a connect retracts --
+#
+# The stale-topic retraction runs before the first publish of every connect and
+# every reload. An empty retained device payload is a deletion in Home
+# Assistant — of the device and every entity on it — so whatever the session is
+# about to publish again must not be emptied first, however briefly.
+
+TRIGGERS = [
+    "homeassistant/device_automation/" + NODE + "/" + colour + "_" + press + "/config"
+    for colour in ("red", "green", "yellow", "blue") for press in ("short", "long")
+]
+OURS = [DEVICE_TOPIC] + TRIGGERS
+
+
+def emptied(published):
+    return [entry.topic for entry in published if entry.retain and entry.text == ""]
+
+
+def reconnect(bridge, factory):
+    factory.client.clear()
+    factory.client.fire_disconnect()
+    factory.client.fire_connect()
+    return list(factory.client.published)
+
+
+def reload(bridge, factory):
+    old = factory.client
+    old.clear()
+    bridge.reload()
+    factory.client.fire_connect()
+    return list(old.published) + list(factory.client.published)
+
+
+def restart(bridge, factory, make_bridge, receiver):
+    """A new process on the same state file — the connect after a GUI restart."""
+    factory.client.fire_disconnect()
+    bridge.stop()
+    fresh = make_bridge(session=receiver.session)
+    fresh.start()
+    factory.client.fire_connect()
+    return list(factory.client.published)
+
+
+def test_a_reconnect_does_not_retract_the_discovery_payloads(live_bridge, factory):
+    assert factory.client.last(DEVICE_TOPIC).text != ""
+    published = reconnect(live_bridge, factory)
+
+    assert [topic for topic in emptied(published) if topic.startswith("homeassistant/")] == []
+    assert factory.client.last(DEVICE_TOPIC).text != ""
+
+
+def test_a_reload_does_not_retract_the_discovery_payloads(live_bridge, factory):
+    published = reload(live_bridge, factory)
+
+    assert [topic for topic in emptied(published) if topic.startswith("homeassistant/")] == []
+    assert factory.client.last(DEVICE_TOPIC).text != ""
+
+
+def test_a_restart_does_not_retract_the_discovery_payloads(live_bridge, factory, make_bridge,
+                                                          receiver):
+    published = restart(live_bridge, factory, make_bridge, receiver)
+
+    assert [topic for topic in emptied(published) if topic.startswith("homeassistant/")] == []
+
+
+def test_the_failed_removal_restart_does_not_retract_the_discovery_payloads(live_bridge,
+                                                                            factory):
+    old = factory.client
+    old.clear()
+    live_bridge.restart_after_failed_uninstall("uninstall", "opkg is busy")
+    factory.client.fire_connect()
+
+    published = list(old.published) + list(factory.client.published)
+    assert [topic for topic in emptied(published) if topic.startswith("homeassistant/")] == []
+
+
+@pytest.mark.parametrize("mode", ["discovery", "integration", "off"])
+@pytest.mark.parametrize("how", ["reconnect", "reload", "restart"])
+def test_nothing_the_session_republishes_is_emptied_first(make_bridge, factory, settings,
+                                                          receiver, mode, how):
+    """In every mode, a topic retracted on connect is one that stays retracted."""
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    settings.ha_mode.value = mode
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+    factory.client.fire_connect()
+
+    if how == "reconnect":
+        published = reconnect(bridge, factory)
+    elif how == "reload":
+        published = reload(bridge, factory)
+    else:
+        published = restart(bridge, factory, make_bridge, receiver)
+
+    refilled = {entry.topic for entry in published if entry.retain and entry.text != ""}
+    assert sorted(set(emptied(published)) & refilled) == []
+
+
+def test_a_new_prefix_retracts_the_payloads_under_the_old_one(live_bridge, factory, settings):
+    settings.ha_discovery_prefix.value = "ha"
+    published = reload(live_bridge, factory)
+
+    assert sorted(set(emptied(published)) & set(OURS)) == sorted(OURS)
+    assert factory.client.last("ha/device/" + NODE + "/config").text != ""
+
+
+def test_a_new_node_id_retracts_the_payloads_of_the_old_one(live_bridge, factory, settings):
+    settings.node_id.value = "vuuno4kse_beef01"
+    published = reload(live_bridge, factory)
+
+    assert sorted(set(emptied(published)) & set(OURS)) == sorted(OURS)
+    assert factory.client.last("homeassistant/device/vuuno4kse_beef01/config").text != ""
+
+
+@pytest.mark.parametrize("mode", ["integration", "off"])
+def test_leaving_discovery_mode_on_the_setup_screen_retracts_the_payloads(live_bridge, factory,
+                                                                         settings, mode):
+    """The setup screen reloads; it does not go through `cmd/ha_mode`."""
+    settings.ha_mode.value = mode
+    published = reload(live_bridge, factory)
+
+    assert sorted(set(emptied(published)) & set(OURS)) == sorted(OURS)
+    assert [entry for entry in published
+            if entry.topic.startswith("homeassistant/") and entry.text != ""] == []
+
+
+def test_the_triggers_go_when_the_remote_stops_being_watched(live_bridge, factory, settings):
+    """A capability that is gone takes its triggers; the device payload stays."""
+    settings.publish_keys.value = False
+    published = reload(live_bridge, factory)
+
+    assert sorted(set(emptied(published)) & set(TRIGGERS)) == sorted(TRIGGERS)
+    assert DEVICE_TOPIC not in emptied(published)
+
+
+@pytest.mark.parametrize("capabilities", [[], ["keys"], ["keys", "power", "volume"]])
+@pytest.mark.parametrize("prefix", ["homeassistant", "ha"])
+def test_the_topic_set_is_what_the_builder_publishes(capabilities, prefix):
+    """The retraction trusts this set, so it may not drift from the payloads."""
+    built = discovery.build_discovery_components(
+        NODE, "Living room receiver", "enigma2", {"capabilities": capabilities}, prefix=prefix
+    )
+    assert discovery.discovery_topics(prefix, NODE, capabilities) == set(built)

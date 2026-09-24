@@ -109,6 +109,10 @@ def device_topic(prefix, node_id):
     return str(prefix).strip("/") + "/device/" + str(node_id) + "/config"
 
 
+# The capability the eight device triggers are gated on: the remote's colour keys.
+TRIGGER_CAPABILITY = "keys"
+
+
 def trigger_topic(prefix, node_id, name):
     return str(prefix).strip("/") + "/device_automation/" + str(node_id) + "/" + name + "/config"
 
@@ -584,25 +588,51 @@ def _triggers(prefix, node_id, friendly_name, root, capabilities):
     the contract says eight. Availability is not offered: the trigger schema has
     no concept of it and would drop the key silently.
     """
-    from .keys import COLOUR_KEYS, PRESS_LONG, PRESS_SHORT
-
-    if "keys" not in capabilities:
+    if TRIGGER_CAPABILITY not in capabilities:
         return {}
     device = {"ids": [str(node_id)], "name": friendly_name or str(node_id)}
     topics = {}
+    for key, colour, press, name in _trigger_presses():
+        topics[trigger_topic(prefix, node_id, name)] = {
+            "atype": "trigger",
+            "type": "button_" + press + "_press",
+            "stype": colour,
+            "t": root + "/key",
+            "val_tpl": "{{ value_json.key }}_{{ value_json.press }}",
+            "pl": key + "_" + press,
+            "dev": device,
+        }
+    return topics
+
+
+def _trigger_presses():
+    """`(key, colour, press, name)` for each of the eight triggers, in a fixed order."""
+    from .keys import COLOUR_KEYS, PRESS_LONG, PRESS_SHORT
+
     for key in COLOUR_KEYS:
         colour = key.replace("KEY_", "").lower()
         for press in (PRESS_SHORT, PRESS_LONG):
-            name = colour + "_" + press
-            topics[trigger_topic(prefix, node_id, name)] = {
-                "atype": "trigger",
-                "type": "button_" + press + "_press",
-                "stype": colour,
-                "t": root + "/key",
-                "val_tpl": "{{ value_json.key }}_{{ value_json.press }}",
-                "pl": key + "_" + press,
-                "dev": device,
-            }
+            yield key, colour, press, colour + "_" + press
+
+
+def discovery_topics(prefix, node_id, capabilities):
+    """The topics `build_discovery_components` publishes, without building a payload.
+
+    The retraction of stale topics runs before anything is published on a
+    connect, and it has to know what is about to be published so that it does
+    not take it back first: an empty retained device payload is a deletion in
+    Home Assistant — of the device and every entity on it — and the republish a
+    moment later creates them again, without the names, areas and dashboards
+    somebody gave them. The topic set depends on the prefix, the node id and one
+    capability, and on nothing a payload carries, so it is answered here from
+    those alone and a test holds it equal to what the builder produces.
+    """
+    topics = {device_topic(prefix, node_id)}
+    if TRIGGER_CAPABILITY in set(capabilities or ()):
+        topics.update(
+            trigger_topic(prefix, node_id, name) for _key, _colour, _press, name
+            in _trigger_presses()
+        )
     return topics
 
 

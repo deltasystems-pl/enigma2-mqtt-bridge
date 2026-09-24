@@ -624,12 +624,29 @@ class Bridge:
         return before != now
 
     def _stale_topics(self):
+        """Remembered topics outside this node's tree that this session will not publish.
+
+        Outside the tree there are two kinds of topic the node owns under its
+        current name: the announcement, and — in `discovery` mode — the Home
+        Assistant discovery payloads for the current prefix, node id and
+        capabilities. 🔴 Those have to be left alone here. This runs before the
+        first publish of every connect and every reload, and an empty retained
+        device payload deletes the device and all its entities in Home
+        Assistant; the republish a moment later brings them back without the
+        names, areas and dashboards they had. What is left over — an older
+        prefix, an older node id, a mode that no longer publishes them, a
+        trigger whose capability is gone — is stale, and is retracted.
+        """
         root = self.base_topic + "/" + self.node_id + "/"
-        announcement = discovery.announcement_topic(self.node_id)
+        current = {discovery.announcement_topic(self.node_id)}
+        if self.value("ha_mode") == "discovery":
+            current |= discovery.discovery_topics(
+                self.discovery_prefix, self.node_id, self.capabilities()
+            )
         return [
             topic
             for topic in self.state.retained_topics
-            if not topic.startswith(root) and topic != announcement
+            if not topic.startswith(root) and topic not in current
         ]
 
     def retract_stale(self):
@@ -641,7 +658,8 @@ class Bridge:
         findable at all, and it survives a restart — which is why this runs on
         every connect and not only from `reload`. The rename is just as likely
         to happen while the box is disconnected, or while the plugin is not even
-        running, as it is to happen with a session open.
+        running, as it is to happen with a session open. What the session is
+        about to publish again is not stale — see `_stale_topics`.
         """
         stale = self._stale_topics()
         if not stale or self.client is None:
