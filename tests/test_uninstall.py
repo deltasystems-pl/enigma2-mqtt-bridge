@@ -457,11 +457,14 @@ def test_commands_are_not_dispatched_once_the_doors_are_closed(box, factory, rec
     client.fire_message(ROOT + "/cmd/restart_gui", b"PRESS")
     client.fire_message(ROOT + "/cmd/reset", b"PRESS")
     refusal = bridge.run_command("screenshot", "", PAGE)
-    settings_refusal = bridge.apply_settings({"log_level": "debug"})
+    # A settings save is kept and not applied, like the setup screen's Save.
+    clients = len(factory.clients)
+    assert bridge.apply_settings({"log_level": "debug"}) is None
 
     assert refusal == "an uninstall is already running"
-    assert settings_refusal == "an uninstall is already running"
     assert len(client.published) == after
+    assert len(factory.clients) == clients
+    assert bridge.settings.log_level.saved_value == "debug"
     assert receiver.session.opened == []
 
 
@@ -1036,6 +1039,48 @@ def test_after_a_save_mid_removal_the_failure_path_still_reloads_with_it(
     client = _fresh_session(factory, old)
     _put_back(client, bridge)
     assert client.last(INFO).json()["settings"]["screenshot_delay"] == 9
+
+
+def test_an_abandoned_removal_is_not_under_way(box, factory):
+    """A shutdown in the middle ends the removal; nothing is held back after it."""
+    bridge = box()
+    send(factory)
+    MainLoop.advance(0)
+    assert bridge.uninstaller.underway
+    bridge.stop()
+    assert bridge.uninstaller.phase == "abandoned"
+    assert bridge.uninstaller.underway is False
+
+
+def test_a_screen_whose_info_box_cannot_open_still_closes(box, factory, settings):
+    bridge = box()
+    send(factory)
+
+    from MQTTBridge import setup as setup_screen
+
+    class Refusing(_Session):
+        def openWithCallback(self, callback, what, *arguments, **kwargs):
+            raise RuntimeError("no dialog on this image")
+
+    screen = setup_screen.MQTTBridgeSetup(Refusing(), settings=settings, bridge=bridge)
+    settings.screenshot_delay.value = 9
+    screen.keySave()
+
+    assert screen.closed_with == (True,)
+    assert settings.screenshot_delay.saved_value == 9
+    assert len(factory.clients) == 1
+
+
+def test_a_second_start_during_the_removal_opens_no_session(box, factory):
+    bridge = box()
+    run_to_opkg(bridge, factory)
+    assert bridge.client is None
+    clients = len(factory.clients)
+
+    bridge.start()
+
+    assert len(factory.clients) == clients
+    assert bridge.client is None
 
 
 def test_a_save_after_a_failed_removal_reloads_as_usual(box, factory, settings):

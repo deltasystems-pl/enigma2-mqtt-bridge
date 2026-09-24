@@ -1978,3 +1978,58 @@ def test_the_openwebif_hook_is_silent_when_openwebif_is_absent(monkeypatch):
             monkeypatch.delitem(sys.modules, name, raising=False)
     # No exception, and nothing registered: most boxes have no OpenWebif hook.
     assert _run_hook(monkeypatch) is not None
+
+
+# ------------------------------------------- a page save while the plugin removes itself --
+
+
+def _accept_uninstall(bridge, monkeypatch):
+    """`cmd/uninstall` accepted from the page: scheduled, the teardown not yet begun."""
+    monkeypatch.setattr(bridge.uninstaller, "claimed", True)
+    assert bridge.run_command("uninstall", NODE, PAGE) is None
+    assert bridge.uninstaller.phase == "scheduled"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"log_level": "debug"}, {"screenshot_delay": "9"}],
+    ids=["reconnecting setting", "cmd-config setting"],
+)
+def test_a_page_save_after_the_uninstall_was_accepted_does_not_lose_it(
+    live_bridge, page, factory, settings, monkeypatch, change
+):
+    """Between acceptance and the teardown's first turn a reload would leave the
+    teardown an unconnected session, and it would fail."""
+    from conftest import MainLoop
+
+    _accept_uninstall(live_bridge, monkeypatch)
+    clients = len(factory.clients)
+    published = len(factory.client.published)
+
+    request, body = post(page(live_bridge), new_session(),
+                         settings_fields(live_bridge.settings, **change))
+
+    assert request.response_code == 200
+    assert "being removed from this receiver" in html.unescape(body.decode("utf-8"))
+    assert len(factory.clients) == clients
+    assert len(factory.client.published) == published
+    name, value = next(iter(change.items()))
+    assert str(getattr(settings, name).saved_value) == value
+
+    MainLoop.advance(0)
+    assert live_bridge.uninstaller.phase == "retracting"
+
+
+def test_a_page_save_after_a_failed_removal_applies_as_usual(live_bridge, page, factory,
+                                                             monkeypatch):
+    _accept_uninstall(live_bridge, monkeypatch)
+    live_bridge.uninstaller._fail("the uninstall stopped: a test")
+    factory.client.fire_connect()
+    clients = len(factory.clients)
+
+    request, body = post(page(live_bridge), new_session(),
+                         settings_fields(live_bridge.settings, log_level="debug"))
+
+    assert request.response_code == 200
+    assert b"reconnecting" in body
+    assert len(factory.clients) == clients + 1

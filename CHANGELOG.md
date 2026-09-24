@@ -181,10 +181,12 @@ version that has no section here.
 
 ### Fixed
 
-- **A Save on the receiver's setup screen no longer reopens the broker session while
-  `cmd/uninstall` is under way.** It republished everything underneath a removal that had just
-  retracted it. The settings are still saved, the screen says they are not applied yet, and the
-  removal's own failure path reconnects with them if it stops.
+- **A Save on the receiver's setup screen or the OpenWebif page no longer reopens the broker
+  session while `cmd/uninstall` is under way.** It republished everything underneath a removal
+  that had just retracted it, and a page save made before the removal's first step left it an
+  unconnected session, so the removal failed. The settings are still saved, the screen and the
+  page say they are not applied yet, and the removal's own failure path reconnects with them if
+  it stops.
 - **„Next timer" has been unreadable in discovery mode since 0.2.0.** Its value template appended
   `+00:00` to `timestamp_utc`, which already ends in the offset, so the state arrived as
   `2026-09-10T12:08:29+00:00+00:00`. Home Assistant cannot parse that: it logs „Invalid state

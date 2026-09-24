@@ -250,11 +250,28 @@ class Bridge:
         one changed on the television does, and a kill-switch rebinds its hook
         the same way. `values` must already be validated.
         """
+        if self._uninstaller.underway:
+            return self.defer_settings(values)
         if self._uninstaller.closed:
             return UNINSTALL_RUNNING
         if not settings_module.save_settings(values, self.settings):
             return "could not persist the plugin settings"
         self.reload()
+        return None
+
+    def defer_settings(self, values):
+        """Save settings while the plugin removes itself, and apply nothing now.
+
+        🔴 A reload here would open a fresh session underneath the removal —
+        republishing what it retracts, or, before its first turn, leaving it a
+        session that is not connected yet, so it fails and the removal is lost.
+        The values are kept: a reinstall starts from them, and if the removal
+        stops, its failure path reloads the bridge with them. The same rule as
+        the setup screen's Save. `values` must already be validated.
+        """
+        if not settings_module.save_settings(values, self.settings):
+            return "could not persist the plugin settings"
+        LOG.warning("settings saved during an uninstall; not applying them now")
         return None
 
     def run_command(self, name, text, origin):
@@ -405,6 +422,12 @@ class Bridge:
         return self
 
     def _start(self):
+        if self._uninstaller.underway:
+            # Once the removal has disconnected, `client` is None and a second
+            # start would open a session under it. No caller is known to do
+            # this; the failure path clears the phase before it reloads.
+            LOG.warning("not starting: the plugin is removing itself")
+            return
         if self.client is not None:
             # enigma2 can hand a plugin its session start more than once. The
             # session that is already open is the healthy one; opening a second

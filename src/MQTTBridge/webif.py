@@ -854,10 +854,26 @@ def _settings_payload(changes):
     })
 
 
+def _uninstalling(bridge):
+    """Whether `cmd/uninstall` is under way on this bridge. Anything unreadable is „no"."""
+    try:
+        return bool(bridge.uninstaller.underway)
+    except Exception:
+        return False
+
+
 def _apply(request, bridge, changes):
     """Save through the path the rest of the plugin uses, chosen by what changed."""
     remote = set(settings_module.REMOTE_SETTING_NAMES)
-    if bridge.running and set(changes) <= remote:
+    if _uninstalling(bridge):
+        # Saved, not applied: the setup screen's rule, in the same words.
+        error = bridge.defer_settings(changes)
+        done = _(
+            "Settings saved. The plugin is being removed from this receiver, so they "
+            "are not applied now; they take effect if the removal stops or the plugin "
+            "is installed again."
+        )
+    elif bridge.running and set(changes) <= remote:
         raw = bridge.remote_settings()
         raw.update(changes)
         values = settings_module.validate_remote_settings(raw, bridge.settings)
