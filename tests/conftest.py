@@ -823,9 +823,12 @@ config_module = _module("Components.config")
 #   on the box the wrong type is what stays in memory until the next start
 #   reads the settings file back.
 # - **Notifiers are called only on a change.** `setValue` compares the old
-#   value with the new one (`ConfigText` before storing, `ConfigSelection` and
-#   `ConfigInteger` by their `str()`) and calls `changed()` only when they
-#   differ; `addNotifier` calls the new notifier at once unless told not to.
+#   value with the new one (`ConfigText` before storing, `ConfigSelection` by
+#   the `str()` of the choice, `ConfigInteger` by the `str()` of the
+#   one-element list it keeps) and calls `changed()` only when they differ;
+#   `addNotifier` calls the new notifier at once unless told not to. So on an
+#   integer `5` then `"5"` is a change (`[5]` against `['5']`), while on a
+#   selection `2` then `"2"` is not.
 #
 # `ConfigSelection` never raises either: a value that is not one of its
 # choices is replaced by the default, silently.
@@ -918,9 +921,11 @@ class ConfigInteger(ConfigElement):
         self.limits = limits
 
     def setValue(self, value):
-        previous = str(self._value)
+        # The image keeps `[value]` and compares the `str()` of that list, so
+        # `5` and `"5"` differ (`[5]` against `['5']`) and the change notifies.
+        previous = str([self._value])
         self._value = value
-        if str(self._value) != previous:
+        if str([self._value]) != previous:
             self.changed()
 
     value = property(ConfigElement.getValue, setValue)

@@ -205,8 +205,14 @@ version that has no section here.
   first, as a shutdown does. When the new session then never connected (a mistyped broker address,
   a password that no longer matches, or the plugin switched off on the same screen), the retained
   `availability` stayed `online` with nothing connected, and a consumer showed a live receiver
-  until somebody looked. The old session now publishes a retained `offline` before it disconnects;
-  the new one replaces it with `online` the moment it connects.
+  until somebody looked. A save that changes the connection — broker address or port, login, TLS —
+  or switches the plugin off now publishes a retained `offline` before the old session
+  disconnects, so **the receiver shows as unavailable while it reconnects**, and stays so if the
+  new session never connects; the new session replaces it with `online` the moment it does. Every
+  other save reconnects silently, as before, so a changed screenshot delay or log level does not
+  make the receiver blink unavailable and re-fire what watches it. Renaming the node id or the base
+  topic publishes no `offline` either: the old name's topics are retracted, and the new name
+  belongs to the new session alone.
 
 ### Notes
 - **An EPG import freezes the menus for two to three seconds at its end**, whoever starts it. The

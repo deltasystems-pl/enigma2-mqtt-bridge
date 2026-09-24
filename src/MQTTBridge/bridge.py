@@ -121,6 +121,15 @@ UNINSTALL_CAPABILITY = "uninstall"
 
 SHUTDOWN_FLUSH_SECONDS = 1.0
 
+# What a session is: where the broker is, who logs in, how, and under which
+# name. A reload after a save that changed one of these — or switched the plugin
+# off — says `offline` first; any other save reconnects silently. The last two
+# name the will's topic, which makes a change to them a rename (see `reload`).
+IDENTITY_CONNECTION_SETTING_NAMES = ("node_id", "base_topic")
+CONNECTION_SETTING_NAMES = (
+    "host", "port", "tls", "ca_file", "username", "password",
+) + IDENTITY_CONNECTION_SETTING_NAMES
+
 # A command name comes off the topic, so its length is the publisher's choice.
 # The retained `last_error` is not the place to store somebody's 4 KB topic.
 LAST_ERROR_CMD_LIMIT = 64
@@ -176,6 +185,10 @@ class Bridge:
         # publisher sent — no copy.
         self._screenshot = None
         self._screenshot_topic = None
+        # The open session's will topic, and the settings it connected with:
+        # what `reload` compares a save against.
+        self._will_topic = None
+        self._session_settings = None
 
     # ----------------------------------------------------------------- settings --
 
@@ -450,7 +463,9 @@ class Bridge:
             return
         if self._loop_monitor is not None:
             self._loop_monitor.start()
-        self.client.set_will(self.topic("availability"), OFFLINE, qos=WILL_QOS, retain=True)
+        self._will_topic = self.topic("availability")
+        self._session_settings = self._connection_settings()
+        self.client.set_will(self._will_topic, OFFLINE, qos=WILL_QOS, retain=True)
 
         self._last_error_published = self.state.knows(self.topic("last_error"))
         self.register_default_publishers()
@@ -520,13 +535,20 @@ class Bridge:
         """Apply changed settings. Called by the setup screen after a save.
 
         🔴 The old session ends with a clean disconnect, and a clean disconnect
-        is exactly what tells the broker to throw the will away. So, as `stop`
-        does, the session says `offline` itself first. Without it the retained
-        `availability` stays `online` from the old session, and if the new one
-        never connects — a mistyped broker, a password that is now wrong, or the
-        plugin switched off on the same screen — a consumer sees a receiver that
-        is online with nothing connected, for as long as nobody looks. The new
-        session's own `online` replaces it the moment it connects.
+        is exactly what tells the broker to throw the will away. When the save
+        changed the connection itself — see `_says_offline_on_reload` — the
+        session therefore says `offline` first, as `stop` does. Without it the
+        retained `availability` stays `online` from the old session, and if the
+        new one never connects — a mistyped broker, a password that is now
+        wrong, or the plugin switched off on the same screen — a consumer sees a
+        receiver that is online with nothing connected, for as long as nobody
+        looks. The new session's own `online` replaces it the moment it connects.
+
+        Every other save stays silent. The setup screen reloads on every save
+        and the OpenWebif page on every setting outside `cmd/config`'s
+        allowlist; an `offline` there would make the receiver unavailable for
+        the seconds a reconnect takes, and re-fire every automation that
+        watches it, for a change that did not touch the connection at all.
 
         Unlike `stop`, this does not wait for the publish to leave: the process
         goes on running, paho's network thread writes its queue in order and
@@ -538,16 +560,45 @@ class Bridge:
             self._stop_loop_monitor()
             if self.connected:
                 self.retract_stale()
-                self.client.publish(
-                    self.topic("availability"), OFFLINE, qos=STATE_QOS, retain=True
-                )
+                if self._says_offline_on_reload():
+                    self.client.publish(self._will_topic, OFFLINE, qos=STATE_QOS, retain=True)
             if self.client is not None:
                 self.client.stop()
                 self.client = None
+            self._will_topic = None
+            self._session_settings = None
             self._stop_publishers()
         except Exception:
             LOG.exception("could not shut the old session down cleanly")
         return self.start()
+
+    def _connection_settings(self):
+        """What the open session was built from, as the settings hold it now."""
+        return {name: self.value(name) for name in CONNECTION_SETTING_NAMES}
+
+    def _says_offline_on_reload(self):
+        """Whether the session being replaced should publish `offline` first.
+
+        Yes when the save switched the plugin off, or changed how the box
+        reaches the broker — the new session may never connect, and nothing
+        else would take the old `online` back. No when nothing of the
+        connection changed, and no on a rename either: the node id and the base
+        topic name the will's topic, the settings already carry the new name,
+        and the old topic has just been retracted by `retract_stale`. An
+        `offline` for the new name from the old session could reach the broker
+        after the new session's `online` — they are two client ids, so the
+        broker does not order them — and would then stay retained under a name
+        that is live.
+        """
+        before = self._session_settings
+        if before is None or self._will_topic is None:
+            return False
+        now = self._connection_settings()
+        if any(before[name] != now[name] for name in IDENTITY_CONNECTION_SETTING_NAMES):
+            return False
+        if not self.value("enabled"):
+            return True
+        return before != now
 
     def _stale_topics(self):
         root = self.base_topic + "/" + self.node_id + "/"

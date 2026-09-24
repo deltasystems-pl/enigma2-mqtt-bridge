@@ -3,8 +3,11 @@
 Every other test in this suite trusts these classes to be the receiver's. The
 rules pinned here were read from the receiver's own `Components/config.pyc`:
 a value is kept exactly as it was assigned, notifiers run only when it changes,
-and a selection never raises. A stub that tidied values up — `1` into `True`,
-`"5"` into `5`, `None` into `""` — would let the plugin write the wrong type
+and a selection never raises. „Changes" is the image's own comparison: the
+`str()` of the choice for a selection, and for an integer the `str()` of the
+one-element list it keeps, which tells `5` from `"5"`. A stub that tidied
+values up — `1` into `True`, `"5"` into `5`, `None` into `""` — would let the
+plugin write the wrong type
 and pass, while the box kept the wrong type in memory until its next start.
 """
 
@@ -63,18 +66,26 @@ def test_notifiers_run_only_when_the_value_changes():
         assert calls == [first, second], element
 
 
-def test_an_integer_and_a_selection_compare_by_their_text():
-    """`5` and `"5"` are the same value to the image, so no notifier runs."""
+def test_an_integer_compares_the_text_of_the_list_it_keeps():
+    """The image keeps `[value]`: `[5]` and `['5']` differ, so `"5"` after `5` notifies."""
     integer = ConfigInteger(default=5)
     calls = _counting(integer)
     integer.value = "5"
-    assert calls == []
+    assert calls == ["5"]
     assert integer.value == "5"
+    integer.value = "5"
+    assert calls == ["5"]
 
+
+def test_a_selection_compares_the_text_of_the_choice():
+    """`2` finds the choice `"2"`, which is stored — and it is a change only from `"1"`."""
     selection = ConfigSelection(choices=[("1", "one"), ("2", "two")], default="1")
     calls = _counting(selection)
     selection.value = 2
     assert selection.value == "2"
+    assert calls == ["2"]
+    selection.value = 2
+    selection.value = "2"
     assert calls == ["2"]
 
 

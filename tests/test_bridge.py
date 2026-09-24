@@ -6,6 +6,8 @@ rule that `on_connect` publishes the lot *every* time rather than only at
 start-up.
 """
 
+import pytest
+
 from MQTTBridge import boxinfo, discovery
 from MQTTBridge import config as settings_module
 from MQTTBridge.bridge import Bridge, Publisher
@@ -471,16 +473,31 @@ def _record_disconnect_order(client):
     return seen
 
 
+def _offline_from(client):
+    return [entry for entry in client.published if entry.text == "offline"]
+
+
+@pytest.mark.parametrize("name, changed", [
+    ("host", "10.0.0.9"),
+    ("port", 8883),
+    ("username", "someone"),
+    ("password", "something else"),
+    ("tls", True),
+    ("ca_file", "/etc/ssl/certs/ca.pem"),
+])
 def test_a_reload_whose_reconnect_fails_leaves_offline_retained(connected_bridge, factory,
-                                                                 settings):
-    """The clean disconnect drops the will, so the old session says `offline` itself."""
+                                                                 settings, name, changed):
+    """A save that changes the connection: the old session says `offline` itself.
+
+    The clean disconnect drops the will, and the new session may never connect —
+    a wrong address, a password that no longer matches.
+    """
     old = factory.client
     assert _retained_on_the_broker(factory, AVAILABILITY) == "online"
     seen = _record_disconnect_order(old)
 
-    settings.host.value = "10.0.0.9"
+    getattr(settings, name).value = changed
     connected_bridge.reload()
-    # The new session never connects: a wrong address, a changed password.
 
     assert factory.client is not old
     assert factory.client.published == []
@@ -489,6 +506,69 @@ def test_a_reload_whose_reconnect_fails_leaves_offline_retained(connected_bridge
                and e.text == "offline" and e.retain]
     # Before the DISCONNECT, which is what a broker would still deliver.
     assert offline and offline[-1] < seen[0]
+    # A state topic, so QoS 0 — the will alone is asked for at QoS 1.
+    assert [e.qos for e in _offline_from(old)] == [0]
+
+
+@pytest.mark.parametrize("name, changed", [
+    ("log_level", "debug"),
+    ("screenshot_delay", 9),
+    ("publish_keys", False),
+    ("friendly_name", "Kitchen receiver"),
+])
+def test_a_reload_that_leaves_the_connection_alone_says_nothing(connected_bridge, factory,
+                                                                settings, name, changed):
+    """The setup screen reloads on every save: only a connection change may blink `offline`."""
+    old = factory.client
+    getattr(settings, name).value = changed
+    connected_bridge.reload()
+
+    assert _offline_from(old) == []
+    assert _retained_on_the_broker(factory, AVAILABILITY) == "online"
+    factory.client.fire_connect()
+    assert _retained_on_the_broker(factory, AVAILABILITY) == "online"
+
+
+@pytest.mark.parametrize("name, changed, renamed", [
+    ("node_id", "vuuno4kse_beef01", "enigma2/vuuno4kse_beef01/availability"),
+    ("base_topic", "stb", "stb/" + NODE + "/availability"),
+])
+@pytest.mark.parametrize("with_host", [False, True], ids=["rename", "rename-and-new-broker"])
+def test_a_rename_publishes_no_offline_for_either_name(connected_bridge, factory, settings,
+                                                       name, changed, renamed, with_host):
+    """The old name is retracted; the new one belongs to the new session alone.
+
+    An `offline` from the old session under the new name could land after the
+    new session's `online` — two client ids, which the broker does not order —
+    and stay retained under a name that is live. One under the old name would
+    land after its retraction and stay behind for a name nobody uses. That holds
+    when the same save also changes the broker.
+    """
+    old = factory.client
+    getattr(settings, name).value = changed
+    if with_host:
+        settings.host.value = "10.0.0.9"
+    connected_bridge.reload()
+
+    assert _offline_from(old) == []
+    assert old.last(AVAILABILITY).text == ""
+    assert old.all_for(renamed) == []
+    factory.client.fire_connect()
+    assert _retained_on_the_broker(factory, renamed) == "online"
+
+
+def test_a_reload_after_the_connection_dropped_publishes_nothing(connected_bridge, factory,
+                                                                 settings):
+    """With the session already gone, the broker has published the will; there is no one to tell."""
+    old = factory.client
+    old.fire_disconnect(reason_code=7)
+    assert connected_bridge.connected is False
+    before = len(old.published)
+
+    settings.host.value = "10.0.0.9"
+    connected_bridge.reload()
+
+    assert old.published[before:] == []
 
 
 def test_a_reload_that_switches_the_plugin_off_leaves_offline_retained(connected_bridge,
