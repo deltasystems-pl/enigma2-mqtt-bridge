@@ -995,8 +995,9 @@ order, never blocking it ([ADR-0013](adr/0013-the-uninstall-closes-the-doors-and
 
 1. **Stop publishing.** Every publisher lets go of its hooks and no further command is dispatched;
    a command arriving now is dropped with a line in the log, and one from the OpenWebif page is
-   answered „an uninstall is already running" without touching `last_error`. From here on nothing
-   re-creates a topic.
+   answered „an uninstall is already running" without touching `last_error`. A Save on the
+   receiver's setup screen from the moment the command is accepted keeps its settings but does
+   not reconnect. From here on nothing re-creates a topic.
 2. **Retract** — an empty retained payload — every topic in the state file (§4), which is the set
    `cmd/reset` uses, **and** every command topic of this node on which somebody left a retained
    message during this session (the dispatcher discards those; this is where they are cleared).

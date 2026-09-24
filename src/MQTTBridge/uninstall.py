@@ -275,6 +275,16 @@ class Uninstaller:
         self._output = ""
         self._last_line = ""
 
+    @property
+    def underway(self):
+        """From acceptance to the end: nothing may reopen the session meanwhile.
+
+        Accepted, retracting, removing, or removed and waiting for the restart.
+        Not after a failure — `_fail` clears the phase before it reloads — and
+        not once the interface is shutting down anyway.
+        """
+        return self.phase in ("scheduled", "retracting", "removing", "done")
+
     # -------------------------------------------------------------- capability --
 
     def probe(self):

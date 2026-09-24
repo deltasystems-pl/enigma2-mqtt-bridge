@@ -106,6 +106,14 @@ def status_text(bridge, settings):
     return state + "  ·  " + (_("Node: %s") % (node or "-"))
 
 
+def _uninstalling(bridge):
+    """Whether `cmd/uninstall` is under way on this bridge. Anything unreadable is „no"."""
+    try:
+        return bool(bridge.uninstaller.underway)
+    except Exception:
+        return False
+
+
 class MQTTBridgeSetup(Screen, ConfigListScreen):
     skin = """
         <screen name="MQTTBridgeSetup" position="center,center" size="900,600" title="MQTT Bridge">
@@ -203,12 +211,39 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
             LOG.exception("could not write enigma2's settings file")
 
         bridge = self._bridge_or_running()
+        if bridge is not None and _uninstalling(bridge):
+            # 🔴 A reload now would open a fresh session and republish
+            # everything underneath a removal that has just retracted it. The
+            # settings are kept, not refused: they were typed on a remote
+            # control, they are what a reinstall will start from, and if the
+            # removal stops its own failure path reloads the bridge — with
+            # them. So nothing is lost and nothing is applied twice; the
+            # household is told why the change does not show yet.
+            LOG.warning("settings saved during an uninstall; not reloading the bridge")
+            self._tell_and_close(_(
+                "Settings saved. The plugin is being removed from this receiver, so they "
+                "are not applied now; they take effect if the removal stops or the plugin "
+                "is installed again."
+            ))
+            return
         if bridge is not None:
             try:
                 bridge.reload()
             except Exception:
                 LOG.exception("the bridge could not be restarted with the new settings")
         self.close(True)
+
+    def _tell_and_close(self, text):
+        try:
+            self.session.openWithCallback(
+                lambda *_answer: self.close(True),
+                MessageBox,
+                text,
+                getattr(MessageBox, "TYPE_INFO", 1),
+            )
+        except Exception:
+            LOG.exception("could not say why the settings were not applied")
+            self.close(True)
 
     def keyCancel(self):
         """Red or Exit. Ask first when there is something to lose.

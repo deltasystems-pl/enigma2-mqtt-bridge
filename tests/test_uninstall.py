@@ -957,6 +957,100 @@ def test_an_info_dir_that_climbs_out_of_the_root_is_refused(opkg_tree):
     assert uninstall.package_gone(str(root)) is False
 
 
+# ------------------------------------------- the setup screen's Save mid-removal --
+
+
+class _Session:
+    def __init__(self):
+        self.opened = []
+        self.callbacks = []
+
+    def open(self, what, *arguments, **kwargs):
+        self.opened.append((what, arguments))
+
+    def openWithCallback(self, callback, what, *arguments, **kwargs):
+        self.opened.append((what, arguments))
+        self.callbacks.append(callback)
+
+
+def _save_on_the_screen(bridge, settings):
+    from MQTTBridge import setup as setup_screen
+
+    screen = setup_screen.MQTTBridgeSetup(_Session(), settings=settings, bridge=bridge)
+    settings.screenshot_delay.value = 9
+    screen.keySave()
+    return screen
+
+
+def _advance_to(phase, bridge, factory):
+    send(factory)
+    if phase == "scheduled":
+        return
+    MainLoop.advance(0)
+    if phase == "retracting":
+        return
+    factory.client.acknowledge()
+    MainLoop.advance(uninstall.POLL_MILLISECONDS)
+    if phase == "removing":
+        return
+    opkg_succeeds()
+
+
+@pytest.mark.parametrize("phase", ["scheduled", "retracting", "removing", "done"])
+def test_a_save_on_the_setup_screen_does_not_reopen_the_session(
+    box, factory, settings, phase
+):
+    """A reload mid-removal would republish everything under the teardown."""
+    from Screens.MessageBox import MessageBox
+
+    bridge = box()
+    _advance_to(phase, bridge, factory)
+    assert bridge.uninstaller.phase == phase
+    clients = len(factory.clients)
+    published = len(factory.client.published)
+
+    screen = _save_on_the_screen(bridge, settings)
+
+    assert len(factory.clients) == clients
+    assert len(factory.client.published) == published
+    assert bridge.uninstaller.phase == phase
+    # Saved, not refused, and the household is told why nothing changed yet.
+    assert settings.screenshot_delay.saved_value == 9
+    what, arguments = screen.session.opened[-1]
+    assert what is MessageBox
+    assert "being removed" in arguments[0]
+    screen.session.callbacks.pop()(True)
+    assert screen.closed_with == (True,)
+
+
+def test_after_a_save_mid_removal_the_failure_path_still_reloads_with_it(
+    box, factory, settings, receiver
+):
+    bridge = box()
+    old = run_to_opkg(bridge, factory)
+    _save_on_the_screen(bridge, settings)
+    assert factory.client is old
+
+    opkg().finish(1)
+
+    client = _fresh_session(factory, old)
+    _put_back(client, bridge)
+    assert client.last(INFO).json()["settings"]["screenshot_delay"] == 9
+
+
+def test_a_save_after_a_failed_removal_reloads_as_usual(box, factory, settings):
+    bridge = box()
+    old = run_to_opkg(bridge, factory)
+    opkg().finish(1)
+    _fresh_session(factory, old)
+    clients = len(factory.clients)
+
+    screen = _save_on_the_screen(bridge, settings)
+
+    assert len(factory.clients) == clients + 1
+    assert screen.closed_with == (True,)
+
+
 # -------------------------------------------------------------- the page seam --
 
 
