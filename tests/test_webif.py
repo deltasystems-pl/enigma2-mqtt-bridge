@@ -2033,3 +2033,24 @@ def test_a_page_save_after_a_failed_removal_applies_as_usual(live_bridge, page, 
     assert request.response_code == 200
     assert b"reconnecting" in body
     assert len(factory.clients) == clients + 1
+
+
+def test_keys_switched_off_on_the_page_retract_the_device_triggers(live_bridge, page, factory,
+                                                                  settings):
+    """The page applies `publish_keys` without a reconnect; the triggers go at once."""
+    triggers = [
+        "homeassistant/device_automation/" + NODE + "/" + colour + "_" + press + "/config"
+        for colour in ("red", "green", "yellow", "blue") for press in ("short", "long")
+    ]
+    assert all(factory.client.last(topic).text != "" for topic in triggers)
+    old = factory.client
+    old.clear()
+
+    request, _body = post(page(live_bridge), new_session(),
+                          settings_fields(settings, publish_keys=False))
+
+    assert request.response_code == 200
+    assert factory.client is old  # no reconnect: the remote-settings path
+    for topic in triggers:
+        assert old.last(topic).text == ""
+    assert old.last("homeassistant/device/" + NODE + "/config").text != ""
