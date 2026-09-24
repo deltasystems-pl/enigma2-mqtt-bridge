@@ -188,6 +188,22 @@ def test_the_guard_refuses_what_the_engine_does_not_own(source, missing):
         hatemplate.render(source, value="{}", value_json={})
 
 
+def test_a_payload_that_is_not_json_offers_only_value():
+    """Home Assistant offers `value_json` only when the payload parses."""
+    template_ = "{{ value_json | default('absent') }}|{{ value }}"
+    assert hatemplate.render_payload(template_, "standby") == "absent|standby"
+    assert hatemplate.render_payload(template_, b"standby") == "absent|standby"
+    assert hatemplate.render_payload(template_, '{"x": 1}') == "{'x': 1}|{\"x\": 1}"
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_nan_and_infinity_are_not_json_to_home_assistant(constant):
+    """Python's `json` reads these, Home Assistant's loader refuses the whole payload."""
+    payload = '{"x": ' + constant + "}"
+    json.loads(payload)  # what the shim must not do
+    assert hatemplate.render_payload("{{ value_json | default('absent') }}", payload) == "absent"
+
+
 def test_the_environment_holds_only_what_is_listed():
     """Empty, then filled: nothing of Jinja's is inherited by name."""
     assert set(hatemplate.ENVIRONMENT.filters) == set(hatemplate.FILTERS)

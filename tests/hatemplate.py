@@ -9,7 +9,9 @@ tests render the templates instead, and this module is what they render with.
 It is plain Jinja plus the part of Home Assistant that differs from plain Jinja
 — and only the part these templates use. Home Assistant **adds** filters (such
 as `timestamp_utc`) and **replaces** some of Jinja's own: `int`, `round`,
-`float`, `random`, and the `range` global. A replaced filter is the trap. A
+`float` and `random`. (Its `range` global differs from plain Jinja's too, but
+that is the sandbox's doing, not Home Assistant's; the environment here is the
+same sandbox.) A replaced filter is the trap. A
 template that uses `int` renders under plain Jinja too, with Jinja's semantics
 rather than Home Assistant's, and a test that passes that way is coverage of
 the wrong engine.
@@ -28,9 +30,17 @@ integration's test harness pins (`pytest-homeassistant-custom-component`
 `helpers/template/helpers.py` (the error they raise) and `util/dt.py`
 (`utc_from_timestamp`). Which names it replaces was measured rather than read:
 its `TemplateEnvironment`, compared with a plain Jinja 3.1.6 `Environment`,
-holds a different object under exactly the filter and global names above, and
-under no test name. Being copies they can go stale with nothing here noticing;
-move them together with that pin.
+holds a different object under exactly the four filter names above and the
+sandbox's `range`, and under no test name. Being copies they can go stale with
+nothing here noticing; move them together with that pin.
+
+🔴 This engine is **stricter** than Home Assistant about errors, on purpose.
+Home Assistant treats two kinds differently. A `ValueError` from `int`,
+`round` or `timestamp_utc` reaches the MQTT layer, which drops the message, so
+the entity keeps its previous state. Any other template error (an undefined
+attribute, say) is caught earlier: Home Assistant logs it and hands the entity
+the **raw payload** as its state. Here both simply raise, so a test sees
+either as a failure instead of a plausible-looking state.
 """
 
 import datetime
@@ -63,8 +73,9 @@ def forgiving_int(value, default=_SENTINEL, base=10):
 
     Jinja's own filter answers 0 for anything it cannot convert, so a null
     epoch becomes 1970 and renders as a plausible date. Home Assistant's raises
-    unless the template gave a default, and a value template that raises keeps
-    the entity's previous state.
+    a `ValueError` unless the template gave a default. On that error path (and
+    only that one: see the module docstring) the MQTT layer drops the message
+    and the entity keeps its previous state.
     """
     result = jinja2.filters.do_int(value, default=default, base=base)
     if result is _SENTINEL:
@@ -209,7 +220,17 @@ def render_payload(template, payload):
         payload = bytes(payload).decode("utf-8")
     variables = {"value": payload}
     try:
-        variables["value_json"] = json.loads(payload)
+        variables["value_json"] = json.loads(payload, parse_constant=_reject_constant)
     except ValueError:
         pass
     return render(template, **variables)
+
+
+def _reject_constant(name):
+    """`NaN`, `Infinity` and `-Infinity` are not JSON, and Home Assistant says so.
+
+    Python's `json` accepts them; Home Assistant's loader (orjson) refuses the
+    whole payload, so a template sees no `value_json` at all. Accepting them
+    here would let a test pass on a payload the entity never gets to read.
+    """
+    raise ValueError("not JSON: " + name)
