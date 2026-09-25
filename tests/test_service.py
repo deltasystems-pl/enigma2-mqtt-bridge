@@ -601,6 +601,36 @@ def test_a_zap_without_a_session_is_refused():
     assert "no session" in service_module.zap(None, TVN)
 
 
+def test_a_zap_without_a_navigation_is_refused_before_the_receiver_is_woken(
+    live_bridge, factory, receiver
+):
+    """Refused on the spot: a zap that cannot be made must not turn the receiver on first."""
+    receiver.with_channel_list([TVP1, TVN])
+    screen = receiver.enter_standby(restoring=True)
+    receiver.session.nav = None
+    factory.client.fire_message(ROOT + "/cmd/zap", TVN.encode())
+    assert screen.power_calls == 0
+    assert screen.closing is False
+    assert factory.client.last(LAST_ERROR).json()["error"] == service_module.NO_SESSION
+
+
+def test_a_navigation_gone_during_the_wake_refuses_the_zap_with_cmd_zaps_sentence(
+    live_bridge, factory, receiver
+):
+    """The check runs again after the wake, and names the missing piece as `cmd/zap` does."""
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    screen = receiver.enter_standby(restoring=True)
+    nav = receiver.nav
+    factory.client.fire_message(ROOT + "/cmd/zap", TVN.encode())
+    assert screen.power_calls == 1
+    receiver.session.nav = None
+    screen.finish_close()
+    MainLoop.advance(0)
+    assert factory.client.last(LAST_ERROR).json()["error"] == service_module.NO_SESSION
+    assert nav.played == [TVP1]      # the restore, and no zap after it
+    assert channel_list.zaps == 0
+
+
 def test_a_zap_that_lands_says_nothing(live_bridge, factory, receiver):
     publisher = live_bridge.publisher("service")
     publisher.expect(TVN)
