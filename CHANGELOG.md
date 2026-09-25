@@ -30,14 +30,13 @@ box would refuse.
 channel list, so it lands in the receiver's zap history like a zap from the remote, and a zap to a
 channel outside the bouquet being browsed moves the channel list to that channel's bouquet.
 
-**The OpenWebif page is now exactly as open as OpenWebif itself.** It follows OpenWebif's own
+**The OpenWebif page is now no more open than OpenWebif itself.** It follows OpenWebif's own
 authentication and enforces no login of its own, and every setting and every command is on it.
 With OpenWebif authentication off, anybody OpenWebif admits can use it; switch that
 authentication on if that is not what you want.
 
-**Popup text loses every backslash, as toast text does.** A literal `
-` no longer breaks a line
-in a popup; send a real newline instead.
+**Popup text loses every backslash, as toast text does.** A literal `\n` no longer
+breaks a line in a popup; send a real newline instead.
 
 **`cmd/uninstall` is a one-way door.** Once it has run there is no plugin left to listen; only SSH
 or the receiver's own package manager can put it back. Its permission is off by default.

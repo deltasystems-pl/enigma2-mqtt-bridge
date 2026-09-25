@@ -298,7 +298,7 @@ The full list is in [CHANGELOG.md](CHANGELOG.md).
 9. **The OpenWebif page** opens wherever OpenWebif does and follows OpenWebif's own
    authentication instead of demanding a login of its own. It shows the bridge's state and every
    retained topic, edits every setting and runs every command through the same guards as MQTT.
-   It is now exactly as open as your receiver's OpenWebif: switch OpenWebif authentication on if
+   It is now no more open than your receiver's OpenWebif: switch OpenWebif authentication on if
    that is not what you want. Decided in
    [ADR-0009](docs/adr/0009-the-openwebif-page-trusts-openwebif.md).
 10. **A fix in `discovery` mode**: a connect, a reload or a settings save no longer deletes the
