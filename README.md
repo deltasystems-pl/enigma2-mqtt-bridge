@@ -7,13 +7,16 @@ their satellite receiver in it without polling OpenWebif.
 [![Release](https://img.shields.io/github/v/release/deltasystems-pl/enigma2-mqtt-bridge?sort=semver)](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases)
 [![License: GPL-2.0-or-later](https://img.shields.io/badge/License-GPL--2.0--or--later-blue.svg)](LICENSE)
 
-<img src="docs/images/device-page.png" width="480" alt="The receiver's device page in Home Assistant, with power, channel, programme and volume">
+<img src="docs/images/device-page.png" width="480" alt="The receiver's device page in Home Assistant with the companion integration: power, channel, programme, volume and sensors">
+
+The receiver's device page in Home Assistant, with the companion integration.
 
 ## What you get
 
 - The receiver publishes its state the moment it changes: channel, programme, standby, recording,
   volume, remote keys. No fifteen-second polling delay.
-- Home Assistant sees the box go offline within the MQTT keepalive, through a retained last will.
+- Home Assistant sees the box go offline within about 1.5 times the MQTT keepalive, when the broker
+  publishes the box's retained last will.
 - Control from Home Assistant: power and standby, zap by channel name or reference, volume and
   mute, remote keys, on-screen messages, recordings, timers and screenshots. Every command is
   checked on the box and a failure is reported on `last_error`.
@@ -34,8 +37,10 @@ zaps back to it.
 
 1. Change the receiver's root password. The box will hold a broker login, and most images ship a
    well-known password.
-2. Create a broker login for the receiver only, not the one Home Assistant uses.
-   [docs/SETUP.md](docs/SETUP.md#broker-access) has an ACL that limits it to the box's own topics.
+2. Create a broker login for the receiver only, not the one Home Assistant uses. On a broker that
+   enforces ACLs, [docs/SETUP.md](docs/SETUP.md#broker-access) has one that limits the login to
+   the box's own topics. The Mosquitto add-on in Home Assistant accepts an ACL file but does not
+   enforce it, so there the dedicated login is all you get.
 3. Add the feed and install, over SSH on the receiver:
 
    ```sh
@@ -67,8 +72,11 @@ plugin are in [docs/INSTALL.md](docs/INSTALL.md).
 | VTi (Python 2.7) | not supported |
 
 A hook the image does not provide costs one feature, not the plugin: the box lists what it can do
-in its `capabilities`. If you run an image from the last three rows, a test report in an issue
-helps; [CONTRIBUTING.md](CONTRIBUTING.md#becoming-an-image-tester) says what to check.
+in its `capabilities`. The code is tested on Python 3.9, 3.12 and 3.14. If you run OpenATV,
+OpenPLi or OpenBH, a test report in an issue helps;
+[CONTRIBUTING.md](CONTRIBUTING.md#becoming-an-image-tester) says what to check.
+
+## Compatibility
 
 | Plugin | Integration |
 |---|---|
@@ -76,11 +84,14 @@ helps; [CONTRIBUTING.md](CONTRIBUTING.md#becoming-an-image-tester) says what to 
 | 0.2.0 | 0.2.0 |
 | 0.1.0 | 0.1.0 |
 
+The integration's `update` entity warns when the box runs a plugin older than the one it bundles.
+
 ## Privacy and security
 
 The box stores your broker password, and anyone who can publish to its command topics can switch
-on screenshots and remote-key reporting. Keep the box's login limited by an ACL and check the ACL
-by effect: Mosquitto drops a denied publish without telling the sender. The threat model is in
+on screenshots and remote-key reporting. Where the broker enforces ACLs, limit the box's login to
+its own topics and check the ACL by effect: Mosquitto drops a denied publish without telling the
+sender. The threat model is in
 [SECURITY.md](SECURITY.md).
 
 The channel, programme, keys, zap history and screenshots say what your household watches. They

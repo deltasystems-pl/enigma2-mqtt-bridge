@@ -384,8 +384,10 @@ ssh root@<box-ip> 'chmod 600 /etc/enigma2/mqttbridge.json && init 4 && sleep 3 &
 
 ## Broker access
 
-Give the receiver a dedicated login with an ACL limited to its own topics. For the Mosquitto
-add-on, in the ACL file, with `<node_id>` replaced by the plugin's node id:
+Give the receiver a dedicated login, never the one Home Assistant itself uses.
+
+If your broker enforces ACLs, limit that login to the box's own topics. For Mosquitto, in the ACL
+file, with `<node_id>` replaced by the plugin's node id:
 
 ```
 user enigma2box
@@ -400,12 +402,38 @@ touching and publish there as the box's user: the message must not arrive. Mosqu
 ACL-denied publish silently and the publishing client sees success either way, so an ACL that is
 too tight and one that works look identical from the box.
 
-**That ACL is the privacy boundary.** Anything able to publish on `<base>/<node>/cmd/config` can
-switch on screenshots, key reporting and the CAM and OSCam telemetry, and then ask for a picture
-of the television whenever it likes. The companion integration's options flow is built on exactly
-that path, so the plugin does not ask the box for a second confirmation.
+**The Mosquitto add-on in Home Assistant does not enforce an ACL.** Version 7.1.1 accepts an
+`acl_file` in its customize folder, logs nothing, and never consults it
+([home-assistant/addons#4721](https://github.com/home-assistant/addons/issues/4721)). On the
+add-on, use the dedicated login, run the by-effect check above rather than trusting the file, and
+do not count on a topic boundary. If you need the topic boundary, use a broker that enforces ACLs.
+
+Where the ACL is enforced, it is the privacy boundary. Anything able to publish on
+`<base>/<node>/cmd/config` can switch on screenshots, key reporting and the CAM and OSCam
+telemetry, and then ask for a picture of the television whenever it likes. The companion
+integration's options flow is built on exactly that path, so the plugin does not ask the box for
+a second confirmation. Without an enforced ACL, any client with a login on the broker can do the
+same.
 
 TLS to the broker is optional (`tls`, `ca_file`); client certificates are not supported in v1.
+
+## Home Assistant modes
+
+The `ha_mode` setting decides how Home Assistant learns about the box:
+
+- **`discovery`** (default) - the plugin publishes standard Home Assistant MQTT discovery
+  payloads and Home Assistant's own MQTT integration creates the entities. Nothing else to
+  install.
+- **`integration`** - the plugin publishes only its announcement and leaves entity creation to
+  the companion integration [hass-enigma2-mqtt](https://github.com/deltasystems-pl/hass-enigma2-mqtt),
+  which adds what discovery cannot express: a native `media_player` with channel browsing, a
+  `remote`, a `notify` target for on-screen messages, device triggers for the colour keys and an
+  `update` entity. The integration switches the box into this mode itself when you add it.
+- **`off`** - no discovery and no announcement. State topics still publish, for openHAB, Node-RED
+  or anything else that speaks MQTT.
+
+A mode switch retracts the old discovery payloads before anything new is published, so entities
+are never duplicated. The details are in [TOPICS.md](TOPICS.md#cmdha_mode-semantics).
 
 ---
 
