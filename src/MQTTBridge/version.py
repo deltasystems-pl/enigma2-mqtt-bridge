@@ -5,4 +5,4 @@ workflow checks the tag against it, and the plugin reports it on the `info`
 topic. Change it here and nowhere else.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

@@ -9,6 +9,32 @@ version that has no section here.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.0] - 2026-09-25
+
+The release that works through the list of wants two days of household use produced, planned in
+[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md).
+
+0.2.0 made the box useful. This one adds a softcam restart for a stuck decode, manual and
+optionally automatic; an opt-in workaround for a standby the television asks for and the receiver
+sits on; a discreet toast beside the popup; an EPG import on demand; what the image says about
+Wake-on-LAN, with a box-only setting that switches the image's own Wake-on-LAN setting on; what
+the enigma2 process costs; the receiver's own zap history, with a zap into it and a clear that
+does what the 0 key does; and a remote uninstall. The softcam restart, the EPG import and the
+uninstall are each behind their own permission - off by default, set on the receiver, never
+writable over MQTT, and echoed read-only in `info.settings` so a consumer can hide a control the
+box would refuse.
+
+**`cmd/zap` changes behaviour.** Every zap the plugin makes now goes through the receiver's
+channel list, so it lands in the receiver's zap history like a zap from the remote, and a zap to a
+channel outside the bouquet being browsed moves the channel list to that channel's bouquet.
+
+**`cmd/uninstall` is a one-way door.** Once it has run there is no plugin left to listen; only SSH
+or the receiver's own package manager can put it back. Its permission is off by default.
+
+The code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
+
 ### Added
 
 - **The receiver's zap history, on a new retained `zap_history` topic** - the list its own "History
@@ -747,6 +773,7 @@ tested on 3.9, 3.12 and 3.14.
 - Examples throughout the documentation use the documentation MAC `00:00:5e:00:53:01` and the
   node id derived from it.
 
-[Unreleased]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.1.0

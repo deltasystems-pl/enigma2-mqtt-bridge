@@ -55,7 +55,7 @@ announcement retained.
 {
   "image": "OpenViX 6.6.007",
   "enigma": "2024-09-11-Release",
-  "plugin": "0.2.0",
+  "plugin": "0.3.0",
   "boxtype": "vuuno4kse",
   "mac": "00:00:5e:00:53:01",
   "ip": "192.0.2.12",
@@ -1177,7 +1177,7 @@ configuration; `docs/SETUP.md` lists what stays and why.
   "base_topic": "enigma2",
   "image": "OpenViX 6.6.007",
   "enigma": "2024-09-11-Release",
-  "plugin": "0.2.0",
+  "plugin": "0.3.0",
   "boxtype": "vuuno4kse",
   "mac": "00:00:5e:00:53:01",
   "ip": "192.0.2.12",
