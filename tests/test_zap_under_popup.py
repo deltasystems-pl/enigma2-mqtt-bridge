@@ -151,11 +151,22 @@ def test_a_zap_under_the_plugins_own_popup_is_recorded(box, kind):
     assert popup.execing is True
 
 
-def test_a_zap_under_the_images_zap_timer_popup_is_recorded(box):
-    # RecordTimer.pyc 664: `AddPopup(text=..., type=MessageBox.TYPE_INFO,
-    # timeout=...)`, no id - the popup a zap timer leaves on the screen.
+@pytest.mark.parametrize("osd_showing", [False, True], ids=["info bar hidden", "info bar showing"])
+def test_a_zap_under_the_images_zap_timer_popup_is_recorded(box, osd_showing):
+    """RecordTimer.pyc 664: `AddPopup(text=..., type=MessageBox.TYPE_INFO, timeout=...)`.
+
+    The popup a zap timer leaves on the screen, no id. It arrives right after
+    the timer's own zap, so the info bar's OSD is often still showing: the
+    session then stacks the info bar as `(InfoBar.instance, True)` and hides
+    it under the popup (StartEnigma.py 130-133, 94). Either way it is the info
+    bar under a popup, and the zap is recorded.
+    """
+    if osd_showing:
+        InfoBar.instance.show()
     AddPopup("Zapped to timer service TVN HD!", MessageBox.TYPE_INFO, 5)
-    assert_popup_state(box)
+    assert type(box.session.current_dialog) is MessageBox
+    assert box.session.dialog_stack == [(InfoBar.instance, osd_showing)]
+    assert InfoBar.instance.shown is False
 
     send(box, "zap", {"sref": TVN})
 
@@ -332,8 +343,8 @@ def test_an_information_popup_over_another_screen_than_the_info_bar_is_played_di
 
 def test_a_popup_that_is_closing_is_played_directly(box):
     # StartEnigma.py 164-180: after `close`, the popup stays the current dialog
-    # until the main loop turns, with the session no longer executing it. A PIN
-    # screen the zap opened then would be refused.
+    # for one more turn of the main loop, with the session no longer executing
+    # it. A popup on its way out is not the state the rule is about.
     osd.show("Dinner is ready", "info", 15)
     popup = assert_popup_state(box)
     popup.close(True)

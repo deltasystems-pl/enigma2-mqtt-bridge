@@ -971,7 +971,9 @@ Six cases play the service directly, as before 0.3.0, and are **not recorded**:
 **An information popup is not a screen open.** When the only thing open is a popup directly over
 the info bar - the receiver's own "Zapped to timer service", a recording or zap error, or what
 `cmd/message` shows - the zap goes through the channel list and is recorded, and the popup stays
-until its own timeout, as it does when the remote zaps. Exactly this counts: the image's own
+until its own timeout, as it does after the receiver's own zap-timer zap. A protected channel's
+PIN is queued behind the popup and appears when it closes, as it would for a direct play. Exactly
+this counts: the image's own
 `Screens.MessageBox.MessageBox` (not a class built on it), of type information, warning or error,
 with no answers to choose from, executing, with the info bar as the one screen under it. A question
 (which is what a message box queued without a type is), a type the image does not know, a popup

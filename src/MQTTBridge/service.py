@@ -410,8 +410,9 @@ def info_popup_over_infobar(session):
       which can bind its own keys and answers;
     - its `type` is one of `POPUP_TYPE_NAMES`, and its answer list is empty;
     - the session is executing it: after the popup's own `close()`, it stays
-      `current_dialog` until the main loop turns, and a PIN screen the zap
-      might open then would be refused;
+      `current_dialog` for one more turn of the main loop, no longer
+      executing. A popup on its way out is not the state this rule is about,
+      so the old path is kept for that one turn;
     - `dialog_stack` holds one entry, and it is the info bar. Two deep - over
       the movie player, or over a screen over the info bar - is not this.
 
