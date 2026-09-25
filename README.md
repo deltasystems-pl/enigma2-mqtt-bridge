@@ -88,7 +88,7 @@ The plugin has no telemetry, no cloud component and no update check that phones 
 SHA-256 on the [releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases):
 
 ```sh
-opkg install https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/download/v0.2.0/enigma2-plugin-extensions-mqttbridge_0.2.0_all.ipk
+opkg install https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/download/v0.3.0/enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk
 ```
 
 **From the opkg feed**, which gets you updates through the normal plugin browser - write
@@ -189,7 +189,8 @@ matters in your household:
 | Plugin | Integration |
 |---|---|
 | 0.1.0 | 0.1.0 |
-| 0.2.0 (current) | 0.2.0 (current) |
+| 0.2.0 | 0.2.0 |
+| 0.3.0 (current) | 0.3.0 |
 
 The integration warns on its `update` entity when the box runs a plugin older than the one it
 bundles.
@@ -203,7 +204,7 @@ bundles.
       and `info`, and has a setup screen. Released as **v0.1.0**
 - [x] **M2** - power, service, EPG, volume, recording, timers, disk, keys, screenshot, the channel
       list, the EPG grid, bouquet context, the optional CAM and OSCam telemetry, and every `cmd/*`
-      with its guards. Released as **v0.2.0**, which is what the feed and the releases page serve.
+      with its guards. Released as **v0.2.0**.
       The by-effect checklist and a 60-minute active soak have passed; the **long passive soak**
       and the **watchdog-restart interplay** have not, and **deep standby with Wake-on-LAN has
       never been drilled**
@@ -221,17 +222,17 @@ bundles.
 - [ ] **M6** - `v1.0.0`: third-party feed and HACS default pull requests
 - [ ] **M7** - OE-Alliance recipe, OpenPLi, broker-login auto-provisioning
 
-The feed and the releases page serve **0.2.0**, which is what this tree builds, and the companion
-integration's **v0.2.0** is released alongside it. Everything after M4 is unreleased, and two
+The feed and the releases page serve **0.3.0**, which is what this tree builds; the companion
+integration's own 0.3.0 release follows this one. Everything after M4 is unreleased, and two
 things M2 itself promised are still open: the **long passive soak** and the **deep-standby
 drill**.
 
-### What 0.2.0 shipped, and what 0.3.0 will carry
+### What 0.2.0 and 0.3.0 shipped
 
 Two days of household use produced a list of problems and a list of wants, and they were split
 into two releases. The reasoning is in
-[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md); the contract additions that
-are still ahead are in [docs/TOPICS.md](docs/TOPICS.md) under **Planned (not implemented yet)**.
+[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md); the contract for every item
+is in [docs/TOPICS.md](docs/TOPICS.md).
 
 **0.2.0 - fixes**, released 2026-09-22 - both halves, this plugin and the companion integration.
 Everything M2 covers, and from that list of problems:
@@ -244,7 +245,7 @@ Everything M2 covers, and from that list of problems:
 
 The full list is in [CHANGELOG.md](CHANGELOG.md).
 
-**0.3.0 - features**, in this order:
+**0.3.0 - features**, released 2026-09-25:
 
 1. **`cmd/softcam_restart`** - restart the cam *the image selected*, resolved on the box and never
    named over MQTT, behind a permission that is never writable over MQTT; plus an opt-in
@@ -269,7 +270,7 @@ The full list is in [CHANGELOG.md](CHANGELOG.md).
    standby** - only by its remote, its front button or a timer. The maintainer's Uno 4K SE is one.
    On any other receiver, **deep standby may still be one-way** until a deep standby -> magic packet
    drill has passed on that image.
-6. **`process`** - what the enigma2 process costs, already in review.
+6. **`process`** - what the enigma2 process costs.
 7. **`cmd/uninstall`** - remove the plugin from the receiver on request, behind a permission
    `uninstall_allowed`, never writable over MQTT and echoed **read-only** in `info.settings`, and a
    capability `uninstall` claimed only where opkg installed this very copy. Everything that
@@ -294,6 +295,17 @@ The full list is in [CHANGELOG.md](CHANGELOG.md).
    bouquet, as a number zap on the remote does. With a screen open on the receiver, in timeshift
    and in a few other cases the zap is played directly and is not in the history. Decided in
    [ADR-0014](docs/adr/0014-the-zap-history-is-the-receivers.md).
+9. **The OpenWebif page** opens wherever OpenWebif does and follows OpenWebif's own
+   authentication instead of demanding a login of its own. It shows the bridge's state and every
+   retained topic, edits every setting and runs every command through the same guards as MQTT.
+   It is now no more open than your receiver's OpenWebif: switch OpenWebif authentication on if
+   that is not what you want. Decided in
+   [ADR-0009](docs/adr/0009-the-openwebif-page-trusts-openwebif.md).
+10. **A fix in `discovery` mode**: a connect, a reload or a settings save no longer deletes the
+    device from Home Assistant and creates it again, which could cost the names, areas and
+    dashboard placements given to it.
+
+The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 

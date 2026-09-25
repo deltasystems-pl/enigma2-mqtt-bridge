@@ -9,6 +9,40 @@ version that has no section here.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.0] - 2026-09-25
+
+The release that works through the list of wants two days of household use produced, planned in
+[ADR-0003](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0003-control-feedback-and-household-features.md).
+
+0.2.0 made the box useful. This one adds a softcam restart for a stuck decode, manual and
+optionally automatic; an opt-in workaround for a standby the television asks for and the receiver
+sits on; a discreet toast beside the popup; an EPG import on demand; what the image says about
+Wake-on-LAN, with a box-only setting that switches the image's own Wake-on-LAN setting on; what
+the enigma2 process costs; the receiver's own zap history, with a zap into it and a clear that
+does what the 0 key does; and a remote uninstall. The softcam restart, the EPG import and the
+uninstall are each behind their own permission - off by default, set on the receiver, never
+writable over MQTT, and echoed read-only in `info.settings` so a consumer can hide a control the
+box would refuse.
+
+**`cmd/zap` changes behaviour.** Every zap the plugin makes now goes through the receiver's
+channel list, so it lands in the receiver's zap history like a zap from the remote, and a zap to a
+channel outside the bouquet being browsed moves the channel list to that channel's bouquet.
+
+**The OpenWebif page is now no more open than OpenWebif itself.** It follows OpenWebif's own
+authentication and enforces no login of its own, and every setting and every command is on it.
+With OpenWebif authentication off, anybody OpenWebif admits can use it; switch that
+authentication on if that is not what you want.
+
+**Popup text loses every backslash, as toast text does.** A literal `\n` no longer
+breaks a line in a popup; send a real newline instead.
+
+**`cmd/uninstall` is a one-way door.** Once it has run there is no plugin left to listen; only SSH
+or the receiver's own package manager can put it back. Its permission is off by default.
+
+The code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
+
 ### Added
 
 - **The receiver's zap history, on a new retained `zap_history` topic** - the list its own "History
@@ -37,7 +71,7 @@ version that has no section here.
 - The OpenWebif page shows the `zap_history` payload with the other topics, unfiltered, and gains
   both commands - the zap as a list of the last published channels, the clear behind a
   confirmation that says it switches to channel 1. Decided in
-  [ADR-0014](docs/adr/0014-the-zap-history-is-the-receivers.md).
+  [ADR-0014](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0014-the-zap-history-is-the-receivers.md).
 
 - **`cmd/uninstall`: the plugin removes itself from the receiver**, behind the permission
   `uninstall_allowed` - off by default, echoed read-only in `info.settings`, never writable over
@@ -69,13 +103,13 @@ version that has no section here.
   plugin did. `supported` is the image's own probe for its front-processor switch; a receiver that
   reports `false` cannot be woken over the network from deep standby, only by its remote, its front
   button or a timer. A box-only setting **`wol_arm`**, off by default, switches on the image's own
-  Wake-on-LAN setting where the image has one, never switches it off, and is marked „not available"
+  Wake-on-LAN setting where the image has one, never switches it off, and is marked "not available"
   where it has none. No `ethtool` and no process of any kind: on an image that powers off into deep
   standby rather than suspending, the flag it sets is read by nothing (ADR-0012).
 - **`cmd/epg_import`: ask the image's EPG-Importer for an import now**, behind the permission
   `epg_import_allowed` - off by default, echoed read-only in `info.settings`, never writable over
   MQTT, and not needed on the OpenWebif page, which gains the action and the setting. The import
-  starts exactly as the importer's own „Manual" button starts it; the payload is ignored. Refused
+  starts exactly as the importer's own "Manual" button starts it; the payload is ignored. Refused
   while an import runs (whoever started it), by the whole recording guard, within ten minutes of the
   importer's own scheduled run, and when no sources are selected. A new retained **`epg_import`**
   topic and capability (`state`, `started`, `finished`, `events`, `error`) **follows every import**,
@@ -85,13 +119,13 @@ version that has no section here.
   and, with the permission on, a button in discovery mode.
 - **Deep standby, reboot and the user-interface restart are refused while an EPG import runs**,
   whoever started it: a restart mid-import loses the run. The refusal lapses once the plugin's own
-  start of the import failed and left the importer saying „running", or once the 30-minute
-  watchdog fired, because the importer can go on saying „running" after a failed start until its
+  start of the import failed and left the importer saying "running", or once the 30-minute
+  watchdog fired, because the importer can go on saying "running" after a failed start until its
   next scheduled run.
 
 - **What the enigma2 process costs**, on `process`: resident set, its high-water mark, threads,
   open file descriptors and the epoch second the process started, read from `/proc`. It answers the
-  question a box that is never restarted eventually raises - „is it leaking?" - which cannot be
+  question a box that is never restarted eventually raises - "is it leaking?" - which cannot be
   answered by looking once, only by a curve somebody's recorder already has. Published in the
   snapshot on every connect and then every 300 seconds - a ceiling on the gap rather than a
   heartbeat, because like every state topic an unchanged payload is not republished - plus early
@@ -105,10 +139,10 @@ version that has no section here.
 - **`cmd/softcam_restart`, and an opt-in automatic restart behind the same permission.** The
   household symptom is a channel that stops decoding; underneath it, an image whose softcam
   manager starts the bare binary can leave several copies of the cam running and none of them
-  working. So the command is not „run the init script" and not „restart the process": it
+  working. So the command is not "run the init script" and not "restart the process": it
   **collapses the running copies to exactly one**, signalling every instance of the binary the
   image selected, waiting up to five seconds, killing what is left, and starting one with the
-  image's own command line. 🔴 The binary is resolved on the receiver and **no part of the command
+  image's own command line. The binary is resolved on the receiver and **no part of the command
   line comes from the payload**.
 - **A new retained `softcam` topic and capability**, carrying the selected binary, how many
   instances are running, the last restart and its reason, the count since local midnight, and two
@@ -127,9 +161,9 @@ version that has no section here.
   and when the list is finally closed it goes to standby and sends `<Standby>` back to the
   television, because the image forgot the standby was the television's. With the setting on, the
   plugin closes the **channel list and nothing else** through its own exit, holding the image's
-  „this came from the television" marker set until the standby has happened (at most five
+  "this came from the television" marker set until the standby has happened (at most five
   seconds) so it is not echoed; and a television standby still waiting after thirty seconds behind
-  any other screen is dropped from the queue rather than left to fire later. 🔴 A standby the
+  any other screen is dropped from the queue rather than left to fire later. A standby the
   household asked for is never touched: `cmd/power standby` queues the identical notification, so
   the television's is identified at the moment it is queued and kept by identity (the remote's
   power button opens the standby screen directly and never reaches the queue at all). The
@@ -137,9 +171,9 @@ version that has no section here.
   television into standby. New capability `cec_workaround` and retained topic `cec`
   (`last_intervention`, `kind`, `count`, `pending`), retracted when the workaround is switched off;
   each television standby counts at most once. The decisions are in
-  [ADR-0007](docs/adr/0007-cec-standby-workaround.md).
+  [ADR-0007](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0007-cec-standby-workaround.md).
 - **A discreet toast, as a second message style.** `cmd/message` takes an optional
-  `"style": "toast"`: a small box in the top-right corner, headed „MQTT Bridge", that hides itself
+  `"style": "toast"`: a small box in the top-right corner, headed "MQTT Bridge", that hides itself
   after 5 seconds (1-30 on request), never takes focus, never waits behind the channel list the way
   the popup does, and is replaced by the next toast rather than queued. It holds two text labels and
   nothing else, because some of enigma2's widgets bind keys natively without being executed and a
@@ -150,7 +184,7 @@ version that has no section here.
   no narrower rule holds; `\cFFFF0000` shows as `cFFFF0000`); `type` is validated as for a popup and then ignored. New capability `toast`, claimed only
   once the screen has been created, and the box-only setting `osd_toast` (on by default, not in
   `info.settings` or `cmd/config`). **Payloads without `style` behave exactly as before.** The
-  decisions are in [ADR-0008](docs/adr/0008-discreet-toast.md).
+  decisions are in [ADR-0008](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0008-discreet-toast.md).
 
 ### Changed
 
@@ -160,7 +194,7 @@ version that has no section here.
   source list, `play_media` and the integration's `zap` action) now calls the image's own number-zap
   path, `InfoBar.instance.selectAndStartService`, in the bouquet the channel list is browsing when
   that is a published bouquet holding the service, and otherwise in the first published bouquet
-  that holds it. 🔴 **Visible
+  that holds it. **Behaviour
   change: a zap to a channel outside the bouquet being browsed now moves the channel list to that
   channel's bouquet**, so channel up and down on the remote walk that bouquet afterwards and the
   `bouquet` topic names it - which is what the remote's own number zap does. It used to leave the
@@ -177,7 +211,7 @@ version that has no section here.
   Any later zap - `cmd/zap`, `cmd/zap_history` or `cmd/bouquet` - replaces one still waiting. The
   5 s verification on `service` starts when the zap is made. The zap `cmd/bouquet` makes is played
   directly while a screen is open.
-  The decision is recorded in [ADR-0014](docs/adr/0014-the-zap-history-is-the-receivers.md).
+  The decision is recorded in [ADR-0014](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0014-the-zap-history-is-the-receivers.md).
 - **`cmd/bouquet` is refused during timeshift**, with "timeshift is active; the receiver would ask
   on screen whether to leave it", before anything changes. Its zap would have opened that question
   and then, seeing nothing tuned, restored the old channel underneath it.
@@ -187,9 +221,9 @@ version that has no section here.
   reordering, where no narrower rule can find it. Both styles now follow one rule, in one place:
   every backslash is removed and nothing else, so `\cFFFF0000Alarm` shows as `cFFFF0000Alarm` and a
   literal `\n` as `n`, while a real newline stays a line break. The 500-character cap counts what is
-  left, and a text of nothing but backslashes is refused as empty. 🔴 **A sender that used a literal
+  left, and a text of nothing but backslashes is refused as empty. **Behaviour change: a sender that used a literal
   `\n` for a line break in a popup has to send a real newline instead.** The decision is recorded
-  in [ADR-0008](docs/adr/0008-discreet-toast.md).
+  in [ADR-0008](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0008-discreet-toast.md).
 - **The OpenWebif page now opens wherever OpenWebif does, shows everything, and changes
   everything.** It answered 403 to everybody on a receiver whose OpenWebif authentication was off -
   OpenWebif's default, and on most households a necessity - because it demanded a logged OpenWebif
@@ -209,9 +243,9 @@ version that has no section here.
   receiver's IP address, `localhost` or its own hostname - plus the same-origin check, the
   session token and exact field sets; it adds `frame-ancestors 'self'` and stays script-free. The
   decision and the measurements behind it are in
-  [ADR-0009](docs/adr/0009-the-openwebif-page-trusts-openwebif.md), which supersedes the
+  [ADR-0009](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0009-the-openwebif-page-trusts-openwebif.md), which supersedes the
   fail-closed clause of ADR-0002 §5.
-- 🔴 **If you relied on the page being closed:** it is now exactly as open as your receiver's
+- **Behaviour change - if you relied on the page being closed:** it is now exactly as open as your receiver's
   OpenWebif. With OpenWebif authentication off, anybody OpenWebif admits can open it - as they could
   already change every setting through OpenWebif itself. Switch OpenWebif authentication on if that
   is not what you want. The page also refuses to answer under a DNS name of your own or behind a
@@ -221,18 +255,18 @@ version that has no section here.
   would leak its styles into OpenWebif and navigate the whole window on submit. The page answers that
   load with a small fragment instead - a frame of itself, of fixed height and scrolling, and a link to
   open it in a new tab - with no script and no styles of its own. The page opened directly is
-  unchanged. The decision is in [ADR-0010](docs/adr/0010-the-page-inside-openwebif.md).
+  unchanged. The decision is in [ADR-0010](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0010-the-page-inside-openwebif.md).
 - **The OpenWebif page shows the last screenshot.** Beside *Take a screenshot*, the last picture
   sent on `screen`, with the time the capture finished, at `<mount>/screen.jpg`; while a capture is
   running the page reloads itself every two seconds for at most twenty. The picture now survives a
   settings save, which used to drop it together with the publisher that held it.
-- **„Box-only" now reads „never writable over MQTT".** A setting that enables a command is set on
+- **"Box-only" now reads "never writable over MQTT".** A setting that enables a command is set on
   the receiver - the setup screen, the provisioning file or the OpenWebif page - and the broker can
   still never grant one: `cmd/config`'s allowlist and `info.settings` are unchanged.
 - **`epg_grid/<bouquet_slug>.generated` now means when the grid last changed**, not when it was
   last built, which follows from the fix below: an unchanged rebuild publishes nothing, so the
   retained stamp stays where the last real change left it. `docs/TOPICS.md` says so, and the
-  reasoning is in [ADR-0006](docs/adr/0006-volatile-fields-and-publish-on-change.md).
+  reasoning is in [ADR-0006](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0006-volatile-fields-and-publish-on-change.md).
 
 ### Fixed
 
@@ -260,9 +294,9 @@ version that has no section here.
   it stops. `cmd/config` accepted in the same window is saved and not applied either - it used
   to republish `info` and discovery and retract device triggers at QoS 0 outside the removal's
   acknowledged retraction - and answers with a `last_error` that says so.
-- **„Next timer" has been unreadable in discovery mode since 0.2.0.** Its value template appended
+- **"Next timer" has been unreadable in discovery mode since 0.2.0.** Its value template appended
   `+00:00` to `timestamp_utc`, which already ends in the offset, so the state arrived as
-  `2026-09-10T12:08:29+00:00+00:00`. Home Assistant cannot parse that: it logs „Invalid state
+  `2026-09-10T12:08:29+00:00+00:00`. Home Assistant cannot parse that: it logs "Invalid state
   message" and stores nothing, so the sensor read unknown for ever rather than reading wrong. One
   character in one template. It was found by the review of the process telemetry above, which had
   copied the same shape from it - and it was invisible to both test suites because they compared
@@ -278,7 +312,7 @@ version that has no section here.
   bouquet overnight - rewrote its retained topic for nothing, delivering a state change to every
   consumer and a row to every recorder. A field a payload stamps from the wall clock now takes no
   part in the change comparison; it is still published, so nothing a consumer reads has moved.
-- **A settings change whose reconnect fails no longer leaves the box „online".** Saving the setup
+- **A settings change whose reconnect fails no longer leaves the box "online".** Saving the setup
   screen, or a setting on the OpenWebif page that restarts the session, ended the old session with
   a clean disconnect - which tells the broker to discard the last will - without saying `offline`
   first, as a shutdown does. When the new session then never connected (a mistyped broker address,
@@ -302,8 +336,8 @@ version that has no section here.
 - **The importer has no failure signal**, so `epg_import` can say only that an import did not run,
   finished with no events, or has not finished after 30 minutes - never which source failed.
 - **The importer's own deep-standby behaviour applies to every import**, including one started from
-  here, but only when all four of its conditions hold: its „shutdown" setting on, deep standby set
-  to „wake up", „deep standby after import" on, and the receiver woken by a timer - and then only in
+  here, but only when all four of its conditions hold: its "shutdown" setting on, deep standby set
+  to "wake up", "deep standby after import" on, and the receiver woken by a timer - and then only in
   standby, with nothing recording and not already shutting down. The three settings are off by
   default.
 - **An instance is not a process.** A cam that forks a supervisor to keep its worker shows two
@@ -333,25 +367,20 @@ version that has no section here.
   comparison, so the copies an upgrade left behind are exactly the ones the button can collapse.
 - **The restart is refused rather than half-performed when the image will not give it a timer.**
   The sequence is armed before anything is signalled, so the one failure that would otherwise end
-  with the cam stopped, nothing started and every later attempt answering „a restart is already
+  with the cam stopped, nothing started and every later attempt answering "a restart is already
   running" is now an ordinary refusal that changed nothing.
 
 ### Documentation
 
 - **M4 is ticked in the roadmap.** The guided installer has been run end to end on a receiver that
   did not have the plugin, and its rollback exercised for real: a deliberately wrong broker
-  password, the plugin refused, the receiver restored to the byte, the lock released, and „the
+  password, the plugin refused, the receiver restored to the byte, the lock released, and "the
   receiver was restored" reported because it had been checked rather than assumed. The correct run
   then ended on the success screen. The four defects the earlier runs found - a pending discovery
   offer blocking the installer, a lost success screen, a rollback that misjudged the restart and
-  left its lock behind, and a receiver at default settings refused as „different" - are fixed. The
+  left its lock behind, and a receiver at default settings refused as "different" - are fixed. The
   installer lives in the companion integration, so nothing in this package changed; the roadmap
   here was simply still describing a milestone as unproven.
-- **The companion integration's 0.2.0 is released**, so the README no longer says it „follows"
-  this one. Both halves of the pair are out: the compatibility table marks 0.2.0 as current on
-  both sides, M3 is ticked, and the paragraph under the milestone list says everything after M4 is
-  unreleased rather than everything after M2. M2's own open items - the long passive soak and the
-  deep-standby drill - are unchanged, and nothing in this package changed.
 
 ## [0.2.0] - 2026-09-22
 
@@ -747,6 +776,7 @@ tested on 3.9, 3.12 and 3.14.
 - Examples throughout the documentation use the documentation MAC `00:00:5e:00:53:01` and the
   node id derived from it.
 
-[Unreleased]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.1.0
