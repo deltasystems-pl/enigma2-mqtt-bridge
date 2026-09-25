@@ -245,7 +245,7 @@ Everything M2 covers, and from that list of problems:
 
 The full list is in [CHANGELOG.md](CHANGELOG.md).
 
-**0.3.0 - features**, released 2026-09-25, in the order they were planned:
+**0.3.0 - features**, released 2026-09-25:
 
 1. **`cmd/softcam_restart`** - restart the cam *the image selected*, resolved on the box and never
    named over MQTT, behind a permission that is never writable over MQTT; plus an opt-in
@@ -295,6 +295,17 @@ The full list is in [CHANGELOG.md](CHANGELOG.md).
    bouquet, as a number zap on the remote does. With a screen open on the receiver, in timeshift
    and in a few other cases the zap is played directly and is not in the history. Decided in
    [ADR-0014](docs/adr/0014-the-zap-history-is-the-receivers.md).
+9. **The OpenWebif page** opens wherever OpenWebif does and follows OpenWebif's own
+   authentication instead of demanding a login of its own. It shows the bridge's state and every
+   retained topic, edits every setting and runs every command through the same guards as MQTT.
+   It is now exactly as open as your receiver's OpenWebif: switch OpenWebif authentication on if
+   that is not what you want. Decided in
+   [ADR-0009](docs/adr/0009-the-openwebif-page-trusts-openwebif.md).
+10. **A fix in `discovery` mode**: a connect, a reload or a settings save no longer deletes the
+    device from Home Assistant and creates it again, which could cost the names, areas and
+    dashboard placements given to it.
+
+The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 
