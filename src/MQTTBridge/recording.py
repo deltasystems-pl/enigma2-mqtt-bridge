@@ -3,7 +3,7 @@
 Every recording on an Enigma2 box is a timer, including the one somebody started
 by pressing the red button thirty seconds ago. So there is one source of truth
 here - `session.nav.RecordTimer` - and two topics reading it for two different
-questions: `recording` answers „is the box busy right now", which is what the
+questions: `recording` answers "is the box busy right now", which is what the
 shutdown guards need, and `timers` answers "what is it going to do, and what
 became of what it was told to do", which is what a household planner needs.
 
@@ -108,7 +108,14 @@ def timer_state(timer):
     ended; it is waiting to be switched back on, so the flag wins over the
     number. A recording the image could not write (a full disk) keeps counting
     up to `StateEnded` with `failed` set rather than reaching `StateFailed`, so
-    that flag wins too: "ended" would say it was recorded.
+    that flag wins too.
+
+    The flag also wins on a repeating timer the image has put back in the
+    queue for its next day: the image does not clear it, and a flagged timer
+    returns before it starts recording, so "waiting" would promise a recording
+    that will not happen. The flag is not saved in the timer file, so an
+    interface restart loses it; "failed" is what the image still knows, no
+    more - and "ended" never meant "recorded".
     """
     if getattr(timer, "disabled", False):
         return "disabled"
@@ -301,9 +308,15 @@ def _record(session, entry):
     # check recognised one like it. The return value cannot tell them apart, so
     # the list is the only honest answer - and „added" is exactly the kind of
     # claim that must be verified by effect rather than by a return code.
-    if not any(listed is entry for listed in timer_list(session)):
-        return "the receiver did not keep the timer; it already has one like it"
-    return None
+    #
+    # The pending list, not every list: `record()` files a timer whose window
+    # has already passed straight with the finished ones. It is kept, and it
+    # will never record, so it is not a timer that was added.
+    if any(listed is entry for listed in timer_list(session)):
+        return None
+    if any(listed is entry for listed in all_timers(session)):
+        return "the receiver filed the timer as finished; its window has already passed"
+    return "the receiver did not keep the timer; it already has one like it"
 
 
 def add_event_timer(session, sref, event_id):

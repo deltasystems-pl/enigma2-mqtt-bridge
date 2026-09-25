@@ -33,13 +33,18 @@ version that has no section here.
   finished with - and `state` has three new words: `disabled`, `failed` and `unknown`. A timer
   somebody switched off, or one the receiver switched off itself because it conflicted, was
   missing from the topic, and would otherwise have read `ended` (the receiver files it with the
-  finished ones); it is `disabled`. A recording that could not be made is `failed`. A state number
-  the plugin has no word for is `unknown`; it used to read `waiting`, which promised a recording
-  nobody could vouch for. A consumer that treated every entry as pending must now filter on
-  `state` (`waiting`, `prepared`, `running` are the pending ones). The payload grows with how long
-  the receiver keeps finished timers (`config.recording.keep_timers`) and with AutoTimer use, and
-  a Home Assistant diagnostics download, which carries the topic, now includes the names of
-  finished and disabled timers too. [docs/TOPICS.md](docs/TOPICS.md#basenodetimers) has the table.
+  finished ones); it is `disabled`. A timer the receiver has flagged as failed is `failed` - best
+  effort: OpenViX flags only a disk too full to start, and forgets the flag when its interface
+  restarts, so `ended` means "no longer scheduled", never "recorded". A repeating timer that keeps
+  the flag for its next day is published as `failed` while pending, because the receiver will not
+  record it either. A state number the plugin has no word for is `unknown`; it used to read
+  `waiting`, which promised a recording nobody could vouch for. A consumer that treated every
+  entry as pending must now filter on `state` (`waiting`, `prepared`, `running` are the pending
+  ones). The payload grows, uncapped, by about 180 bytes per kept timer, with how long the receiver
+  keeps finished timers (`config.recording.keep_timers`) and with AutoTimer use, and a Home
+  Assistant diagnostics download, which carries the topic, now includes the names of finished and
+  disabled timers too. [docs/TOPICS.md](docs/TOPICS.md#basenodetimers) has the table and the
+  limits.
 
 ### Fixed
 
@@ -49,6 +54,9 @@ version that has no section here.
   `timers` is republished without the timer, so a consumer waiting for the list to change sees
   the delete. When a pending timer and a disabled copy share service, begin and end, the pending
   one is deleted first, as before and as OpenWebif does.
+- `cmd/timer` `add` for a window that has already passed - which the receiver keeps, filed with the
+  finished timers, and never records - is refused with "the receiver filed the timer as finished;
+  its window has already passed" instead of "it already has one like it".
 - `cmd/zap_history` with a screen open over the info bar on a session that has no navigation, or
   a navigation without `playService`, now reports it on `last_error` instead of raising inside the
   command - with the sentence `cmd/zap` gives for the same thing: "there is no session to zap
@@ -59,7 +67,10 @@ version that has no section here.
 
 - The `RecordTimer` stub files timers as the receiver's image does: `addTimerEntry` puts a
   finished or disabled timer in `processed_timers` as `StateEnded`, `removeEntry` takes a timer
-  out of either list, and entries carry `StateFailed` and `failed`.
+  out of either list, and entries carry `StateFailed` and `failed`. Its `record()` files an
+  accepted timer through `addTimerEntry` and its entries' `shouldSkip`, as the image does, against
+  a clock of the stub's own, so a timer whose window has passed lands with the finished ones. Tests
+  that added timers in 1970 now add them in the future.
 - The discovery template test builds its box that can do everything with `uninstall` and
   `history_clear` too. Two guards keep it that way: every `*_CAPABILITY` constant in the plugin
   must be in that list, and so must every capability a discovery component is gated on.
