@@ -7,7 +7,7 @@ their satellite receiver in it without polling OpenWebif.
 [![Release](https://img.shields.io/github/v/release/deltasystems-pl/enigma2-mqtt-bridge?sort=semver)](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases)
 [![License: GPL-2.0-or-later](https://img.shields.io/badge/License-GPL--2.0--or--later-blue.svg)](LICENSE)
 
-![The receiver's device page in Home Assistant, with power, channel, programme and volume](docs/images/device-page.png)
+<img src="docs/images/device-page.png" width="480" alt="The receiver's device page in Home Assistant, with power, channel, programme and volume">
 
 ## What you get
 
@@ -24,6 +24,11 @@ their satellite receiver in it without polling OpenWebif.
   optional softcam restart and EPG import (both off until you allow them on the box).
 - Pure Python with one vendored library (paho-mqtt). Nothing to compile, and no connection to
   anything but your broker.
+
+<img src="docs/images/zap-history.png" width="400" alt="The Recently watched list in Home Assistant, showing the last six channels">
+
+The receiver's zap history in Home Assistant, with the companion integration. Picking a channel
+zaps back to it.
 
 ## Install
 
@@ -44,7 +49,7 @@ their satellite receiver in it without polling OpenWebif.
 
 With the feed in place, updates show up in the image's own software update screens.
 
-Using Home Assistant? The [companion integration](https://github.com/deltasystems-pl/hass-enigma2-mqtt)
+If you use Home Assistant, the [companion integration](https://github.com/deltasystems-pl/hass-enigma2-mqtt)
 can install and configure the plugin for you over SSH, and roll the receiver back if anything
 fails. Installing a single IPK from the releases page, the manual `scp` route and removing the
 plugin are in [docs/INSTALL.md](docs/INSTALL.md).
