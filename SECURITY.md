@@ -35,8 +35,8 @@ everything else:
 
 1. **The box is weakly protected.** Enigma2 images commonly ship a well-known root password and
    an open telnet or SSH port. Anyone with LAN access to such a box can read the plugin's
-   configuration, and with it the broker credential. The first line of the README therefore tells
-   users to change the root password; the plugin cannot do it for them.
+   configuration, and with it the broker credential. The first install step in the README and in
+   docs/INSTALL.md therefore tells users to change the root password; the plugin cannot do it for them.
 2. **The LAN is the trust boundary.** The plugin makes no outbound connection other than to the
    broker the user configures. There is no telemetry, no cloud service, and the release check is
    the integration's business and is off by default. TLS to the broker is supported; client
@@ -59,7 +59,7 @@ everything else:
 Consequences the design accepts: the password is stored in enigma2's settings file in clear, as
 every enigma2 plugin's credentials are; the provisioning file holds it too, which is why it is
 deleted immediately after import; and the `key`, `epg` and `screen` topics are privacy-sensitive
-by nature, which the README covers and the settings can switch off.
+by nature, which [docs/SETUP.md](docs/SETUP.md#privacy) covers and the settings can switch off.
 
 ## Supply chain
 

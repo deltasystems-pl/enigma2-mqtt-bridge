@@ -9,7 +9,12 @@ version that has no section here.
 
 ## [Unreleased]
 
-Nothing yet.
+### Documentation
+
+- The README is now a short landing page: what the plugin does, how to install it, what it needs.
+  The milestones and open items moved to [ROADMAP.md](ROADMAP.md); the privacy notes and the
+  ACL's role as the privacy boundary moved to [docs/SETUP.md](docs/SETUP.md#privacy). The release
+  history stays here. The roadmap now says the companion integration's 0.3.0 is released.
 
 ## [0.3.0] - 2026-09-25
 

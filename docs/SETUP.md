@@ -400,6 +400,13 @@ touching and publish there as the box's user: the message must not arrive. Mosqu
 ACL-denied publish silently and the publishing client sees success either way, so an ACL that is
 too tight and one that works look identical from the box.
 
+**That ACL is the privacy boundary.** Anything able to publish on `<base>/<node>/cmd/config` can
+switch on screenshots, key reporting and the CAM and OSCam telemetry, and then ask for a picture
+of the television whenever it likes. The companion integration's options flow is built on exactly
+that path, so the plugin does not ask the box for a second confirmation.
+
+TLS to the broker is optional (`tls`, `ca_file`); client certificates are not supported in v1.
+
 ---
 
 # A media player without the custom integration
@@ -530,3 +537,25 @@ above would name something that does not exist. Turn **`publish_keys` off** on t
 which is the stronger control in either case, because the information then never reaches the
 broker at all. The screenshot *is* an entity in discovery mode, so the second line applies; on the
 box, `screenshot: off` is its equivalent.
+
+What else to know, and the settings that control it:
+
+- **The `key` and `epg` topics** say what is being pressed and watched. Decide deliberately about
+  the programme-title sensor as well as the key events.
+- **`zap_history`** (since 0.3.0) names the channels watched recently (up to twenty on the images
+  read so far), from every bouquet, retained on the broker - just as `channels` names every
+  channel there is. A consumer that hides a bouquet hides it from its own list, not from the
+  broker.
+- **`screenshot`** is a picture of your screen on the broker, retained. Set it to `off` if you do
+  not use it. `screenshot_delay` (four seconds by default) is how long the image settles after a
+  channel change; rapid zaps reset the delay and stale in-flight captures are discarded.
+- **`cam_telemetry`** stays off unless you need conditional-access diagnostics. When on, it
+  publishes only the generic CA system, the current service's encryption flag and bounded fresh
+  ECM timing - never reader, server, user, card or raw ECM data.
+- **`oscam_telemetry`** stays off unless you need OSCam's software and reader/server health. It queries only
+  receiver-local, read-only WebIf views and publishes opaque source ids and bounded aggregate
+  counts; reader names, addresses, users, card identifiers and WebIf credentials stay on the
+  receiver.
+- **Retained topics outlive the plugin.** `cmd/reset` retracts everything and is the documented
+  step before removing the plugin by hand; `cmd/uninstall` (since 0.3.0) does it for you, in the
+  right order. See [INSTALL.md](INSTALL.md#uninstalling).
