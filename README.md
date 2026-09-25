@@ -159,7 +159,10 @@ are both written against it, and it is versioned with the plugin.
 ## Privacy
 
 The `key` and `epg` topics reveal what is being watched and what is being pressed, and they land
-in Home Assistant's recorder database by default. If that matters in your household:
+in Home Assistant's recorder database by default. Since 0.3.0 `zap_history` names the channels watched
+recently (up to twenty on the images read), from every bouquet, retained on the broker - as `channels` names every channel
+there is; a consumer that hides a bouquet hides it from its own list, not from the broker. If that
+matters in your household:
 
 - exclude the screenshot image entity from the recorder, and decide deliberately about the
   programme-title sensor. The key `event` entity is worth excluding too - but it only exists
@@ -278,6 +281,19 @@ The full list is in [CHANGELOG.md](CHANGELOG.md).
    🔴 A one-way door - nothing over MQTT can put it back, only SSH or the receiver's own package
    manager. Decided in [ADR-0004](docs/adr/0004-remote-uninstall.md); the order, the QoS and the
    failure path in [ADR-0013](docs/adr/0013-the-uninstall-closes-the-doors-and-waits-for-the-broker.md).
+8. **The zap history** - the receiver's own list of recently watched channels, the one KEY_NEXT and
+   KEY_PREVIOUS open, on a `zap_history` topic; `cmd/zap_history` to go back to one of them, and
+   `cmd/history_clear`, which does exactly what the receiver's 0 key does: it empties the list and
+   **switches to channel 1**, the first channel of the first bouquet. It is refused wherever 0 would
+   not clear - standby, the image's panic-button setting off, one channel or none in the list,
+   any active timeshift (the plugin treats every one as blocking), picture-in-picture taking the
+   key, a recording being played back, another screen open on the receiver - with a reason code a
+   consumer can translate. 🔴 **`cmd/zap` changes with it**: every zap the plugin makes now goes
+   through the receiver's channel list, so it is in that history like a zap from the remote - and a
+   zap to a channel outside the bouquet being browsed moves the channel list to that channel's
+   bouquet, as a number zap on the remote does. With a screen open on the receiver, in timeshift
+   and in a few other cases the zap is played directly and is not in the history. Decided in
+   [ADR-0014](docs/adr/0014-the-zap-history-is-the-receivers.md).
 
 ## Contributing
 

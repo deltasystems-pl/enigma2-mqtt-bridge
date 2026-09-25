@@ -675,3 +675,15 @@ msgstr "Das Plugin wird von diesem Receiver entfernt und die Benutzeroberfläche
 #: src/MQTTBridge/setup.py
 msgid "Settings saved. The plugin is being removed from this receiver, so they are not applied now; they take effect if the removal stops or the plugin is installed again."
 msgstr "Einstellungen gespeichert. Das Plugin wird gerade von diesem Receiver entfernt, daher werden sie jetzt nicht übernommen; sie gelten, wenn das Entfernen abbricht oder das Plugin erneut installiert wird."
+
+#: src/MQTTBridge/webif.py
+msgid "Zap to a recently watched channel"
+msgstr "Zu einem zuletzt gesehenen Sender wechseln"
+
+#: src/MQTTBridge/webif.py
+msgid "Clear the recently watched list"
+msgstr "Zuletzt gesehen leeren"
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver switches to channel 1, the first channel of its first bouquet, and empties its list of recently watched channels."
+msgstr "Der Receiver schaltet auf Kanal 1, den ersten Sender des ersten Bouquets, und leert die Liste der zuletzt gesehenen Sender."

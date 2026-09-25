@@ -108,6 +108,59 @@ def test_tv_bouquet_selection_is_refused_in_radio_mode_without_side_effects(
     assert "television mode" in factory.client.last(ROOT + "/last_error").json()["error"]
 
 
+def test_bouquet_selection_is_refused_during_timeshift_without_side_effects(
+    make_bridge, factory, settings, receiver
+):
+    """The channel list's zap would open the no-timeout timeshift question."""
+    from conftest import InfoBar
+
+    _bridge, servicelist = started(make_bridge, settings, receiver)
+    InfoBar.instance.seekable = True
+    InfoBar.instance.timeshift = True
+    old_path = [item.toString() for item in servicelist.path]
+    old_service = receiver.nav.sref
+    old_saved = servicelist.saved_roots
+
+    select(factory, SECOND_BOUQUET)
+
+    assert [item.toString() for item in servicelist.path] == old_path
+    assert receiver.nav.sref == old_service
+    assert receiver.nav.played == []
+    assert servicelist.zaps == 0
+    assert servicelist.saved_roots == old_saved
+    assert factory.client.last(ROOT + "/last_error").json()["error"] == bouquet.TIMESHIFT
+
+
+def test_bouquet_zap_with_a_screen_open_is_played_directly(
+    make_bridge, factory, settings, receiver
+):
+    """The channel list is open over the info bar: its zap would leave the remote on it."""
+    _bridge, servicelist = started(make_bridge, settings, receiver)
+    receiver.session.current_dialog = servicelist
+
+    select(factory, SECOND_BOUQUET)
+
+    assert receiver.nav.played == [POLSAT]
+    assert servicelist.zaps == 0
+    assert factory.client.last(BOUQUET).json()["sref"] == SECOND_BOUQUET
+
+
+def test_bouquet_selection_cancels_a_zap_waiting_for_the_wake(
+    make_bridge, factory, settings, receiver
+):
+    from conftest import MainLoop
+
+    from MQTTBridge import service
+
+    bridge, servicelist = started(make_bridge, settings, receiver)
+    screen = receiver.enter_standby(restoring=True)
+    service.zap(receiver.session, TVN, channels=bridge.publisher("channels"))
+    screen.finish_close()
+    select(factory, SECOND_BOUQUET)
+    MainLoop.advance(0)
+    assert receiver.nav.sref == POLSAT
+
+
 def test_unknown_or_empty_bouquet_is_refused_without_side_effects(
     make_bridge, factory, settings, receiver
 ):

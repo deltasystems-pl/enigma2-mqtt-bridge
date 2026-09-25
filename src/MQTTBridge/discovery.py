@@ -380,6 +380,16 @@ class _Components:
                 cmd_tpl='{"name": {{ value | tojson }}}',
                 ops=list(channel_options),
             )
+        # The zap history itself is not announced: a core MQTT select carries
+        # its options inside this discovery payload, and a list that changes
+        # on every zap would mean republishing discovery on every zap. The
+        # companion integration builds that select from the topic instead.
+        self.add(
+            "history_clear", "button", "history_clear",
+            name="Clear zap history",
+            cmd_t=self.topic("cmd/history_clear"),
+            ic="mdi:history-off",
+        )
         self.add(
             "screen", "image", "screenshot",
             name="Screen",

@@ -28,6 +28,7 @@ from .service import EpgPublisher, ServicePublisher, TunerPublisher
 from .softcam import SoftcamPublisher
 from .toast import ToastPublisher
 from .volume import VolumePublisher
+from .zaphistory import ZapHistoryPublisher
 
 PUBLISHER_CLASSES = (
     PowerPublisher,
@@ -45,6 +46,7 @@ PUBLISHER_CLASSES = (
     ProcessPublisher,
     ChannelsPublisher,
     BouquetPublisher,
+    ZapHistoryPublisher,
     EpgGridPublisher,
     EpgImportPublisher,
     KeyPublisher,

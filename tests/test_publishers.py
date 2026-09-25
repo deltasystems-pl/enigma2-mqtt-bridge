@@ -25,21 +25,24 @@ def test_a_bridge_with_a_session_registers_every_feature_area(live_bridge):
     names = [publisher.name for publisher in live_bridge._publishers]
     assert names == [
         "power", "service", "epg", "tuner", "recording", "timers", "volume", "hdd",
-        "process", "channels", "bouquet_context", "epg_grid", "keys", "screenshot", "toast",
+        "process", "channels", "bouquet_context", "zap_history", "epg_grid", "keys",
+        "screenshot", "toast",
     ]
 
 
 def test_capabilities_name_the_areas_that_bound(live_bridge, factory):
     capabilities = factory.client.last(topic("info")).json()["capabilities"]
     # `message` has no publisher: it is a command, and what makes it real is the
-    # popup machinery being importable. `bouquet_context` is registered on this
-    # receiver and absent from the list, because nothing has opened the channel
-    # list yet and a bouquet that cannot be read is not a capability.
+    # popup machinery being importable. `bouquet_context` and `zap_history` are
+    # registered on this receiver and absent from the list, because nothing has
+    # built the channel list yet and a list that cannot be read is not a
+    # capability.
     assert capabilities == [
         "power", "service", "epg", "tuner", "recording", "timers", "volume", "hdd",
         "process", "channels", "epg_grid", "keys", "screenshot", "toast", "message",
     ]
     assert live_bridge.publisher("bouquet_context") is not None
+    assert live_bridge.publisher("zap_history") is not None
 
 
 def test_capabilities_drop_an_area_whose_hooks_are_missing(make_bridge, factory, settings,
@@ -184,7 +187,7 @@ def test_the_default_registry_is_the_documented_order():
     assert [cls.name for cls in publishers.PUBLISHER_CLASSES] == [
         "power", "cec_workaround", "service", "epg", "tuner", "cam", "oscam", "softcam",
         "recording", "timers", "volume", "hdd", "process", "channels", "bouquet_context",
-        "epg_grid", "epg_import", "keys", "screenshot", "toast",
+        "zap_history", "epg_grid", "epg_import", "keys", "screenshot", "toast",
     ]
 
 

@@ -1,6 +1,18 @@
 """What is playing, what is on, and how well it is arriving."""
 
-from conftest import POLSAT, TVN, TVP1, Event, Frontend, Service, ServiceInfo
+from conftest import (
+    POLSAT,
+    SECOND_BOUQUET,
+    TVN,
+    TVP1,
+    Event,
+    Frontend,
+    InfoBar,
+    MainLoop,
+    Service,
+    ServiceInfo,
+    eServiceReference,
+)
 
 from MQTTBridge import service as service_module
 
@@ -230,41 +242,328 @@ def test_nothing_playing_publishes_the_empty_tuner_shape(live_bridge, factory, r
 # ----------------------------------------------------------------------- zap --
 
 
+def _zap(bridge, receiver, sref, **options):
+    """`service.zap` as `cmd/zap` calls it: with the channel cache to choose a bouquet."""
+    return service_module.zap(
+        receiver.session, sref, channels=bridge.publisher("channels"), **options
+    )
+
+
+def _front(channel_list):
+    """The newest history entry's service, as a string."""
+    return channel_list.history[-1][-1].toString() if channel_list.history else None
+
+
 def test_a_zap_plays_the_service(live_bridge, receiver):
-    assert service_module.zap(receiver.session, TVN) is None
+    """No channel list at all: there is nothing to record through."""
+    assert _zap(live_bridge, receiver, TVN) is None
     assert receiver.nav.played == [TVN]
 
 
 def test_a_zap_wakes_the_box_first(live_bridge, receiver):
+    """Changed in 0.3.0: the zap waits for the turn after the wake, not the same call."""
     screen = receiver.enter_standby()
-    service_module.zap(receiver.session, TVN)
+    assert _zap(live_bridge, receiver, TVN) is None
     assert screen.power_calls == 1
+    assert receiver.nav.played == []
+    MainLoop.advance(0)
     assert receiver.nav.played == [TVN]
 
 
-def test_a_zap_uses_the_channel_list_when_the_service_is_in_it(live_bridge, receiver):
+def test_a_zap_uses_the_channel_lists_own_number_zap(live_bridge, receiver):
+    """The remote's path, `selectAndStartService`, so the zap is in the history."""
     channel_list = receiver.with_channel_list([TVP1, TVN])
-    assert service_module.zap(receiver.session, TVN) is None
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert InfoBar.instance.started == [(eServiceReference(TVN), channel_list.root)]
     assert channel_list.zaps == 1
+    assert channel_list.corrected == 1
+    assert _front(channel_list) == TVN
     # And it did not also play it a second way.
     assert receiver.nav.played == []
 
 
-def test_a_zap_never_asks_the_channel_list_to_tune_the_wrong_channel(live_bridge, receiver):
-    """🔴 `zap()` tunes what is *selected*, so a selection that did not take
-    would tune the television to whatever was selected before."""
+def test_a_zap_in_the_browsed_bouquet_does_not_move_the_channel_list(live_bridge, receiver):
+    """Rule 1: the bouquet on screen wins over the first bouquet that holds the service."""
+    receiver.service_center.contents[SECOND_BOUQUET].append((TVN, "TVN HD"))
+    live_bridge.publisher("channels").refresh()
+    channel_list = receiver.with_channel_list([POLSAT])
+    channel_list.bouquets[SECOND_BOUQUET] = [POLSAT, TVN]
+    channel_list.enterPath(eServiceReference(SECOND_BOUQUET))
+    path_before = [reference.toString() for reference in channel_list.path]
+
+    assert _zap(live_bridge, receiver, TVN) is None
+
+    service, bouquet = InfoBar.instance.started[0]
+    assert bouquet is channel_list.root
+    assert bouquet.toString() == SECOND_BOUQUET
+    assert [reference.toString() for reference in channel_list.path] == path_before
+    assert _front(channel_list) == TVN
+
+
+def test_a_zap_outside_the_browsed_bouquet_moves_the_channel_list_to_its_bouquet(
+    live_bridge, receiver
+):
+    """Rule 2, and changed in 0.3.0: this zap used to be a bare `playService`.
+
+    POLSAT is not in the bouquet being browsed, so the zap goes through the
+    first published bouquet that holds it - and the channel list follows it
+    there, exactly as a number zap on the remote does.
+    """
     channel_list = receiver.with_channel_list([TVP1])
-    assert service_module.zap(receiver.session, POLSAT) is None
-    assert channel_list.zaps == 0
-    assert receiver.nav.played == [POLSAT]
+    assert _zap(live_bridge, receiver, POLSAT) is None
+    assert receiver.nav.played == []
+    assert channel_list.zaps == 1
+    assert channel_list.getRoot().toString() == SECOND_BOUQUET
+    assert channel_list.history[-1][-2].toString() == SECOND_BOUQUET
+    assert _front(channel_list) == POLSAT
 
 
-def test_a_zap_in_standby_goes_straight_to_the_player(live_bridge, receiver):
+def test_a_zap_is_selected_in_the_bouquets_own_spelling(live_bridge, receiver):
+    """The caller's spelling is not the one the channel list compares against."""
     channel_list = receiver.with_channel_list([TVP1, TVN])
-    receiver.enter_standby()
-    service_module.zap(receiver.session, TVN)
-    assert channel_list.zaps == 0
+    assert _zap(live_bridge, receiver, TVN.lower() + ":TVN HD") is None
+    assert channel_list.zaps == 1
+    assert receiver.nav.sref == TVN
+    assert receiver.nav.played == []
+
+
+def test_a_zap_never_leaves_the_wrong_channel_on_the_television(live_bridge, receiver):
+    """🔴 `selectAndStartService` zaps whatever it managed to select.
+
+    A bouquet edited since the channel cache was read leaves the selection
+    where it was, and the channel list then tunes that. The plugin reads back
+    what is playing and puts the right channel on, the old way.
+    """
+    # TVN left the bouquet file; the cache still has it.
+    channel_list = receiver.with_channel_list([TVP1])
+    channel_list.selection = TVP1
+    receiver.nav.sref = POLSAT
+
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.sref == TVN
     assert receiver.nav.played == [TVN]
+
+
+def test_a_channel_the_list_cannot_select_is_played_directly(live_bridge, receiver):
+    """The cache says the browsed bouquet holds it; the list itself does not.
+
+    A bouquet edited since the `channels` cache was read (up to a minute), or a
+    list that hides the channel: the selection stays on what is playing, the
+    channel list re-zaps it, and nothing is tuned. Played directly instead.
+    """
+    channel_list = receiver.with_channel_list([TVP1])
+    channel_list.selection = TVP1
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.sref == TVN
+    assert receiver.nav.played == [TVN]
+
+
+def test_a_protected_channel_waits_for_its_pin_and_is_not_played_twice(live_bridge, receiver):
+    from Components.ParentalControl import parentalControl
+
+    parentalControl.protected.add(TVN)
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    channel_list.zap = lambda **_arguments: None  # the PIN is on the television
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.played == []
+    assert receiver.nav.sref == TVP1
+
+
+def test_parental_control_that_cannot_answer_counts_as_a_pin_waiting(live_bridge, receiver):
+    from Components.ParentalControl import parentalControl
+
+    parentalControl.raises = True
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    channel_list.zap = lambda **_arguments: None
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.played == []
+
+
+def test_a_zap_with_a_screen_open_is_played_directly(live_bridge, receiver):
+    """The channel list, the EPG or a menu over the info bar: no channel-list zap."""
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    receiver.session.current_dialog = channel_list
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.played == [TVN]
+    assert channel_list.zaps == 0
+    assert InfoBar.instance.started == []
+
+
+def test_a_session_that_does_not_say_what_is_open_counts_as_a_screen_open(live_bridge, receiver):
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    del receiver.session.current_dialog
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.played == [TVN]
+    assert channel_list.zaps == 0
+
+
+def test_a_timeshift_check_that_raises_counts_as_timeshift(live_bridge, receiver):
+    """Fail-safe: the direct play cannot open the timeshift question."""
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+
+    def broken():
+        raise RuntimeError("no seek interface")
+
+    InfoBar.instance.isSeekable = broken
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.played == [TVN]
+    assert channel_list.zaps == 0
+
+
+def test_a_newer_zap_cancels_one_whose_wake_has_finished_but_not_yet_run(live_bridge, receiver):
+    """The standby screen closed, the waiting zap's 0 ms timer has not fired yet."""
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    screen = receiver.enter_standby(restoring=True)
+    assert _zap(live_bridge, receiver, TVN) is None
+    screen.finish_close()
+    assert _zap(live_bridge, receiver, POLSAT) is None
+    MainLoop.advance(0)
+    MainLoop.advance(service_module.WAKE_WAIT_MILLISECONDS)
+    assert receiver.nav.sref == POLSAT
+    assert channel_list.history[-1][-1].toString() == POLSAT
+
+
+def test_a_channel_in_no_published_bouquet_is_played_directly(live_bridge, receiver, plugin_log):
+    """Rule 3: there is no bouquet to enter it through; logged once per reference."""
+    radio = "1:0:2:1B1D:802:2:11A0000:0:0:0:"
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    assert _zap(live_bridge, receiver, radio) is None
+    assert _zap(live_bridge, receiver, radio) is None
+    assert receiver.nav.played == [radio, radio]
+    assert channel_list.zaps == 0
+    assert InfoBar.instance.started == []
+    assert plugin_log().count("not in the zap history") == 1
+
+
+def test_a_zap_during_timeshift_is_played_directly(live_bridge, receiver):
+    """The channel list would ask on the television whether to leave timeshift."""
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    InfoBar.instance.seekable = True
+    InfoBar.instance.timeshift = True
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.played == [TVN]
+    assert channel_list.zaps == 0
+    assert InfoBar.instance.started == []
+
+
+def test_a_timeshift_waiting_to_be_saved_counts_as_timeshift(live_bridge, receiver):
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    InfoBar.instance.save_current_timeshift = True
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.played == [TVN]
+    assert channel_list.zaps == 0
+
+
+def test_a_zap_in_picture_in_picture_zap_mode_is_played_directly(live_bridge, receiver):
+    """The channel list would zap the small picture."""
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    channel_list.dopipzap = True
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.played == [TVN]
+    assert channel_list.zaps == 0
+    assert InfoBar.instance.started == []
+
+
+def test_a_zap_with_the_channel_list_in_radio_mode_is_played_directly(live_bridge, receiver):
+    """A television bouquet entered under the radio root would be saved as the radio root."""
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    channel_list.mode = 1
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.played == [TVN]
+    assert InfoBar.instance.started == []
+
+
+def test_the_recorded_zap_opens_no_dialog(live_bridge, receiver):
+    """The CEC workaround closes channel-list dialogs; this path opens and shows none."""
+    receiver.with_channel_list([TVP1, TVN])
+    opened = list(receiver.session.opened)
+    instantiated = list(receiver.session.instantiated)
+    assert _zap(live_bridge, receiver, POLSAT) is None
+    assert receiver.session.opened == opened
+    assert receiver.session.instantiated == instantiated
+
+
+def test_a_zap_from_standby_waits_for_the_restore_and_is_recorded(live_bridge, receiver):
+    """The standby screen closes a turn late and plays what the box slept on first."""
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    screen = receiver.enter_standby(restoring=True)
+    zapped = []
+
+    assert _zap(live_bridge, receiver, TVN, on_zap=zapped.append) is None
+    assert screen.power_calls == 1
+    MainLoop.advance(0)
+    assert channel_list.zaps == 0 and zapped == []
+
+    screen.finish_close()
+    assert receiver.nav.played == [TVP1]      # the restore, not recorded
+    assert channel_list.zaps == 0
+    MainLoop.advance(0)
+    assert channel_list.zaps == 1
+    assert receiver.nav.sref == TVN
+    assert _front(channel_list) == TVN
+    assert zapped == [TVN]
+    MainLoop.advance(10000)
+    assert channel_list.zaps == 1
+
+
+def test_a_standby_that_never_ends_says_so(live_bridge, receiver):
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    receiver.enter_standby(restoring=True)
+    refusals = []
+
+    assert _zap(live_bridge, receiver, TVN,
+                report=lambda command, text: refusals.append((command, text))) is None
+    MainLoop.advance(service_module.WAKE_WAIT_MILLISECONDS)
+    assert refusals == [("zap", "the receiver did not leave standby")]
+    assert channel_list.zaps == 0
+
+
+def test_a_later_zap_from_standby_replaces_the_one_waiting(live_bridge, receiver):
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    screen = receiver.enter_standby(restoring=True)
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert _zap(live_bridge, receiver, TVP1) is None
+    screen.finish_close()
+    MainLoop.advance(0)
+    assert channel_list.zaps == 1
+    assert receiver.nav.sref == TVP1
+
+
+def test_a_zap_waiting_for_the_wake_is_dropped_by_an_uninstall(live_bridge, receiver):
+    """🔴 A removal accepted meanwhile comes first: nothing starts after it."""
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    screen = receiver.enter_standby(restoring=True)
+    open_doors = [True]
+    assert _zap(live_bridge, receiver, TVN, allowed=lambda: open_doors[0]) is None
+    open_doors[0] = False
+    screen.finish_close()
+    MainLoop.advance(0)
+    assert channel_list.zaps == 0
+    assert receiver.nav.sref == TVP1
+
+
+def test_cmd_zap_from_standby_verifies_after_the_wake(live_bridge, factory, receiver):
+    """The five seconds start when the zap is made, not when the command came."""
+    receiver.with_channel_list([TVP1, TVN])
+    screen = receiver.enter_standby(restoring=True)
+    factory.client.fire_message(ROOT + "/cmd/zap", TVN.encode())
+    publisher = live_bridge.publisher("service")
+    assert publisher._waiting_for is None
+    screen.finish_close()
+    MainLoop.advance(0)
+    assert publisher._waiting_for == TVN
+
+
+def test_cmd_zap_is_dropped_after_the_wake_while_the_plugin_removes_itself(
+    live_bridge, factory, receiver
+):
+    receiver.with_channel_list([TVP1, TVN])
+    screen = receiver.enter_standby(restoring=True)
+    factory.client.fire_message(ROOT + "/cmd/zap", TVN.encode())
+    live_bridge.uninstaller.phase = "scheduled"
+    screen.finish_close()
+    MainLoop.advance(0)
+    assert receiver.nav.sref == TVP1
 
 
 def test_a_zap_to_nonsense_is_refused(live_bridge, receiver, monkeypatch):
