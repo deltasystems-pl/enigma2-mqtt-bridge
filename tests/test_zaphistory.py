@@ -389,15 +389,31 @@ def test_cmd_zap_history_with_a_screen_open_is_played_directly(box):
 
 @pytest.mark.parametrize("nav", [None, object()], ids=["no navigation", "no playService"])
 def test_cmd_zap_history_with_a_screen_open_and_no_player_says_why(box, nav):
-    """The direct play is the one path that needs `session.nav`; without it, a sentence."""
+    """The direct play needs `session.nav`; without it, the sentence `cmd/zap` gives."""
+    from MQTTBridge import service
+
     before = [item[-1].toString() for item in box.list.history]
     box.receiver.session.current_dialog = box.list
     box.receiver.session.nav = nav
     send(box.factory, "zap_history", json.dumps({"sref": TVN}).encode())
-    assert last_error(box.factory)["error"] == zaphistory.NO_PLAYER
+    expected = service.NO_SESSION if nav is None else service.NO_PLAYER
+    assert last_error(box.factory)["error"] == expected
     assert box.receiver.nav.played == []
     assert box.list.history_paths == 0
     assert [item[-1].toString() for item in box.list.history] == before
+
+
+@pytest.mark.parametrize("nav", [None, object()], ids=["no navigation", "no playService"])
+def test_zap_and_zap_history_say_the_same_about_a_missing_player(box, nav):
+    """One missing piece, one sentence: `last_error` must not depend on which command found it."""
+    box.receiver.session.current_dialog = box.list
+    box.receiver.session.nav = nav
+    send(box.factory, "zap", json.dumps({"sref": TVN}).encode())
+    by_zap = last_error(box.factory)
+    send(box.factory, "zap_history", json.dumps({"sref": TVN}).encode())
+    by_zap_history = last_error(box.factory)
+    assert by_zap is not None and by_zap_history is not None
+    assert by_zap_history["error"] == by_zap["error"]
 
 
 def test_cmd_zap_history_cancels_a_zap_waiting_for_the_wake(box):
