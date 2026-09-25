@@ -43,3 +43,26 @@ Filename: enigma2-plugin-extensions-mqttbridge_0.2.0_all.ipk
 Size: 167622
 SHA256sum: 3e50979ef5583f7e5c7785dec9190fa9ec03adc8e07284905ce74617c7a65568
 MD5Sum: 184d2c8d645d4d6575f61880f59c0391
+
+Package: enigma2-plugin-extensions-mqttbridge
+Version: 0.3.0
+Architecture: all
+Section: extra
+Priority: optional
+Depends: python3-core, python3-json, python3-threading, python3-netclient
+Maintainer: Damian Wilczek <deltasystems-pl@users.noreply.github.com>
+Homepage: https://github.com/deltasystems-pl/enigma2-mqtt-bridge
+License: GPL-2.0-or-later
+Description: Push receiver state to MQTT and take commands back.
+ Keeps one MQTT session to your broker and publishes the receiver's state the
+ moment enigma2 raises the event - zap, EPG change, standby, recording, volume,
+ remote key - instead of making a home-automation system poll OpenWebif.
+ Commands travel back on the same session: power, zap, volume, mute, remote
+ keys, on-screen messages, timers, recording and screenshots, each verified by
+ effect. Announces itself with Home Assistant MQTT discovery, or stays quiet for
+ the companion Home Assistant integration to build its own entities. Pure
+ Python, no native code, no outbound connection other than your broker.
+Filename: enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk
+Size: 259730
+SHA256sum: 12d0bcaa49ff02c7b1825da00d384dadc85d63d84dc05e733d78039c9fab8793
+MD5Sum: 95f859e0433095e782d32edb68718aa8
