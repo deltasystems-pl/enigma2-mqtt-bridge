@@ -114,6 +114,19 @@ a type is - never qualifies. The popup is left to its own timeout, as the image'
 leaves it. `cmd/zap`, `cmd/zap_history` and the zap of `cmd/bouquet` share the rule;
 `cmd/history_clear` does not, because it is the 0 key and a key goes to the popup.
 
+**Amended 2026-09-26 (documentation, no change of decision).** The list of six direct-play cases
+above was incomplete. The code has ten exits: the six named, plus an image with no channel-list
+zap, a bouquet cache that raised while one was chosen, `selectAndStartService` raising, and a
+channel list that tuned a neighbour instead of the service asked for. Before the popup amendment
+above, a zap under the receiver's own "Zapped to timer service" message was measured on OpenViX 6.6
+as played directly and unrecorded. With a question or any other screen open, `cmd/zap`,
+`cmd/zap_history` and the zap of `cmd/bouquet` still change the channel directly and leave the
+screen open and unanswered; that is intended, because the household keeps control with the remote
+and a zap from Home Assistant is an explicit request. The zap-timer and EPG paths the Consequences
+below called unread have since been read from the bytecode, and the awake zap timer was measured.
+`docs/TOPICS.md` ("What enters the receiver's zap history", "A zap from Home Assistant during
+timeshift") carries the full list, what is measured and what is not.
+
 **Discovery mode announces the clear button and no history select.** A core MQTT select carries its
 options inside the discovery payload, so a list that changes on every zap would mean republishing
 discovery on every zap. The companion integration builds the select from the topic.
@@ -129,7 +142,9 @@ discovery on every zap. The companion integration builds the select from the top
   OpenWebif page shows the list unfiltered to whoever OpenWebif admits.
 - **The list is only as complete as the receiver's.** Zaps made by OpenWebif's own zap, by a zap
   timer or from the EPG are in it only if the image routes them through the channel list, which was
-  not read. The direct-play cases above are not in it.
+  not read. The direct-play cases above are not in it. *(Amended 2026-09-26: on OpenViX 6.6 a zap
+  timer is recorded only when the receiver is awake and not in timeshift, and an EPG zap only once
+  it is confirmed; OpenWebif's own zap is still not read. See `docs/TOPICS.md`.)*
 - **The clear lands on channel 1**, which is the first channel of the first bouquet and moves when
   the bouquet order does. The settings that change what 0 does - `panicbutton`, `multibouquet`,
   `pip_zero_button` - are the image's; the plugin reads `panicbutton`, and asks the image's own

@@ -26,6 +26,29 @@ version that has no section here.
 - The PRD's copy here ([ADR-0000](docs/adr/0000-prd.md)) points to the companion integration's
   ADR-0007, which supersedes its paragraph saying entity ids derive from the English keys: Home
   Assistant makes them from the name in the installation's language.
+- [TOPICS.md](docs/TOPICS.md#what-enters-the-receivers-zap-history) now says what enters the
+  receiver's zap history and what does not: a zap timer is recorded when the receiver is awake and
+  not in timeshift, and not from standby or when the timeshift question is answered "Zap"; an EPG
+  zap is recorded once confirmed with a second OK, not as a preview, and after a preview closed
+  back to the original channel a zap back to that channel is not recorded until the channel list
+  is used. The awake zap timer was measured on OpenViX 6.6; the rest is read from its bytecode.
+- The direct-play exits of `cmd/zap` are listed in full, in the order the code checks them, each
+  with its log line. The page named six; the code has ten - the four missing were an image with no
+  channel-list zap, a bouquet cache that raised, `selectAndStartService` raising, and a channel
+  list that tuned a neighbour. The table now carries the information-popup exception from the
+  fix below.
+- TOPICS.md, ADR-0014 and TROUBLESHOOTING.md say plainly what a zap from Home Assistant does to a
+  question or any other screen open on the television: `cmd/zap`, `cmd/zap_history` and the zap
+  of `cmd/bouquet` change the channel directly, unrecorded, and leave the screen open and the
+  question unanswered. This is intended - the household keeps control with the remote, and a zap
+  from Home Assistant is an explicit request.
+- A new section says what a zap from Home Assistant during timeshift does, measured on OpenViX
+  6.6: no question on the television, not in the zap history, and the timeshift buffer files left
+  on the recordings disk, no longer growing. It also says what the receiver's own question would
+  have done - "Yes, but don't save" erases the buffer - and what is not measured.
+  [ADR-0014](docs/adr/0014-the-zap-history-is-the-receivers.md) carries a dated amendment, and
+  TROUBLESHOOTING.md has two short entries: a channel missing from the zap history, and timeshift
+  files left on the disk.
 
 ### Changed
 

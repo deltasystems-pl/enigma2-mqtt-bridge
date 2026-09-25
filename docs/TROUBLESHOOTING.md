@@ -208,6 +208,37 @@ There is no acknowledgement topic. A command's answer is the state topic changin
    nothing. The log line names it. Clear it by publishing an empty retained payload to that
    topic, then send it again without `-r`.
 
+## A channel is missing from the zap history
+
+The zap history is the receiver's own list, and the receiver records only zaps that pass through
+its channel selection. A zap from Home Assistant that the plugin had to play directly tunes the
+channel but is not in the list, and the log says why:
+
+```text
+zapping to <sref> without the channel list: <reason>
+```
+
+The usual reasons are a menu, a list or a question open on the television (`a screen is open on
+the receiver` - a plain information popup alone does not count), timeshift (`timeshift is
+active`), and a radio station or a channel outside the published bouquets (`it is in no published
+bouquet`, logged once per channel). None of them is an error, and none sets `last_error`.
+
+If a question was on the television, it is still there after the zap, unanswered. That is
+intended: a zap from Home Assistant changes the channel and leaves every open screen to the
+household and its remote. A zap timer that fires while the receiver is in standby or in
+timeshift, and an EPG preview that was not confirmed with a second OK, are not recorded by the
+receiver either. [TOPICS.md](TOPICS.md#what-enters-the-receivers-zap-history) has the complete
+list.
+
+## Timeshift files left on the recordings disk
+
+A zap from Home Assistant during timeshift leaves timeshift without asking, and on OpenViX 6.6 the
+timeshift buffer - `pts_livebuffer_<n>` and its `.sc` file, in the image's timeshift directory on
+the recordings disk - stays behind. The plugin does not delete them. Remove them by
+hand when no timeshift is running, or leave them to the image; whether it removes them itself
+later was not measured. [TOPICS.md](TOPICS.md#a-zap-from-home-assistant-during-timeshift) has the
+details.
+
 ## Reporting a problem
 
 Open an issue with: the image and its version, the plugin version, the `info` payload (its
