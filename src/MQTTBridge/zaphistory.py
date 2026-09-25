@@ -46,7 +46,6 @@ from .enigma2 import (
     enigma_attribute,
     identity,
     missing,
-    navigation,
     reference_string,
     same_service,
     service_name,
@@ -88,8 +87,6 @@ NOT_AVAILABLE = "the zap history is not available on this image"
 CLEAR_NOT_AVAILABLE = "clearing the zap history is not available on this image"
 UNREADABLE = "the receiver's zap history cannot be read"
 GONE = "that channel is no longer in the receiver's zap history"
-# The same sentence `service.zap` gives, for the same missing piece.
-NO_PLAYER = "this image's navigation has no playService"
 
 # What the channel selection has to offer for the topic and `cmd/zap_history`,
 # and what the info bar has to offer on top for `cmd/history_clear`.
@@ -405,7 +402,7 @@ class ZapHistoryPublisher(Publisher):
         else is playing - a zap the history does not know about - and then
         `setHistoryPath()` plays it.
         """
-        from .service import infobar_on_screen
+        from .service import infobar_on_screen, play_service
 
         read = self._read()
         if read is None:
@@ -420,12 +417,12 @@ class ZapHistoryPublisher(Publisher):
             # A screen is open over the info bar; the history's own calls
             # would move the channel list under it. Played directly, and the
             # list is left as it is.
-            # Asked the way `service.zap` asks it: a session without a player
-            # says so on `last_error` rather than raising out of the command.
-            nav = navigation(self.session)
-            player = getattr(nav, "playService", None) if nav is not None else None
-            if player is None:
-                return NO_PLAYER
+            # Asked through `service.zap`'s own check, so a session without a
+            # player gets `cmd/zap`'s sentence on `last_error` rather than
+            # raising out of the command.
+            player, refusal = play_service(self.session)
+            if refusal:
+                return refusal
             player(reference)
         elif index == position and not same_service(playing, reference_string(reference)):
             servicelist.setHistoryPath()

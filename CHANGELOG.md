@@ -30,9 +30,10 @@ version that has no section here.
 ### Fixed
 
 - `cmd/zap_history` with a screen open over the info bar on a session that has no navigation, or
-  a navigation without `playService`, now reports "this image's navigation has no playService" on
-  `last_error` - the sentence `cmd/zap` gives for the same thing - instead of raising inside the
-  command.
+  a navigation without `playService`, now reports it on `last_error` instead of raising inside the
+  command - with the sentence `cmd/zap` gives for the same thing: "there is no session to zap
+  with" without a navigation, "this image's navigation has no playService" without a player. Both
+  commands take the sentence from one place, so they cannot drift apart again.
 
 ### Tests
 

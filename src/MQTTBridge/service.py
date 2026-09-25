@@ -329,6 +329,12 @@ UNWATCHABLE = (
 # Why a zap was played directly: the one fallback logged once per reference.
 NO_BOUQUET = "it is in no published bouquet"
 
+# Why a zap cannot be made at all. Every command that zaps - `cmd/zap` and
+# `cmd/zap_history` - asks through `play_service`, so the sentence on
+# `last_error` names the missing piece the same way whichever command found it.
+NO_SESSION = "there is no session to zap with"
+NO_PLAYER = "this image's navigation has no playService"
+
 # References already logged as unrecordable, so a household zapping the same
 # radio station every evening does not log the same line every evening.
 _unrecorded_noted = set()
@@ -530,12 +536,22 @@ def _note_unrecorded(sref, why):
              sref, why)
 
 
+def play_service(session):
+    """`(nav.playService, None)`, or `(None, the refusal)` naming what is missing."""
+    nav = navigation(session)
+    if nav is None:
+        return None, NO_SESSION
+    player = getattr(nav, "playService", None)
+    if player is None:
+        return None, NO_PLAYER
+    return player, None
+
+
 def _zap_awake(session, sref, channels=None, on_zap=None):
     """The zap itself, on a receiver that is awake. None, or the refusal."""
-    nav = navigation(session)
-    player = getattr(nav, "playService", None) if nav is not None else None
-    if player is None:
-        return "this image's navigation has no playService"
+    player, refusal = play_service(session)
+    if refusal:
+        return refusal
     reference = service_reference(sref)
     if reference is None:
         return "'" + str(sref) + "' is not a service reference"
@@ -710,11 +726,9 @@ def zap(session, sref, channels=None, on_zap=None, report=None, allowed=None):
     From standby the receiver is woken first and the zap follows its restore
     (`run_after_wake`), so it is recorded like any other.
     """
-    nav = navigation(session)
-    if nav is None:
-        return "there is no session to zap with"
-    if getattr(nav, "playService", None) is None:
-        return "this image's navigation has no playService"
+    _player, refusal = play_service(session)
+    if refusal:
+        return refusal
     if service_reference(sref) is None:
         return "'" + str(sref) + "' is not a service reference"
 
