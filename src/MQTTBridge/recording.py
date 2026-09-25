@@ -3,9 +3,9 @@
 Every recording on an Enigma2 box is a timer, including the one somebody started
 by pressing the red button thirty seconds ago. So there is one source of truth
 here - `session.nav.RecordTimer` - and two topics reading it for two different
-questions: `recording` answers „is the box busy right now", which is what the
-shutdown guards need, and `timers` answers „what is it going to do", which is
-what a household planner needs.
+questions: `recording` answers "is the box busy right now", which is what the
+shutdown guards need, and `timers` answers "what is it going to do, and what
+became of what it was told to do", which is what a household planner needs.
 
 The timer list has no change event. This build of enigma2 has no
 `on_state_change` list to attach to, so what is wrapped instead is `saveTimer`,
@@ -48,7 +48,14 @@ STATE_NAMES = (
     ("StatePrepared", "prepared"),
     ("StateRunning", "running"),
     ("StateEnded", "ended"),
+    ("StateFailed", "failed"),
 )
+
+# A state number this module has no word for. Not "waiting": that word promises
+# a recording, and the one thing a number nobody named cannot be trusted to mean
+# is that the box will still record it. Not "ended" either, which promises the
+# opposite. The contract says it plainly instead.
+UNKNOWN_STATE = "unknown"
 
 
 def record_timer(session):
@@ -88,7 +95,33 @@ def _state_map():
 
 
 def state_word(state):
-    return _state_map().get(state, "waiting")
+    return _state_map().get(state, UNKNOWN_STATE)
+
+
+def timer_state(timer):
+    """The contract's word for what a timer will do, which its number alone
+    does not say.
+
+    The image files a disabled timer - one somebody switched off, or one
+    `record()` switched off because it conflicted while the timer file was
+    loading - with the finished ones and gives it `StateEnded`. It has not
+    ended; it is waiting to be switched back on, so the flag wins over the
+    number. A recording the image could not write (a full disk) keeps counting
+    up to `StateEnded` with `failed` set rather than reaching `StateFailed`, so
+    that flag wins too.
+
+    The flag also wins on a repeating timer the image has put back in the
+    queue for its next day: the image does not clear it, and a flagged timer
+    returns before it starts recording, so "waiting" would promise a recording
+    that will not happen. The flag is not saved in the timer file, so an
+    interface restart loses it; "failed" is what the image still knows, no
+    more - and "ended" never meant "recorded".
+    """
+    if getattr(timer, "disabled", False):
+        return "disabled"
+    if getattr(timer, "failed", False):
+        return "failed"
+    return state_word(getattr(timer, "state", None))
 
 
 def _timer_sref(timer):
@@ -103,7 +136,7 @@ def _timer_payload(timer):
             "sref": _timer_sref(timer),
             "begin": int(getattr(timer, "begin", 0) or 0),
             "end": int(getattr(timer, "end", 0) or 0),
-            "state": state_word(getattr(timer, "state", 0)),
+            "state": timer_state(timer),
             "repeated": int(getattr(timer, "repeated", 0) or 0),
         }
     except Exception:
@@ -112,15 +145,36 @@ def _timer_payload(timer):
 
 
 def timer_list(session):
+    """The pending timers: waiting, preparing or recording.
+
+    What "is the box busy" reads - `recording`, instant-record stop, the add
+    check. A processed timer never records, so it has no business there.
+    """
     timer = record_timer(session)
     entries = getattr(timer, "timer_list", None) if timer is not None else None
     return list(entries or [])
 
 
+def all_timers(session):
+    """Every timer the receiver still lists: the pending ones, then the processed.
+
+    enigma2 moves a timer out of `timer_list` the moment it is done with it -
+    finished, failed, or disabled - into `processed_timers`, and keeps it there
+    for about `keep_timers` days (a disabled repeating one for good). OpenWebif
+    shows and deletes from both lists, so a household sees these timers; a
+    plugin that read only the first list could neither show them nor delete
+    them. The order matters to `find_timer`: see there.
+    """
+    timer = record_timer(session)
+    if timer is None:
+        return []
+    return timer_list(session) + list(getattr(timer, "processed_timers", None) or [])
+
+
 def read_timers(session):
-    """The `timers` payload - a list, one entry per timer."""
+    """The `timers` payload - a list, one entry per timer, processed ones too."""
     payloads = []
-    for timer in timer_list(session):
+    for timer in all_timers(session):
         payload = _timer_payload(timer)
         if payload is not None:
             payloads.append(payload)
@@ -254,9 +308,15 @@ def _record(session, entry):
     # check recognised one like it. The return value cannot tell them apart, so
     # the list is the only honest answer - and „added" is exactly the kind of
     # claim that must be verified by effect rather than by a return code.
-    if not any(listed is entry for listed in timer_list(session)):
-        return "the receiver did not keep the timer; it already has one like it"
-    return None
+    #
+    # The pending list, not every list: `record()` files a timer whose window
+    # has already passed straight with the finished ones. It is kept, and it
+    # will never record, so it is not a timer that was added.
+    if any(listed is entry for listed in timer_list(session)):
+        return None
+    if any(listed is entry for listed in all_timers(session)):
+        return "the receiver filed the timer as finished; its window has already passed"
+    return "the receiver did not keep the timer; it already has one like it"
 
 
 def add_event_timer(session, sref, event_id):
@@ -321,14 +381,23 @@ def add_manual_timer(session, sref, begin, end, name):
 
 
 def find_timer(session, sref, begin, end):
-    """The timer identified by service, start and end - enigma2's own identity."""
+    """The timer identified by service, start and end - enigma2's own identity.
+
+    The triple is not unique: a timer somebody disabled and then set again from
+    the guide exists twice, once pending and once processed, because the image
+    checks a new timer only against the pending list. The pending copy is found
+    first. That is what every delete did before processed timers were reachable
+    at all - so a delete that worked then, including one that stops a running
+    recording, does exactly the same now - and it is what OpenWebif does. The
+    processed copy is the next delete's.
+    """
     try:
         begin = int(begin)
         end = int(end)
     except (TypeError, ValueError):
         return None
     wanted = identity(sref)
-    for timer in timer_list(session):
+    for timer in all_timers(session):
         if identity(_timer_sref(timer)) != wanted:
             continue
         if int(getattr(timer, "begin", 0) or 0) != begin:

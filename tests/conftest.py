@@ -2414,10 +2414,15 @@ record_timer_module = _module("RecordTimer")
 
 
 class RecordTimerEntry:
+    # The image's `timer.TimerEntry` numbers, all five of them. OpenViX 6.6's
+    # own recording timer never sets `StateFailed` (a recording that could not
+    # be written keeps counting up to `StateEnded` with `failed` set instead),
+    # but the state exists and `shouldSkip` tests for it.
     StateWaiting = 0
     StatePrepared = 1
     StateRunning = 2
     StateEnded = 3
+    StateFailed = 4
 
     def __init__(self, serviceref, begin, end, name, description, eit, disabled=False,
                  justplay=False, afterEvent=3, *args, **kwargs):
@@ -2436,9 +2441,21 @@ class RecordTimerEntry:
         self.state = RecordTimerEntry.StateWaiting
         self.repeated = 0
         self.dontSave = False
+        # `TimerEntry.__init__` sets both to False; the recording timer sets
+        # `failed` when the disk is too full to start.
+        self.failed = False
 
     def isRunning(self):
         return self.state == RecordTimerEntry.StateRunning
+
+    def shouldSkip(self):
+        """`timer.TimerEntry.shouldSkip` for a recording timer: a disabled one,
+        and one whose window passed before it ever started, are skipped."""
+        if self.disabled:
+            return True
+        return self.end <= record_timer_module.clock() and self.state in (
+            RecordTimerEntry.StateWaiting, RecordTimerEntry.StateFailed
+        )
 
 
 def parseEvent(event, description=True):
@@ -2454,6 +2471,13 @@ record_timer_module.RecordTimerEntry = RecordTimerEntry
 record_timer_module.parseEvent = parseEvent
 record_timer_module.margin_before = 0
 record_timer_module.margin_after = 0
+
+# The image's `shouldSkip` asks `time()` whether a window has passed. The
+# fixtures' timers sit at fixed moments that the real clock has long overtaken,
+# so the stub receiver has a clock of its own, set before all of them; a test
+# about a window that has passed moves it.
+STUB_NOW = 1789000000
+record_timer_module.clock = lambda: STUB_NOW
 
 
 class RecordTimer:
@@ -2474,14 +2498,41 @@ class RecordTimer:
             return list(self.conflicts)
         if self.swallow:
             return None
-        self.timer_list.append(entry)
+        # The image hands an accepted timer to `addTimerEntry`, which decides
+        # which list it lands in.
+        self.addTimerEntry(entry)
         self.saveTimer()
         return None
 
+    def addTimerEntry(self, entry):
+        """Where the image files a timer, and what it does to its state.
+
+        `timer.Timer.addTimerEntry`: a timer the image would skip (disabled, or
+        whose window passed before it started), one that has ended, or one
+        that waits while disabled, goes to `processed_timers` and is marked
+        `StateEnded` - so a disabled timer, including one `record()` disabled
+        because it conflicted while the file was loading, looks exactly like a
+        finished one apart from its `disabled` flag.
+        """
+        if entry.shouldSkip() or entry.state == RecordTimerEntry.StateEnded or (
+            entry.state == RecordTimerEntry.StateWaiting and entry.disabled
+        ):
+            self.processed_timers.append(entry)
+            self.processed_timers.sort(key=lambda timer: timer.begin)
+            entry.state = RecordTimerEntry.StateEnded
+            return
+        self.timer_list.append(entry)
+
     def removeEntry(self, entry):
+        # The image's `removeEntry` aborts the entry, lets `timeChanged` take a
+        # pending one out of `timer_list`, removes it from `processed_timers`,
+        # and writes the file: whichever list held it, it is in neither after.
         self.removed.append(entry)
         if entry in self.timer_list:
             self.timer_list.remove(entry)
+        processed = getattr(self, "processed_timers", [])
+        if entry in processed:
+            processed.remove(entry)
         self.saveTimer()
 
     def saveTimer(self):
@@ -2937,6 +2988,21 @@ class Receiver:
         self.nav.RecordTimer.timer_list.append(timer)
         return timer
 
+    def add_processed_timer(self, sref=TVP1, begin=1789459200, end=1789460700,
+                            name="Wiadomości", disabled=False, failed=False):
+        """A timer the image has moved to `processed_timers`.
+
+        Filed by the image's own rule, so it arrives as `StateEnded` whether it
+        finished, failed to write (`failed`), or is disabled.
+        """
+        timer = RecordTimerEntry(ServiceReference(sref), begin, end, name, "", 0)
+        timer.disabled = disabled
+        timer.failed = failed
+        if not disabled:
+            timer.state = RecordTimerEntry.StateEnded
+        self.nav.RecordTimer.addTimerEntry(timer)
+        return timer
+
     def with_channel_list(self, selectable=(TVP1, TVN)):
         InfoBar.instance = InfoBar(
             ChannelList(
@@ -3002,6 +3068,7 @@ def fresh_receiver():
         MainLoop.now = 0
         record_timer_module.margin_before = 0
         record_timer_module.margin_after = 0
+        record_timer_module.clock = lambda: STUB_NOW
         counter = config.misc.standbyCounter
         counter.notifiers = []
         counter._value = 0

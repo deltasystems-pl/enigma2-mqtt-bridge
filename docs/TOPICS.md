@@ -584,11 +584,13 @@ does not come off a tuner - IPTV, a recording being played back - has every fiel
 or `null`. This topic is what the deep-standby, reboot and GUI-restart guards read.
 
 A timer that only tunes the box - enigma2 calls it `justplay` - is not a recording and appears in
-neither field, though it is in `timers`. A disabled timer is in neither either.
+neither field, though it is in `timers`. A disabled, finished or failed timer is in neither
+either.
 
 ### `<base>/<node>/timers`
 
-A JSON **list** (not an object), one entry per timer:
+A JSON **list** (not an object), one entry per timer the receiver still lists - the pending
+ones **and** the ones it has finished with:
 
 ```json
 [{"name": "Wiadomości", "sref": "1:0:19:283D:...:", "begin": 1789459200,
@@ -600,13 +602,60 @@ A JSON **list** (not an object), one entry per timer:
 | `name` | string | |
 | `sref` | string | |
 | `begin`, `end` | int | Epoch seconds |
-| `state` | string | One of `waiting`, `prepared`, `running`, `ended` |
+| `state` | string | One of the words below |
 | `repeated` | int | enigma2's day bitmask; `0` for a one-off timer, `127` for daily |
 
-In `begin` order. Published whenever enigma2 writes its timer file - which it does after every
-change to the list, including one made with the remote control while somebody is sitting in front
-of the television - and after every recording event. A burst of changes produces one payload, not
+| `state` | Meaning |
+|---|---|
+| `waiting` | Pending: it will start at `begin` |
+| `prepared` | Pending: it is about to start |
+| `running` | Recording now |
+| `ended` | No longer scheduled. It does **not** say a recording was made: see below. A repeating timer is back to `waiting` for its next day instead |
+| `disabled` | Switched off. It will not run until somebody switches it back on. This covers a timer the receiver switched off itself because it conflicted with another when the timer file was loaded. enigma2 files a disabled timer with the finished ones and marks it ended; it is published as `disabled`, never `ended` |
+| `failed` | The receiver says this timer's recording could not be written. Best effort - see below |
+| `unknown` | The receiver reported a state number this plugin has no word for. Treat it as neither pending nor over |
+
+`disabled` wins over `failed`, and both win over the state number. A consumer that wants only
+what is still going to happen keeps `waiting`, `prepared` and `running`.
+
+**`failed` is best effort, and `ended` is not "recorded".** The plugin can only repeat what the
+receiver keeps, and on OpenViX 6.6 (read from its timer code) that is little:
+
+- The receiver sets its failure flag in one case only: the disk was too full to start. It gives up
+  on a timer for other reasons without setting it - a timer that could not get a tuner (logged as
+  "prepare failed") stays waiting until its end passes and is then filed as ended. It is published
+  as `ended`.
+- The flag is not saved in the timer file. After the receiver's interface restarts - a GUI
+  restart, a reboot, a wake from deep standby - the same timer is published as `ended`.
+- Images that give a failed timer a state number of its own are published as `failed` too.
+- A **repeating** timer keeps the flag when the receiver puts it back in the queue for its next
+  day, and on OpenViX a timer with the flag set returns before it starts recording - so the next
+  day will not be recorded either, until the interface restarts and the flag is lost. Such a timer
+  is pending and is published as `failed`, not `waiting`: `waiting` would promise a recording the
+  receiver will not make. The `recording` topic does not read the flag and still lists it as
+  `next`.
+
+To learn whether something was actually recorded, look for the recording, not the timer.
+
+A finished, failed or disabled timer is published for as long as the receiver keeps it, which is
+the receiver's business, not the plugin's. On OpenViX 6.6 (read from its timer code): a finished
+timer is kept only when `config.recording.keep_timers` (days) is above `0`; one whose `end` is
+older than that is pruned, but only when the receiver next activates a timer, so a quiet receiver
+lists it for longer than the setting says (one was measured still listed 8.8 days after its end
+with the setting at 7). A disabled timer is filed the same way whatever that setting is, and a
+disabled repeating timer is never pruned. Deleting one - `cmd/timer`, OpenWebif, the remote -
+removes it at once. The list therefore grows with that setting and with how many timers the
+receiver sets for itself (AutoTimer, for one). Neither the plugin nor the topic caps it: an entry
+is about 180 bytes with a 48-character name, so 50 timers are about 9 KB and 1000 about 180 KB.
+
+In `begin` order; timers with the same `begin` keep the pending ones first. Published whenever
+enigma2 writes its timer file - which it does after adding, deleting, starting or finishing
+a timer - and after every recording event. A burst of changes produces one payload, not
 one per call.
+
+Known gap: switching a timer off or back on in the receiver's own timer list does **not** write the
+file on OpenViX 6.6, so that change reaches `timers` only with the next write for any other reason.
+Until then the topic shows the timer's previous state.
 
 ### `<base>/<node>/volume`
 
@@ -1023,7 +1072,15 @@ gaining a style that silently does nothing.
 
 The first form is the one to prefer: enigma2 resolves the event itself, so the timer inherits the
 programme's padding and its name. The second is for a manual window. Deletion matches on the
-triple `sref` + `begin` + `end`, which is what enigma2 itself uses as a timer's identity.
+triple `sref` + `begin` + `end`, which is what enigma2 itself uses as a timer's identity, and
+takes any timer `timers` lists - pending, `ended`, `failed` or `disabled`. Deleting a finished
+timer removes the entry, never the recording it made.
+
+The triple is not always unique. A timer somebody disabled and then set again exists twice - the
+receiver checks a new timer only against its pending ones. **A delete removes the pending copy
+first**, then, on the next delete, the other one. That is what a delete did before finished
+timers could be deleted at all, so a delete of a pending timer - including one that stops a
+running recording - behaves exactly as it always has; it is also the order OpenWebif uses.
 
 🔴 **The `begin` and `end` of a timer are not the `begin` and `end` of the programme.** A receiver
 applies its own recording margins - typically a few minutes before and after - so a timer added
