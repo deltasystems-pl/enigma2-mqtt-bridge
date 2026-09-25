@@ -212,8 +212,8 @@ class BouquetPublisher(Publisher):
         # Refused before anything is touched.
         from .service import (
             cancel_waiting_zap,
+            channel_list_may_zap,
             infobar_instance,
-            infobar_on_screen,
             timeshift_active,
         )
 
@@ -221,7 +221,9 @@ class BouquetPublisher(Publisher):
             return TIMESHIFT
         # A zap still waiting for the wake is older than this one.
         cancel_waiting_zap()
-        on_screen = infobar_on_screen(self.session)
+        # The same rule as `cmd/zap`: nothing open over the info bar but, at
+        # most, an information popup.
+        on_screen = channel_list_may_zap(self.session)
 
         servicelist = _servicelist()
         required = (

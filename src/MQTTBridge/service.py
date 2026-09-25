@@ -296,26 +296,36 @@ def read_tuner(session):
 # own `InfoBar.instance.selectAndStartService(service, bouquet)`, which enters
 # the bouquet, selects the service, zaps and corrects the channel number.
 #
-# Three situations keep the old `playService`, unrecorded, because the recorded
-# path would do something worse than not being recorded:
+# `_recorded_zap` has ten ways out that keep the old `playService`, unrecorded,
+# each because the recorded path would do something worse than not being
+# recorded, or cannot be taken at all. In the order they are asked:
 #
-# - **timeshift**: `ChannelSelection.zap` asks `checkTimeshiftRunning` first,
-#   and during timeshift that opens a question on the television with no
-#   timeout. A zap from a phone must not leave a dialogue on somebody's screen;
-# - **picture-in-picture zap mode** (`servicelist.dopipzap`): the channel list
-#   would zap the small picture, and the command means the main one;
-# - **a channel in no published bouquet** (a radio service, a bouquet
-#   `bouquets_for_select` leaves out, a reference in no bouquet at all): there
-#   is no bouquet to enter it through.
-#
-# And three more this plugin adds. A channel list in radio mode, for the reason
-# `cmd/bouquet` refuses it: a television bouquet entered under the radio root
-# would be saved as the radio list's root. A screen open over the info bar -
-# the channel list, the EPG, a menu - because the zap would work on a list
-# somebody is looking at, or leave the remote on one exec'd and invisible. And
-# a channel list that could not select the service (a bouquet edited since the
-# cache was read): it then re-zaps what is playing, and the service is played
-# directly - unless a parental-control PIN may be what it is waiting for.
+# 1. **no channel-list zap on this image**: no info bar, no `servicelist`, or
+#    no `selectAndStartService` to call;
+# 2. **a screen open over the info bar** - the channel list, the EPG, a menu, a
+#    question: the zap would work on a list somebody is looking at, or leave
+#    the remote on one exec'd and invisible. One thing open does not count:
+#    an information popup directly over the info bar (`channel_list_may_zap`);
+# 3. **picture-in-picture zap mode** (`servicelist.dopipzap`): the channel list
+#    would zap the small picture, and the command means the main one;
+# 4. **timeshift**: `ChannelSelection.zap` asks `checkTimeshiftRunning` first,
+#    and during timeshift that opens a question on the television with no
+#    timeout. A zap from a phone must not leave a dialogue on somebody's
+#    screen;
+# 5. **a channel list in radio mode**, for the reason `cmd/bouquet` refuses it:
+#    a television bouquet entered under the radio root would be saved as the
+#    radio list's root;
+# 6. **the channel list could not be read** to choose a bouquet;
+# 7. **a channel in no published bouquet** (a radio service, a bouquet
+#    `bouquets_for_select` leaves out, a reference in no bouquet at all): there
+#    is no bouquet to enter it through;
+# 8. **`selectAndStartService` raised**;
+# 9. **the channel list could not select the service** (a bouquet edited since
+#    the cache was read): it then re-zaps what is playing, and the service is
+#    played directly - unless a parental-control PIN may be what it is waiting
+#    for, which counts as recorded;
+# 10. **the channel list tuned another service**: the wrong channel on the
+#     television is worse than an unrecorded zap to the right one.
 
 # How long a zap waiting for the receiver to leave standby waits for the
 # standby screen to close before it says so on `last_error`.
@@ -370,6 +380,84 @@ def infobar_on_screen(session):
         return getattr(session, "current_dialog", None) is infobar
     except Exception:
         return False
+
+
+# The popup types a zap may be made under, by their names on `MessageBox`. They
+# are the ones the image's own passive popups use - "Zapped to timer service",
+# a disk full while recording, a zap or PiP error, a parental-control error -
+# and the three `cmd/message` shows. A question is `TYPE_YESNO`, and it is what
+# a queued `MessageBox` becomes when its caller passes no type, which is how
+# the image asks "A timer failed to record", whether to put the receiver in
+# standby or shut it down after a timer, and whether to resume playback.
+# `TYPE_MESSAGE` is left out: nothing on the image asks for it, and a box
+# only becomes one when its caller passed a type the image does not know - an
+# intent this plugin cannot read. A name the image lacks is simply not allowed.
+POPUP_TYPE_NAMES = ("TYPE_INFO", "TYPE_WARNING", "TYPE_ERROR")
+
+
+def info_popup_over_infobar(session):
+    """Whether the one thing open is an information popup, directly over the info bar.
+
+    A popup queued with `AddPopup` - by the image, or by `cmd/message` - is
+    opened by the info bar with `session.open`, so it is the executing dialog,
+    and `StartEnigma.Session` keeps the info bar under it as the one
+    `(dialog, shown)` tuple on `dialog_stack`. It is a notice, not a screen
+    anybody is working in: the channel list's zap goes under it exactly as the
+    remote's number zap would go before it, and the receiver closes it on its
+    own timeout. So all of these, and anything else is a screen open:
+
+    - the dialog is exactly `Screens.MessageBox.MessageBox` - not a subclass,
+      which can bind its own keys and answers;
+    - its `type` is one of `POPUP_TYPE_NAMES`, and its answer list is empty;
+    - the session is executing it: after the popup's own `close()`, it stays
+      `current_dialog` until the main loop turns, and a PIN screen the zap
+      might open then would be refused;
+    - `dialog_stack` holds one entry, and it is the info bar. Two deep - over
+      the movie player, or over a screen over the info bar - is not this.
+
+    The second element of the tuple is the info bar's visibility when the
+    popup opened, usually hidden, and says nothing about what is open.
+    Nothing here may raise: any surprise is a screen open.
+    """
+    infobar = infobar_instance()
+    if infobar is None or session is None:
+        return False
+    try:
+        from Screens.MessageBox import MessageBox
+    except Exception:
+        return False
+    try:
+        popup = getattr(session, "current_dialog", None)
+        if type(popup) is not MessageBox:
+            return False
+        kind = getattr(popup, "type", None)
+        allowed = [getattr(MessageBox, name, None) for name in POPUP_TYPE_NAMES]
+        if type(kind) is not int or kind not in [v for v in allowed if type(v) is int]:
+            return False
+        answers = getattr(popup, "list", None)
+        if answers is None or len(answers) != 0:
+            return False
+        if getattr(session, "in_exec", False) is not True:
+            return False
+        stack = getattr(session, "dialog_stack", None)
+        if stack is None or len(stack) != 1:
+            return False
+        under, _shown = stack[0]
+        return under is infobar
+    except Exception:
+        return False
+
+
+def channel_list_may_zap(session):
+    """Whether a zap may go through the channel list: nothing open but the info bar.
+
+    Or nothing but an information popup over it (`info_popup_over_infobar`).
+    The popup is left alone: the image's own channel-list zap does not close
+    it, and neither does this. `cmd/zap`, `cmd/zap_history` and the zap of
+    `cmd/bouquet` all ask this. `cmd/history_clear` does not: it is the 0 key,
+    and with a popup open the key goes to the popup.
+    """
+    return infobar_on_screen(session) or info_popup_over_infobar(session)
 
 
 def pin_may_be_pending(reference):
@@ -480,10 +568,10 @@ def _recorded_zap(session, sref, channels):
         getattr(servicelist, "getRoot", None)
     ):
         return False, "this image has no channel-list zap to record it with"
-    if not infobar_on_screen(session):
-        # The channel list, the EPG or a menu is open. Zapping through the
-        # channel list then would work on a list somebody is looking at - or
-        # one exec'd and invisible - and leave the remote on it.
+    if not channel_list_may_zap(session):
+        # The channel list, the EPG, a menu or a question is open. Zapping
+        # through the channel list then would work on a list somebody is
+        # looking at - or one exec'd and invisible - and leave the remote on it.
         return False, "a screen is open on the receiver"
     if getattr(servicelist, "dopipzap", False):
         return False, "the channel list is in picture-in-picture zap mode"
