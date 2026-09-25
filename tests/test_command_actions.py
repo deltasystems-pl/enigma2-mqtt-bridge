@@ -19,7 +19,7 @@ def send(factory, name, payload=b"PRESS", retain=False):
 
 # The three payload shapes `cmd/timer` takes, spelled out once.
 ADD_EVENT = ('{"action": "add", "sref": "' + TVP1 + '", "event_id": 27431}').encode("utf-8")
-ADD_MANUAL = ('{"action": "add", "sref": "' + TVN + '", "begin": 100, "end": 200,'
+ADD_MANUAL = ('{"action": "add", "sref": "' + TVN + '", "begin": 1789500000, "end": 1789501800,'
               ' "name": "Film"}').encode("utf-8")
 DELETE = ('{"action": "delete", "sref": "' + TVP1 + '", "begin": 1789459200,'
           ' "end": 1789460700}').encode("utf-8")

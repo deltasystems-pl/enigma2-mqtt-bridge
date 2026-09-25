@@ -2448,6 +2448,15 @@ class RecordTimerEntry:
     def isRunning(self):
         return self.state == RecordTimerEntry.StateRunning
 
+    def shouldSkip(self):
+        """`timer.TimerEntry.shouldSkip` for a recording timer: a disabled one,
+        and one whose window passed before it ever started, are skipped."""
+        if self.disabled:
+            return True
+        return self.end <= record_timer_module.clock() and self.state in (
+            RecordTimerEntry.StateWaiting, RecordTimerEntry.StateFailed
+        )
+
 
 def parseEvent(event, description=True):
     """Exactly the five-tuple the real one returns, margins and all."""
@@ -2462,6 +2471,13 @@ record_timer_module.RecordTimerEntry = RecordTimerEntry
 record_timer_module.parseEvent = parseEvent
 record_timer_module.margin_before = 0
 record_timer_module.margin_after = 0
+
+# The image's `shouldSkip` asks `time()` whether a window has passed. The
+# fixtures' timers sit at fixed moments that the real clock has long overtaken,
+# so the stub receiver has a clock of its own, set before all of them; a test
+# about a window that has passed moves it.
+STUB_NOW = 1789000000
+record_timer_module.clock = lambda: STUB_NOW
 
 
 class RecordTimer:
@@ -2482,21 +2498,23 @@ class RecordTimer:
             return list(self.conflicts)
         if self.swallow:
             return None
-        self.timer_list.append(entry)
+        # The image hands an accepted timer to `addTimerEntry`, which decides
+        # which list it lands in.
+        self.addTimerEntry(entry)
         self.saveTimer()
         return None
 
     def addTimerEntry(self, entry):
         """Where the image files a timer, and what it does to its state.
 
-        `timer.Timer.addTimerEntry`: a timer that has ended, or one that waits
-        while disabled, goes to `processed_timers` and is marked `StateEnded` -
-        so a disabled timer, including one `record()` disabled because it
-        conflicted while the file was loading, looks exactly like a finished one
-        apart from its `disabled` flag. (The image's `shouldSkip` also sends a
-        past, never-started timer there; nothing here needs that branch.)
+        `timer.Timer.addTimerEntry`: a timer the image would skip (disabled, or
+        whose window passed before it started), one that has ended, or one
+        that waits while disabled, goes to `processed_timers` and is marked
+        `StateEnded` - so a disabled timer, including one `record()` disabled
+        because it conflicted while the file was loading, looks exactly like a
+        finished one apart from its `disabled` flag.
         """
-        if entry.state == RecordTimerEntry.StateEnded or (
+        if entry.shouldSkip() or entry.state == RecordTimerEntry.StateEnded or (
             entry.state == RecordTimerEntry.StateWaiting and entry.disabled
         ):
             self.processed_timers.append(entry)
@@ -2512,8 +2530,9 @@ class RecordTimer:
         self.removed.append(entry)
         if entry in self.timer_list:
             self.timer_list.remove(entry)
-        if entry in self.processed_timers:
-            self.processed_timers.remove(entry)
+        processed = getattr(self, "processed_timers", [])
+        if entry in processed:
+            processed.remove(entry)
         self.saveTimer()
 
     def saveTimer(self):
@@ -3049,6 +3068,7 @@ def fresh_receiver():
         MainLoop.now = 0
         record_timer_module.margin_before = 0
         record_timer_module.margin_after = 0
+        record_timer_module.clock = lambda: STUB_NOW
         counter = config.misc.standbyCounter
         counter.notifiers = []
         counter._value = 0

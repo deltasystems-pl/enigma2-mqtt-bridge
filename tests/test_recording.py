@@ -164,6 +164,40 @@ def test_a_timer_in_state_failed_is_failed_not_waiting(live_bridge, factory, rec
     assert [entry["state"] for entry in published_timers(live_bridge, factory)] == ["failed"]
 
 
+def test_a_timer_without_a_state_is_unknown(live_bridge, factory, receiver):
+    timer = receiver.add_timer()
+    del timer.state
+    assert [entry["state"] for entry in published_timers(live_bridge, factory)] == ["unknown"]
+
+
+def test_timers_with_the_same_begin_list_the_pending_one_first(live_bridge, factory, receiver):
+    receiver.add_processed_timer(name="Switched off", disabled=True)
+    receiver.add_timer(name="Set again")
+    payload = published_timers(live_bridge, factory)
+    assert [entry["name"] for entry in payload] == ["Set again", "Switched off"]
+
+
+def test_a_disabled_timer_that_also_failed_is_disabled(live_bridge, factory, receiver):
+    """A repeating timer that failed once keeps the flag; switched off, it is
+    off - that is what a person has to act on."""
+    receiver.add_processed_timer(disabled=True, failed=True)
+    assert [entry["state"] for entry in published_timers(live_bridge, factory)] == ["disabled"]
+
+
+def test_a_requeued_repeating_timer_that_failed_stays_failed(
+    live_bridge, factory, receiver, monkeypatch
+):
+    """The image puts a repeating timer back as waiting for its next day
+    without clearing `failed`, and a flagged timer returns before it records.
+    "waiting" would promise that next day; the receiver will not record it."""
+    monkeypatch.setattr(recording.time, "time", lambda: 1789000000)
+    timer = receiver.add_timer(repeated=127)
+    timer.failed = True
+    assert [entry["state"] for entry in published_timers(live_bridge, factory)] == ["failed"]
+    # Documented: `recording` does not read the flag.
+    assert recording.read_recording(receiver.session)["next"]["name"] == "Wiadomości"
+
+
 def test_a_state_nobody_named_is_unknown_not_waiting(live_bridge, factory, receiver):
     receiver.add_timer(state=17)
     assert recording.state_word(17) == "unknown"
@@ -289,9 +323,9 @@ def test_an_unknown_event_is_refused(live_bridge, receiver):
 
 
 def test_a_manual_timer_is_built_from_its_window(live_bridge, receiver):
-    assert recording.add_manual_timer(receiver.session, TVN, 100, 200, "Film") is None
+    assert recording.add_manual_timer(receiver.session, TVN, 1789500000, 1789501800, "Film") is None
     timer = receiver.nav.RecordTimer.timer_list[0]
-    assert (timer.begin, timer.end, timer.name) == (100, 200, "Film")
+    assert (timer.begin, timer.end, timer.name) == (1789500000, 1789501800, "Film")
 
 
 def test_a_manual_timer_that_ends_before_it_begins_is_refused(live_bridge, receiver):
@@ -316,6 +350,15 @@ def test_a_timer_the_receiver_quietly_dropped_is_reported(live_bridge, receiver)
     assert "did not keep the timer" in error
 
 
+def test_a_timer_whose_window_has_passed_is_not_added(live_bridge, receiver):
+    """The image files it straight with the finished ones: kept, never recorded."""
+    conftest.record_timer_module.clock = lambda: 1789460700
+    error = recording.add_manual_timer(receiver.session, TVN, 1789459200, 1789460700, "Film")
+    assert error == "the receiver filed the timer as finished; its window has already passed"
+    assert receiver.nav.RecordTimer.timer_list == []
+    assert [timer.name for timer in receiver.nav.RecordTimer.processed_timers] == ["Film"]
+
+
 def test_a_timer_is_deleted_by_service_start_and_end(live_bridge, receiver):
     timer = receiver.add_timer()
     assert recording.delete_timer(receiver.session, TVP1, 1789459200, 1789460700) is None
@@ -324,6 +367,23 @@ def test_a_timer_is_deleted_by_service_start_and_end(live_bridge, receiver):
 
 def test_deleting_a_timer_that_is_not_there_is_refused(live_bridge, receiver):
     assert "no timer on" in recording.delete_timer(receiver.session, TVP1, 1, 2)
+
+
+def test_only_the_timer_with_that_exact_end_is_deleted(live_bridge, receiver):
+    """A stopped recording keeps its begin and gets a new end; set again, it
+    shares service and begin with its old self. Only the triple identifies."""
+    stopped = receiver.add_processed_timer(end=1789459800, name="Stopped early")
+    again = receiver.add_timer(name="Set again")
+    assert recording.delete_timer(receiver.session, TVP1, 1789459200, 1789459800) is None
+    assert receiver.nav.RecordTimer.removed == [stopped]
+    assert receiver.nav.RecordTimer.timer_list == [again]
+
+
+def test_an_image_without_a_processed_list_behaves_as_before(live_bridge, receiver):
+    del receiver.nav.RecordTimer.processed_timers
+    receiver.add_timer()
+    assert [entry["state"] for entry in recording.read_timers(receiver.session)] == ["waiting"]
+    assert recording.delete_timer(receiver.session, TVP1, 1789459200, 1789460700) is None
 
 
 def test_an_ended_timer_is_deleted_from_the_processed_list(live_bridge, receiver):
@@ -421,6 +481,6 @@ def test_reading_timers_from_a_box_with_no_record_timer(receiver):
 
 
 def test_the_epg_cache_finds_an_event_by_its_id(live_bridge, receiver):
-    receiver.epg.events[TVP1] = [Event(4242, 10, 20, "Named")]
+    receiver.epg.events[TVP1] = [Event(4242, 1789500000, 1800, "Named")]
     assert recording.add_event_timer(receiver.session, TVP1, 4242) is None
     assert receiver.nav.RecordTimer.timer_list[0].name == "Named"
