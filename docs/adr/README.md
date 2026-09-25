@@ -58,7 +58,7 @@ What this costs, what it rules out, and what has to change if it is ever reverse
 
 | # | Title | Status |
 |---|---|---|
-| [0000](0000-prd.md) | Product requirements (PRD) | accepted 2026-09-16, partly superseded by [ADR-0001](0001-m0-decisions.md), extended by [ADR-0002](0002-scope-after-m0.md) and [ADR-0003](0003-control-feedback-and-household-features.md) |
+| [0000](0000-prd.md) | Product requirements (PRD) | accepted 2026-09-16, partly superseded by [ADR-0001](0001-m0-decisions.md), extended by [ADR-0002](0002-scope-after-m0.md) and [ADR-0003](0003-control-feedback-and-household-features.md), §6.3's paragraph on entity ids superseded by the integration's [ADR-0007](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0007-entity-ids-follow-the-installation-language.md) |
 | [0001](0001-m0-decisions.md) | M0 sign-off - the three open questions | accepted 2026-09-16, amended 2026-09-16 |
 | [0002](0002-scope-after-m0.md) | Scope added and changed after M0 | accepted 2026-09-21, extended by [ADR-0003](0003-control-feedback-and-household-features.md), §5 partly superseded by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) |
 | [0003](0003-control-feedback-and-household-features.md) | Control feedback and household features - the 0.2.0 and 0.3.0 plan | accepted 2026-09-21, amended 2026-09-22, extended by [ADR-0004](0004-remote-uninstall.md), §3 partly superseded by [ADR-0005](0005-softcam-restart.md), §5 partly superseded by [ADR-0007](0007-cec-standby-workaround.md), §2 partly superseded by [ADR-0008](0008-discreet-toast.md), amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md), §4 partly superseded by [ADR-0011](0011-epg-import-on-demand.md), §6 superseded by [ADR-0012](0012-wake-on-lan-is-the-image-s-switch.md) |
@@ -66,7 +66,7 @@ What this costs, what it rules out, and what has to change if it is ever reverse
 | [0005](0005-softcam-restart.md) | The softcam is restarted by collapsing its instances, counted by process roots | accepted 2026-09-22, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) |
 | [0006](0006-volatile-fields-and-publish-on-change.md) | A self-stamped field takes no part in publish-on-change | accepted 2026-09-22 |
 | [0007](0007-cec-standby-workaround.md) | The CEC standby workaround identifies the television's standby when it is queued, and holds the echo across the close | accepted 2026-09-22, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) |
-| [0008](0008-discreet-toast.md) | The discreet toast is made of widgets that bind no keys, refuses a timeout it cannot honour, and is deleted rather than closed | accepted 2026-09-23, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) |
+| [0008](0008-discreet-toast.md) | The discreet toast is made of widgets that bind no keys, refuses a timeout it cannot honour, and is deleted rather than closed | accepted 2026-09-23, amended 2026-09-23 and 2026-09-25, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) |
 | [0009](0009-the-openwebif-page-trusts-openwebif.md) | The OpenWebif page trusts OpenWebif, and exposes every setting and command | accepted 2026-09-23, amended by [ADR-0010](0010-the-page-inside-openwebif.md) |
 | [0010](0010-the-page-inside-openwebif.md) | OpenWebif's panel load gets a fragment framing the page, and the page shows the last screenshot | accepted 2026-09-23 |
 | [0011](0011-epg-import-on-demand.md) | The EPG import uses the importer enigma2 loaded, and is followed by polling, never hooked | accepted 2026-09-23 |

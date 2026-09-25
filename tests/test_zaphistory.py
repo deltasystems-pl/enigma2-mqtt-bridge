@@ -387,6 +387,19 @@ def test_cmd_zap_history_with_a_screen_open_is_played_directly(box):
     assert [item[-1].toString() for item in box.list.history] == before
 
 
+@pytest.mark.parametrize("nav", [None, object()], ids=["no navigation", "no playService"])
+def test_cmd_zap_history_with_a_screen_open_and_no_player_says_why(box, nav):
+    """The direct play is the one path that needs `session.nav`; without it, a sentence."""
+    before = [item[-1].toString() for item in box.list.history]
+    box.receiver.session.current_dialog = box.list
+    box.receiver.session.nav = nav
+    send(box.factory, "zap_history", json.dumps({"sref": TVN}).encode())
+    assert last_error(box.factory)["error"] == zaphistory.NO_PLAYER
+    assert box.receiver.nav.played == []
+    assert box.list.history_paths == 0
+    assert [item[-1].toString() for item in box.list.history] == before
+
+
 def test_cmd_zap_history_cancels_a_zap_waiting_for_the_wake(box):
     from MQTTBridge import service
 

@@ -15,6 +15,33 @@ version that has no section here.
   The milestones and open items moved to [ROADMAP.md](ROADMAP.md); the privacy notes and the
   ACL's role as the privacy boundary moved to [docs/SETUP.md](docs/SETUP.md#privacy). The release
   history stays here. The roadmap now says the companion integration's 0.3.0 is released.
+- The Mosquitto add-on note in the README, SETUP.md and SECURITY.md now says which version was
+  reported upstream and which was measured: the unenforced `acl_file` was reported against 7.1.0
+  (home-assistant/addons#4721, closed as stale without a fix) and is still the case in 7.1.1.
+- `enter_standby`'s docstring no longer says the remote's power button queues a notification. The
+  power button opens the standby screen directly, and only when the screen on top allows it; the
+  plugin queues it because a command can arrive with any screen open.
+- [ADR-0008](docs/adr/0008-discreet-toast.md) carries a dated note under its Context: the sentence
+  saying a payload could recolour its own text describes the receiver before that decision.
+- The PRD's copy here ([ADR-0000](docs/adr/0000-prd.md)) points to the companion integration's
+  ADR-0007, which supersedes its paragraph saying entity ids derive from the English keys: Home
+  Assistant makes them from the name in the installation's language.
+
+### Fixed
+
+- `cmd/zap_history` with a screen open over the info bar on a session that has no navigation, or
+  a navigation without `playService`, now reports "this image's navigation has no playService" on
+  `last_error` - the sentence `cmd/zap` gives for the same thing - instead of raising inside the
+  command.
+
+### Tests
+
+- The discovery template test builds its box that can do everything with `uninstall` and
+  `history_clear` too. Two guards keep it that way: every `*_CAPABILITY` constant in the plugin
+  must be in that list, and so must every capability a discovery component is gated on.
+- The test stubs' standby screen is the session's executing dialog while it is open, and still
+  while its `onClose` is walked, as on the receiver. A zap made inside `onClose` - which the
+  receiver plays outside its zap history - can no longer pass a test as a recorded one.
 
 ## [0.3.0] - 2026-09-25
 

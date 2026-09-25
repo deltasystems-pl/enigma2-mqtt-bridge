@@ -77,12 +77,17 @@ def wake():
 
 
 def enter_standby():
-    """Go to standby through the notification queue, as the remote's power button does.
+    """Go to standby through the notification queue.
 
-    Not `session.open(Standby)`: a screen opened on top of whatever is already
-    open is how a receiver ends up with a standby screen behind a dialogue.
-    `AddNotification` hands it to enigma2, which opens it when the session is in
-    a state to take it.
+    The remote's power button does not queue anything: `StartEnigma`'s
+    `PowerKey.standby` opens `Standby` directly with `session.open` - but only
+    when the executing dialog allows suspend and the session is executing, and
+    otherwise does nothing. A command arrives whenever the broker delivers it,
+    with any screen open, so the plugin cannot make that check once and open the
+    screen itself: a screen opened on top of whatever is already open is how a
+    receiver ends up with a standby screen behind a dialogue. `AddNotification`
+    hands it to enigma2, which opens it when the session is in a state to take
+    it.
     """
     module = standby_module()
     if module is None:

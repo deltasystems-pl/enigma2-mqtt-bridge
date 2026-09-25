@@ -55,8 +55,9 @@ everything else:
 
    Verify the ACL by subscribing elsewhere and trying to publish there as that user - Mosquitto
    drops an ACL-denied publish silently and the publisher sees success either way. The Mosquitto
-   add-on in Home Assistant (7.1.1) accepts an ACL file and never consults it
-   ([home-assistant/addons#4721](https://github.com/home-assistant/addons/issues/4721)), so on
+   add-on in Home Assistant accepts an ACL file and never consults it - reported against 7.1.0
+   ([home-assistant/addons#4721](https://github.com/home-assistant/addons/issues/4721)), still
+   the case in 7.1.1 - so on
    that broker the dedicated login is the only separation; see
    [docs/SETUP.md](docs/SETUP.md#broker-access).
 
