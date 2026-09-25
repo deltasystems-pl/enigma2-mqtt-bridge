@@ -286,11 +286,13 @@ The full list is in [CHANGELOG.md](CHANGELOG.md).
    `cmd/history_clear`, which does exactly what the receiver's 0 key does: it empties the list and
    **switches to channel 1**, the first channel of the first bouquet. It is refused wherever 0 would
    not clear - standby, the image's panic-button setting off, one channel or none in the list,
-   timeshift, picture-in-picture taking the key, a recording being played back - with a reason code
-   a consumer can translate. 🔴 **`cmd/zap` changes with it**: every zap the plugin makes now goes
+   any active timeshift (the plugin treats every one as blocking), picture-in-picture taking the
+   key, a recording being played back, another screen open on the receiver - with a reason code a
+   consumer can translate. 🔴 **`cmd/zap` changes with it**: every zap the plugin makes now goes
    through the receiver's channel list, so it is in that history like a zap from the remote - and a
    zap to a channel outside the bouquet being browsed moves the channel list to that channel's
-   bouquet, as a number zap on the remote does. Decided in
+   bouquet, as a number zap on the remote does. With a screen open on the receiver, in timeshift
+   and in a few other cases the zap is played directly and is not in the history. Decided in
    [ADR-0014](docs/adr/0014-the-zap-history-is-the-receivers.md).
 
 ## Contributing

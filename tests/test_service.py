@@ -344,6 +344,85 @@ def test_a_zap_never_leaves_the_wrong_channel_on_the_television(live_bridge, rec
     assert receiver.nav.played == [TVN]
 
 
+def test_a_channel_the_list_cannot_select_is_played_directly(live_bridge, receiver):
+    """The cache says the browsed bouquet holds it; the list itself does not.
+
+    A bouquet edited since the `channels` cache was read (up to a minute), or a
+    list that hides the channel: the selection stays on what is playing, the
+    channel list re-zaps it, and nothing is tuned. Played directly instead.
+    """
+    channel_list = receiver.with_channel_list([TVP1])
+    channel_list.selection = TVP1
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.sref == TVN
+    assert receiver.nav.played == [TVN]
+
+
+def test_a_protected_channel_waits_for_its_pin_and_is_not_played_twice(live_bridge, receiver):
+    from Components.ParentalControl import parentalControl
+
+    parentalControl.protected.add(TVN)
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    channel_list.zap = lambda **_arguments: None  # the PIN is on the television
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.played == []
+    assert receiver.nav.sref == TVP1
+
+
+def test_parental_control_that_cannot_answer_counts_as_a_pin_waiting(live_bridge, receiver):
+    from Components.ParentalControl import parentalControl
+
+    parentalControl.raises = True
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    channel_list.zap = lambda **_arguments: None
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.played == []
+
+
+def test_a_zap_with_a_screen_open_is_played_directly(live_bridge, receiver):
+    """The channel list, the EPG or a menu over the info bar: no channel-list zap."""
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    receiver.session.current_dialog = channel_list
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.played == [TVN]
+    assert channel_list.zaps == 0
+    assert InfoBar.instance.started == []
+
+
+def test_a_session_that_does_not_say_what_is_open_counts_as_a_screen_open(live_bridge, receiver):
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    del receiver.session.current_dialog
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.played == [TVN]
+    assert channel_list.zaps == 0
+
+
+def test_a_timeshift_check_that_raises_counts_as_timeshift(live_bridge, receiver):
+    """Fail-safe: the direct play cannot open the timeshift question."""
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+
+    def broken():
+        raise RuntimeError("no seek interface")
+
+    InfoBar.instance.isSeekable = broken
+    assert _zap(live_bridge, receiver, TVN) is None
+    assert receiver.nav.played == [TVN]
+    assert channel_list.zaps == 0
+
+
+def test_a_newer_zap_cancels_one_whose_wake_has_finished_but_not_yet_run(live_bridge, receiver):
+    """The standby screen closed, the waiting zap's 0 ms timer has not fired yet."""
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    screen = receiver.enter_standby(restoring=True)
+    assert _zap(live_bridge, receiver, TVN) is None
+    screen.finish_close()
+    assert _zap(live_bridge, receiver, POLSAT) is None
+    MainLoop.advance(0)
+    MainLoop.advance(service_module.WAKE_WAIT_MILLISECONDS)
+    assert receiver.nav.sref == POLSAT
+    assert channel_list.history[-1][-1].toString() == POLSAT
+
+
 def test_a_channel_in_no_published_bouquet_is_played_directly(live_bridge, receiver, plugin_log):
     """Rule 3: there is no bouquet to enter it through; logged once per reference."""
     radio = "1:0:2:1B1D:802:2:11A0000:0:0:0:"

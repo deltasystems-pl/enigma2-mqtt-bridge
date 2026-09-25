@@ -369,6 +369,46 @@ def test_cmd_zap_history_from_standby_waits_for_the_restore(box):
     assert box.list.history[-1][-1].toString() == TVN
 
 
+def test_a_channel_not_in_the_history_is_refused_without_waking_the_receiver(box):
+    screen = box.receiver.enter_standby(restoring=True)
+    send(box.factory, "zap_history", json.dumps({"sref": RADIO}).encode())
+    assert last_error(box.factory)["error"] == zaphistory.GONE
+    assert screen.power_calls == 0
+
+
+def test_cmd_zap_history_with_a_screen_open_is_played_directly(box):
+    """The history's own calls would move the channel list under an open screen."""
+    before = [item[-1].toString() for item in box.list.history]
+    box.receiver.session.current_dialog = box.list
+    send(box.factory, "zap_history", json.dumps({"sref": TVN}).encode())
+    assert last_error(box.factory) is None
+    assert box.receiver.nav.played == [TVN]
+    assert box.list.history_paths == 0
+    assert [item[-1].toString() for item in box.list.history] == before
+
+
+def test_cmd_zap_history_cancels_a_zap_waiting_for_the_wake(box):
+    from MQTTBridge import service
+
+    screen = box.receiver.enter_standby(restoring=True)
+    service.zap(box.receiver.session, TVP1, channels=box.bridge.publisher("channels"))
+    screen.finish_close()
+    send(box.factory, "zap_history", json.dumps({"sref": TVN}).encode())
+    MainLoop.advance(0)
+    assert box.receiver.nav.sref == TVN
+
+
+def test_a_timeshift_check_that_raises_refuses_the_clear(box):
+    """Fail-safe: 0 could open the timeshift question, so the clear is refused."""
+    def broken():
+        raise RuntimeError("no seek interface")
+
+    InfoBar.instance.isSeekable = broken
+    send(box.factory, "history_clear", b"PRESS")
+    assert last_error(box.factory)["reason"] == "timeshift"
+    assert InfoBar.instance.keys == []
+
+
 def test_cmd_zap_history_waiting_for_the_wake_is_dropped_by_an_uninstall(box):
     screen = box.receiver.enter_standby(restoring=True)
     send(box.factory, "zap_history", json.dumps({"sref": TVN}).encode())
@@ -438,10 +478,14 @@ def _disarm(box, usage, reason):
     elif reason == "pip":
         InfoBar.instance.pip_zero = False
     elif reason == "playback":
-        box.receiver.session.current_dialog = None
+        # Another screen over the info bar: the channel list the remote opened.
+        box.receiver.session.current_dialog = box.list
+    elif reason == "screen_open":
+        box.receiver.session.current_dialog = InfoBar.instance
 
 
-ORDER = ("standby", "panic_off", "too_short", "timeshift", "zap_blocked", "pip", "playback")
+ORDER = ("standby", "panic_off", "too_short", "timeshift", "zap_blocked", "pip", "playback",
+         "screen_open")
 SENTENCES = {
     "standby": "the receiver is in standby, where 0 does not clear the history",
     "panic_off": "the receiver's panic-button setting is off, so 0 goes back one channel "
@@ -451,6 +495,7 @@ SENTENCES = {
     "zap_blocked": "the receiver is holding zaps for a moment after timeshift; try again",
     "pip": "picture-in-picture is showing and 0 is set to act on it",
     "playback": "a recording is being played back",
+    "screen_open": "a screen is open on the receiver, and 0 does not reach the zap history there",
 }
 
 

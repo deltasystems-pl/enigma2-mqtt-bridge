@@ -131,6 +131,36 @@ def test_bouquet_selection_is_refused_during_timeshift_without_side_effects(
     assert factory.client.last(ROOT + "/last_error").json()["error"] == bouquet.TIMESHIFT
 
 
+def test_bouquet_zap_with_a_screen_open_is_played_directly(
+    make_bridge, factory, settings, receiver
+):
+    """The channel list is open over the info bar: its zap would leave the remote on it."""
+    _bridge, servicelist = started(make_bridge, settings, receiver)
+    receiver.session.current_dialog = servicelist
+
+    select(factory, SECOND_BOUQUET)
+
+    assert receiver.nav.played == [POLSAT]
+    assert servicelist.zaps == 0
+    assert factory.client.last(BOUQUET).json()["sref"] == SECOND_BOUQUET
+
+
+def test_bouquet_selection_cancels_a_zap_waiting_for_the_wake(
+    make_bridge, factory, settings, receiver
+):
+    from conftest import MainLoop
+
+    from MQTTBridge import service
+
+    bridge, servicelist = started(make_bridge, settings, receiver)
+    screen = receiver.enter_standby(restoring=True)
+    service.zap(receiver.session, TVN, channels=bridge.publisher("channels"))
+    screen.finish_close()
+    select(factory, SECOND_BOUQUET)
+    MainLoop.advance(0)
+    assert receiver.nav.sref == POLSAT
+
+
 def test_unknown_or_empty_bouquet_is_refused_without_side_effects(
     make_bridge, factory, settings, receiver
 ):

@@ -308,9 +308,14 @@ def read_tuner(session):
 #   `bouquets_for_select` leaves out, a reference in no bouquet at all): there
 #   is no bouquet to enter it through.
 #
-# And one this plugin adds for the same reason `cmd/bouquet` refuses it: a
-# channel list in radio mode. Entering a television bouquet under the radio
-# root would build a path the receiver then saves as its radio list's root.
+# And three more this plugin adds. A channel list in radio mode, for the reason
+# `cmd/bouquet` refuses it: a television bouquet entered under the radio root
+# would be saved as the radio list's root. A screen open over the info bar -
+# the channel list, the EPG, a menu - because the zap would work on a list
+# somebody is looking at, or leave the remote on one exec'd and invisible. And
+# a channel list that could not select the service (a bouquet edited since the
+# cache was read): it then re-zaps what is playing, and the service is played
+# directly - unless a parental-control PIN may be what it is waiting for.
 
 # How long a zap waiting for the receiver to leave standby waits for the
 # standby screen to close before it says so on `last_error`.
@@ -340,6 +345,44 @@ def infobar_instance():
     except Exception:
         return None
     return getattr(InfoBar, "instance", None)
+
+
+def infobar_on_screen(session):
+    """Whether the info bar is the dialog the receiver is executing - nothing open over it.
+
+    `StartEnigma.Session` keeps the executing dialog in `current_dialog`; the
+    info bar is opened as the session's first dialog, and the channel list, the
+    EPG, a menu or a question each become `current_dialog` while they are open
+    (the channel list through `execDialog`). The image's own skin reloader asks
+    the same question the same way. A session that does not say is treated as
+    having something open, so the caller takes the path that touches no screen.
+    """
+    infobar = infobar_instance()
+    if infobar is None or session is None:
+        return False
+    try:
+        return getattr(session, "current_dialog", None) is infobar
+    except Exception:
+        return False
+
+
+def pin_may_be_pending(reference):
+    """Whether a zap to `reference` may be waiting for a parental-control PIN.
+
+    `ParentalControl.isServicePlayable`, which the channel list's zap asks,
+    opens a PIN screen or queues one as a notification for a protected service,
+    and tunes nothing until it is answered. Unprotected, nothing waits. An image
+    without parental control has no PIN to wait for; one that cannot answer is
+    assumed to be waiting, so nothing is tuned behind the television's back.
+    """
+    try:
+        from Components.ParentalControl import parentalControl
+    except Exception:
+        return False
+    try:
+        return bool(parentalControl.isProtected(reference))
+    except Exception:
+        return True
 
 
 def timeshift_active(infobar):
@@ -431,6 +474,11 @@ def _recorded_zap(session, sref, channels):
         getattr(servicelist, "getRoot", None)
     ):
         return False, "this image has no channel-list zap to record it with"
+    if not infobar_on_screen(session):
+        # The channel list, the EPG or a menu is open. Zapping through the
+        # channel list then would work on a list somebody is looking at - or
+        # one exec'd and invisible - and leave the remote on it.
+        return False, "a screen is open on the receiver"
     if getattr(servicelist, "dopipzap", False):
         return False, "the channel list is in picture-in-picture zap mode"
     if timeshift_active(infobar):
@@ -453,10 +501,18 @@ def _recorded_zap(session, sref, channels):
         LOG.exception("selectAndStartService raised")
         return False, "the channel list's zap raised"
     after = _playing(session)
-    if same_service(after, sref) or same_service(after, before) or not after:
-        # Tuned - or not yet, which is what a parental-control PIN on the
-        # television looks like. Either way `service.expect` has the last word.
+    if same_service(after, sref):
         return True, None
+    if same_service(after, before) or not after:
+        # Nothing was tuned. A protected service waits for its PIN on the
+        # television, and `service.expect` has the last word on it. Anything
+        # else is a selection that did not take - a bouquet edited since the
+        # `channels` cache was read, or a list that hides the channel - and the
+        # channel list then re-zapped what was already playing.
+        if pin_may_be_pending(service):
+            return True, None
+        LOG.warning("the channel list did not select %s; playing it directly", sref)
+        return False, "the channel list could not select it"
     # 🔴 `selectAndStartService` zaps whatever it managed to select, and a
     # bouquet file edited since the `channels` cache was read can leave the
     # selection on a neighbour. The wrong channel on the television is worse
@@ -499,10 +555,20 @@ def _zap_awake(session, sref, channels=None, on_zap=None):
     return None
 
 
-# The one zap waiting for the standby screen to close. A second request while
-# the first still waits replaces it: the household pressed twice, and the later
-# press is the one they meant.
+# The one zap waiting for the standby screen to close. Any later zap replaces
+# it - one that also has to wait, and one that arrives after the screen closed
+# but before the waiting zap's 0 ms timer ran: the household pressed twice, and
+# the later press is the one they meant.
 _pending_wake = None
+
+
+def cancel_waiting_zap():
+    """Drop the zap still waiting for the wake, if there is one. Called by every zap."""
+    global _pending_wake
+    waiter, _pending_wake = _pending_wake, None
+    if waiter is not None:
+        LOG.info("a newer zap replaces the %s that waited for the wake", waiter.command)
+        waiter.cancel()
 
 
 class _AfterWake:
@@ -618,14 +684,13 @@ def run_after_wake(command, action, report=None, allowed=None):
     global _pending_wake
     from .power import standby_module
 
+    # Every caller has already dropped the zap waiting before this one
+    # (`cancel_waiting_zap`): it is a zap, and newer.
     module = standby_module()
     screen = getattr(module, "inStandby", None) if module is not None else None
     if screen is None:
         # Awake already - between the caller's look and this one.
         return action()
-    if _pending_wake is not None:
-        _pending_wake.cancel()
-        _pending_wake = None
     waiter = _AfterWake(command, action, report, allowed)
     error = waiter.begin(screen)
     if error:
@@ -658,6 +723,8 @@ def zap(session, sref, channels=None, on_zap=None, report=None, allowed=None):
     def awake():
         return _zap_awake(session, sref, channels, on_zap)
 
+    # A zap still waiting for the wake is older than this one.
+    cancel_waiting_zap()
     if in_standby():
         return run_after_wake("zap", awake, report, allowed)
     return awake()

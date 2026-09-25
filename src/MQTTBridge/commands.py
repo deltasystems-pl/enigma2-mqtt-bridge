@@ -363,7 +363,7 @@ class CommandDispatcher:
         """
         from . import zaphistory
         from .power import in_standby
-        from .service import run_after_wake
+        from .service import cancel_waiting_zap, run_after_wake
 
         try:
             payload = json.loads(text)
@@ -379,10 +379,16 @@ class CommandDispatcher:
             return zaphistory.NOT_AVAILABLE
         if zaphistory.playing_back(self.session):
             return zaphistory.refusal(zaphistory.PLAYBACK)
+        # Checked before anything happens: a channel that is not in the list
+        # must not wake a sleeping receiver on the way to being refused.
+        if publisher.find(sref) is None:
+            return zaphistory.GONE
 
         def awake():
             return publisher.zap_to(sref, on_zap=self._expect)
 
+        # A zap still waiting for the wake is older than this one.
+        cancel_waiting_zap()
         if in_standby():
             return run_after_wake(
                 "zap_history", awake, report=self.bridge.publish_last_error,

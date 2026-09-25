@@ -1,6 +1,6 @@
 # ADR-0014: The zap history is the receiver's, and the plugin's zaps are in it
 
-**Status:** accepted 2026-09-24
+**Status:** accepted 2026-09-24, amended 2026-09-25
 **Date:** 2026-09-24
 **Supersedes:** - (changes the behaviour of `cmd/zap`, documented in `docs/TOPICS.md`)
 
@@ -67,26 +67,41 @@ played back.
 **Clearing is the 0 key's own handler, after every case in which 0 would not clear.**
 `cmd/history_clear` refuses, in order: standby, `panic_button` not on, fewer than two entries,
 timeshift, the post-timeshift zap block, picture-in-picture taking the 0 key, and the playback of a
-recording. Then it calls `InfoBar.instance.keyNumberGlobal(0)` - the handler the key reaches when
+recording, and any other screen open over the info bar. Then it calls `InfoBar.instance.keyNumberGlobal(0)` - the handler the key reaches when
 nothing is open - rather than injecting a key, which would go to whatever screen has focus. It then
 reads the list back and says so when more than one entry is left. It has no permission, because
 `cmd/key KEY_0` already does the same with none.
 
 **Each refusal carries a stable reason code.** `last_error` gains an optional `reason` field, set
 only by handlers that define codes (`standby`, `panic_off`, `too_short`, `timeshift`,
-`zap_blocked`, `pip`, `playback`, `not_cleared`), so a consumer can say the refusal in the
+`zap_blocked`, `pip`, `playback`, `screen_open`, `not_cleared`), so a consumer can say the refusal in the
 household's language. The English sentence stays the contract's human text, and every other
 `last_error` is byte for byte what it was.
 
 **Every zap the plugin makes goes through the channel list, so it is recorded.** `cmd/zap` calls
-`selectAndStartService` in the bouquet the channel list is on when it holds the service, otherwise
-in the first published bouquet that does - moving the channel list there, as a number zap on the
-remote does. From standby it hooks the standby screen's close before waking it and zaps on the turn
-after the receiver's own restore. Four cases play the service directly and are not recorded,
-because the recorded path would be worse: timeshift (the no-timeout question), picture-in-picture
-zap mode (the small picture), a channel list in radio mode (a television bouquet would be saved
-under the radio root) and a service in no published bouquet (nothing to enter). `cmd/bouquet` is
-refused during timeshift for the same question.
+`selectAndStartService` in the bouquet the channel list is browsing when that is a published
+bouquet holding the service, otherwise in the first published bouquet that does - moving the channel
+list there, as a number zap on the remote does. From standby it hooks the standby screen's close
+before waking it and zaps on the turn after the receiver's own restore; any later zap replaces one
+still waiting. Six cases play the service directly and are not recorded, because the recorded path
+would be worse: a screen open over the info bar (the channel list, the EPG, a menu - the zap would
+leave the remote on a list opened out of sight), timeshift (the no-timeout question; any active
+timeshift blocks, whatever the image's "check timeshift" setting says, and so does a timeshift state
+that cannot be read), picture-in-picture zap mode (the small picture), a channel list in radio mode
+(a television bouquet would be saved under the radio root), a service in no published bouquet
+(nothing to enter), and a selection that did not take - the published bouquets are read once a
+minute, and a stale one leaves the channel list re-zapping what is playing - unless the service is
+protected by parental control and the PIN is what it waits for. `cmd/bouquet` is refused during
+timeshift for the same question, and its zap is played directly while a screen is open.
+
+**Amended 2026-09-25 (review, before merge).** "A screen open over the info bar" was not in the
+first draft: the executing dialog is `session.current_dialog` (`StartEnigma.Session`), the info bar
+is the session's first dialog, and the channel list becomes the executing dialog through
+`execDialog` - the image's own skin reloader asks "is anything open?" the same way. It adds the
+direct-play case above, the `screen_open` refusal of `cmd/history_clear`, and the direct play of
+`cmd/zap_history`. The same review added the fallback for a selection that did not take, the
+replacement of a waiting zap by any later one, and `cmd/zap_history` checking the entry before it
+wakes the receiver.
 
 **Discovery mode announces the clear button and no history select.** A core MQTT select carries its
 options inside the discovery payload, so a list that changes on every zap would mean republishing
@@ -103,9 +118,11 @@ discovery on every zap. The companion integration builds the select from the top
   OpenWebif page shows the list unfiltered to whoever OpenWebif admits.
 - **The list is only as complete as the receiver's.** Zaps made by OpenWebif's own zap, by a zap
   timer or from the EPG are in it only if the image routes them through the channel list, which was
-  not read. The four direct-play cases above are not in it.
+  not read. The direct-play cases above are not in it.
 - **The clear lands on channel 1**, which is the first channel of the first bouquet and moves when
   the bouquet order does. The settings that change what 0 does - `panicbutton`, `multibouquet`,
-  `pip_zero_button`, `check_timeshift` - are the image's, and the plugin reads only `panicbutton`.
+  `pip_zero_button` - are the image's; the plugin reads `panicbutton`, and asks the image's own
+  `pipHandles0Action` for the picture-in-picture case. It does not read `check_timeshift`: any
+  active timeshift refuses the clear.
 - Reversing the zap change means going back to `playService` and to zaps the receiver's list does
   not show; reversing the history means only removing a topic and two commands.

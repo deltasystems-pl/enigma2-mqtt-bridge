@@ -79,6 +79,8 @@ ZAP_BLOCKED = ("the receiver is holding zaps for a moment after timeshift; try a
                "zap_blocked")
 PIP = ("picture-in-picture is showing and 0 is set to act on it", "pip")
 PLAYBACK = ("a recording is being played back", "playback")
+SCREEN_OPEN = ("a screen is open on the receiver, and 0 does not reach the zap history there",
+               "screen_open")
 NOT_CLEARED = ("the receiver did not clear its zap history", "not_cleared")
 
 NOT_AVAILABLE = "the zap history is not available on this image"
@@ -371,6 +373,25 @@ class ZapHistoryPublisher(Publisher):
 
     # ---------------------------------------------------------------- commands --
 
+    def find(self, sref):
+        """`(index, reference object)` of the entry for `sref`, by identity, or None.
+
+        Only among the entries the receiver's own screen would show.
+        """
+        read = self._read()
+        wanted = identity(sref)
+        if read is None or not wanted:
+            return None
+        center = _service_center()
+        for index, entry in enumerate(read[2]):
+            try:
+                reference = entry[-1]
+            except Exception:
+                continue
+            if identity(reference_string(reference)) == wanted and _shown(center, reference):
+                return index, reference
+        return None
+
     def zap_to(self, sref, on_zap=None):
         """Zap to one entry the way the receiver's History Zap screen does. None, or why not.
 
@@ -381,26 +402,24 @@ class ZapHistoryPublisher(Publisher):
         else is playing - a zap the history does not know about - and then
         `setHistoryPath()` plays it.
         """
+        from .service import infobar_on_screen
+
         read = self._read()
         if read is None:
             return UNREADABLE
-        _infobar, servicelist, history, position = read
-        wanted = identity(sref)
-        center = _service_center()
-        found = None
-        for index, entry in enumerate(history):
-            try:
-                reference = entry[-1]
-            except Exception:
-                continue
-            if identity(reference_string(reference)) == wanted and _shown(center, reference):
-                found = index, reference
-                break
-        if not wanted or found is None:
+        _infobar, servicelist, _history, position = read
+        found = self.find(sref)
+        if found is None:
             return GONE
         index, reference = found
         playing = current_service_reference(self.session)
-        if index == position and not same_service(playing, reference_string(reference)):
+        if not infobar_on_screen(self.session):
+            # A screen is open over the info bar; the history's own calls
+            # would move the channel list under it. Played directly, and the
+            # list is left as it is.
+            nav = getattr(self.session, "nav", None)
+            nav.playService(reference)
+        elif index == position and not same_service(playing, reference_string(reference)):
             servicelist.setHistoryPath()
         else:
             servicelist.historyMenuClosed(reference)
@@ -412,7 +431,7 @@ class ZapHistoryPublisher(Publisher):
     def clear(self):
         """`cmd/history_clear`: the 0 key's own handler, after every case it would not clear."""
         from .power import in_standby
-        from .service import timeshift_active
+        from .service import infobar_on_screen, timeshift_active
 
         if not self.clear_available():
             return CLEAR_NOT_AVAILABLE
@@ -436,6 +455,10 @@ class ZapHistoryPublisher(Publisher):
             return refusal(PIP)
         if playing_back(self.session):
             return refusal(PLAYBACK)
+        if not infobar_on_screen(self.session):
+            # The key reaches `keyNumberGlobal` only on the info bar; with the
+            # channel list, the EPG or a menu open, 0 means something else.
+            return refusal(SCREEN_OPEN)
         infobar.keyNumberGlobal(0)
         read = self._read()
         if read is not None and len(read[2]) > 1:

@@ -2321,6 +2321,25 @@ class ChannelList:
         self.zap()
 
 
+parental_module = _module("Components.ParentalControl")
+
+
+class ParentalControl:
+    """`Components/ParentalControl.pyc`, as far as `isProtected(ref)` goes."""
+
+    def __init__(self):
+        self.protected = set()
+        self.raises = False
+
+    def isProtected(self, ref):
+        if self.raises:
+            raise RuntimeError("the parental-control list could not be read")
+        return getattr(ref, "reference", str(ref)) in self.protected
+
+
+parental_module.parentalControl = ParentalControl()
+
+
 class MoviePlayer(ModelScreen):
     """`Screens/InfoBar.pyc`'s player for recordings, the current dialog while one plays."""
 
@@ -2765,6 +2784,9 @@ class Session:
 
     def __init__(self, nav):
         self.nav = nav
+        # The executing dialog, as `StartEnigma.Session` keeps it. The info bar
+        # once `with_channel_list` has built one.
+        self.current_dialog = None
         self.opened = []
         self.desktop = getDesktop(0)
         self.instantiated = []
@@ -2896,6 +2918,8 @@ class Receiver:
                 nav=self.nav,
             )
         )
+        # StartEnigma opens the info bar as the session's first dialog.
+        self.session.current_dialog = InfoBar.instance
         return InfoBar.instance.servicelist
 
 
@@ -2913,6 +2937,7 @@ def fresh_receiver():
     from MQTTBridge import service as service_module
 
     def reset():
+        parental_module.parentalControl = ParentalControl()
         service_module.forget_unrecorded()
         if service_module._pending_wake is not None:
             service_module._pending_wake.cancel()

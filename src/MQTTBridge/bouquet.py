@@ -210,10 +210,18 @@ class BouquetPublisher(Publisher):
         # and the synchronous check below would then see nothing tuned and
         # "restore" with `playService` while that question is still on screen.
         # Refused before anything is touched.
-        from .service import infobar_instance, timeshift_active
+        from .service import (
+            cancel_waiting_zap,
+            infobar_instance,
+            infobar_on_screen,
+            timeshift_active,
+        )
 
         if timeshift_active(infobar_instance()):
             return TIMESHIFT
+        # A zap still waiting for the wake is older than this one.
+        cancel_waiting_zap()
+        on_screen = infobar_on_screen(self.session)
 
         servicelist = _servicelist()
         required = (
@@ -277,10 +285,16 @@ class BouquetPublisher(Publisher):
             ):
                 raise RuntimeError("the service list did not select a playable channel")
             if not preserve:
-                zapper = getattr(servicelist, "zap", None)
-                if not callable(zapper):
-                    raise RuntimeError("the service list cannot tune the first channel")
-                zapper()
+                if not on_screen:
+                    # A screen is open over the info bar: the channel list's
+                    # zap would leave the remote on a list nobody opened. Played
+                    # directly, and not in the zap history.
+                    navigation(self.session).playService(selected_ref)
+                else:
+                    zapper = getattr(servicelist, "zap", None)
+                    if not callable(zapper):
+                        raise RuntimeError("the service list cannot tune the first channel")
+                    zapper()
                 tuned_changed = True
                 tuned = _current_service(self.session)
                 if tuned is None or identity(reference_string(tuned)) != identity(

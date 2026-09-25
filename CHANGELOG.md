@@ -19,13 +19,16 @@ version that has no section here.
   **`history_clear`**, claimed on the first successful read of the receiver's list, the second only
   where the image has the 0 key's own path and its panic-button setting.
 - **`cmd/zap_history`**, `{"sref": ...}`: zap to one channel of that list the way the receiver's
-  screen does, which moves it to the front. By reference only; from standby after the wake, as
-  `cmd/zap`. Refused while a recording is played back.
+  screen does, which moves it to the front. By reference only, checked before a sleeping receiver
+  is woken; from standby after the wake, as `cmd/zap`. Refused while a recording is played back;
+  played directly, and the list left alone, while another screen is open on the receiver.
 - **`cmd/history_clear`**: clear the list exactly as the receiver's 0 key does - the image's own
   handler, which **switches to channel 1** (the first channel of the first bouquet) and leaves that
   one channel in the list. Refused in every case in which 0 would not clear: standby, the image's
-  panic-button setting off, fewer than two entries, timeshift, the zap block after timeshift,
-  picture-in-picture taking the 0 key, and the playback of a recording. A "Clear zap history" button
+  panic-button setting off, fewer than two entries, any active timeshift (whatever the image's
+  "check timeshift" setting says), the zap block after timeshift, picture-in-picture taking the 0
+  key, the playback of a recording, and any other screen open over the info bar (`screen_open`). A
+  "Clear zap history" button
   in discovery mode; no history select there, because its options would republish discovery on
   every zap.
 - **`last_error.reason`**, an optional stable code beside the English sentence, set only by commands
@@ -155,18 +158,25 @@ version that has no section here.
   history** - the list KEY_NEXT and KEY_PREVIOUS open - exactly as a zap made with the remote is.
   Every zap the plugin makes (a service reference, a name, the channel select, the media player's
   source list, `play_media` and the integration's `zap` action) now calls the image's own number-zap
-  path, `InfoBar.instance.selectAndStartService`, in the bouquet the channel list is on when the
-  service is in it, and otherwise in the first published bouquet that holds it. 🔴 **Visible
+  path, `InfoBar.instance.selectAndStartService`, in the bouquet the channel list is browsing when
+  that is a published bouquet holding the service, and otherwise in the first published bouquet
+  that holds it. 🔴 **Visible
   change: a zap to a channel outside the bouquet being browsed now moves the channel list to that
   channel's bouquet**, so channel up and down on the remote walk that bouquet afterwards and the
   `bouquet` topic names it - which is what the remote's own number zap does. It used to leave the
-  channel list where it was. Four cases keep the old direct `playService` and are **not** recorded:
-  timeshift (the channel list would ask on the television, with no timeout, whether to leave it),
-  picture-in-picture zap mode (it would zap the small picture), a channel list in radio mode, and a
-  channel in no published bouquet (logged once per channel). **From standby** the receiver is woken
-  first and the zap follows on the turn after the receiver's own restore of the channel it slept on,
-  so it is recorded too; if the standby screen has not closed within 5 s, `last_error` says "the
-  receiver did not leave standby". The 5 s verification on `service` starts when the zap is made.
+  channel list where it was. Six cases keep the old direct `playService` and are **not** recorded:
+  a screen open over the info bar (the channel list, the EPG, a menu - the zap would leave the
+  remote on a list opened out of sight), any active timeshift (the channel list would ask on the
+  television, with no timeout, whether to leave it; also when the timeshift state cannot be read),
+  picture-in-picture zap mode (it would zap the small picture), a channel list in radio mode, a
+  channel in no published bouquet (logged once per channel), and a channel the list could not
+  select - a bouquet edited since the channel cache was read - unless a parental-control PIN is
+  what it waits for. **From standby** the receiver is woken first and the zap follows on the turn
+  after the receiver's own restore of the channel it slept on, so it is recorded too; if the
+  standby screen has not closed within 5 s, `last_error` says "the receiver did not leave standby".
+  Any later zap - `cmd/zap`, `cmd/zap_history` or `cmd/bouquet` - replaces one still waiting. The
+  5 s verification on `service` starts when the zap is made. The zap `cmd/bouquet` makes is played
+  directly while a screen is open.
   The decision is recorded in [ADR-0014](docs/adr/0014-the-zap-history-is-the-receivers.md).
 - **`cmd/bouquet` is refused during timeshift**, with "timeshift is active; the receiver would ask
   on screen whether to leave it", before anything changes. Its zap would have opened that question
