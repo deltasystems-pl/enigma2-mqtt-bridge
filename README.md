@@ -1,330 +1,116 @@
-<h1 align="center">Enigma2 MQTT Bridge</h1>
+# Enigma2 MQTT Bridge
 
-<p align="center">
-  <a href="https://github.com/deltasystems-pl/enigma2-mqtt-bridge/actions/workflows/ci.yml"><img src="https://github.com/deltasystems-pl/enigma2-mqtt-bridge/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases"><img src="https://img.shields.io/github/v/release/deltasystems-pl/enigma2-mqtt-bridge?include_prereleases&sort=semver" alt="Release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--2.0--or--later-blue.svg" alt="License: GPL-2.0-or-later"></a>
-  <img src="https://img.shields.io/badge/Python-3.9%2B-blue.svg" alt="Python 3.9+">
-</p>
+An Enigma2 plugin for people who run Home Assistant (or anything else that speaks MQTT) and want
+their satellite receiver in it without polling OpenWebif.
 
-An Enigma2 plugin that keeps one MQTT session to your broker and pushes the receiver's state
-the moment enigma2 raises the event - zap, EPG change, standby, recording, volume, remote key -
-instead of making Home Assistant poll OpenWebif every fifteen seconds. Commands travel back on
-the same session, and the box announces itself with standard Home Assistant MQTT discovery, so a
-working set of entities appears without any custom integration at all.
+[![CI](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/deltasystems-pl/enigma2-mqtt-bridge?sort=semver)](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases)
+[![License: GPL-2.0-or-later](https://img.shields.io/badge/License-GPL--2.0--or--later-blue.svg)](LICENSE)
 
-## What it does
+<img src="docs/images/device-page.png" width="480" alt="The receiver's device page in Home Assistant with the companion integration: power, channel, programme, volume and sensors">
 
-- **Push, not poll.** State lands on the broker as the event happens; there is no 15 s ceiling
-  on „the TV just changed channel".
-- **Availability that tells the truth.** A retained last will means Home Assistant sees the box
-  disappear within the keepalive window, not after a ten-minute poll watchdog.
-- **Two-way.** Power and standby, zap by service reference or by channel name, volume and mute,
-  remote keys (short and long), on-screen messages, recording start/stop, timers, screenshots.
-  Every command is verified by effect and answered on its state topic; failures land on
-  `last_error`.
-- **Home Assistant discovery out of the box**, or a quieter announcement-only mode for the
-  companion integration to build richer entities on top.
-- **Nothing native, nothing to compile.** Pure Python, `Architecture: all`, one vendored
-  dependency (paho-mqtt), no outbound connection other than your broker.
-- **It never takes the GUI down with it.** Bad config means one log line and an idle plugin;
-  no hook blocks the main thread; deep standby and reboot are refused while a recording runs.
+The receiver's device page in Home Assistant, with the companion integration.
 
-State is published under `enigma2/<node_id>/...`; commands arrive on `enigma2/<node_id>/cmd/...`.
-The full contract is in [docs/TOPICS.md](docs/TOPICS.md).
+## What you get
 
-## Supported images
+- The receiver publishes its state the moment it changes: channel, programme, standby, recording,
+  volume, remote keys. No fifteen-second polling delay.
+- Home Assistant sees the box go offline within about 1.5 times the MQTT keepalive, when the broker
+  publishes the box's retained last will.
+- Control from Home Assistant: power and standby, zap by channel name or reference, volume and
+  mute, remote keys, on-screen messages, recordings, timers and screenshots. Every command is
+  checked on the box and a failure is reported on `last_error`.
+- Entities appear on their own through Home Assistant's MQTT discovery. For a real media player,
+  channel browsing and a guided installer, add the companion integration
+  [hass-enigma2-mqtt](https://github.com/deltasystems-pl/hass-enigma2-mqtt).
+- The receiver's zap history, a page inside OpenWebif with every setting and command, and an
+  optional softcam restart and EPG import (both off until you allow them on the box).
+- Pure Python with one vendored library (paho-mqtt). Nothing to compile, and no connection to
+  anything but your broker.
 
-| Image | Python | enigma2 flavour | Status | Test box |
-|---|---|---|---|---|
-| OpenViX 6.6 | 3.12 | OE-Alliance 5.4 | **supported** | Vu+ Uno 4K SE |
-| OpenATV 7.4 / 7.5 | 3.12 | OE-Alliance | **supported** | community tester needed |
-| OpenPLi 9.x | 3.9+ | OpenPLi core | best effort | community |
-| OpenBH 6.0 | 3.14 | OE-Alliance fork | best effort | community |
-| VTi 15 / 16 | 2.7 | OE 2.0 | unsupported | - |
+<img src="docs/images/zap-history.png" width="400" alt="The Recently watched list in Home Assistant, showing the last six channels">
 
-The code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14. Every enigma2
-import is guarded, and what the running image cannot provide is reported in the `capabilities`
-list rather than assumed - so a missing hook loses one feature, not the plugin.
-
-**Testers wanted - please open an issue.** If you run an image that is not in the first two rows,
-your report is what moves a row from *best effort* to *supported*. There is no per-image thread to
-find yet; opening the first one is genuinely useful.
-
-## Security first
-
-Most Enigma2 boxes ship with a well-known root password and an open telnet or SSH port. This
-plugin stores your broker credentials on that box, so before you install it:
-
-1. **Change the box's root password.** Anything on the LAN can otherwise read the credential
-   this plugin needs.
-2. **Give the box its own broker login** - never the one Home Assistant itself uses.
-3. **Restrict that login with an ACL.** For Mosquitto, with `<node_id>` replaced by the node id
-   the plugin shows on its setup screen:
-
-   ```
-   user enigma2box
-   topic readwrite enigma2/<node_id>/#
-   topic write enigma2mqtt/discovery/<node_id>/#
-   topic write homeassistant/device/<node_id>/#
-   topic write homeassistant/device_automation/<node_id>/#
-   ```
-
-   Verify the ACL by effect, not by reading it back: subscribe to a topic the box has no business
-   writing to and publish there as the box's user. Mosquitto drops an ACL-denied publish
-   **silently** - the publisher sees success either way.
-4. TLS to the broker is optional (`tls`, `ca_file`); client certificates are not in v1.
-
-🔴 **That ACL is the privacy boundary.** Anything able to publish on `<base>/<node>/cmd/config`
-can switch on screenshots, key reporting and the CAM and OSCam telemetry, and then ask for a
-picture of the television whenever it likes - the companion integration's options flow is built on
-exactly that path, so the plugin does not ask the box for a second confirmation.
-
-The plugin has no telemetry, no cloud component and no update check that phones home.
+The receiver's zap history in Home Assistant, with the companion integration. Picking a channel
+zaps back to it.
 
 ## Install
 
-**From a GitHub release** (any image, one line on the box). Every release carries the IPK and its
-SHA-256 on the [releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases):
+1. Change the receiver's root password. The box will hold a broker login, and most images ship a
+   well-known password.
+2. Create a broker login for the receiver only, not the one Home Assistant uses. On a broker that
+   enforces ACLs, [docs/SETUP.md](docs/SETUP.md#broker-access) has one that limits the login to
+   the box's own topics. The Mosquitto add-on in Home Assistant accepts an ACL file but does not
+   enforce it, so there the dedicated login is all you get.
+3. Add the feed and install, over SSH on the receiver:
 
-```sh
-opkg install https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/download/v0.3.0/enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk
-```
+   ```sh
+   echo 'src/gz enigma2-mqtt-bridge https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed' \
+       > /etc/opkg/enigma2-mqtt-bridge.conf
+   opkg update && opkg install enigma2-plugin-extensions-mqttbridge
+   ```
 
-**From the opkg feed**, which gets you updates through the normal plugin browser - write
+4. Restart the GUI (the package never does it by itself), then open *Menu -> Plugins -> MQTT
+   Bridge* and enter the broker address and login.
 
-```
-src/gz enigma2-mqtt-bridge https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed
-```
+With the feed in place, updates show up in the image's own software update screens.
 
-into `/etc/opkg/enigma2-mqtt-bridge.conf`, then `opkg update && opkg install
-enigma2-plugin-extensions-mqttbridge`.
+If you use Home Assistant, the [companion integration](https://github.com/deltasystems-pl/hass-enigma2-mqtt)
+can install and configure the plugin for you over SSH, and roll the receiver back if anything
+fails. Installing a single IPK from the releases page, the manual `scp` route and removing the
+plugin are in [docs/INSTALL.md](docs/INSTALL.md).
 
-**From the image's plugin browser** - from v1.0, through the OE-Alliance third-party feed that
-OpenViX, OpenATV and their siblings already consume.
+## Requirements
 
-Restart enigma2 afterwards; the package deliberately never restarts the GUI by itself.
-Details, the manual `scp` route and how to uninstall cleanly are in
-[docs/INSTALL.md](docs/INSTALL.md).
+- An MQTT broker, for example the Mosquitto add-on in Home Assistant.
+- An Enigma2 image with Python 3.9 or newer:
 
-## Configure
+| Image | Status |
+|---|---|
+| OpenViX 6.6 | supported, tested on a Vu+ Uno 4K SE |
+| OpenATV 7.4 / 7.5 | supported, needs a community tester |
+| OpenPLi 9.x, OpenBH 6.0 | best effort |
+| VTi (Python 2.7) | not supported |
 
-*Menu -> Plugins -> MQTT Bridge* opens a setup screen with the broker host and port, the
-credentials, the node id, the friendly name, the Home Assistant mode and the rest. Every setting
-and its default is listed in [docs/SETUP.md](docs/SETUP.md).
-
-For headless installs there is a one-shot provisioning file. Write
-`/etc/enigma2/mqttbridge.json` before the first start:
-
-```json
-{
-  "host": "192.0.2.10",
-  "port": 1883,
-  "username": "enigma2box",
-  "password": "the-broker-password",
-  "node_id": "vuuno4kse_005301",
-  "friendly_name": "Living room receiver",
-  "ha_mode": "discovery"
-}
-```
-
-The plugin imports those keys into its config at start and then **deletes the file**, because it
-holds a password. The setup screen shows the same values afterwards.
-
-## Home Assistant
-
-Two modes, chosen by the `ha_mode` setting:
-
-- **`discovery`** (default) - the plugin publishes standard Home Assistant MQTT discovery
-  payloads and HA's own MQTT integration creates the entities. Nothing else to install.
-- **`integration`** - the plugin publishes only its announcement and leaves entity creation to
-  [hass-enigma2-mqtt](https://github.com/deltasystems-pl/hass-enigma2-mqtt), which adds what
-  discovery cannot express: a native `media_player` with channel browsing, a `remote`, a
-  `notify` target for on-screen messages, device triggers for the colour keys and an `update`
-  entity. The integration switches the box into this mode itself, and the plugin retracts its
-  discovery payloads first so entities are never duplicated.
-- **`off`** - no discovery, no announcement. State topics still publish, for openHAB, Node-RED
-  or anything else that speaks MQTT.
-
-Using another home-automation system, or want a media player without the custom integration?
-[docs/SETUP.md](docs/SETUP.md) has a `universal` media_player recipe built entirely from the
-discovery entities.
-
-## Topics
-
-Topic strings, retain flags, QoS, payload fields and their types, every command and its guard:
-[docs/TOPICS.md](docs/TOPICS.md). That document is the contract - the plugin and the integration
-are both written against it, and it is versioned with the plugin.
-
-## Privacy
-
-The `key` and `epg` topics reveal what is being watched and what is being pressed, and they land
-in Home Assistant's recorder database by default. Since 0.3.0 `zap_history` names the channels watched
-recently (up to twenty on the images read), from every bouquet, retained on the broker - as `channels` names every channel
-there is; a consumer that hides a bouquet hides it from its own list, not from the broker. If that
-matters in your household:
-
-- exclude the screenshot image entity from the recorder, and decide deliberately about the
-  programme-title sensor. The key `event` entity is worth excluding too - but it only exists
-  **with the companion integration**; in plain discovery mode the keys are MQTT device triggers,
-  which are not entities and cannot be excluded by name;
-- turn `publish_keys` off if you do not automate on remote keys - on a plugin-only install that
-  is the control, and it is the stronger one either way, because nothing reaches the broker;
-- set `screenshot` to `off` - it is a picture of your screen on the broker, retained;
-- adjust `screenshot_delay` (four seconds by default) if the image needs longer to settle after a
-  channel change; rapid zaps reset the delay and stale in-flight captures are discarded;
-- leave `cam_telemetry` off unless you need conditional-access diagnostics. When enabled it
-  publishes only the generic CA system, current-service encryption flag and bounded fresh ECM timing,
-  never reader, server, user, card or raw ECM data;
-- leave `oscam_telemetry` off unless you need software and reader/server health. It queries only
-  receiver-local read-only WebIf views and publishes opaque source ids and bounded aggregate
-  counts; raw reader names, addresses, users, card identifiers and WebIf credentials stay on the
-  receiver;
-- remember that retained topics outlive the plugin: `cmd/reset` retracts everything, and it is
-  the documented step before uninstalling by hand. `cmd/uninstall` (0.3.0) does it for you, and
-  in the right order.
+A hook the image does not provide costs one feature, not the plugin: the box lists what it can do
+in its `capabilities`. The code is tested on Python 3.9, 3.12 and 3.14. If you run OpenATV,
+OpenPLi or OpenBH, a test report in an issue helps;
+[CONTRIBUTING.md](CONTRIBUTING.md#becoming-an-image-tester) says what to check.
 
 ## Compatibility
 
 | Plugin | Integration |
 |---|---|
-| 0.1.0 | 0.1.0 |
-| 0.2.0 | 0.2.0 |
 | 0.3.0 (current) | 0.3.0 |
+| 0.2.0 | 0.2.0 |
+| 0.1.0 | 0.1.0 |
 
-The integration warns on its `update` entity when the box runs a plugin older than the one it
-bundles.
+The integration's `update` entity warns when the box runs a plugin older than the one it bundles.
 
-## Roadmap
+## Privacy and security
 
-- [x] **M0** - PRD approved and recorded as [ADR-0000](docs/adr/0000-prd.md); the three open
-      questions closed in [ADR-0001](docs/adr/0001-m0-decisions.md). The scope added since is
-      [ADR-0002](docs/adr/0002-scope-after-m0.md)
-- [x] **M1** - repository and skeleton: the plugin loads, connects, publishes `availability`
-      and `info`, and has a setup screen. Released as **v0.1.0**
-- [x] **M2** - power, service, EPG, volume, recording, timers, disk, keys, screenshot, the channel
-      list, the EPG grid, bouquet context, the optional CAM and OSCam telemetry, and every `cmd/*`
-      with its guards. Released as **v0.2.0**.
-      The by-effect checklist and a 60-minute active soak have passed; the **long passive soak**
-      and the **watchdog-restart interplay** have not, and **deep standby with Wake-on-LAN has
-      never been drilled**
-- [x] **M3** - the integration's entities: *released as the companion integration's **v0.2.0***
-- [x] **M4** - the guided installer and the `update` entity, *exercised end to end on one
-      receiver.* The installer has been run repeatedly on a box that did not have the plugin, and
-      the rollback has been exercised for real: a deliberately wrong broker password, the plugin
-      refused, the receiver restored to the byte, the lock released, and „the receiver was
-      restored" reported truthfully rather than as a guess. The correct run then ended on the
-      success screen. Four defects those runs found - a pending discovery offer blocked the
-      installer, the success screen was lost, the rollback misjudged the restart and left its lock
-      behind, and a receiver at default settings was refused as „different" - are fixed, and the
-      run above is the one after the fixes, and the integration's **v0.2.0** carries them
-- [ ] **M5** - public beta `v0.x`: releases, opkg feed, HACS custom repository, testers per image
-- [ ] **M6** - `v1.0.0`: third-party feed and HACS default pull requests
-- [ ] **M7** - OE-Alliance recipe, OpenPLi, broker-login auto-provisioning
+The box stores your broker password, and anyone who can publish to its command topics can switch
+on screenshots and remote-key reporting. Where the broker enforces ACLs, limit the box's login to
+its own topics and check the ACL by effect: Mosquitto drops a denied publish without telling the
+sender. The threat model is in
+[SECURITY.md](SECURITY.md).
 
-The feed and the releases page serve **0.3.0**, which is what this tree builds; the companion
-integration's own 0.3.0 release follows this one. Everything after M4 is unreleased, and two
-things M2 itself promised are still open: the **long passive soak** and the **deep-standby
-drill**.
+The channel, programme, keys, zap history and screenshots say what your household watches. They
+land on the broker and, by default, in Home Assistant's recorder.
+[docs/SETUP.md](docs/SETUP.md#privacy) lists what to switch off or exclude. The plugin has no
+telemetry, no cloud part and no update check of its own.
 
-### What 0.2.0 and 0.3.0 shipped
+## Documentation
 
-Two days of household use produced a list of problems and a list of wants, and they were split
-into two releases. The reasoning is in
-[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md); the contract for every item
-is in [docs/TOPICS.md](docs/TOPICS.md).
-
-**0.2.0 - fixes**, released 2026-09-22 - both halves, this plugin and the companion integration.
-Everything M2 covers, and from that list of problems:
-
-- `deep_standby_allowed` is echoed **read-only** in `info.settings`, so a consumer can tell „the
-  box refused this" from „the box cannot do this" and hide a control that would always fail.
-  🔴 This changes what `info.settings` means: presence no longer implies writability.
-- Removing or upgrading the package no longer leaves the plugin behind as compiled bytecode the
-  receiver imports on the next graphical-interface restart.
-
-The full list is in [CHANGELOG.md](CHANGELOG.md).
-
-**0.3.0 - features**, released 2026-09-25:
-
-1. **`cmd/softcam_restart`** - restart the cam *the image selected*, resolved on the box and never
-   named over MQTT, behind a permission that is never writable over MQTT; plus an opt-in
-   auto-heal for a stuck decode, rate-limited and counted on a new `softcam` topic.
-2. **An opt-in CEC standby workaround** for an upstream enigma2 defect that makes a standby
-   requested by the television arrive late and echo back at it. It closes the channel list and
-   nothing else, never touches a standby the household asked for, and counts every intervention
-   on a `cec` topic.
-3. **A discreet toast** - a non-modal, auto-hiding, top-right message that never takes focus and
-   never waits behind an open channel list. `cmd/message` gains `style: popup | toast`; `popup`
-   stays the default.
-4. **`cmd/epg_import`** - run the image's EPG importer, behind a permission that is never
-   writable over MQTT, with progress on an `epg_import` topic that follows every import, whoever
-   started it. The import is the image's: its end freezes the menus for two or three seconds.
-   Decided in [ADR-0011](docs/adr/0011-epg-import-on-demand.md).
-5. **`info.wol`** - what the image says about Wake-on-LAN: whether it has a switch for it, whether
-   that is on, the interface and the mechanism - plus a box-only **`wol_arm`** that switches on the
-   image's own Wake-on-LAN setting where the image has one. No `ethtool`: the flag it sets is read by
-   nothing on an enigma2 image's way into deep standby, which powers the box off rather than
-   suspending it. Decided in [ADR-0012](docs/adr/0012-wake-on-lan-is-the-image-s-switch.md).
-   🔴 **A receiver that reports `supported: false` cannot be woken over the network from deep
-   standby** - only by its remote, its front button or a timer. The maintainer's Uno 4K SE is one.
-   On any other receiver, **deep standby may still be one-way** until a deep standby -> magic packet
-   drill has passed on that image.
-6. **`process`** - what the enigma2 process costs.
-7. **`cmd/uninstall`** - remove the plugin from the receiver on request, behind a permission
-   `uninstall_allowed`, never writable over MQTT and echoed **read-only** in `info.settings`, and a
-   capability `uninstall` claimed only where opkg installed this very copy. Everything that
-   publishes is stopped first; every retained topic is retracted and a final `offline` published,
-   at QoS 1, and the broker's acknowledgements are awaited before the package is removed and the
-   interface restarted. A removal that fails - opkg's lock held, no acknowledgement, a dropped
-   connection - puts everything back and says why on `last_error`. The payload is the node id, so a
-   mis-sent message removes nothing. The settings stay on the receiver.
-   🔴 A one-way door - nothing over MQTT can put it back, only SSH or the receiver's own package
-   manager. Decided in [ADR-0004](docs/adr/0004-remote-uninstall.md); the order, the QoS and the
-   failure path in [ADR-0013](docs/adr/0013-the-uninstall-closes-the-doors-and-waits-for-the-broker.md).
-8. **The zap history** - the receiver's own list of recently watched channels, the one KEY_NEXT and
-   KEY_PREVIOUS open, on a `zap_history` topic; `cmd/zap_history` to go back to one of them, and
-   `cmd/history_clear`, which does exactly what the receiver's 0 key does: it empties the list and
-   **switches to channel 1**, the first channel of the first bouquet. It is refused wherever 0 would
-   not clear - standby, the image's panic-button setting off, one channel or none in the list,
-   any active timeshift (the plugin treats every one as blocking), picture-in-picture taking the
-   key, a recording being played back, another screen open on the receiver - with a reason code a
-   consumer can translate. 🔴 **`cmd/zap` changes with it**: every zap the plugin makes now goes
-   through the receiver's channel list, so it is in that history like a zap from the remote - and a
-   zap to a channel outside the bouquet being browsed moves the channel list to that channel's
-   bouquet, as a number zap on the remote does. With a screen open on the receiver, in timeshift
-   and in a few other cases the zap is played directly and is not in the history. Decided in
-   [ADR-0014](docs/adr/0014-the-zap-history-is-the-receivers.md).
-9. **The OpenWebif page** opens wherever OpenWebif does and follows OpenWebif's own
-   authentication instead of demanding a login of its own. It shows the bridge's state and every
-   retained topic, edits every setting and runs every command through the same guards as MQTT.
-   It is now no more open than your receiver's OpenWebif: switch OpenWebif authentication on if
-   that is not what you want. Decided in
-   [ADR-0009](docs/adr/0009-the-openwebif-page-trusts-openwebif.md).
-10. **A fix in `discovery` mode**: a connect, a reload or a settings save no longer deletes the
-    device from Home Assistant and creates it again, which could cost the names, areas and
-    dashboard placements given to it.
-
-The full list is in [CHANGELOG.md](CHANGELOG.md).
-
-## Contributing
-
-Read [CONTRIBUTING.md](CONTRIBUTING.md) for the development loop, the test matrix and the rule
-that every change lands through a pull request with CI green.
-
-Two things are worth more than code right now:
-
-- **Testers.** One box, one image, one afternoon. OpenATV, OpenPLi and OpenBH all need somebody
-  who can run the by-effect checklist and paste the log. **Testers wanted: open an issue** - there
-  is no per-image thread yet, so yours starts it.
-- **Translators.** The source strings are English, the Polish ones are reviewed, and the
-  **German ones are drafted and marked for review** - a native speaker's pass would be very
-  welcome.
-
-Decisions live as ADRs in [docs/adr/](docs/adr/); the security policy is in
-[SECURITY.md](SECURITY.md); the version history is in [CHANGELOG.md](CHANGELOG.md).
+- [docs/INSTALL.md](docs/INSTALL.md) - every install route, updating, removing
+- [docs/SETUP.md](docs/SETUP.md) - every setting, the OpenWebif page, the provisioning file,
+  a media player without the integration
+- [docs/TOPICS.md](docs/TOPICS.md) - the MQTT topics and commands, for Node-RED, openHAB or scripts
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md), [decision records](docs/adr/)
+- [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md) (testers and German
+  translation reviewers are welcome)
 
 ## License
 
-[GPL-2.0-or-later](LICENSE) - enigma2 is GPL-2.0 and this plugin imports its modules.
-The vendored paho-mqtt is used under its EDL-1.0 option; see [NOTICE](NOTICE).
+[GPL-2.0-or-later](LICENSE), because the plugin imports enigma2's modules. The vendored
+paho-mqtt is used under its EDL-1.0 option; see [NOTICE](NOTICE).

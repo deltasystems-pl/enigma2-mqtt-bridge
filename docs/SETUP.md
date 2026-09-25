@@ -384,8 +384,10 @@ ssh root@<box-ip> 'chmod 600 /etc/enigma2/mqttbridge.json && init 4 && sleep 3 &
 
 ## Broker access
 
-Give the receiver a dedicated login with an ACL limited to its own topics. For the Mosquitto
-add-on, in the ACL file, with `<node_id>` replaced by the plugin's node id:
+Give the receiver a dedicated login, never the one Home Assistant itself uses.
+
+If your broker enforces ACLs, limit that login to the box's own topics. For Mosquitto, in the ACL
+file, with `<node_id>` replaced by the plugin's node id:
 
 ```
 user enigma2box
@@ -399,6 +401,39 @@ Then **verify it by effect**. Subscribe as a privileged user to a topic the box 
 touching and publish there as the box's user: the message must not arrive. Mosquitto drops an
 ACL-denied publish silently and the publishing client sees success either way, so an ACL that is
 too tight and one that works look identical from the box.
+
+**The Mosquitto add-on in Home Assistant does not enforce an ACL.** Version 7.1.1 accepts an
+`acl_file` in its customize folder, logs nothing, and never consults it
+([home-assistant/addons#4721](https://github.com/home-assistant/addons/issues/4721)). On the
+add-on, use the dedicated login, run the by-effect check above rather than trusting the file, and
+do not count on a topic boundary. If you need the topic boundary, use a broker that enforces ACLs.
+
+Where the ACL is enforced, it is the privacy boundary. Anything able to publish on
+`<base>/<node>/cmd/config` can switch on screenshots, key reporting and the CAM and OSCam
+telemetry, and then ask for a picture of the television whenever it likes. The companion
+integration's options flow is built on exactly that path, so the plugin does not ask the box for
+a second confirmation. Without an enforced ACL, any client with a login on the broker can do the
+same.
+
+TLS to the broker is optional (`tls`, `ca_file`); client certificates are not supported in v1.
+
+## Home Assistant modes
+
+The `ha_mode` setting decides how Home Assistant learns about the box:
+
+- **`discovery`** (default) - the plugin publishes standard Home Assistant MQTT discovery
+  payloads and Home Assistant's own MQTT integration creates the entities. Nothing else to
+  install.
+- **`integration`** - the plugin publishes only its announcement and leaves entity creation to
+  the companion integration [hass-enigma2-mqtt](https://github.com/deltasystems-pl/hass-enigma2-mqtt),
+  which adds what discovery cannot express: a native `media_player` with channel browsing, a
+  `remote`, a `notify` target for on-screen messages, device triggers for the colour keys and an
+  `update` entity. The integration switches the box into this mode itself when you add it.
+- **`off`** - no discovery and no announcement. State topics still publish, for openHAB, Node-RED
+  or anything else that speaks MQTT.
+
+A mode switch retracts the old discovery payloads before anything new is published, so entities
+are never duplicated. The details are in [TOPICS.md](TOPICS.md#cmdha_mode-semantics).
 
 ---
 
@@ -530,3 +565,25 @@ above would name something that does not exist. Turn **`publish_keys` off** on t
 which is the stronger control in either case, because the information then never reaches the
 broker at all. The screenshot *is* an entity in discovery mode, so the second line applies; on the
 box, `screenshot: off` is its equivalent.
+
+What else to know, and the settings that control it:
+
+- **The `key` and `epg` topics** say what is being pressed and watched. Decide deliberately about
+  the programme-title sensor as well as the key events.
+- **`zap_history`** (since 0.3.0) names the channels watched recently (up to twenty on the images
+  read so far), from every bouquet, retained on the broker - just as `channels` names every
+  channel there is. A consumer that hides a bouquet hides it from its own list, not from the
+  broker.
+- **`screenshot`** is a picture of your screen on the broker, retained. Set it to `off` if you do
+  not use it. `screenshot_delay` (four seconds by default) is how long the image settles after a
+  channel change; rapid zaps reset the delay and stale in-flight captures are discarded.
+- **`cam_telemetry`** stays off unless you need conditional-access diagnostics. When on, it
+  publishes only the generic CA system, the current service's encryption flag and bounded fresh
+  ECM timing - never reader, server, user, card or raw ECM data.
+- **`oscam_telemetry`** stays off unless you need OSCam's software and reader/server health. It queries only
+  receiver-local, read-only WebIf views and publishes opaque source ids and bounded aggregate
+  counts; reader names, addresses, users, card identifiers and WebIf credentials stay on the
+  receiver.
+- **Retained topics outlive the plugin.** `cmd/reset` retracts everything and is the documented
+  step before removing the plugin by hand; `cmd/uninstall` (since 0.3.0) does it for you, in the
+  right order. See [INSTALL.md](INSTALL.md#uninstalling).
