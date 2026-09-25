@@ -103,6 +103,83 @@ def test_the_timer_list_is_in_time_order(live_bridge, factory, receiver):
     assert names == ["Sooner", "Later"]
 
 
+# A timer the receiver has finished with is not gone: the image keeps it in
+# `processed_timers`, OpenWebif lists it, and so does the household's panel. So
+# must `timers`, with a word that says what became of it.
+
+
+def published_timers(bridge, factory):
+    factory.client.clear()
+    fire_coalesced(bridge, "timers")
+    return factory.client.last(TIMERS).json()
+
+
+def test_ended_timers_are_published_as_ended(live_bridge, factory, receiver):
+    receiver.add_timer(begin=1789500000, end=1789501000, name="Pending")
+    receiver.add_processed_timer(name="Finished")
+    payload = published_timers(live_bridge, factory)
+    assert [(entry["name"], entry["state"]) for entry in payload] == [
+        ("Finished", "ended"), ("Pending", "waiting"),
+    ]
+
+
+def test_a_disabled_timer_is_published_as_disabled_not_ended(live_bridge, factory, receiver):
+    """The image files a disabled timer as `StateEnded`; it is not over."""
+    receiver.add_processed_timer(name="Switched off", disabled=True)
+    timer = receiver.nav.RecordTimer.processed_timers[0]
+    assert timer.state == RecordTimerEntry.StateEnded
+    assert [entry["state"] for entry in published_timers(live_bridge, factory)] == ["disabled"]
+
+
+def test_a_disabled_timer_still_in_the_pending_list_is_disabled(live_bridge, factory, receiver):
+    timer = receiver.add_timer()
+    timer.disabled = True
+    assert [entry["state"] for entry in published_timers(live_bridge, factory)] == ["disabled"]
+
+
+def test_a_timer_disabled_for_a_conflict_is_published_as_disabled(live_bridge, factory, receiver):
+    """What `RecordTimer.record()` does to a conflicting timer while loading the
+    file: set `disabled`, then hand it to `addTimerEntry`, which files it with
+    the finished ones as `StateEnded`."""
+    receiver.add_timer(name="Kept")
+    loser = RecordTimerEntry(conftest.ServiceReference(TVN), 1789459200, 1789460700,
+                             "Conflicting", "", 0)
+    loser.disabled = True
+    receiver.nav.RecordTimer.addTimerEntry(loser)
+    assert loser in receiver.nav.RecordTimer.processed_timers
+    states = {entry["name"]: entry["state"] for entry in published_timers(live_bridge, factory)}
+    assert states == {"Kept": "waiting", "Conflicting": "disabled"}
+
+
+def test_a_timer_that_failed_to_write_is_published_as_failed(live_bridge, factory, receiver):
+    """OpenViX marks it `failed` and lets it count on to `StateEnded`."""
+    receiver.add_processed_timer(failed=True)
+    assert [entry["state"] for entry in published_timers(live_bridge, factory)] == ["failed"]
+
+
+def test_a_timer_in_state_failed_is_failed_not_waiting(live_bridge, factory, receiver):
+    """Images that do use `StateFailed`: the worst word for it is "waiting"."""
+    receiver.add_timer(state=RecordTimerEntry.StateFailed)
+    assert recording.state_word(RecordTimerEntry.StateFailed) == "failed"
+    assert [entry["state"] for entry in published_timers(live_bridge, factory)] == ["failed"]
+
+
+def test_a_state_nobody_named_is_unknown_not_waiting(live_bridge, factory, receiver):
+    receiver.add_timer(state=17)
+    assert recording.state_word(17) == "unknown"
+    assert [entry["state"] for entry in published_timers(live_bridge, factory)] == ["unknown"]
+
+
+def test_finished_and_disabled_timers_are_not_recordings(live_bridge, receiver, monkeypatch):
+    """`recording` and the guard answer "is the box busy"; a processed timer
+    never records, whatever its window says."""
+    monkeypatch.setattr(recording.time, "time", lambda: 1789459200 - 120)
+    receiver.add_processed_timer(name="Switched off", disabled=True)
+    receiver.add_processed_timer(begin=1789459300, end=1789460000, name="Failed", failed=True)
+    assert recording.read_recording(receiver.session) == {"active": [], "next": None}
+    assert recording.guard(receiver.session) is None
+
+
 def test_saving_a_timer_publishes_the_list(live_bridge, factory, receiver):
     """The only „the list changed" enigma2 offers is that it wrote the file."""
     factory.client.clear()
@@ -247,6 +324,42 @@ def test_a_timer_is_deleted_by_service_start_and_end(live_bridge, receiver):
 
 def test_deleting_a_timer_that_is_not_there_is_refused(live_bridge, receiver):
     assert "no timer on" in recording.delete_timer(receiver.session, TVP1, 1, 2)
+
+
+def test_an_ended_timer_is_deleted_from_the_processed_list(live_bridge, receiver):
+    timer = receiver.add_processed_timer()
+    assert recording.delete_timer(receiver.session, TVP1, 1789459200, 1789460700) is None
+    assert receiver.nav.RecordTimer.removed == [timer]
+    assert receiver.nav.RecordTimer.processed_timers == []
+
+
+def test_a_disabled_timer_can_be_deleted(live_bridge, receiver):
+    timer = receiver.add_processed_timer(disabled=True)
+    assert recording.delete_timer(receiver.session, TVP1, 1789459200, 1789460700) is None
+    assert receiver.nav.RecordTimer.removed == [timer]
+
+
+def test_the_pending_copy_of_a_shared_triple_is_deleted_first(live_bridge, receiver):
+    """A timer somebody disabled and then set again from the guide: the image
+    checks a new timer only against the pending list, so both copies exist with
+    one triple. A delete takes the pending one - as it did before finished
+    timers were reachable, and as OpenWebif does - and the next delete takes the
+    disabled copy."""
+    disabled = receiver.add_processed_timer(disabled=True)
+    pending = receiver.add_timer()
+    assert recording.delete_timer(receiver.session, TVP1, 1789459200, 1789460700) is None
+    assert receiver.nav.RecordTimer.removed == [pending]
+    assert receiver.nav.RecordTimer.processed_timers == [disabled]
+    assert recording.delete_timer(receiver.session, TVP1, 1789459200, 1789460700) is None
+    assert receiver.nav.RecordTimer.removed == [pending, disabled]
+    assert "no timer on" in recording.delete_timer(receiver.session, TVP1, 1789459200, 1789460700)
+
+
+def test_a_running_recording_is_still_what_a_shared_triple_deletes(live_bridge, receiver):
+    receiver.add_processed_timer()
+    running = receiver.add_timer(state=RecordTimerEntry.StateRunning)
+    assert recording.delete_timer(receiver.session, TVP1, 1789459200, 1789460700) is None
+    assert receiver.nav.RecordTimer.removed == [running]
 
 
 def test_a_timer_is_matched_whatever_the_reference_is_spelled_like(live_bridge, receiver):

@@ -384,6 +384,25 @@ def test_a_timer_is_deleted(live_bridge, factory, receiver):
     assert receiver.nav.RecordTimer.removed == [timer]
 
 
+def test_cmd_timer_delete_of_an_ended_timer_republishes_the_list(live_bridge, factory, receiver):
+    """A consumer waits for `timers` to change to know a delete worked. Deleting
+    a finished timer changes the list only if the list showed it - and only
+    publishes if the delete itself set the publisher going."""
+    receiver.add_processed_timer()
+    coalesce = live_bridge.publisher("timers")._coalesce
+    live_bridge.publisher("timers").soon()
+    coalesce.timer.fire()
+    assert [entry["state"] for entry in factory.client.last(ROOT + "/timers").json()] == ["ended"]
+    coalesce.timer.stopped = True  # a single-shot timer that has fired
+
+    factory.client.clear()
+    send(factory, "timer", DELETE)
+    assert coalesce.timer.running, "the delete did not schedule a publish"
+    coalesce.timer.fire()
+    assert factory.client.last(ROOT + "/timers").json() == []
+    assert error(factory) is None
+
+
 def test_a_timer_with_no_action_is_refused(live_bridge, factory):
     send(factory, "timer", ('{"sref": "' + TVP1 + '"}').encode())
     assert "unknown timer action" in error(factory)
