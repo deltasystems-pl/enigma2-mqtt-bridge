@@ -2456,6 +2456,24 @@ class ChannelList:
         self.zap()
 
 
+class ModalInfoBar(InfoBar, NotifiableInfoBar):
+    """The zap stubs' info bar, run the way the receiver runs it.
+
+    On the receiver one object is all of these at once: `InfoBar.instance`
+    with its channel list and number zap, the session's first dialog, and -
+    through `InfoBarNotifications` - the screen that opens a queued popup with
+    `session.open`. The zap stubs above and the popup model (`ModalSession`,
+    `NotifiableInfoBar`) were written apart; this joins them, so a test gets
+    "a popup over the info bar" from `AddPopup` and the session's own stack
+    rather than by setting `current_dialog` and `dialog_stack` itself.
+    `Receiver(modal=True).with_channel_list()` opens it.
+    """
+
+    def __init__(self, session, servicelist=None):
+        InfoBar.__init__(self, servicelist)
+        NotifiableInfoBar.__init__(self, session)
+
+
 parental_module = _module("Components.ParentalControl")
 
 
@@ -3019,9 +3037,16 @@ MARKER = "1:64:0:0:0:0:0:0:0:0::A heading"
 
 
 class Receiver:
-    """A whole fake box: bouquets, EPG, a tuner, a volume and a session."""
+    """A whole fake box: bouquets, EPG, a tuner, a volume and a session.
 
-    def __init__(self):
+    `modal=True` gives it `StartEnigma`'s modal session (`ModalSession`)
+    instead of the recording one, and `with_channel_list` then opens the info
+    bar on it as its first dialog, so popups reach the screen as they do on
+    the receiver.
+    """
+
+    def __init__(self, modal=False):
+        self.modal = modal
         self.service_center = ServiceCenter.getInstance()
         self.epg = EPGCache.getInstance()
         self.volume = DVBVolumeControl.getInstance()
@@ -3035,7 +3060,7 @@ class Receiver:
         self.frontend = Frontend()
         self.service = Service(self.info, self.frontend)
         self.nav = Navigation(self.service, TVP1)
-        self.session = Session(self.nav)
+        self.session = ModalSession(self.nav) if modal else Session(self.nav)
 
         self.service_center.contents = {
             BOUQUET_ROOT: [
@@ -3111,16 +3136,22 @@ class Receiver:
         return timer
 
     def with_channel_list(self, selectable=(TVP1, TVN)):
-        InfoBar.instance = InfoBar(
-            ChannelList(
-                selectable,
-                bouquets={
-                    FIRST_BOUQUET: [TVP1, TVN],
-                    SECOND_BOUQUET: [POLSAT],
-                },
-                nav=self.nav,
-            )
+        servicelist = ChannelList(
+            selectable,
+            bouquets={
+                FIRST_BOUQUET: [TVP1, TVN],
+                SECOND_BOUQUET: [POLSAT],
+            },
+            nav=self.nav,
         )
+        if self.modal:
+            # StartEnigma opens the info bar as the session's first dialog;
+            # its OSD hides itself a few seconds later, which is how it is
+            # when a popup usually arrives.
+            InfoBar.instance = self.session.open(ModalInfoBar, servicelist)
+            InfoBar.instance.hide()
+            return servicelist
+        InfoBar.instance = InfoBar(servicelist)
         # StartEnigma opens the info bar as the session's first dialog.
         self.session.current_dialog = InfoBar.instance
         return InfoBar.instance.servicelist

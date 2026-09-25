@@ -402,7 +402,7 @@ class ZapHistoryPublisher(Publisher):
         else is playing - a zap the history does not know about - and then
         `setHistoryPath()` plays it.
         """
-        from .service import infobar_on_screen, play_service
+        from .service import channel_list_may_zap, play_service
 
         read = self._read()
         if read is None:
@@ -413,10 +413,11 @@ class ZapHistoryPublisher(Publisher):
             return GONE
         index, reference = found
         playing = current_service_reference(self.session)
-        if not infobar_on_screen(self.session):
+        if not channel_list_may_zap(self.session):
             # A screen is open over the info bar; the history's own calls
             # would move the channel list under it. Played directly, and the
-            # list is left as it is.
+            # list is left as it is. An information popup is not such a
+            # screen, as for `cmd/zap`.
             # Asked through `service.zap`'s own check, so a session without a
             # player gets `cmd/zap`'s sentence on `last_error` rather than
             # raising out of the command.

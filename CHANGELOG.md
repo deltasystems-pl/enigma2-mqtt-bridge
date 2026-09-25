@@ -48,6 +48,14 @@ version that has no section here.
 
 ### Fixed
 
+- A zap from Home Assistant made while an information popup was on the television - the one
+  `cmd/message` shows, or the receiver's own "Zapped to timer service" - was played directly and
+  left out of the receiver's zap history, as if a menu were open. It now goes through the channel
+  list and is recorded, and the popup stays until its own timeout. The same holds for
+  `cmd/zap_history` and for the zap `cmd/bouquet` makes. Only a plain information, warning or
+  error popup directly over the info bar counts: a question, a popup over any other screen, or one
+  already closing is still treated as a screen open, and `cmd/history_clear` still refuses under
+  any popup. [docs/TOPICS.md](docs/TOPICS.md) has the exact rule.
 - `cmd/timer` `delete` refused a finished timer - "no timer on ..." - although OpenWebif and the
   receiver's own timer list still showed it, so a household panel built on OpenWebif offered a
   delete that always failed. It now deletes finished, failed and disabled timers too, and
@@ -85,6 +93,10 @@ version that has no section here.
   simple `MessageBox`, the info bar opens it only while it is the executing dialog, and the
   session stacks the info bar under it with its `shown` state. Tests can build "a popup over
   the info bar" through that path instead of setting the dialog stack by hand.
+- The zap stubs' info bar and the popup model are one screen when a test asks for it:
+  `Receiver(modal=True)` runs the modal session, and its channel list's info bar is
+  `InfoBar.instance`, the session's first dialog and the screen that opens queued popups, as on
+  the receiver. The zap-under-a-popup tests take their dialog stack from there.
 
 ## [0.3.0] - 2026-09-25
 

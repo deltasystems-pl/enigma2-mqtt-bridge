@@ -961,12 +961,24 @@ Six cases play the service directly, as before 0.3.0, and are **not recorded**:
 
 | Case | Why |
 |---|---|
-| a screen is open over the info bar - the channel list, the EPG, a menu, a question, a recording being played back | the zap would work on a list somebody is looking at, or leave the remote on a channel list opened out of sight. The receiver's executing dialog (`session.current_dialog`) must be the info bar itself; when the session does not say, a screen counts as open |
+| a screen is open over the info bar - the channel list, the EPG, a menu, a question, a recording being played back - but not an information popup alone (below) | the zap would work on a list somebody is looking at, or leave the remote on a channel list opened out of sight. The receiver's executing dialog (`session.current_dialog`) must be the info bar itself; when the session does not say, a screen counts as open |
 | timeshift is active, or waiting to be saved - and also when the image's timeshift state cannot be read | the channel list would ask on the television, with no timeout, whether to leave timeshift. The plugin treats any active timeshift as blocking, whatever the image's own "check timeshift" setting says |
 | the channel list is in picture-in-picture zap mode | the channel list would zap the small picture |
 | the channel list is in radio mode | a television bouquet entered under the radio root would be saved as the radio list's root |
 | the service is in no published bouquet (a radio service, a bouquet `bouquets_for_select` leaves out, a reference in no bouquet) | there is no bouquet to enter it through; logged once per service |
 | the channel list could not select the service, and nothing was tuned | the published bouquets are read once a minute, so a bouquet edited since then, or a list that hides the channel, leaves the selection on what is playing, and the channel list re-zaps that. The service is then played directly - unless it is protected by parental control, when the PIN on the television is what it waits for |
+
+**An information popup is not a screen open.** When the only thing open is a popup directly over
+the info bar - the receiver's own "Zapped to timer service", a recording or zap error, or what
+`cmd/message` shows - the zap goes through the channel list and is recorded, and the popup stays
+until its own timeout, as it does after the receiver's own zap-timer zap. A protected channel's
+PIN is queued behind the popup and appears when it closes, as it would for a direct play. Exactly
+this counts: the image's own
+`Screens.MessageBox.MessageBox` (not a class built on it), of type information, warning or error,
+with no answers to choose from, executing, with the info bar as the one screen under it. A question
+(which is what a message box queued without a type is), a type the image does not know, a popup
+over any other screen - the movie player, the channel list - and a popup already closing still
+count as a screen open.
 
 **From standby** the receiver is woken first. Its standby screen closes on the next turn of the
 main loop and plays the channel it slept on; the zap follows on the turn after that, so it is
@@ -977,9 +989,10 @@ leave standby" and no zap follows. **Any later zap replaces one still waiting** 
 the moment between that and the waiting zap running.
 
 A zap made this way asks for a parental-control PIN on the television exactly as one from the
-remote does, and it never opens or shows a screen of its own. The same "screen open" rule applies
-to `cmd/zap_history` (played directly, the history left as it is) and to the zap `cmd/bouquet`
-makes after changing the context.
+remote does, and it never opens or shows a screen of its own. The same "screen open" rule applies,
+information popup included, to `cmd/zap_history` (played directly, the history left as it is) and
+to the zap `cmd/bouquet` makes after changing the context. `cmd/history_clear` still refuses under
+a popup (`screen_open`): it is the 0 key, and with a popup on the screen the key goes to the popup.
 
 ### `cmd/history_clear` is the 0 key - since 0.3.0
 

@@ -103,6 +103,17 @@ direct-play case above, the `screen_open` refusal of `cmd/history_clear`, and th
 replacement of a waiting zap by any later one, and `cmd/zap_history` checking the entry before it
 wakes the receiver.
 
+**Amended again 2026-09-25 (after 0.3.0).** An information popup directly over the info bar is not
+a screen open: a queued popup is opened with `session.open`, so while it shows it is the executing
+dialog, and a zap made then - under a `cmd/message` popup, or under the image's own "Zapped to
+timer service" - was played directly and left out of the history. The exception is narrow: exactly
+`Screens.MessageBox.MessageBox`, of type information, warning or error (`TYPE_MESSAGE`, which only
+a type the image does not know becomes, is not included), with an empty answer list, executing,
+and with `dialog_stack` holding the info bar alone. A question - what a message box queued without
+a type is - never qualifies. The popup is left to its own timeout, as the image's channel-list zap
+leaves it. `cmd/zap`, `cmd/zap_history` and the zap of `cmd/bouquet` share the rule;
+`cmd/history_clear` does not, because it is the 0 key and a key goes to the popup.
+
 **Discovery mode announces the clear button and no history select.** A core MQTT select carries its
 options inside the discovery payload, so a list that changes on every zap would mean republishing
 discovery on every zap. The companion integration builds the select from the topic.
