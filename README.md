@@ -39,8 +39,8 @@ zaps back to it.
    well-known password.
 2. Create a broker login for the receiver only, not the one Home Assistant uses. On a broker that
    enforces ACLs, [docs/SETUP.md](docs/SETUP.md#broker-access) has one that limits the login to
-   the box's own topics. The Mosquitto add-on in Home Assistant accepts an ACL file but does not
-   enforce it, so there the dedicated login is all you get.
+   the box's own topics. The Mosquitto add-on in Home Assistant (7.1.1) accepts an ACL file but
+   does not enforce it, so there the dedicated login is all you get.
 3. Add the feed and install, over SSH on the receiver:
 
    ```sh

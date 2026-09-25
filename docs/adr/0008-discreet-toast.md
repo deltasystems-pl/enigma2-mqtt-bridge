@@ -1,7 +1,7 @@
 # ADR-0008: The discreet toast is made of widgets that bind no keys, refuses a timeout it cannot honour, and is deleted rather than closed
 
 **Status:** accepted 2026-09-23, amended 2026-09-23 (twice: the backslash rule, then the popup
-under it), amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) (the box-only setting)
+under it), amended 2026-09-25 (a note on the Context), amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) (the box-only setting)
 **Date:** 2026-09-23
 **Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §2, in part - it
 described this feature, and three parts of it were right for the wrong reason or contradicted
@@ -52,6 +52,10 @@ Two further facts were not in §2 at all. The standby screen is a full-screen bl
 a toast - which has to be above the channel list, also at 0 - is drawn over it on a television that
 is still on. And enigma2's text renderer reads a backslash, a `c` and the next eight characters as a
 colour change, so a payload could recolour its own text, which is not „one fixed appearance".
+
+(Amended 2026-09-25, a note for the reader, nothing reversed: the last sentence describes the
+receiver before this decision. Neither style can be recoloured by a payload any more - the
+decision below removes every backslash from the text of the toast and of the popup.)
 
 ## Decision
 

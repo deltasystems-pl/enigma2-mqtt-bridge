@@ -66,7 +66,7 @@ What this costs, what it rules out, and what has to change if it is ever reverse
 | [0005](0005-softcam-restart.md) | The softcam is restarted by collapsing its instances, counted by process roots | accepted 2026-09-22, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) |
 | [0006](0006-volatile-fields-and-publish-on-change.md) | A self-stamped field takes no part in publish-on-change | accepted 2026-09-22 |
 | [0007](0007-cec-standby-workaround.md) | The CEC standby workaround identifies the television's standby when it is queued, and holds the echo across the close | accepted 2026-09-22, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) |
-| [0008](0008-discreet-toast.md) | The discreet toast is made of widgets that bind no keys, refuses a timeout it cannot honour, and is deleted rather than closed | accepted 2026-09-23, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) |
+| [0008](0008-discreet-toast.md) | The discreet toast is made of widgets that bind no keys, refuses a timeout it cannot honour, and is deleted rather than closed | accepted 2026-09-23, amended 2026-09-23 and 2026-09-25, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) |
 | [0009](0009-the-openwebif-page-trusts-openwebif.md) | The OpenWebif page trusts OpenWebif, and exposes every setting and command | accepted 2026-09-23, amended by [ADR-0010](0010-the-page-inside-openwebif.md) |
 | [0010](0010-the-page-inside-openwebif.md) | OpenWebif's panel load gets a fragment framing the page, and the page shows the last screenshot | accepted 2026-09-23 |
 | [0011](0011-epg-import-on-demand.md) | The EPG import uses the importer enigma2 loaded, and is followed by polling, never hooked | accepted 2026-09-23 |

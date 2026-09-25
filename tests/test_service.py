@@ -506,6 +506,32 @@ def test_a_zap_from_standby_waits_for_the_restore_and_is_recorded(live_bridge, r
     assert channel_list.zaps == 1
 
 
+def test_a_zap_made_while_the_standby_screen_closes_is_not_recorded(live_bridge, receiver):
+    """Why the zap after a wake waits one more turn: inside `onClose` the screen is still open.
+
+    The standby screen is the executing dialog until it has been popped, and it
+    is popped only after its `onClose` has been walked. A zap from in there
+    meets a screen open over the info bar, so it is played directly and the
+    receiver's history never hears of it.
+    """
+    channel_list = receiver.with_channel_list([TVP1, TVN])
+    screen = receiver.enter_standby(restoring=True)
+    assert receiver.session.current_dialog is screen
+    seen = []
+
+    def zap_inside_on_close():
+        seen.append(receiver.session.current_dialog)
+        seen.append(_zap(live_bridge, receiver, TVN))
+
+    screen.onClose.append(zap_inside_on_close)
+    screen.finish_close()
+    assert seen == [screen, None]
+    assert receiver.nav.sref == TVN
+    assert channel_list.zaps == 0
+    assert _front(channel_list) != TVN
+    assert receiver.session.current_dialog is InfoBar.instance
+
+
 def test_a_standby_that_never_ends_says_so(live_bridge, receiver):
     channel_list = receiver.with_channel_list([TVP1, TVN])
     receiver.enter_standby(restoring=True)

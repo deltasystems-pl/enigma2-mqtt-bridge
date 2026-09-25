@@ -34,7 +34,7 @@ import test_softcam
 from conftest import POLSAT, TVP1, RecordTimerEntry, install_epg_importer
 
 from MQTTBridge import bridge as bridge_module
-from MQTTBridge import discovery, hdd, keys, process, recording, volume
+from MQTTBridge import discovery, hdd, keys, process, recording, volume, zaphistory
 from MQTTBridge.publishers import PUBLISHER_CLASSES
 
 NODE = "vuuno4kse_005301"
@@ -66,10 +66,18 @@ def renders(*names):
 
 
 def every_capability():
-    """Every capability a bridge can ever claim: the core ones, and one per publisher."""
+    """Every capability a bridge can ever claim.
+
+    The core ones, one per publisher, the extra one a publisher claims on top
+    (`history_clear`), and the two with no publisher behind them (`message`,
+    `uninstall`). `test_every_capability_is_in_every_capability` fails when a
+    new one is not added here.
+    """
     names = set(bridge_module.CORE_CAPABILITIES)
     names.update(publisher.name for publisher in PUBLISHER_CLASSES if publisher.name)
     names.add(bridge_module.MESSAGE_CAPABILITY)
+    names.add(bridge_module.UNINSTALL_CAPABILITY)
+    names.add(zaphistory.CLEAR_CAPABILITY)
     return sorted(names)
 
 
@@ -163,6 +171,47 @@ def test_the_full_payload_really_has_every_optional_template():
     for name in ("softcam.val_tpl", "epg_import.json_attr_tpl", "channel_select.cmd_tpl",
                  "process_started.val_tpl", "trigger/blue_long.val_tpl"):
         assert name in TEMPLATES
+
+
+def test_every_capability_is_in_every_capability():
+    """A capability claimed outside a publisher's name is a module constant; each is listed.
+
+    `everything()` is only a box that can do everything if `every_capability()`
+    names every capability there is. The ones that are not a publisher's name
+    are all spelled as a `*_CAPABILITY` constant in some module, so every module
+    of the plugin is read for them.
+    """
+    import importlib
+    import pkgutil
+
+    import MQTTBridge
+
+    found = {}
+    for module_info in pkgutil.iter_modules(MQTTBridge.__path__):
+        if module_info.name.startswith("_"):
+            continue
+        module = importlib.import_module("MQTTBridge." + module_info.name)
+        for attribute, value in vars(module).items():
+            if attribute.endswith("_CAPABILITY") and isinstance(value, str):
+                found[module_info.name + "." + attribute] = value
+    assert {"bridge.UNINSTALL_CAPABILITY", "zaphistory.CLEAR_CAPABILITY"} <= set(found)
+    assert {name: value for name, value in found.items()
+            if value not in every_capability()} == {}
+
+
+def test_every_capability_a_component_is_gated_on_is_claimed(monkeypatch):
+    """No component of the full payload is left out because its capability was not named."""
+    gates = set()
+    add = discovery._Components.add
+
+    def recording_add(self, key, platform, needs, **fields):
+        gates.add(needs)
+        return add(self, key, platform, needs, **fields)
+
+    monkeypatch.setattr(discovery._Components, "add", recording_add)
+    everything()
+    assert zaphistory.CLEAR_CAPABILITY in gates
+    assert sorted(gate for gate in gates - {None} if gate not in every_capability()) == []
 
 
 @pytest.mark.parametrize("name", sorted(TEMPLATES))

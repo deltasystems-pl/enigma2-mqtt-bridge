@@ -402,9 +402,10 @@ touching and publish there as the box's user: the message must not arrive. Mosqu
 ACL-denied publish silently and the publishing client sees success either way, so an ACL that is
 too tight and one that works look identical from the box.
 
-**The Mosquitto add-on in Home Assistant does not enforce an ACL.** Version 7.1.1 accepts an
-`acl_file` in its customize folder, logs nothing, and never consults it
-([home-assistant/addons#4721](https://github.com/home-assistant/addons/issues/4721)). On the
+**The Mosquitto add-on in Home Assistant does not enforce an ACL.** It accepts an `acl_file` in
+its customize folder, logs nothing, and never consults it. This was reported against 7.1.0
+([home-assistant/addons#4721](https://github.com/home-assistant/addons/issues/4721), closed as
+stale without a fix) and is still the case in 7.1.1. On the
 add-on, use the dedicated login, run the by-effect check above rather than trusting the file, and
 do not count on a topic boundary. If you need the topic boundary, use a broker that enforces ACLs.
 

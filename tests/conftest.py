@@ -1694,10 +1694,35 @@ notifications_module.Notifications = Notifications
 standby_module = _module("Screens.Standby")
 
 
-class StandbyScreen:
-    def __init__(self):
+class _OpenStandby:
+    """The standby screen as the session's executing dialog, from open to close.
+
+    On the receiver `Standby` is opened like any other screen, so while it is
+    open it is `session.current_dialog` - and it still is while `onClose` is
+    walked, because `StartEnigma`'s `processDelay` runs `doClose()` before it
+    pops the dialog. A zap made inside `onClose` therefore meets a screen open
+    over the info bar and is played directly, out of the history. The stubs
+    below model that, so a test cannot pass on a zap the box would not record.
+    """
+
+    def _open(self, session):
+        self.session = session
+        self.under = None
+        if session is not None:
+            self.under = session.current_dialog
+            session.current_dialog = self
+
+    def _closed(self):
+        session = self.session
+        if session is not None and session.current_dialog is self:
+            session.current_dialog = self.under
+
+
+class StandbyScreen(_OpenStandby):
+    def __init__(self, session=None):
         self.onClose = []
         self.power_calls = 0
+        self._open(session)
 
     def Power(self):
         self.power_calls += 1
@@ -1706,9 +1731,10 @@ class StandbyScreen:
         standby_module.inStandby = None
         for function in list(self.onClose):
             function()
+        self._closed()
 
 
-class RestoringStandbyScreen:
+class RestoringStandbyScreen(_OpenStandby):
     """The standby screen as a zap from standby meets it, closing a turn late.
 
     From `Screens/Standby.pyc` (`Standby2`) and `StartEnigma.py`: `Power()` is
@@ -1720,12 +1746,13 @@ class RestoringStandbyScreen:
     walks the list itself, not a copy.
     """
 
-    def __init__(self, nav=None, restore=None):
+    def __init__(self, nav=None, restore=None, session=None):
         self.nav = nav
         self.restore = restore
         self.onClose = [self._on_close]
         self.power_calls = 0
         self.closing = False
+        self._open(session)
 
     def Power(self):
         self.power_calls += 1
@@ -1734,6 +1761,7 @@ class RestoringStandbyScreen:
     def finish_close(self):
         for function in self.onClose:
             function()
+        self._closed()
 
     def _on_close(self):
         standby_module.inStandby = None
@@ -2887,9 +2915,11 @@ class Receiver:
     def enter_standby(self, restoring=False):
         """`restoring`: the screen closes a turn late and plays what the box slept on."""
         if restoring:
-            standby_module.inStandby = RestoringStandbyScreen(self.nav, self.nav.sref)
+            standby_module.inStandby = RestoringStandbyScreen(
+                self.nav, self.nav.sref, session=self.session
+            )
         else:
-            standby_module.inStandby = StandbyScreen()
+            standby_module.inStandby = StandbyScreen(session=self.session)
         config.misc.standbyCounter.increment()
         return standby_module.inStandby
 
