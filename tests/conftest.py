@@ -1560,20 +1560,8 @@ skin_module.readSkin = readSkin
 message_box_module = _module("Screens.MessageBox")
 
 
-class MessageBox:
-    # enigma2's own numbering: the yes/no dialog is 0.
-    TYPE_YESNO = 0
-    TYPE_INFO = 1
-    TYPE_WARNING = 2
-    TYPE_ERROR = 3
-
-    def __init__(self, session=None, text="", type=TYPE_INFO, timeout=-1, **kwargs):
-        self.text = text
-        self.type = type
-        self.timeout = timeout
-
-
-message_box_module.MessageBox = MessageBox
+# `MessageBox` itself is defined with the session model below: on the receiver it
+# is a screen the session opens, and the model's screen is defined there.
 
 plugins_package = _module("Plugins", package=True)
 plugin_module = _module("Plugins.Plugin")
@@ -1646,21 +1634,49 @@ class Notifications:
     raises = False
 
 
-def AddPopup(text, type=1, timeout=10, id=None):
+def AddPopup(text, type, timeout, id=None):
+    """The image's `AddPopup` (Notifications.pyc 68-72): no default type or timeout.
+
+    It removes an earlier popup with the same id, then queues a `MessageBox` with
+    `close_on_any_key=True`; the info bar opens it when it next drains the queue.
+    `popups` records every call for the tests; `removed` records only the
+    plugin's own `RemovePopup` calls, not the one made here.
+    """
     if Notifications.raises:
         raise RuntimeError("no screen to put it on")
     Notifications.popups.append({"text": text, "type": type, "timeout": timeout, "id": id})
+    if id is not None:
+        _remove_popup(id)
+    AddNotificationWithID(
+        id, MessageBox, text=text, type=type, timeout=timeout, close_on_any_key=True
+    )
 
 
 def RemovePopup(id):
     Notifications.removed.append(id)
+    _remove_popup(id)
+
+
+def _remove_popup(id):
+    """`RemovePopup` as the image runs it (Notifications.pyc 54-65).
+
+    A queued entry with that id is dropped; a shown one is asked to `close()`,
+    which takes effect on the session's next turn like any other close.
+    """
     for entry in list(notifications):
         if entry[4] and entry[4] == id:
             notifications.remove(entry)
+    for entry in list(current_notifications):
+        if entry[0] == id:
+            entry[1].close()
 
 
 def _add_notification(fnc, screen, id, *args, **kwargs):
     """`__AddNotification`: append, then tell every listener, with no arguments."""
+    # Notifications.pyc 12-13: a MessageBox that comes through the queue is always
+    # a simple one - the image tests the class's repr, not the class.
+    if ".MessageBox'>" in repr(screen):
+        kwargs["simple"] = True
     notifications.append((fnc, screen, args, kwargs, id))
     for listener in notificationAdded:
         listener()
@@ -1822,6 +1838,14 @@ class ModelScreen:
     def execEnd(self):
         self.execing = False
 
+    def show(self):
+        # Screen.pyc 132-143, without the GUI object it would also show.
+        self.shown = True
+
+    def hide(self):
+        # Screen.pyc 147-150.
+        self.shown = False
+
     def doClose(self):
         for function in list(self.onClose):
             function()
@@ -1831,6 +1855,74 @@ class ModelScreen:
             self.close_on_next_exec = retval
             return
         self.session.close(self, *retval)
+
+
+class MessageBox(ModelScreen):
+    """The receiver's `Screens/MessageBox.pyc` (OpenViX 6.6), where the plugin can notice.
+
+    Opened without a type it is a **question**, as on the receiver: `type`
+    defaults to `TYPE_YESNO` and `list` to Yes and No. A stub that defaulted to
+    an information popup would let a test open "a popup" where the receiver
+    shows somebody a question, and pass on exactly the case a rule about
+    popups has to refuse.
+
+    From the image's `__init__` (MessageBox.pyc 29-107): a type outside
+    `range(TYPE_MESSAGE + 1)` becomes `TYPE_MESSAGE`; the timeout is kept as
+    `int(timeout)`, but line 106 compares the argument itself with 0, so a
+    string raises; the skin names follow `simple`, `wizard` and `skin_name`;
+    and only a question has answers - its `list` is the caller's if it is not
+    empty, else Yes/No (No/Yes with `default=False`), while every other type's
+    is `[]` whatever was passed. The labels are not translated and the
+    countdown is not modelled: a test closes the box with `close(True)`, which
+    is what `ok()` does on an empty list when the timeout runs out (245-249,
+    159). `tests/test_message_box_stub.py` pins the signature, the constants,
+    and each of these rules against the image.
+
+    It is a `ModelScreen`, so `ModalSession` can open it as the info bar opens
+    a queued notification.
+    """
+
+    # enigma2's own numbering: the yes/no dialog is 0 (MessageBox.pyc 15-19).
+    TYPE_YESNO = 0
+    TYPE_INFO = 1
+    TYPE_WARNING = 2
+    TYPE_ERROR = 3
+    TYPE_MESSAGE = 4
+
+    def __init__(self, session, text, type=TYPE_YESNO, timeout=0, close_on_any_key=False,
+                 default=True, enable_input=True, msgBoxID=None, picon=True, simple=False,
+                 wizard=False, list=None, skin_name=None, timeout_default=None, title=None):
+        ModelScreen.__init__(self, session)
+        self.text = text
+        self.type = type if type in range(self.TYPE_MESSAGE + 1) else self.TYPE_MESSAGE
+        self.timeout = int(timeout)
+        self.close_on_any_key = close_on_any_key
+        self.msgBoxID = msgBoxID
+        self.skinName = ["MessageBox"]
+        if simple:
+            self.skinName = ["MessageBoxSimple"] + self.skinName
+        if wizard:
+            self.skinName = ["MessageBoxWizard"]
+        if isinstance(skin_name, str):
+            self.skinName = [skin_name] + self.skinName
+        if not list:
+            list = []
+        if type == self.TYPE_YESNO:
+            if list:
+                self.list = list
+            elif default:
+                self.list = [("Yes", True), ("No", False)]
+            else:
+                self.list = [("No", False), ("Yes", True)]
+        else:
+            self.list = []
+        self.timeout_default = timeout_default
+        self.timerRunning = False
+        if timeout > 0:
+            self.timerRunning = True
+
+
+message_box_module.MessageBox = MessageBox
 
 
 class ModalSession:
@@ -1858,12 +1950,20 @@ class ModalSession:
     def execBegin(self, first=True, do_show=True):
         assert not self.in_exec
         self.in_exec = True
-        self.current_dialog.execBegin()
+        current = self.current_dialog
+        current.execBegin()
+        # StartEnigma.py 85-87: shown unless its execBegin opened another dialog,
+        # or it is coming back from under one it was hidden beneath.
+        if current == self.current_dialog and do_show:
+            current.show()
 
     def execEnd(self, last=True):
         assert self.in_exec
         self.in_exec = False
         self.current_dialog.execEnd()
+        # StartEnigma.py 94. `pushCurrent` has already stacked the dialog with the
+        # `shown` it had before this, so the stack keeps the info bar's own state.
+        self.current_dialog.hide()
 
     def instantiateDialog(self, screen, *arguments, **kwargs):
         return screen(self, *arguments, **kwargs)
@@ -1940,9 +2040,16 @@ class NotifiableInfoBar(ModelScreen):
             del notifications[0]
             callback = entry[0]
             if callback:
-                self.session.openWithCallback(callback, entry[1], *entry[2], **entry[3])
+                dialog = self.session.openWithCallback(callback, entry[1], *entry[2], **entry[3])
             else:
-                self.session.open(entry[1], *entry[2], **entry[3])
+                dialog = self.session.open(entry[1], *entry[2], **entry[3])
+            # InfoBarGenerics 3880-3882 and 3894-3895: what is on screen, by id,
+            # until it closes - which is what `RemovePopup` closes. The image's
+            # `ZapError` branch (3867-3875) and `onSessionOpenCallback` are not
+            # modelled.
+            shown = (entry[4], dialog)
+            current_notifications.append(shown)
+            dialog.onClose.append(lambda: current_notifications.remove(shown))
 
 
 class Standby(ModelScreen):
