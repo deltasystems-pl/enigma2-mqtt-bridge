@@ -1561,16 +1561,48 @@ message_box_module = _module("Screens.MessageBox")
 
 
 class MessageBox:
-    # enigma2's own numbering: the yes/no dialog is 0.
+    """The receiver's `Screens/MessageBox.pyc` (OpenViX 6.6), where the plugin can notice.
+
+    Opened without a type it is a **question**, as on the receiver: `type`
+    defaults to `TYPE_YESNO` and `list` to Yes and No. A stub that defaulted to
+    an information popup would let a test open "a popup" where the receiver
+    shows somebody a question, and pass on exactly the case a rule about
+    popups has to refuse. `tests/test_message_box_stub.py` pins every default
+    against the image.
+
+    From the image's `__init__` (MessageBox.pyc 29-101): a type outside
+    `range(TYPE_MESSAGE + 1)` becomes `TYPE_MESSAGE`; the timeout is kept as
+    `int(timeout)`; and only a question has answers - its `list` is the
+    caller's, or Yes/No (No/Yes with `default=False`), while every other type's
+    is `[]` whatever was passed. The screen itself is not modelled.
+    """
+
+    # enigma2's own numbering: the yes/no dialog is 0 (MessageBox.pyc 15-19).
     TYPE_YESNO = 0
     TYPE_INFO = 1
     TYPE_WARNING = 2
     TYPE_ERROR = 3
+    TYPE_MESSAGE = 4
 
-    def __init__(self, session=None, text="", type=TYPE_INFO, timeout=-1, **kwargs):
+    def __init__(self, session, text, type=TYPE_YESNO, timeout=0, close_on_any_key=False,
+                 default=True, enable_input=True, msgBoxID=None, picon=True, simple=False,
+                 wizard=False, list=None, skin_name=None, timeout_default=None, title=None):
+        self.session = session
         self.text = text
-        self.type = type
-        self.timeout = timeout
+        self.type = type if type in range(self.TYPE_MESSAGE + 1) else self.TYPE_MESSAGE
+        self.timeout = int(timeout)
+        self.close_on_any_key = close_on_any_key
+        self.msgBoxID = msgBoxID
+        self.timeout_default = timeout_default
+        if type == self.TYPE_YESNO:
+            if list:
+                self.list = list
+            elif default:
+                self.list = [("Yes", True), ("No", False)]
+            else:
+                self.list = [("No", False), ("Yes", True)]
+        else:
+            self.list = []
 
 
 message_box_module.MessageBox = MessageBox
@@ -1646,7 +1678,8 @@ class Notifications:
     raises = False
 
 
-def AddPopup(text, type=1, timeout=10, id=None):
+def AddPopup(text, type, timeout, id=None):
+    # The image's signature (Notifications.pyc 68): no default type or timeout.
     if Notifications.raises:
         raise RuntimeError("no screen to put it on")
     Notifications.popups.append({"text": text, "type": type, "timeout": timeout, "id": id})

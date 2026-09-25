@@ -77,6 +77,10 @@ version that has no section here.
 - The test stubs' standby screen is the session's executing dialog while it is open, and still
   while its `onClose` is walked, as on the receiver. A zap made inside `onClose` - which the
   receiver plays outside its zap history - can no longer pass a test as a recorded one.
+- The test stubs' `MessageBox` opened without a type is a yes/no question, as on the receiver,
+  not an information popup; it has the receiver's fifth type, `TYPE_MESSAGE`, and a question's
+  Yes/No answers. `AddPopup` needs a type and a timeout, as the receiver's does. A new test pins
+  both signatures to the receiver's.
 
 ## [0.3.0] - 2026-09-25
 
