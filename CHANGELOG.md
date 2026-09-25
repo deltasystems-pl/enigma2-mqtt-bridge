@@ -23,6 +23,9 @@ version that has no section here.
   plugin queues it because a command can arrive with any screen open.
 - [ADR-0008](docs/adr/0008-discreet-toast.md) carries a dated note under its Context: the sentence
   saying a payload could recolour its own text describes the receiver before that decision.
+- The PRD's copy here ([ADR-0000](docs/adr/0000-prd.md)) points to the companion integration's
+  ADR-0007, which supersedes its paragraph saying entity ids derive from the English keys: Home
+  Assistant makes them from the name in the installation's language.
 
 ### Fixed
 
