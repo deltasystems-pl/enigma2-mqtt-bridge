@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "package": "enigma2-plugin-extensions-mqttbridge",
+  "serial": 1,
+  "issued": 1790433905,
+  "key_id": "5de3b24c97e88660",
+  "floor": "0.2.0",
+  "releases": [
+    {"version": "0.3.0", "filename": "enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk", "size": 259730, "sha256": "12d0bcaa49ff02c7b1825da00d384dadc85d63d84dc05e733d78039c9fab8793", "commit": "26c996bcfa6cecc3ad8540f3fe2a86d74862c93b", "commit_time": 1790324861, "contract": 1, "min_integration": null, "depends": ["python3-core", "python3-json", "python3-threading", "python3-netclient"], "self_update": false, "withdrawn": null},
+    {"version": "0.2.0", "filename": "enigma2-plugin-extensions-mqttbridge_0.2.0_all.ipk", "size": 167622, "sha256": "3e50979ef5583f7e5c7785dec9190fa9ec03adc8e07284905ce74617c7a65568", "commit": "edc7ca6b37d0bc06ce485613e7a7ecb8f7ee7d3a", "commit_time": 1790087001, "contract": 1, "min_integration": null, "depends": ["python3-core", "python3-json", "python3-threading", "python3-netclient"], "self_update": false, "withdrawn": null},
+    {"version": "0.1.0", "filename": "enigma2-plugin-extensions-mqttbridge_0.1.0_all.ipk", "size": 90588, "sha256": "95b0f01f155aa4caa2f92c945c3c3f6db6ce4b82767781d840694b32c35caeb6", "commit": "924d1e9cc97674b9f203f6298a53a04e12686684", "commit_time": 1789574655, "contract": 0, "min_integration": null, "depends": ["python3-core", "python3-json", "python3-threading", "python3-netclient"], "self_update": false, "withdrawn": null}
+  ]
+}
