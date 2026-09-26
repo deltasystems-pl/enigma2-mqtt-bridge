@@ -66,8 +66,9 @@ version that has no section here.
   permissions, nothing installed, and no code from the repository at all - the artifact, its
   hash with the runner's own `sha256sum`, the signature from a fixed step (the key on OpenSSL's
   stdin only, `base64` and `openssl` by absolute path, OpenSSL's arguments fixed) and the signature
-  handed on - while the repository's checks run in key-free jobs before (`precheck`) and after
-  (`publish`, which verifies the signature before it publishes); `emergency-index.yml`, in a concurrency group of its
+  handed on as its only output - while the repository's checks run in key-free jobs before
+  (`precheck`, a fixed check of the artifact against build's sha256 with gh-pages' whole history)
+  and after (`publish`, which verifies the signature before it publishes); `emergency-index.yml`, in a concurrency group of its
   own and startable by hand, publishes an index signed offline with the spare. The build and publish
   jobs read the whole history of `gh-pages` and refuse to build on or publish over a pair older than
   the newest it ever published, or none after one was - a rollback of the branch would otherwise

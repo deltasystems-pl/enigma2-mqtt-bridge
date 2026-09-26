@@ -25,13 +25,16 @@ meets them. It fails when:
   `permissions: {}` on a fresh hosted `ubuntu-24.04` runner; it declares `env`, `defaults`,
   `container` or `services` (or the workflow declares `env` or `defaults`); or it is anything but
   exactly four steps - download the artifact into `${{ runner.temp }}`, check its hash, sign, emit
-  the signature - with **no checkout and no code from the repository**: the runner keeps the
-  job's secrets in memory for the whole job and hosted runners give passwordless sudo, so anything
-  running anywhere in that job could read the key;
+  the signature, its only output - with **no checkout and no code from the repository**: the
+  runner keeps the job's secrets in memory for the whole job and hosted runners give passwordless
+  sudo, so anything running anywhere in that job could read the key;
 - the hash, sign and emit steps are not, byte for byte, the texts written here (`HASH_STEP`,
   `SIGN_STEP`, `EMIT_STEP`): the key is expanded once, into the pipeline that decodes it for
   OpenSSL's stdin, and OpenSSL's arguments are fixed - so no slice of the key can be printed and no
   provider, engine or configuration loaded into the process that reads it;
+- the key-free `precheck` job is not exactly a checkout with `fetch-depth: 0`, the fetch of
+  gh-pages, the download of the artifact into `index` and the fixed check of it against build's
+  sha256 output (`PRECHECK_STEP`), or `publish` stops running `wrap` and `verify`;
 - any workflow passes `--keyset`, which only the tests and the rehearsal may use;
 - `publish-index.yml`, `emergency-index.yml` or `index.yml` could let a failed guard pass: a run
   step without `shell: bash` (so without pipefail); a `continue-on-error`; a step condition other
@@ -326,6 +329,15 @@ SIGN_JOB_ENV = {
     "sign": {SECRET: "${{ secrets." + SECRET + " }}"},
     "emit": {},
 }
+# The key job's one output: the emitted signature, from the emit step, and nothing else.
+SIGN_JOB_OUTPUTS = {"signature": "${{ steps.emit.outputs.signature }}"}
+# The precheck job's steps that decide what gets checked, fixed like the key job's: the artifact
+# build uploaded, checked against build's sha256 output, with gh-pages' whole history.
+PRECHECK_STEP = ("python3 tools/make-index.py check --index index/releases.json "
+                 "--sha256 \"$EXPECTED\"")
+PRECHECK_ENV = {"EXPECTED": "${{ needs.build.outputs.sha256 }}"}
+PRECHECK_DOWNLOAD_WITH = {"name": "unsigned-index", "path": "index"}
+FETCH_HISTORY = "git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages"
 # What the repository's own code looks like on a command line, for the message only: the job that
 # holds the key runs none of it, and none of anything else either.
 _REPOSITORY_CODE = re.compile(r"(\btools/|\bsrc/|\.py\b|\bpython)")
@@ -607,6 +619,9 @@ def check_sign_job(loaded, texts):
         if job.get("needs") != ["build", "precheck"]:
             problems.append(f"{name}: job {job_name} waits for build and the key-free precheck: "
                             "`needs: [build, precheck]`")
+        if job.get("outputs") != SIGN_JOB_OUTPUTS:
+            problems.append(f"{name}: job {job_name}: its only output is "
+                            "`signature: ${{ steps.emit.outputs.signature }}`")
         problems.extend(_around_the_key(name, loaded[name]))
         steps = job.get("steps") or []
         kinds = [_step_kind(other) for other in steps]
@@ -642,6 +657,9 @@ def check_sign_job(loaded, texts):
             if (other.get("env") or {}) != SIGN_JOB_ENV[kind]:
                 problems.append(f"{other_where}: its environment is exactly "
                                 f"{SIGN_JOB_ENV[kind] or 'nothing'}")
+            if kind == "emit" and other.get("id") != "emit":
+                problems.append(f"{other_where}: the emit step's id is `emit`, which the job's "
+                                "output reads")
             extra = set(other) - {"name", "id", "shell", "working-directory", "env", "run"}
             if extra:
                 problems.append(f"{other_where}: `{sorted(extra)[0]}` has no place in the job "
@@ -658,14 +676,46 @@ def _around_the_key(name, workflow):
     """The repository's own checks run before and after the key-holding job, in jobs without it."""
     problems = []
     jobs = workflow.get("jobs") or {}
+    problems.extend(_precheck(name, jobs.get("precheck")))
     for job_name, command, words in (
-        ("precheck", "tools/make-index.py check", "re-checks the unsigned index before signing"),
         ("publish", "tools/make-index.py wrap", "verifies the signature with the embedded key"),
         ("publish", "tools/make-index.py verify", "accepts the pair as a reader would"),
     ):
         job = jobs.get(job_name)
         if not isinstance(job, dict) or not _runs(job, command):
             problems.append(f"{name}: job {job_name} {words} (`{command}`), without the key")
+    return problems
+
+
+def _precheck(name, job):
+    """The key-free precheck: the artifact build uploaded, checked against build's sha256 output,
+    with gh-pages' whole history - by fixed texts, not by a command that merely appears."""
+    where = f"{name}: job precheck"
+    if not isinstance(job, dict):
+        return [f"{where} re-checks the unsigned index before signing, without the key"]
+    problems = []
+    steps = [step for step in job.get("steps") or [] if isinstance(step, dict)]
+    checks = [step for step in steps if step.get("run") == PRECHECK_STEP]
+    if len(checks) != 1 or checks[0].get("env") != PRECHECK_ENV or \
+            checks[0].get("shell") != "bash":
+        problems.append(f"{where} re-checks the unsigned index before signing with exactly "
+                        f"`{PRECHECK_STEP}` and EXPECTED from build's sha256 output")
+    downloads = [step for step in steps
+                 if str(step.get("uses", "")).split("@")[0] == "actions/download-artifact"]
+    if len(downloads) != 1 or downloads[0].get("with") != PRECHECK_DOWNLOAD_WITH:
+        problems.append(f"{where} checks the artifact build uploaded: download `unsigned-index` "
+                        "into `index`, once")
+    checkouts = [step for step in steps
+                 if str(step.get("uses", "")).split("@")[0] == "actions/checkout"]
+    fetches = [step for step in steps if step.get("run") == FETCH_HISTORY]
+    if len(checkouts) != 1 or (checkouts[0].get("with") or {}).get("fetch-depth") != 0 or \
+            len(fetches) != 1:
+        problems.append(f"{where} checks against gh-pages' whole history: a checkout with "
+                        f"`fetch-depth: 0` and `{FETCH_HISTORY}`")
+    if job.get("needs") != "build":
+        problems.append(f"{where} checks what build hashed: `needs: build`")
+    if len(steps) != len(job.get("steps") or []) or len(steps) != 4:
+        problems.append(f"{where} is exactly checkout, fetch, download and check")
     return problems
 
 

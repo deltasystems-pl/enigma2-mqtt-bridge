@@ -222,6 +222,13 @@ SIGN_JOB_CHANGES = [
     ("    if: github.ref == 'refs/heads/main'\n    # A fresh",
      "    if: github.ref == 'refs/heads/main' || true\n    # A fresh",
      "must be refused off `main`"),
+    # The fourth review: the job's output, checked as exactly as its steps.
+    ("      signature: ${{ steps.emit.outputs.signature }}\n",
+     "      signature: ${{ steps.hash.outputs.signature }}\n", "its only output is"),
+    ("      signature: ${{ steps.emit.outputs.signature }}\n",
+     "      signature: ${{ steps.emit.outputs.signature }}\n      all: ${{ toJSON(env) }}\n",
+     "its only output is"),
+    ("        id: emit\n", "        id: handed-on\n", "the emit step's id is `emit`"),
 ]
 SIGN_JOB_CHANGES = [change if len(change) == 3 else (*change, CODE_OR_ACTION)
                     for change in SIGN_JOB_CHANGES]
@@ -341,6 +348,39 @@ def _new(copy, name, job="", steps="      - run: echo hi\n", on=None):
                         "        run: |\n          if ! python3 tools/make-index.py check --index "
                         "index/releases.json --sha256 \"$EXPECTED\"; then echo skipped; fi\n"),
      "a guard inside a condition can never fail its step"),
+    # The fourth review: precheck's check is a fixed text - the artifact, build's sha256, the
+    # whole history - not a command that merely appears somewhere in the job.
+    (lambda copy: _edit(copy, SIGN, "        run: python3 tools/make-index.py check --index "
+                        "index/releases.json --sha256 \"$EXPECTED\"\n",
+                        "        run: python3 tools/make-index.py check --index "
+                        "tests/vectors/any.json\n"),
+     "re-checks the unsigned index before signing with exactly"),
+    (lambda copy: _edit(copy, SIGN, " --sha256 \"$EXPECTED\"\n\n  sign:",
+                        "\n\n  sign:"),
+     "re-checks the unsigned index before signing with exactly"),
+    (lambda copy: _edit(copy, SIGN, "          EXPECTED: ${{ needs.build.outputs.sha256 }}\n"
+                        "        run: python3 tools/make-index.py check",
+                        "          EXPECTED: 0000\n        run: python3 tools/make-index.py check"),
+     "EXPECTED from build's sha256 output"),
+    (lambda copy: _edit(copy, SIGN, "          name: unsigned-index\n          path: index\n\n"
+                        "      - name: A consistent next index",
+                        "          name: unsigned-index\n          path: elsewhere\n\n"
+                        "      - name: A consistent next index"),
+     "checks the artifact build uploaded"),
+    (lambda copy: _edit(copy, SIGN, "          fetch-depth: 0\n"
+                        "          persist-credentials: false\n\n"
+                        "      - name: Fetch the published index and its history\n",
+                        "          persist-credentials: false\n\n"
+                        "      - name: Fetch the published index and its history\n"),
+     "against gh-pages' whole history"),
+    (lambda copy: _edit(copy, SIGN, "  precheck:\n    name: Check the unsigned index (no key)\n"
+                        "    needs: build\n", "  precheck:\n    name: Check the unsigned index "
+                        "(no key)\n    needs: [build]\n"),
+     "checks what build hashed"),
+    (lambda copy: _edit(copy, SIGN, " --sha256 \"$EXPECTED\"\n\n  sign:",
+                        " --sha256 \"$EXPECTED\"\n\n      - shell: bash\n"
+                        "        run: cp tests/vectors/any.json index/releases.json\n\n  sign:"),
+     "is exactly checkout, fetch, download and check"),
 ])
 def test_each_weakening_is_refused(copy, change, words):
     assert check_workflows.check(copy) == []

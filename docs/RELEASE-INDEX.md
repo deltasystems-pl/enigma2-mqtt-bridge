@@ -266,8 +266,10 @@ What remains is the residual this design accepts: those pinned programs and the 
 `tools/check-workflows.py` fails a pull request that would weaken this. Its docstring lists every
 rule; in short: the sign job's whole text is pinned by sha256; it is exactly the four steps
 above, its hash, sign and emit steps fixed texts written in the checker, byte for byte, with no
-checkout and nothing from the repository; it waits for `precheck`, and `precheck` and `publish` keep
-running the repository's checks without the key; it declares no `env` or `defaults` and runs on a
+checkout and nothing from the repository, and its only output the emitted signature; it waits for
+`precheck`, whose check is a fixed text too - the downloaded artifact, against build's sha256
+output, with gh-pages' whole history - and `publish` keeps verifying the signature and the pair
+without the key; it declares no `env` or `defaults` and runs on a
 hosted `ubuntu-24.04` runner; the `secrets` context appears once in the whole repository; only
 that job may name the `release-signing` environment; every `uses:`, flow style included, is pinned
 to a full commit SHA with its version beside it; no `pull_request_target`; in the chain and in
