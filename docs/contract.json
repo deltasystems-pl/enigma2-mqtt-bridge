@@ -1,0 +1,313 @@
+{
+  "schema": 1,
+  "about": "The topic contract of docs/TOPICS.md as data: the contract major, every state topic (payload kind, retain flag), command, info member with its type, setting with its type and whether cmd/config may write it, capability name, topic outside the node's tree, the named in-major exceptions of the Contract version section, and the planned additions of TOPICS.md section 5. Topic names are relative to <base>/<node>/. 'since' appears only where TOPICS.md states it. tools/check-contract.py fails when this file and TOPICS.md disagree, and when a release removes or retypes an entry of the previous release's copy without a new contract major, or drops an exception. Payload fields are not here; their types are the tables in TOPICS.md.",
+  "contract": 1,
+  "state_topics": {
+    "availability": {
+      "payload": "text",
+      "retained": true
+    },
+    "info": {
+      "payload": "json",
+      "retained": true
+    },
+    "power": {
+      "payload": "text",
+      "retained": true
+    },
+    "cec": {
+      "payload": "json",
+      "retained": true,
+      "since": "0.3.0"
+    },
+    "service": {
+      "payload": "json",
+      "retained": true
+    },
+    "epg": {
+      "payload": "json",
+      "retained": true
+    },
+    "channels": {
+      "payload": "json",
+      "retained": true,
+      "since": "0.2.0"
+    },
+    "bouquet": {
+      "payload": "json",
+      "retained": true
+    },
+    "zap_history": {
+      "payload": "json",
+      "retained": true,
+      "since": "0.3.0"
+    },
+    "epg_grid/<bouquet_slug>": {
+      "payload": "json",
+      "retained": true,
+      "since": "0.2.0"
+    },
+    "epg_import": {
+      "payload": "json",
+      "retained": true,
+      "since": "0.3.0"
+    },
+    "tuner": {
+      "payload": "json",
+      "retained": true
+    },
+    "recording": {
+      "payload": "json",
+      "retained": true
+    },
+    "timers": {
+      "payload": "json",
+      "retained": true
+    },
+    "volume": {
+      "payload": "json",
+      "retained": true
+    },
+    "cam": {
+      "payload": "json",
+      "retained": true
+    },
+    "oscam": {
+      "payload": "json",
+      "retained": true
+    },
+    "softcam": {
+      "payload": "json",
+      "retained": true,
+      "since": "0.3.0"
+    },
+    "hdd": {
+      "payload": "json",
+      "retained": true
+    },
+    "process": {
+      "payload": "json",
+      "retained": true,
+      "since": "0.3.0"
+    },
+    "screen": {
+      "payload": "jpeg",
+      "retained": true
+    },
+    "key": {
+      "payload": "json",
+      "retained": false
+    },
+    "last_error": {
+      "payload": "json",
+      "retained": true
+    }
+  },
+  "commands": {
+    "power": {},
+    "deep_standby": {},
+    "reboot": {},
+    "restart_gui": {},
+    "zap": {},
+    "bouquet": {},
+    "zap_history": {
+      "since": "0.3.0"
+    },
+    "history_clear": {
+      "since": "0.3.0"
+    },
+    "volume": {},
+    "mute": {},
+    "key": {},
+    "message": {},
+    "timer": {},
+    "record": {},
+    "screenshot": {},
+    "softcam_restart": {
+      "since": "0.3.0"
+    },
+    "epg_grid": {},
+    "epg_import": {
+      "since": "0.3.0"
+    },
+    "config": {},
+    "discovery": {},
+    "ha_mode": {},
+    "reset": {},
+    "uninstall": {
+      "since": "0.3.0"
+    }
+  },
+  "info_members": {
+    "image": "string",
+    "enigma": "string",
+    "plugin": "string",
+    "boxtype": "string",
+    "mac": "string",
+    "ip": "string",
+    "uptime": "int",
+    "wol": "object",
+    "ha_mode": "string",
+    "settings": "object",
+    "capabilities": "list of strings"
+  },
+  "info_wol_members": {
+    "supported": "bool or null",
+    "armed": "bool or null",
+    "iface": "string or null",
+    "mechanism": "string or null"
+  },
+  "settings": {
+    "publish_keys": {
+      "type": "bool",
+      "writable": true
+    },
+    "screenshot": {
+      "type": "enum(off|on_zap|interval)",
+      "writable": true
+    },
+    "screenshot_interval": {
+      "type": "int",
+      "writable": true
+    },
+    "screenshot_delay": {
+      "type": "int",
+      "writable": true
+    },
+    "cam_telemetry": {
+      "type": "bool",
+      "writable": true
+    },
+    "oscam_telemetry": {
+      "type": "bool",
+      "writable": true
+    },
+    "softcam_autoheal": {
+      "type": "bool",
+      "writable": true
+    },
+    "softcam_autoheal_seconds": {
+      "type": "int",
+      "writable": true
+    },
+    "deep_standby_allowed": {
+      "type": "bool",
+      "writable": false,
+      "since": "0.2.0"
+    },
+    "softcam_restart_allowed": {
+      "type": "bool",
+      "writable": false,
+      "since": "0.3.0"
+    },
+    "epg_import_allowed": {
+      "type": "bool",
+      "writable": false,
+      "since": "0.3.0"
+    },
+    "uninstall_allowed": {
+      "type": "bool",
+      "writable": false,
+      "since": "0.3.0"
+    }
+  },
+  "capabilities": [
+    "bouquet_context",
+    "cam",
+    "cec_workaround",
+    "channels",
+    "epg",
+    "epg_grid",
+    "epg_import",
+    "hdd",
+    "history_clear",
+    "keys",
+    "message",
+    "oscam",
+    "power",
+    "process",
+    "recording",
+    "screenshot",
+    "service",
+    "softcam",
+    "timers",
+    "toast",
+    "tuner",
+    "uninstall",
+    "volume",
+    "zap_history"
+  ],
+  "other_topics": [
+    "enigma2mqtt/discovery/<node>/config",
+    "homeassistant/device/<node>/config",
+    "homeassistant/device_automation/<node>/<colour>_<press>/config"
+  ],
+  "exceptions": [
+    {
+      "name": "zap-moves-channel-list",
+      "release": "0.3.0"
+    },
+    {
+      "name": "epg-grid-generated-means-changed",
+      "release": "0.3.0"
+    },
+    {
+      "name": "timers-lists-finished",
+      "release": "unreleased"
+    },
+    {
+      "name": "zap-under-popup-recorded",
+      "release": "unreleased"
+    }
+  ],
+  "planned": [
+    {
+      "kind": "info member",
+      "name": "build"
+    },
+    {
+      "kind": "info member",
+      "name": "contract"
+    },
+    {
+      "kind": "setting",
+      "name": "update_check"
+    },
+    {
+      "kind": "setting",
+      "name": "update_allowed"
+    },
+    {
+      "kind": "capability",
+      "name": "self_update"
+    },
+    {
+      "kind": "state topic",
+      "name": "update"
+    },
+    {
+      "kind": "command",
+      "name": "update_check"
+    },
+    {
+      "kind": "command",
+      "name": "update"
+    },
+    {
+      "kind": "command",
+      "name": "relay"
+    },
+    {
+      "kind": "event topic",
+      "name": "relay_request"
+    },
+    {
+      "kind": "consumer topic",
+      "name": "enigma2mqtt/integration/<node>"
+    },
+    {
+      "kind": "consumer topic",
+      "name": "enigma2mqtt/release_index"
+    }
+  ]
+}

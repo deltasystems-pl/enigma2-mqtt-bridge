@@ -11,6 +11,55 @@ version that has no section here.
 
 ### Documentation
 
+- **The topic contract has a version.** [TOPICS.md](docs/TOPICS.md#contract-version) gains a
+  "Contract version" section: the current contract major is 1 (0.2.0 and later; 0.1.0 is contract
+  0), what a release may change inside a major - additions, new values of an enumeration, new
+  refusals, tighter free text - and what needs a new one. A change of what a field or command means
+  stays inside the major only as a **named exception**, under four criteria: no known consumer
+  depends on the old meaning (checked against the companion integration's code and cited), no name
+  or type changes, it is listed by name here and in TOPICS.md, and it is decided in the pull request
+  that makes it. Four are named: 0.3.0's `zap-moves-channel-list` and
+  `epg-grid-generated-means-changed`, recorded after the fact, and this release's
+  `timers-lists-finished` and `zap-under-popup-recorded`. Every enumeration is open - a consumer
+  treats a value it does not know as unknown - and the section says where the companion integration
+  stands on that today, including the two places it does not: a new `oscam` reader `kind` makes it
+  drop the whole payload, and a new `key` `press` is read as a short press. The `process` heading
+  now says it is new in 0.3.0.
+- **The same contract as data**: [docs/contract.json](docs/contract.json) lists every state topic
+  with its payload kind and retain flag, every command, every `info` member with its type, every
+  setting with its type and whether `cmd/config` may write it, every capability name, the named
+  exceptions and the planned additions. `tools/check-contract.py` fails when it and TOPICS.md
+  disagree, and - in a new CI job, against the previous release tag's copy - when a change removes
+  or retypes an entry without a new contract major, or drops, re-dates or back-dates an exception:
+  a new one says `unreleased` until the release that ships it dates it to itself, and neither a
+  release pull request (its `version.py` above the previous release tag) nor a release tag says
+  `unreleased` - which the release workflow now also checks before it publishes, including on the
+  first release that carries the file, whose earlier tags do not have it. It fails
+  closed: an unknown ref, a checkout without tags, or a release tag without the file where an older
+  one had it is an error (exit 2), and "nothing to compare against" passes only while no release
+  tag carries the file at all, which the output says. Tests hold the file to the plugin's own
+  command table, settings and their types, `info` members, raw topics and capability names, and run
+  the command line against throwaway git repositories. Payload fields are not in the data.
+- **Updates from a signed release index are planned**, in
+  [ADR-0015](docs/adr/0015-signed-self-update.md) (proposed): a receiver-only `update_check`
+  setting, a receiver-only `update_allowed` permission, the `self_update` capability, an `update`
+  topic, `cmd/update_check`, `cmd/update` (upgrades only), the relay a receiver without internet
+  uses through Home Assistant, and `info.build` and `info.contract`. TOPICS.md §5 lists their shapes;
+  nothing is built yet and no released plugin publishes or accepts any of them.
+- [docs/TRANSACTION.md](docs/TRANSACTION.md) is new: the contract between the companion
+  integration's SSH installer and the planned self-update - the names on the receiver's disk, the
+  shared lock and when it is stale (the released installer's 30-minute rule, unchanged), the
+  heartbeat that keeps a long self-update's lock alive, the snapshot layout, the marker, and the
+  restart rule that keeps the household's channel: the image's clean quit wherever the interface
+  only needs to restart, and where it must be stopped, the channel recorded, written back while it
+  is stopped and checked afterwards, with the stop and the start run as one detached unit whose
+  trap starts the interface again. The two assumptions that rest on the image - that `init 4` loses
+  unsaved settings, and that the image comes back on a `lastservice` written while it is stopped -
+  are marked as hypotheses still to be measured on a receiver, and what is released today is told
+  apart from what is planned throughout.
+- ADR-0000 §7 and SECURITY.md's "no outbound connection other than the broker" are marked as
+  superseded in part by ADR-0015 (proposed). Both still describe every released plugin exactly;
+  SECURITY.md's policy is rewritten when the first release that implements ADR-0015 ships.
 - The README is now a short landing page: what the plugin does, how to install it, what it needs.
   The milestones and open items moved to [ROADMAP.md](ROADMAP.md); the privacy notes and the
   ACL's role as the privacy boundary moved to [docs/SETUP.md](docs/SETUP.md#privacy). The release
@@ -74,7 +123,9 @@ version that has no section here.
   keeps finished timers (`config.recording.keep_timers`) and with AutoTimer use, and a Home
   Assistant diagnostics download, which carries the topic, now includes the names of finished and
   disabled timers too. [docs/TOPICS.md](docs/TOPICS.md#basenodetimers) has the table and the
-  limits.
+  limits. **Behaviour change, named in-major exception `timers-lists-finished`**
+  ([TOPICS.md, Contract version](docs/TOPICS.md#contract-version)): the list's meaning changes
+  inside contract 1; filter on `state` to keep only what is still going to happen.
 
 ### Fixed
 
@@ -90,6 +141,10 @@ version that has no section here.
   keeps an invisible screen under the info bar - the Vu+ HbbTV plugin does - it still played
   every such zap directly; only the screen directly under the popup counts now. When a zap is
   played directly because a screen is open, the log says which condition was not met.
+  **Behaviour change, named in-major exception `zap-under-popup-recorded`**
+  ([TOPICS.md, Contract version](docs/TOPICS.md#contract-version)): 0.3.0's contract said such a
+  zap was played directly; now it is recorded, and a zap outside the bouquet being browsed moves the
+  channel list, as any recorded zap does.
 - `cmd/timer` `delete` refused a finished timer - "no timer on ..." - although OpenWebif and the
   receiver's own timer list still showed it, so a household panel built on OpenWebif offered a
   delete that always failed. It now deletes finished, failed and disabled timers too, and

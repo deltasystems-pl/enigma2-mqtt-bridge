@@ -2,8 +2,10 @@
 
 This is the interface between the plugin and everything that consumes it - the companion Home
 Assistant integration, an openHAB binding, a Node-RED flow, a shell script with `mosquitto_sub`.
-It is versioned with the plugin: a change to a payload is a change to this file, to the
-compatibility table in both READMEs, and to the changelog.
+It is versioned with the plugin: a change to a payload is a change to this file, to
+[`contract.json`](contract.json) - the same contract as data, which CI holds to this file - to the
+compatibility table in both READMEs, and to the changelog. Which changes a release may make
+without a new contract major is in [Contract version](#contract-version).
 
 Two names appear throughout:
 
@@ -27,6 +29,130 @@ Conventions that hold everywhere:
 Everything the plugin publishes it also publishes again on every `on_connect` - the full state
 snapshot, the announcement and, in discovery mode, the discovery payloads. A broker that lost its
 retained store, or a box that reconnected after an outage, converges without anybody asking.
+
+---
+
+## Contract version
+
+The contract has a major number, and the current contract major is **1**.
+
+| Contract | Plugin releases |
+|---|---|
+| 0 | 0.1.0 |
+| 1 | 0.2.0, 0.3.0, and every later release until a release declares contract 2 |
+
+A plugin will publish its major as `info.contract` ([planned](#5-planned-not-implemented-yet),
+[ADR-0015](adr/0015-signed-self-update.md)). A plugin that does not publish it is contract 0 when
+`info.plugin` is below 0.2.0 and contract 1 when it is 0.2.0 or a 0.3.x.
+
+**Inside one major a release may**
+
+- add a topic, a payload member, an `info` member, a command, a capability name or a setting -
+  writable or read-only;
+- add a **value to an existing enumeration** - a `state`, a `kind`, a `reason` code, a setting's
+  choice (below);
+- add a **refusal** to an existing command - a new guard, answered with a sentence on `last_error`,
+  which a consumer already handles for every command;
+- tighten the validation of free text - text a person typed, such as a popup's.
+
+**It may not** remove any of those, or retype one - a topic's payload kind or retain flag, a
+member's type, a setting's type or which side of `cmd/config` it is on, a choice taken away from an
+enumerated setting. That always needs a new major.
+
+**A change of what an existing field or command means** needs a new major too - **unless it is a
+named in-major exception** (below), which is the only way such a change stays inside a major.
+
+**A fix is not a change of meaning** when it makes the plugin do what this file already said. It is
+one when the plugin comes to do something this file said it did not. So 0.3.0's "a settings change
+whose reconnect fails no longer leaves the box `online`" is a fix; 0.3.0's zap through the channel
+list, which this file had described as a direct play, is not.
+
+**New values of an enumeration.** Every enumeration in this file is open: a consumer treats a value
+it does not know as unknown - neither an error nor any value it does know - and keeps the rest of
+the payload. That is what makes adding a value an addition. The release that adds one checks the
+companion integration's handling of it before it ships. Where the integration stands today (0.3.1,
+which is also its `main` at the time of writing):
+
+- **tolerated**: `last_error.reason` - "a code from a newer plugin" falls back to the English
+  sentence (`box.py` l.562-583); `epg_import.state` (l.1768), `softcam.last_restart_reason`
+  (l.1695) and `oscam.readers[].status` (l.1525) - an unknown value becomes unknown or `null`;
+  `timers.state` - the integration does not read it at all (below);
+- **not tolerated**, both on the integration's backlog, and each needing an integration release
+  that tolerates it before a plugin release adds a value:
+  - `oscam.readers[].kind` - a value other than `reader`, `server` or `unknown` makes the
+    integration discard the whole new `oscam` payload (`_normalize_oscam`, l.1486-1515), so the
+    last good sample stays on its panel, going stale;
+  - `key.press` - a value other than `short` or `long` is read as `short` (`box.py` l.1985-1987),
+    so a new kind of press would fire the automations and device triggers of a short press;
+- **not audited**: the other enumerations, among them the choices of an enumerated setting and
+  `info.ha_mode`.
+
+**Named in-major exceptions.** A change of meaning stays inside the major only when all of these
+hold:
+
+1. **No known consumer depends on the meaning it changes** - checked against the companion
+   integration's code at the time, and against this plugin's own Home Assistant discovery payloads
+   (`discovery.py`), which are a consumer too, and cited by file and line in the table below. No
+   other consumer is known to this project; one that becomes known is checked the same way. (None
+   of the four below touches the discovery payloads: they read neither `timers` nor `generated` -
+   "Next timer" reads `recording.next`, `discovery.py` l.332-346 - and carry `bouquet` as reported.)
+2. **Every name and type stays.** An exception changes what something means, never whether it
+   exists or what type it has - [`contract.json`](contract.json) does not change for it. A removal or
+   a retype always needs a new major.
+3. **It is listed by name** in the table below and in the changelog of the release that ships it,
+   marked as a behaviour change, with what a consumer has to do.
+4. **It is decided in the pull request that makes it**, not discovered afterwards, and its date
+   says so. It is `unreleased` until the release that ships it, which dates it to itself - the
+   version in `version.py`, later than the previous release; a release tag never carries
+   `unreleased` - nor does a release pull request, recognised by `version.py` being above the
+   previous release tag, so an undated exception fails the pull request rather than the tag; a
+   date never changes once it has shipped. The only departure is the first
+   release that carries `contract.json`: it records history, dated when it happened.
+   `contract.json` carries the same names and dates in `exceptions`, and `tools/check-contract.py`
+   fails when the two lists differ, when a later release drops or re-dates one, when a new one is
+   dated to anything but the release that ships it, and when a release tag - the one being checked
+   included - says `unreleased` or dates an exception to anything but the release it first
+   appears in. The release workflow runs the same check before it publishes anything.
+
+| Exception | Release | What changed | Why no known consumer breaks |
+|---|---|---|---|
+| `zap-moves-channel-list` | 0.3.0 | `cmd/zap` goes through the receiver's channel list, so a zap to a channel outside the bouquet being browsed moves the channel list to that channel's bouquet, and `bouquet` names it | The integration shows `bouquet` as the receiver reports it (`select.py` l.252 and l.278, `sensor.py` l.719 follow the topic), so it follows the move rather than contradicting it. Recorded after the fact: the rule did not exist when 0.3.0 shipped, and this check is made against integration 0.3.1 |
+| `epg-grid-generated-means-changed` | 0.3.0 | `epg_grid/<bouquet_slug>`'s `generated` means when the grid last changed, not when it was last built | The integration reads `generated` only into its diagnostics (`diagnostics.py` l.144). Recorded after the fact, as above |
+| `timers-lists-finished` | unreleased | `timers` lists the timers the receiver has finished with - ended, failed and disabled - and not only the pending ones; `state` gains `disabled`, `failed` and `unknown`, and a state number with no word is `unknown` where it used to read `waiting`. A consumer that treated every entry as pending filters on `state` (`waiting`, `prepared`, `running`) | The integration keeps the `timers` payload for its diagnostics only (`box.py` l.1299, `diagnostics.py` l.119) and builds no entity from it; its recording guard reads OpenWebif, not this topic (`installer.py` l.516-532). Decided by the maintainer on 2026-09-26 |
+| `zap-under-popup-recorded` | unreleased | With only an information popup open directly over the info bar, `cmd/zap`, `cmd/zap_history` and the zap `cmd/bouquet` makes go through the channel list: the zap is recorded in the zap history, and a zap outside the bouquet being browsed moves the channel list. 0.3.0 played them directly, as with any screen open | As for `zap-moves-channel-list`: the integration follows `bouquet` and `zap_history` as the receiver reports them (`box.py` l.1291 for `zap_history`) |
+
+The rule was written down after 0.3.0, so the history below classifies the releases before it by
+what they did.
+
+The consumer's half: ignore a topic, a member, a capability name or a setting you do not know;
+treat a value of an enumeration you do not know as unknown; treat a member you expect and do not
+find as the older plugin it is; and accept `info` more than once per connection. A consumer that
+does this and is written for contract N works with every
+plugin of contract N, older or newer - which is why there is **no upper bound** inside a major, and
+why "contract 1: plugin 0.2.0 and later, integration 0.2.0 and later" is the whole compatibility
+statement. The lockstep table in the READMEs lists the pairs that were released together; they are
+compatible, but they are not the only compatible pairs, and the table is to be replaced by this
+rule.
+
+**The same contract as data.** [`contract.json`](contract.json) lists every state topic with its
+payload kind and retain flag, every command, every `info` member with its type, every setting with
+its type and whether `cmd/config` may write it, every capability name, the topics outside the
+node's tree, the major, the exceptions above and the planned additions of section 5.
+`tools/check-contract.py` runs in CI and fails when that file and this one disagree, and - against
+`contract.json` at the previous release tag - when a release removes or retypes one of those
+without a new major (a new choice of an enumerated setting counts as an addition, a choice taken
+away as a retype), or drops, re-dates or back-dates an exception. Once a release carries the file,
+a maintenance branch of an older release fails that comparison: its newest tag has no file while a
+newer one has - deliberately, as there are no maintenance releases of the lines before it. The
+fields inside each payload are **not** in the data,
+so a change to one - the commonest way to break a consumer - is caught by review against this file,
+not by the checker; their types are the tables below.
+
+| Step | Classification | What changed |
+|---|---|---|
+| 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
+| 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
+| unreleased, on `main` after 0.3.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
 
 ---
 
@@ -771,7 +897,7 @@ not optional - two binaries differing only after the fifteenth character truncat
 `mounted` boolean, `path` string, `free_mb` integer megabytes or `null` when nothing is mounted.
 Checked on a slow timer; a recording disk that silently unmounts is the point of this topic.
 
-### `<base>/<node>/process`
+### `<base>/<node>/process` - since 0.3.0
 
 ```json
 {"rss_kb": 164208, "hwm_kb": 187432, "threads": 22, "fds": 61, "started": 1789042109}
@@ -1549,11 +1675,77 @@ retained ghost nobody can find: the list is the only record that they exist.
 
 ## 5. Planned (not implemented yet)
 
-Nothing at the moment. This section is where a planned addition is written down before it is built,
-so that a consumer can be written against its shape; the last ones - `uninstall_allowed` and
-`cmd/uninstall` ([ADR-0004](adr/0004-remote-uninstall.md)) - are now in §1 and §2. Until a
-capability is in `info.capabilities`, the box does not have it - that rule is unchanged, and it is
-how a consumer tells a plan from a feature.
+This section is where a planned addition is written down before it is built, so that a consumer can
+be written against its shape; the previous ones - `uninstall_allowed` and `cmd/uninstall`
+([ADR-0004](adr/0004-remote-uninstall.md)) - are in §1 and §2 now. Until a capability is in
+`info.capabilities`, the box does not have it - that rule is unchanged, and it is how a consumer
+tells a plan from a feature. **No released plugin publishes, accepts or reads anything below.**
+
+### Updates from a signed release index - [ADR-0015](adr/0015-signed-self-update.md) (proposed)
+
+The plugin checks for, and installs, its own releases from a signed release index, and the
+companion integration relays that index and the package to a receiver without internet access. Every
+addition is additive under [Contract version](#contract-version), so it stays contract 1. The
+install itself - the lock it shares with the integration's installer, the snapshot, the marker, and
+how a restart keeps the household's channel - is described in [TRANSACTION.md](TRANSACTION.md).
+
+| Kind | Name | Shape |
+|---|---|---|
+| Info member | `build` | object: `commit` (40 hex digits, or empty when the builder did not know it), `time` (the commit's epoch seconds), `dirty` (bool), `flavour` (`release` \| `acceptance`), `on_disk` (the commit of the build on disk when it differs from the running one, else `null`) |
+| Info member | `contract` | int, the contract major - see [Contract version](#contract-version) |
+| Setting | `update_check` | bool, off by default, **read-only** in `info.settings`: set on the receiver, never through `cmd/config`. With it on, the plugin checks the index once a day and answers `cmd/update_check` |
+| Setting | `update_allowed` | bool permission, off by default, **read-only** in `info.settings`: whether `cmd/update` is obeyed over MQTT |
+| Capability | `self_update` | the package manager installed this copy and the receiver can run the update helper detached from enigma2 |
+| State topic | `update` | retained, QoS 0, JSON, published on change - below |
+| Command | `update_check` | any; refused unless `update_check` is on; at most one fetch per 10 minutes, a repeat answers from the last result |
+| Command | `update` | JSON - below. Upgrades and repairs only, never a downgrade |
+| Command | `relay` | JSON `{"id", "version", "url", "expires"}`: Home Assistant's answer to a `relay_request` |
+| Event topic | `relay_request` | `<base>/<node>/relay_request`, **not retained**, QoS 1, JSON `{"id", "version", "serial"}`: a receiver without internet asks Home Assistant for a package |
+| Consumer topic | `enigma2mqtt/integration/<node>` | retained, QoS 1, **published by the companion integration**: `{"integration": "0.4.0", "contract": 1, "plugin_min": "0.2.0"}`; retracted when the integration's entry is removed |
+| Consumer topic | `enigma2mqtt/release_index` | retained, **published by the companion integration** after it verified a newer index: `{"index": "<base64 of the exact signed bytes>", "sig": "<base64 of the signature file>"}`. The plugin verifies it itself and never retracts it |
+
+**The `update` topic:**
+
+```json
+{"origin": "unreachable", "checked": 1790410000, "check_error": null,
+ "index": {"serial": 7, "issued": 1790500000, "source": "relay"},
+ "latest_compatible": "0.4.1",
+ "available": [{"version": "0.4.1", "compatible": true, "reason": null}],
+ "transaction": {"id": "a1b2c3d4e5f6", "started_by": "home_assistant", "target": "0.4.1",
+                 "from": "0.4.0", "phase": "installing", "started": 1790410100,
+                 "finished": null, "result": null, "error": null}}
+```
+
+`origin` is `reachable`, `unreachable` or `unknown`; `checked` is volatile in the sense of
+[ADR-0006](adr/0006-volatile-fields-and-publish-on-change.md). `available` holds the 20 newest
+releases at or above the index's floor that are not withdrawn, each with the reason when it is not
+compatible. `transaction.phase` is one of `downloading`, `verifying`, `snapshot`, `installing`,
+`restarting`, `proving`, `rolling_back`, `finished`; `transaction.result`, only with `finished`, is
+one of `installed`, `withdrawn_before_restart`, `rolled_back`, `failed`, `interrupted`;
+`transaction.started_by` is one of `mqtt`, `home_assistant`, `screen`, `page`, `ssh`.
+
+**`cmd/update`**, QoS 1, never retained:
+
+```json
+{"version": "0.4.1", "sha256": "<64 hex digits>",
+ "relay": {"url": "http://<host>:8123/api/enigma2_mqtt/relay/<token>", "expires": 1790410700}}
+```
+
+`version` is a release number or `latest`; `relay` is optional. It is refused, before anything
+changes and in this order, with a sentence on `last_error` and one of these `reason` codes:
+`not_permitted` (`update_allowed` off), `no_capability`, `busy` (a transaction is running),
+`opkg_busy`, `standby`, the existing recording guard (a recording running, one due within ten
+minutes, or an image that will not say), `epg_import`, the existing "this image cannot restart the
+interface" check, then `unknown_version`, `withdrawn`, `below_floor`,
+`incompatible`, `depends` (a package the release needs is not installed), `downgrade`, `current`
+(that release is running, and the build on disk is that release too - so a receiver running the
+release with another build waiting on disk can still be put back on the release), `checksum`
+(`sha256` is not the signed one),
+`relay` (the address is not a valid relay address, or has expired), `no_space`, `rate_limited` (an
+update ended less than ten minutes ago). The recording guard and the restart check refuse
+`cmd/update` with the same sentences they give `cmd/restart_gui` today; which `reason` codes they
+carry is fixed when the command is built, because neither check has codes yet. The command's answer
+is the `update` topic moving, as for every command.
 
 ---
 
