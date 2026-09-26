@@ -95,8 +95,8 @@ fresh random twelve-digit id, which matches nothing already there.
 
 A reader ignores keys it does not know. The helper of released 0.3.1 reads only `boot_id`,
 `uptime` and `started`, so `origin`, `id` and `target` change nothing for it. The helper on
-integration main reads `id` as well, and only from a record without `origin`. 🔴 **The record is ASCII**:
-the released helper decodes it as ASCII, and a record it cannot decode falls to rule 1 of §2.3 -
+integration main reads `id` as well, and only from a record without `origin`.
+🔴 **The record is ASCII**: the released helper decodes it as ASCII, and a record it cannot decode falls to rule 1 of §2.3 -
 judged by the directory's age, so a live lock with a non-ASCII record looks stale after 30 minutes
 however fresh its heartbeat. A record **without** `origin` is the SSH installer's, and is reported
 as `started_by: ssh`.
@@ -222,7 +222,8 @@ that transaction had begun to restore, or cannot say:
   and is pruned like one (§3.2).
 - A lock the installer released is never a recovery point: an R2 whose end the installer saw -
   including one whose restore failed or was cut off by its bound (§5.2) - releases the lock, and
-  its snapshot is then left for a person, named in the installer's sentence.
+  its snapshot is then left for a person: the installer's sentence names the backups directory,
+  and Home Assistant's log names the exact `ha-installer-<id>`.
 
 Either way the recovery first needs the lock, and the two programs' locks age differently: a dead
 self-update's lock is stale 30 minutes after its last heartbeat, but the SSH installer's lock has
@@ -241,8 +242,9 @@ there, R2's included, swaps the plugin directory in as below. Then:
 - **The plugin directory is never half-written.** The old tree is copied into a staging directory,
   then two renames: the live directory aside, the staged one in. `rename` cannot replace a non-empty
   directory, so it is two steps, and for the microseconds between them the plugin directory is
-  absent; a restart that lands there is caught by the pid check below, because the new process then
-  fails the proof and is rolled back by R2. The hook, its bytecode and each opkg metadata file are
+  absent. During a withdraw, a restart that lands there is caught by the pid check below: on
+  integration main a new pid after the old files went back goes straight to R2, without a proof.
+  The hook, its bytecode and each opkg metadata file are
   single files, each replaced by its own rename. What an earlier, interrupted restore of the same
   snapshot left - its staged or set-aside tree - is removed first, by the two exact names of §1; the
   set-aside tree is removed only once a tree is at the live path again, because until then it is
@@ -255,16 +257,20 @@ there, R2's included, swaps the plugin directory in as below. Then:
   `Plugins/`, then the category directories in it, then the plugin directories in those, so the
   parent of `Plugins/` is never scanned (read from an image's plugin loader, not from every image). A
   test watches every rename of a restore and checks, at each one, that the loader's view holds
-  either no plugin directory or one complete tree, and never a second copy. The restore compares the
-  two directories' filesystems before it takes opkg's lock or changes anything, and refuses when
-  they differ.
+  either no plugin directory or one complete tree, and never a second copy. When the snapshot holds
+  a plugin tree, the restore compares the two directories' filesystems before it takes opkg's lock
+  or changes anything, and refuses when they differ. A snapshot without one - the rollback of a
+  first install, which takes the live tree away - skips that check: on an image whose plugin
+  directory sits on another filesystem than `/usr/lib/enigma2/python/`, such a restore replaces
+  opkg's records and then fails at the rename that sets the live tree aside.
 - Then the enigma2 pid is read again - on integration main for up to 60 s, and compared with the
   pid read **before the restart was requested**, never with a later reading, so a restart that
   began after the last look is still a restart. If it changed - somebody answered the question - the
   transaction never reports "withdrawn" for a receiver that restarted. When the old files had been
   put back, the new process may have read either version, and a proof could pass on a plugin whose
-  files are gone, so the restart is treated as failed: R2 makes the files and the process agree. When they had not been put back (opkg's lock stayed held), the
-  new files are what started, and the transaction goes on to the proof, and to R2 if it fails.
+  files are gone, so the restart is treated as failed: R2 makes the files and the process agree.
+  When they had not been put back (opkg's lock stayed held), the new files are what started, and
+  the transaction goes on to the proof, and to R2 if it fails.
 
 ---
 
@@ -292,7 +298,9 @@ package is installed and verified:
 
 ---
 
-## 5. The restart rule (planned for 0.4.0, both programs)
+<a id="5-the-restart-rule-planned-for-040-both-programs"></a>
+
+## 5. The restart rule (integration main, unreleased 0.4.0; planned for the self-update)
 
 **Why.** The image saves its settings - the channel being watched among them, as
 `config.tv.lastservice` - only on a **clean** quit: `StartEnigma.py` runs `stopService()`,
@@ -335,9 +343,9 @@ answer costs a zap, not a lost channel:
   main). From the power-state request until a new enigma2 pid is seen, no rollback runs, because the
   image may be keeping the interface up on purpose. A connection that drops while the installer
   waits, or while it withdraws, is connected again and the receiver read again, and a withdraw it
-  cut off is repeated - a restore of the same snapshot is safe to repeat (§3.3); the withdraw is
-  given up to 120 s for that. A receiver that cannot be read at all, or Home Assistant stopping in
-  that window, leaves the transaction as it is: the new files stay, and the lock stays with the
+  cut off is repeated - a restore of the same snapshot is safe to repeat (§3.3). New attempts start
+  for up to 120 s, and each may take its own 60 s, so the withdraw can last about 180 s at worst.
+  A receiver that cannot be read at all, or Home Assistant stopping in that window, leaves the transaction as it is: the new files stay, and the lock stays with the
   transaction's id, for the next install to recover by that id once the lock is stale (§3.3).
 - **The record** is taken from OpenWebif's `/api/statusinfo` on the receiver - `currservice_serviceref`
   and `inStandby` - and from the plugin's retained `bouquet` topic where one exists. With nothing
@@ -440,8 +448,10 @@ So:
   releases the lock, and only after that removes `/tmp/enigma2-mqtt-r2-<id>/` and its uploaded
   helper. `restored` other than 0 is reported as `rollback_failed` (or, for the helper's two opkg
   exit statuses, `rollback_opkg_busy` and `rollback_opkg_overlap`), `stop_timeout` as
-  `rollback_failed` saying that only the files went back, and `started` other than 0 as
-  `rollback_restart_failed`.
+  `rollback_failed` saying that only the files went back, and `started` other than 0 - or no new
+  pid within the 120 s - as `rollback_restart_failed`. When the restore and the restart both
+  failed, the restore's code is the one reported, with a note that the interface did not come back
+  either.
 - **The lock is held until the script's end is seen.** From the moment `r2-start` is sent until
   `started` is read, the installer neither releases the lock nor deletes anything of the script's.
   When the following ends without `started` - its bound passed, or Home Assistant stopped - the lock
@@ -482,8 +492,8 @@ So:
 - An interruption the trap does cover, arriving before the restore has begun, starts the interface
   on the plugin as it was: the picture comes first. The status then has `started` without
   `restored`, which integration main reports as `rollback_failed`, and it releases the lock; the
-  snapshot stays, named in the installer's sentence, for a person to restore from - §3.3's recovery
-  does not run, because no lock is left behind.
+  snapshot stays for a person to restore from - the sentence names the backups directory, the log
+  the exact snapshot - and §3.3's recovery does not run, because no lock is left behind.
 - A restore cut off part-way - by the 90 s watchdog, or by a signal to the whole process group,
   which the detached start is there to prevent - leaves a partial restore. The trap still starts
   the interface, and integration main reports `rollback_failed` and releases the lock, as above.
@@ -503,9 +513,10 @@ image asks a question, plus the time the withdraw takes to put the old files bac
 up to 40 s of waiting for opkg's lock (with `init 4` it was a few seconds). A module that plugin
 imports for the first time in that window is new code in an old process. This is accepted as
 bounded. When the withdraw fails (`withdraw_failed`, §5.1) the bound does not hold: the new files
-stay under the running plugin until the next restart, which then starts the new version unchecked. The self-update path does not have it: from the moment the
-package is installed, the plugin answers every command, its setup screen and its OpenWebif page
-with "an update is being applied on the receiver" until the restart or the withdrawal.
+stay under the running plugin until the next restart, which then starts the new version unchecked.
+The self-update path does not have it: from the moment the package is installed, the plugin
+answers every command, its setup screen and its OpenWebif page with "an update is being applied on
+the receiver" until the restart or the withdrawal.
 
 ---
 
