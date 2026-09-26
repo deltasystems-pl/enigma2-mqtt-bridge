@@ -73,6 +73,31 @@ def test_a_malformed_build_id_is_no_build_id(change):
     assert buildid.validated({**RELEASE, **change}) is None
 
 
+@pytest.mark.parametrize("value", ["{[1]: 2}", "{[1]}", "{{}: 1}"])
+def test_a_literal_that_cannot_be_built_is_no_build_id(tmp_path, value):
+    # Valid syntax, and a literal - but an unhashable key or member makes literal_eval raise
+    # TypeError. The reader promises None for anything it cannot use, never an exception.
+    text = _render(RELEASE) + "COMMIT = " + value + "\n"
+    assert buildid.parse(text) is None
+    path = tmp_path / "buildinfo.py"
+    path.write_text(text, encoding="utf-8")
+    assert buildid.read(str(path)) is None
+
+
+def test_a_file_of_exactly_the_cap_is_read(tmp_path):
+    text = _render(RELEASE)
+    path = tmp_path / "buildinfo.py"
+    path.write_text(text + "#" * (buildid.MAX_BYTES - len(text)), encoding="utf-8")
+    assert path.stat().st_size == buildid.MAX_BYTES
+    assert buildid.read(str(path)) == RELEASE
+
+
+def test_the_last_assignment_wins_as_it_does_in_python():
+    # What an import of the same file would say, so the two readers cannot disagree.
+    text = 'COMMIT = "' + "9" * 40 + '"\n' + _render(RELEASE)
+    assert buildid.parse(text) == RELEASE
+
+
 def test_a_missing_member_is_no_build_id():
     text = "\n".join(line for line in _render(RELEASE).splitlines() if "DIRTY" not in line)
     assert buildid.parse(text) is None
@@ -99,6 +124,29 @@ def test_a_checkout_carries_no_build_id():
     assert not (REPO_ROOT / "src" / "MQTTBridge" / buildid.FILE_NAME).exists()
     assert "src/MQTTBridge/buildinfo.py" in (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
     assert buildid.LOADED is None
+
+
+class _BrokenBuildinfo:
+    """An import finder whose `MQTTBridge.buildinfo` fails as a corrupt file does, on import."""
+
+    def find_spec(self, name, path=None, target=None):
+        if name != "MQTTBridge.buildinfo":
+            return None
+        import importlib.machinery
+
+        return importlib.machinery.ModuleSpec(name, self)
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        raise SyntaxError("not what the builder writes")
+
+
+def test_a_corrupt_buildinfo_does_not_stop_the_plugin_loading(monkeypatch):
+    monkeypatch.delitem(sys.modules, "MQTTBridge.buildinfo", raising=False)
+    monkeypatch.setattr(sys, "meta_path", [_BrokenBuildinfo()] + sys.meta_path)
+    assert buildid._loaded() is None
 
 
 def test_the_loaded_build_is_the_imported_module(monkeypatch):
@@ -195,6 +243,16 @@ def test_info_carries_the_running_build(make_bridge, factory, settings, tmp_path
     assert factory.client.last(INFO).json()["build"] == {**RELEASE, "on_disk": None}
 
 
+def test_a_build_already_staged_at_connect_is_in_the_first_info(
+    make_bridge, factory, settings, tmp_path
+):
+    # The files can be replaced while the plugin is disconnected; the first `info` of the
+    # session says so, without waiting ten minutes for the check.
+    on_disk = _write(tmp_path / "buildinfo.py", DEVELOPMENT)
+    _connected(make_bridge, factory, settings, build=RELEASE, build_path=str(on_disk))
+    assert factory.client.last(INFO).json()["build"]["on_disk"] == DEVELOPMENT["commit"]
+
+
 def test_a_build_staged_on_disk_is_published_within_one_check(
     make_bridge, factory, settings, tmp_path
 ):
@@ -221,6 +279,20 @@ def test_a_build_staged_on_disk_is_published_within_one_check(
     _write(on_disk, RELEASE)
     timer.fire()
     assert factory.client.last(INFO).json()["build"]["on_disk"] is None
+
+
+def test_a_build_file_that_cannot_be_read_does_not_cost_the_session(
+    make_bridge, factory, settings, tmp_path
+):
+    # The connect handler builds `info`, and `info` reads the file on disk. A file that makes the
+    # reader raise would abort the handler - no availability, no info, no discovery - on every
+    # reconnect, for as long as the file is there.
+    on_disk = tmp_path / "buildinfo.py"
+    on_disk.write_text(_render(RELEASE) + "COMMIT = {[1]: 2}\n", encoding="utf-8")
+    bridge = _connected(make_bridge, factory, settings, build=RELEASE, build_path=str(on_disk))
+    assert factory.client.last("enigma2/" + NODE + "/availability").text == "online"
+    assert factory.client.last(INFO).json()["build"] == {**RELEASE, "on_disk": None}
+    assert bridge.check_build_on_disk() is False
 
 
 def test_the_check_publishes_nothing_without_a_session(make_bridge, factory, settings, tmp_path):

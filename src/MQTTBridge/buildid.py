@@ -22,9 +22,13 @@ until the interface restarts, the receiver runs one build and has another on
 disk. So the build this process loaded is captured once, when this module is
 first imported (which is when the plugin is), and the file on disk is read again
 whenever `info` is built and every ten minutes (`CHECK_MILLISECONDS`), so that a
-staged build shows up as `on_disk` without anybody asking. The file is read, never
+staged build shows up as `on_disk` without anybody asking. The running build is
+imported with the rest of the plugin, once; the file on disk is read, never
 imported: an import of a changed file would be a first import of new code into a
-process that is still running the old code, and the text is only literals.
+process that is still running the old code, and the text is only literals. Any
+file the reader cannot use - unreadable, oversized, not literals, or literals
+that cannot even be built - is "no build id", never an exception: the reader runs
+inside the connect handler, and an exception there would cost the whole session.
 
 **What a consumer shows.** `display_version` is the one rule: the plain version
 for a release build, and for a build nobody can name the commit of (every plugin
@@ -81,22 +85,28 @@ def validated(values):
 
 
 def parse(text):
-    """The build id in the text of a `buildinfo.py`, read without running it - or None."""
+    """The build id in the text of a `buildinfo.py`, read without running it - or None.
+
+    Never raises. `literal_eval` alone can raise SyntaxError and ValueError for
+    what is not a literal, TypeError for a literal that cannot be built - a
+    dictionary keyed by a list - and RecursionError or MemoryError for a deep
+    one, and a caller that has to list them all will one day miss one.
+    """
     try:
-        tree = ast.parse(text)
-    except (SyntaxError, ValueError):
+        return _parse(text)
+    except Exception:
         return None
+
+
+def _parse(text):
     values = {}
-    for node in tree.body:
+    for node in ast.parse(text).body:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:
             continue
         target = node.targets[0]
         if not isinstance(target, ast.Name) or target.id not in _NAMES:
             continue
-        try:
-            values[_NAMES[target.id]] = ast.literal_eval(node.value)
-        except ValueError:
-            return None
+        values[_NAMES[target.id]] = ast.literal_eval(node.value)
     return validated(values)
 
 
@@ -110,9 +120,10 @@ def read(path=ON_DISK_PATH):
     if len(raw) > MAX_BYTES:
         return None
     try:
-        return parse(raw.decode("utf-8"))
+        text = raw.decode("utf-8")
     except UnicodeDecodeError:
         return None
+    return parse(text)
 
 
 def _loaded():
