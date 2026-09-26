@@ -1,6 +1,6 @@
 # ADR-0014: The zap history is the receiver's, and the plugin's zaps are in it
 
-**Status:** accepted 2026-09-24, amended 2026-09-25
+**Status:** accepted 2026-09-24, amended 2026-09-25 and 2026-09-26
 **Date:** 2026-09-24
 **Supersedes:** - (changes the behaviour of `cmd/zap`, documented in `docs/TOPICS.md`)
 
@@ -113,6 +113,24 @@ and with `dialog_stack` holding the info bar alone. A question - what a message 
 a type is - never qualifies. The popup is left to its own timeout, as the image's channel-list zap
 leaves it. `cmd/zap`, `cmd/zap_history` and the zap of `cmd/bouquet` share the rule;
 `cmd/history_clear` does not, because it is the 0 key and a key goes to the popup.
+
+**Amended 2026-09-26 (documentation, no change of decision).** The list of six direct-play cases
+above was incomplete. The code has ten exits: the six named, plus an image with no channel-list
+zap, a channel list that could not be read while a bouquet was chosen, `selectAndStartService`
+raising, and a channel list that tuned a neighbour instead of the service asked for. Before the
+popup amendment above, a zap under the receiver's own "Zapped to timer service" message was
+measured on OpenViX 6.6 as played directly and unrecorded. With a yes/no question open, `cmd/zap`,
+`cmd/zap_history` and the zap of `cmd/bouquet` still change the channel directly and leave the
+question open and unanswered; that is intended, because the household keeps control with the
+remote and a zap from Home Assistant is an explicit request. It is read from the code, not
+measured with a question on screen. `cmd/zap_history` is still refused during the playback of a
+recording, and `cmd/bouquet` still moves the channel list to its bouquet when the list is open.
+The Consequences below call the zap-timer and EPG paths unread; they have since been read from the
+bytecode of OpenViX 6.6: a zap timer is recorded only when the receiver is awake and not in
+timeshift, and never when it zaps the picture-in-picture; an EPG zap only once it is confirmed;
+and the awake zap timer's entry was measured. OpenWebif's own zap is still not read. `docs/TOPICS.md` ("What enters the receiver's zap history",
+"A zap from Home Assistant during timeshift") carries the full list, what is measured and what is
+not.
 
 **Discovery mode announces the clear button and no history select.** A core MQTT select carries its
 options inside the discovery payload, so a list that changes on every zap would mean republishing

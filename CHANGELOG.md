@@ -26,6 +26,36 @@ version that has no section here.
 - The PRD's copy here ([ADR-0000](docs/adr/0000-prd.md)) points to the companion integration's
   ADR-0007, which supersedes its paragraph saying entity ids derive from the English keys: Home
   Assistant makes them from the name in the installation's language.
+- [TOPICS.md](docs/TOPICS.md#what-enters-the-receivers-zap-history) now says what enters the
+  receiver's zap history and what does not: a zap timer is recorded when the receiver is awake and
+  not in timeshift, and not from standby or when the timeshift question is answered with a zap -
+  "Zap", "Save timeshift and zap", or no answer within 20 s, which saves the timeshift as a
+  recording and zaps; an EPG zap is recorded once confirmed with a second OK, not as a preview,
+  and after a preview closed back to the original channel a zap back to that channel is not
+  recorded until the channel list is used; a zap to a channel protected by parental control is in
+  the history at once, whether or not the PIN is entered. The awake zap timer's entry and bouquet
+  were measured on OpenViX 6.6; the rest is read from its bytecode.
+- The direct-play exits of `cmd/zap` are listed in full, in the order the code checks them, each
+  with its log line. The page named six; the code has ten - the four missing were an image with no
+  channel-list zap, a channel list that could not be read while a bouquet was chosen,
+  `selectAndStartService` raising, and a channel list that tuned a neighbour. The table now
+  carries the information-popup exception from the fix below.
+- `last_error` is cleared by any command that succeeds, not only by the same command, as the page
+  said: a successful zap - a direct play included - clears a refusal another command left there.
+- TOPICS.md, ADR-0014 and TROUBLESHOOTING.md say plainly what a zap from Home Assistant does to a
+  question open on the television: `cmd/zap`, `cmd/zap_history` and the zap of `cmd/bouquet`
+  change the channel directly, unrecorded, and leave the question open and unanswered. This is
+  intended - the household keeps control with the remote, and a zap from Home Assistant is an
+  explicit request. It is read from the code, not measured with a question on screen. Two
+  exceptions are named: `cmd/zap_history` is refused during the playback of a recording, and
+  `cmd/bouquet` moves the channel list to the new bouquet even when the list is open.
+- A new section says what a zap from Home Assistant during timeshift does, measured on OpenViX
+  6.6: no question on the television, not in the zap history, and the timeshift buffer files kept
+  only until the next channel change, when the receiver deletes them. It also says what the
+  receiver's own question would have done - every answer but "No" erases its `timeshift.` files,
+  and the buffer links go at the next channel change either way - and what is not measured.
+  [ADR-0014](docs/adr/0014-the-zap-history-is-the-receivers.md) carries a dated amendment, and
+  TROUBLESHOOTING.md has a short entry on a channel missing from the zap history.
 
 ### Changed
 

@@ -390,9 +390,10 @@ once, with the newest path, and drops the oldest past `limit`. While the image's
 mode is on - its default - radio services zapped in the same channel list are in the same list.
 
 **What enters it.** Zaps through the receiver's channel list: the remote, and since 0.3.0 every zap
-this plugin makes except the direct-play cases of `cmd/zap` (see §2). Zaps made by OpenWebif's
-own zap, by a zap timer or from the EPG are in it only if the image routes them through its
-channel list, which is not documented here because it was not read.
+this plugin makes except the direct-play exits of `cmd/zap` (see §2). A zap timer's zap is in it
+when the receiver is awake and not in timeshift; an EPG zap is in it once it is confirmed, not
+while it is a preview. The full list, with what is measured and what is only read from the
+image's code, is in [What enters the receiver's zap history](#what-enters-the-receivers-zap-history).
 
 **Everything is published.** Every entry of every bouquet is on the broker, retained, as every
 channel is on `channels`. Hiding a bouquet from a list in a consumer hides nothing here. The
@@ -879,8 +880,10 @@ Retained.
 ```
 
 Published when a command fails or is refused by a guard, and **cleared** - an empty retained
-payload - when the same command later succeeds. A consumer that raises an error to the user reads
-this topic, not the absence of a state change.
+payload - when any command later succeeds, not only the same one: a successful zap clears a
+refusal `history_clear` left there. A check that runs after a command has returned, such as the
+5 s verification of a zap on `service`, can publish a new refusal. A consumer that raises an error
+to the user reads this topic, not the absence of a state change.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -957,16 +960,44 @@ remote zap is, bouquet included. The payload is unchanged. The bouquet is, in or
    that bouquet**, as it does after a number zap on the remote: channel up and down walk it
    afterwards, and `bouquet` names it.
 
-Six cases play the service directly, as before 0.3.0, and are **not recorded**:
+Ten exits play the service directly with the image's `playService`, as before 0.3.0, and the zap
+is **not recorded**. Earlier versions of this page listed six; the code has ten. They
+are checked in the order below, and the first that applies wins. None of them is an error: the
+channel is tuned and the command succeeds, so, like any successful command, it **clears** a
+pending `last_error`, whichever command set it. It sets one only if the image's `playService`
+itself raises: the exception's text is then the refusal. The 5 s verification on
+`service` runs as for any zap and can still set `last_error` afterwards. Each exit is logged at
+`info` as
 
-| Case | Why |
-|---|---|
-| a screen is open over the info bar - the channel list, the EPG, a menu, a question, a recording being played back - but not an information popup alone (below) | the zap would work on a list somebody is looking at, or leave the remote on a channel list opened out of sight. The receiver's executing dialog (`session.current_dialog`) must be the info bar itself; when the session does not say, a screen counts as open |
-| timeshift is active, or waiting to be saved - and also when the image's timeshift state cannot be read | the channel list would ask on the television, with no timeout, whether to leave timeshift. The plugin treats any active timeshift as blocking, whatever the image's own "check timeshift" setting says |
-| the channel list is in picture-in-picture zap mode | the channel list would zap the small picture |
-| the channel list is in radio mode | a television bouquet entered under the radio root would be saved as the radio list's root |
-| the service is in no published bouquet (a radio service, a bouquet `bouquets_for_select` leaves out, a reference in no bouquet) | there is no bouquet to enter it through; logged once per service |
-| the channel list could not select the service, and nothing was tuned | the published bouquets are read once a minute, so a bouquet edited since then, or a list that hides the channel, leaves the selection on what is playing, and the channel list re-zaps that. The service is then played directly - unless it is protected by parental control, when the PIN on the television is what it waits for |
+    zapping to <sref> without the channel list: <reason>
+
+with the reason from the table - except exit 7, which is logged once per service until the
+interface restarts, as `zapping to <sref> without the channel list, so it is not in the zap
+history: it is in no published bouquet`.
+
+| # | Case | `<reason>` in the log | Why |
+|---|---|---|---|
+| 1 | the image has no channel-list zap: no `InfoBar.instance`, no `servicelist` or `selectAndStartService` on it, or a channel list without `getRoot` | `this image has no channel-list zap to record it with` | there is nothing to record the zap with. On such an image every `cmd/zap` is a direct play |
+| 2 | a screen is open over the info bar - the channel list, the EPG, a menu, a question, a recording being played back - but not an information popup alone (below) | `a screen is open on the receiver` | the zap would work on a list somebody is looking at, or leave the remote on a channel list opened out of sight. The receiver's executing dialog (`session.current_dialog`) must be the info bar itself, or an information popup directly over it; when the session does not say, a screen counts as open |
+| 3 | the channel list is in picture-in-picture zap mode | `the channel list is in picture-in-picture zap mode` | the channel list would zap the small picture |
+| 4 | timeshift is active, or waiting to be saved - and also when the image's timeshift state cannot be read | `timeshift is active` | the channel list would ask on the television, with no timeout, whether to leave timeshift. The plugin treats any active timeshift as blocking, whatever the image's own "check timeshift" setting says. What happens to the timeshift is [below](#a-zap-from-home-assistant-during-timeshift) |
+| 5 | the channel list is in radio mode | `the channel list is not in television mode` | a television bouquet entered under the radio root would be saved as the radio list's root. This covers a television channel too: while the receiver's channel list was last left in radio mode, no zap from Home Assistant is recorded |
+| 6 | choosing the bouquet raised - reading the published bouquets, or the channel list's own `getRoot` | `the channel list could not be read` | also logged as an exception, `could not choose a bouquet to zap through` |
+| 7 | the service is in no published bouquet - a radio station (`channels` holds television bouquets only), a bouquet `bouquets_for_select` leaves out, a reference in no bouquet | `it is in no published bouquet` | there is no bouquet to enter it through. A radio station zapped from Home Assistant is therefore never recorded; one zapped with the remote is |
+| 8 | the image's `selectAndStartService` raised | `the channel list's zap raised` | also logged as an exception, `selectAndStartService raised`. Whatever the channel list did before it raised is not undone; what that leaves in the history is not measured |
+| 9 | the channel list could not select the service, nothing was tuned, and the service is not protected by parental control | `the channel list could not select it` | preceded by a warning, `the channel list did not select <sref>; playing it directly`. The published bouquets are read once a minute, so a bouquet edited since then, or a list that hides the channel, leaves the selection on what is playing, and the channel list re-zaps that |
+| 10 | the channel list tuned a different service | `the channel list tuned another service` | preceded by a warning, `the channel list tuned <tuned> instead of <sref>; playing it directly`. A stale bouquet can leave the selection on a neighbour, and the wrong channel on the television is worse than an unrecorded zap to the right one. The neighbour went through the channel list's zap, so it may be in the history while the requested channel is not (read from the code, not measured) |
+
+**One case counts as recorded whatever happens next.** When nothing was tuned and the service is
+protected by parental control - or the image cannot say whether it is - the PIN screen on the
+television is what the zap is waiting for. The plugin logs nothing and leaves it to the PIN. The
+channel is in the zap history at once, as a remote zap to it would be, whether or not the PIN is
+ever entered: the image adds it to the history right after it hands the PIN request over, and the
+play that follows a correct PIN adds nothing (read from the bytecode, not run). The 5 s
+verification on `service` reports a zap whose PIN was not entered.
+
+A session with no navigation, or a navigation with no `playService`, is not an exit: `cmd/zap` is
+refused - "there is no session to zap with", "this image's navigation has no playService".
 
 **An information popup is not a screen open.** When the only thing open is a popup directly over
 the info bar - the receiver's own "Zapped to timer service", a recording or zap error, or what
@@ -978,7 +1009,27 @@ this counts: the image's own
 with no answers to choose from, executing, with the info bar as the one screen under it. A question
 (which is what a message box queued without a type is), a type the image does not know, a popup
 over any other screen - the movie player, the channel list - and a popup already closing still
-count as a screen open.
+count as a screen open. A toast is not a dialog at all and never counts as a screen open: a zap
+under a toast is recorded.
+
+**A question stays open and unanswered.** While a yes/no question is open over the info bar,
+`cmd/zap`, `cmd/zap_history` and the zap `cmd/bouquet` makes still change the channel - directly,
+with `playService`, and unrecorded - and the plugin closes and answers nothing: the question stays
+on the television, unanswered, for the household to answer with the remote. This is intended. The
+household keeps control with the remote, and a zap from Home Assistant is an explicit request, so
+it is carried out rather than refused. The same holds for the channel list, the EPG or a menu
+left open, with two exceptions:
+
+- `cmd/zap_history` is refused while a recording is played back ("a recording is being played
+  back", reason `playback`), before anything is tuned. What a direct `cmd/zap` does to the movie
+  player was not traced.
+- `cmd/bouquet` moves the channel list to the new bouquet and saves it as the list's root whatever
+  is open, so a channel list open on the television jumps to that bouquet.
+
+That the question stays on the television is read from the code - the plugin's direct path opens,
+closes and answers no dialog - and is covered by tests; it was **not measured** on a receiver
+(the hardware drill had an information popup open, not a question). Timeshift is a separate case
+with its own rules: see [below](#a-zap-from-home-assistant-during-timeshift).
 
 **From standby** the receiver is woken first. Its standby screen closes on the next turn of the
 main loop and plays the channel it slept on; the zap follows on the turn after that, so it is
@@ -993,6 +1044,99 @@ remote does, and it never opens or shows a screen of its own. The same "screen o
 information popup included, to `cmd/zap_history` (played directly, the history left as it is) and
 to the zap `cmd/bouquet` makes after changing the context. `cmd/history_clear` still refuses under
 a popup (`screen_open`): it is the 0 key, and with a popup on the screen the key goes to the popup.
+
+### What enters the receiver's zap history
+
+The receiver records a zap only when it passes through its channel selection, which calls
+`addToHistory`; the image's `playService` on its own never records. The plugin publishes the list
+as the receiver keeps it (`zap_history`) and adds nothing to it, so a zap missing here is missing
+from the receiver's own History Zap screen too.
+
+The `cmd/*` rows are read from this plugin's code; the others are read from the bytecode of one
+image, OpenViX 6.6. The parts marked **measured** were also checked on a receiver running it.
+Other images may route their zaps differently.
+
+| Zap | In the history? |
+|---|---|
+| The remote: a number, a channel chosen in the channel list, channel up and down, the History Zap screen | Yes. A radio station too, while the image's "e1-like" radio mode is on (its default); its `bouquet_name` is `null` |
+| `cmd/zap` | Yes, filed under the bouquet chosen as [above](#cmdzap-goes-through-the-channel-list---since-030) - except the ten direct-play exits in that section. From standby, the zap is recorded and the channel the receiver slept on is not |
+| `cmd/zap_history` | Yes: the entry moves to the front, as the History Zap screen moves it - also under an information popup, which stays open. With any other screen open over the info bar, a question included, it is played directly, the list is left as it is and the screen stays open - except during the playback of a recording, when it is refused (`playback`). During timeshift it leaves timeshift without asking, as the History Zap screen does (read from the code, not measured) |
+| `cmd/bouquet`, when it has to tune | Yes, through the channel list's own zap - also under an information popup. With any other screen open over the info bar the channel is played directly and not recorded, and the screen stays open - but the channel list itself moves to the new bouquet, even when it is the screen that is open. Refused during timeshift and while the channel list is in radio mode |
+| `cmd/history_clear` | The list is emptied and channel 1 is recorded, as the 0 key does. Refused during timeshift, reason `timeshift` (**measured**) |
+| A zap timer, receiver awake, no timeshift | Yes. It is filed under the **first bouquet in the receiver's own bouquet order** that holds the channel - not the bouquet being browsed, and not only among the published ones, so `bouquet_name` is `null` when that first bouquet is one `bouquets_for_select` leaves out. **Measured:** the timer's zap entered the history, filed under that first bouquet. Read from the bytecode only: the channel list moves to that bouquet, so channel up and down walk it afterwards; and when the image's "show message when recording starts" setting is on (its default) and nothing is open over the info bar, the receiver shows "Zapped to timer service" for 5 s (the popup itself was seen on the drill). A `cmd/zap` in those 5 s goes under the popup and is recorded (the information-popup rule above). Before that rule it was measured played directly and unrecorded; the recorded behaviour is covered by tests and not yet measured on a receiver |
+| A zap timer, receiver in standby | No. The receiver wakes and plays the timer's channel the way it restores the channel it slept on, with `playService` - or its start-up channel, when it is set to start on one after standby |
+| A zap timer during timeshift | No. The receiver asks on the television, for 20 s: "Zap" and "Save timeshift and zap" play the channel directly; "Don't zap" leaves it alone, and the two remaining answers also disable or remove the timer. "Save timeshift and zap" is offered only when no save is already pending, and it is then the first answer - which is what the question takes when nobody answers within the 20 s: **unattended, the receiver saves the timeshift as a recording and zaps**, unrecorded |
+| A zap timer for picture-in-picture | No. It plays in the small picture |
+| The EPG, first OK on a channel | No. It is a preview |
+| The EPG, a second OK on the same channel | Yes. It confirms the preview through the channel selection |
+| Closing the EPG after a preview | No. The receiver returns to the channel it was on, with `playService`, while the image's EPG preview mode is on (its default for every EPG style). With preview mode off, closing confirms the preview instead, and that is recorded |
+| After an EPG preview closed that way | A gap. Until the channel list is next used - a channel chosen in it, a confirmed EPG zap, or the image's zap back - a zap back to the channel that was playing before the preview is not recorded. That includes a `cmd/zap` to it, which the plugin counts as recorded because it only checks that the channel plays (read from the code, not run) |
+| OpenWebif's own zap | Not read |
+
+Only the parts marked measured and the timeshift section below were checked on a receiver. The
+zap-timer rows for standby and timeshift, the EPG rows and the post-preview gap are read from the
+bytecode and not run.
+
+### A zap from Home Assistant during timeshift
+
+While the receiver is in timeshift - the service is seekable and timeshift is enabled, or a
+timeshift is waiting to be saved - `cmd/zap` plays the channel directly (exit 4 above). That is
+every `cmd/zap`: the companion integration's channel select, the source list, `play_media`, the
+zap action. Its history select sends `cmd/zap_history`, and its bouquet select `cmd/bouquet`;
+both are below.
+
+What happens, measured on OpenViX 6.6:
+
+- The channel is tuned with **no question on the television**, and the receiver shows the new
+  channel live.
+- The zap is **not in the zap history**. The list is left as it was, so the channel playing is not
+  its current entry, and a consumer showing the current entry has none to show (the companion
+  integration's history select reads `unknown`) until the next recorded zap.
+- **The timeshift buffer stays until the next channel change.** The buffer file
+  (`pts_livebuffer_<n>` in the image's timeshift directory) and its `.sc` index file were still
+  there right after the zap, no longer growing: same size and time ten seconds later - about 28 MB
+  after roughly 25 s of timeshift on a high-definition channel. At the next channel change, about
+  40 s later, the receiver deleted them: the directory was empty afterwards, its time that of that
+  zap. The mechanism, read from the bytecode: on every service start the image deletes the
+  `timeshift.*` and `pts_livebuffer_*` files in its timeshift directory that are older than 3 s
+  (not in standby, and only when the directory is writable). On OpenViX 6.6 that is the only path
+  that deletes the buffer: the image also creates a clean-up timer, but nothing ever starts it.
+  The zap that ends timeshift cannot delete its own buffer, which is younger than that; the start
+  of the next channel does. The plugin deletes nothing.
+- `last_error`: the zap is a successful command, so it **clears** a pending one - on the drill,
+  the `history_clear` timeshift refusal was cleared about 20 ms after the zap. It sets none unless
+  the image's `playService` raises (exits above).
+
+The plugin does this because the receiver's own zap would ask a question on the television with
+no timeout, and a zap from a phone must not leave a question on somebody's screen. It also plays
+directly where the receiver would not have asked - its "check timeshift" setting off, or a
+timeshift already stopping. That is conservative and costs only the history entry.
+
+What the receiver does on its own path, read from the bytecode and not something the plugin does:
+with "check timeshift" on (the default) it asks. With the timeshift save action "ask user" (the
+default) it offers four answers, in this order: two that save the timeshift as a recording (one
+stops recording afterwards, one goes on recording), "Yes, but don't save", and "No". With any
+other save action it asks Yes or No, and Yes applies that configured action, which may save the
+timeshift as a recording. Every answer but "No" ends with the image erasing its `timeshift.`
+files - after saving, for the answers that save. The `pts_livebuffer_` files are links to those
+and are not touched then; they go at the next service start, exactly as after the plugin's direct
+play. So "Yes, but don't save" leaves the disk no tidier than a zap from Home Assistant does. The
+plugin answers none of these questions and saves nothing. **Careful when scripting `cmd/key`
+against that question:** `KEY_OK` takes the highlighted answer, which is the first one and saves
+the buffer as a recording; `KEY_EXIT` closes it without saving or zapping.
+
+The other commands during timeshift:
+
+- `cmd/zap_history` is recorded and leaves timeshift without asking, as the receiver's own History
+  Zap screen does (read from the code, not measured).
+- `cmd/bouquet` is refused: "timeshift is active; the receiver would ask on screen whether to leave
+  it".
+- `cmd/history_clear` is refused with reason `timeshift` (measured).
+
+**Not measured:** more than one removal of the buffer - that only the start of a new channel
+deletes it is read from the bytecode, and the deletion itself was seen once, with the directory's
+change time matching the next zap; what a direct play does to a timeshift already
+marked for saving; and all of this on any image other than OpenViX 6.6.
 
 ### `cmd/history_clear` is the 0 key - since 0.3.0
 
