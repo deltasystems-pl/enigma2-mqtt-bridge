@@ -72,4 +72,4 @@ What this costs, what it rules out, and what has to change if it is ever reverse
 | [0011](0011-epg-import-on-demand.md) | The EPG import uses the importer enigma2 loaded, and is followed by polling, never hooked | accepted 2026-09-23 |
 | [0012](0012-wake-on-lan-is-the-image-s-switch.md) | Wake-on-LAN is reported from the image, and armed only through the image's own switch | accepted 2026-09-23 |
 | [0013](0013-the-uninstall-closes-the-doors-and-waits-for-the-broker.md) | The remote uninstall closes the doors first, retracts at QoS 1 and waits for the broker, and puts everything back when a step fails | accepted 2026-09-23 |
-| [0014](0014-the-zap-history-is-the-receivers.md) | The zap history is the receiver's, and the plugin's zaps are in it | accepted 2026-09-24 |
+| [0014](0014-the-zap-history-is-the-receivers.md) | The zap history is the receiver's, and the plugin's zaps are in it | accepted 2026-09-24, amended 2026-09-25 and 2026-09-26 |

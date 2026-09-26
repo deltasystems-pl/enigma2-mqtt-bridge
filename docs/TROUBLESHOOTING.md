@@ -216,28 +216,25 @@ channel but is not in the list, and the log says why:
 
 ```text
 zapping to <sref> without the channel list: <reason>
+zapping to <sref> without the channel list, so it is not in the zap history: it is in no published bouquet
 ```
 
 The usual reasons are a menu, a list or a question open on the television (`a screen is open on
 the receiver` - a plain information popup alone does not count), timeshift (`timeshift is
-active`), and a radio station or a channel outside the published bouquets (`it is in no published
-bouquet`, logged once per channel). None of them is an error, and none sets `last_error`.
+active`), and a radio station or a channel outside the published bouquets (the second line,
+logged once per channel). None of them is an error, and none sets `last_error`.
 
 If a question was on the television, it is still there after the zap, unanswered. That is
-intended: a zap from Home Assistant changes the channel and leaves every open screen to the
-household and its remote. A zap timer that fires while the receiver is in standby or in
-timeshift, and an EPG preview that was not confirmed with a second OK, are not recorded by the
-receiver either. [TOPICS.md](TOPICS.md#what-enters-the-receivers-zap-history) has the complete
-list.
+intended: a zap from Home Assistant changes the channel and leaves the question to the household
+and its remote.
 
-## Timeshift files left on the recordings disk
+A zap timer that fires while the receiver is in standby or in timeshift, and an EPG preview that
+was not confirmed with a second OK, are not recorded by the receiver either.
+[TOPICS.md](TOPICS.md#what-enters-the-receivers-zap-history) has the complete list.
 
-A zap from Home Assistant during timeshift leaves timeshift without asking, and on OpenViX 6.6 the
-timeshift buffer - `pts_livebuffer_<n>` and its `.sc` file, in the image's timeshift directory on
-the recordings disk - stays behind. The plugin does not delete them. Remove them by
-hand when no timeshift is running, or leave them to the image; whether it removes them itself
-later was not measured. [TOPICS.md](TOPICS.md#a-zap-from-home-assistant-during-timeshift) has the
-details.
+After a zap from Home Assistant during timeshift, the timeshift buffer files stay on the recordings
+disk until the next channel change, and the receiver then deletes them
+([details](TOPICS.md#a-zap-from-home-assistant-during-timeshift)).
 
 ## Reporting a problem
 
