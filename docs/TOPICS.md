@@ -77,9 +77,13 @@ which is also its `main` at the time of writing):
   sentence (`box.py` l.562-583); `epg_import.state` (l.1768), `softcam.last_restart_reason`
   (l.1695) and `oscam.readers[].status` (l.1525) - an unknown value becomes unknown or `null`;
   `timers.state` - the integration does not read it at all (below);
-- **not tolerated**: `oscam.readers[].kind` - a value other than `reader`, `server` or `unknown`
-  makes the integration discard the whole `oscam` payload (`_normalize_oscam`, l.1486-1515). A
-  release that adds a `kind` needs an integration release that tolerates it first;
+- **not tolerated**, both on the integration's backlog, and each needing an integration release
+  that tolerates it before a plugin release adds a value:
+  - `oscam.readers[].kind` - a value other than `reader`, `server` or `unknown` makes the
+    integration discard the whole new `oscam` payload (`_normalize_oscam`, l.1486-1515), so the
+    last good sample stays on its panel, going stale;
+  - `key.press` - a value other than `short` or `long` is read as `short` (`box.py` l.1985-1987),
+    so a new kind of press would fire the automations and device triggers of a short press;
 - **not audited**: the other enumerations, among them the choices of an enumerated setting and
   `info.ha_mode`.
 
@@ -87,16 +91,26 @@ which is also its `main` at the time of writing):
 hold:
 
 1. **No known consumer depends on the meaning it changes** - checked against the companion
-   integration's code at the time, and cited by file and line in the table below. No other consumer
-   is known to this project; one that becomes known is checked the same way.
+   integration's code at the time, and against this plugin's own Home Assistant discovery payloads
+   (`discovery.py`), which are a consumer too, and cited by file and line in the table below. No
+   other consumer is known to this project; one that becomes known is checked the same way. (None
+   of the four below touches the discovery payloads: they read neither `timers` nor `generated` -
+   "Next timer" reads `recording.next`, `discovery.py` l.332-346 - and carry `bouquet` as reported.)
 2. **Every name and type stays.** An exception changes what something means, never whether it
    exists or what type it has - [`contract.json`](contract.json) does not change for it. A removal or
    a retype always needs a new major.
 3. **It is listed by name** in the table below and in the changelog of the release that ships it,
    marked as a behaviour change, with what a consumer has to do.
-4. **It is decided in the pull request that makes it**, not discovered afterwards. `contract.json`
-   carries the same names in `exceptions`, and `tools/check-contract.py` fails when the two lists
-   differ, or when a later release drops a name or re-dates one that has shipped.
+4. **It is decided in the pull request that makes it**, not discovered afterwards, and its date
+   says so. It is `unreleased` until the release that ships it, which dates it to itself - the
+   version in `version.py`, later than the previous release; a release tag never carries
+   `unreleased`; a date never changes once it has shipped. The only departure is the first
+   release that carries `contract.json`: it records history, dated when it happened.
+   `contract.json` carries the same names and dates in `exceptions`, and `tools/check-contract.py`
+   fails when the two lists differ, when a later release drops or re-dates one, when a new one is
+   dated to anything but the release that ships it, and when a release tag - the one being checked
+   included - says `unreleased` or dates an exception to anything but the release it first
+   appears in. The release workflow runs the same check before it publishes anything.
 
 | Exception | Release | What changed | Why no known consumer breaks |
 |---|---|---|---|
@@ -125,7 +139,10 @@ node's tree, the major, the exceptions above and the planned additions of sectio
 `tools/check-contract.py` runs in CI and fails when that file and this one disagree, and - against
 `contract.json` at the previous release tag - when a release removes or retypes one of those
 without a new major (a new choice of an enumerated setting counts as an addition, a choice taken
-away as a retype), or drops an exception. The fields inside each payload are **not** in the data,
+away as a retype), or drops, re-dates or back-dates an exception. Once a release carries the file,
+a maintenance branch of an older release fails that comparison: its newest tag has no file while a
+newer one has - deliberately, as there are no maintenance releases of the lines before it. The
+fields inside each payload are **not** in the data,
 so a change to one - the commonest way to break a consumer - is caught by review against this file,
 not by the checker; their types are the tables below.
 

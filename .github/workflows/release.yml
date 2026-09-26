@@ -68,6 +68,13 @@ jobs:
       - name: pytest
         run: pytest -q
 
+      - name: The contract, against the release before this one
+        # The same check ci.yml's Contract job runs. On the tagged commit it also refuses an
+        # exception still marked "unreleased", or one dated to anything but this release: a tag
+        # published with either would leave the record wrong for good, and every later CI run
+        # red. Refusing here stops the release before anything is published.
+        run: python tools/check-contract.py --previous tag
+
       - name: Install gettext
         # msgfmt compiles the .po files into the package.
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends gettext

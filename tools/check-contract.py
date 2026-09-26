@@ -19,6 +19,12 @@ the named in-major exceptions, and the planned additions. Two checks run on it:
    no named exception may be dropped or re-dated. A new choice of an enumerated setting is an
    addition; a choice taken away is a retype. A higher major allows anything; a lower one is
    refused. Planned rows are promises about a shape, not features, and are not compared.
+   The exception record keeps its dates (TOPICS.md, criterion 4): a new exception says
+   "unreleased" or names the release that ships it - `version.py`'s version, later than the
+   previous release; no release tag, HEAD's own included, says "unreleased"; and an exception is
+   dated to the release tag it first appears in, except in the first release carrying the file,
+   which records history. A release tag on HEAD is the release being checked, never its own
+   previous release.
 
 **It fails closed.** Exit status 0: the files agree and, when asked, the previous release's
 promises are kept. 1: a contract problem, each one printed. 2: the comparison that was asked for
@@ -454,8 +460,89 @@ def _enum_choices(value):
     return None
 
 
-def compare(old: dict, new: dict) -> list[str]:
-    """What `new` takes away from `old` without the new contract major that would allow it."""
+UNRELEASED = "unreleased"
+VERSION = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+
+
+def _version_key(version) -> tuple | None:
+    match = VERSION.match(version) if isinstance(version, str) else None
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def _date_problem(
+    name: str, release, previous_release: str | None, current_version: str | None
+) -> str | None:
+    """Why a date given to an exception now (new, or leaving "unreleased") is wrong, or None.
+
+    It says "unreleased", or it names the release that ships it: the plugin's own version, and
+    later than the previous release. Anything earlier is a back-dated decision.
+    """
+    if release == UNRELEASED:
+        return None
+    key = _version_key(release)
+    if key is None:
+        return f"exception {name!r} has release {release!r}, which is neither N.N.N nor unreleased"
+    if current_version is not None and release != current_version:
+        return (
+            f"exception {name!r} is dated {release}, but the release that ships it is "
+            f"{current_version}; a new exception says unreleased until then"
+        )
+    previous = _version_key(previous_release)
+    if previous is not None and key <= previous:
+        return (
+            f"exception {name!r} is dated {release}, which is not later than the previous "
+            f"release {previous_release}: that is back-dating a decision"
+        )
+    return None
+
+
+def check_record(history: list[tuple[str, dict]]) -> list[str]:
+    """The exception record across release tags, oldest first: `[(version, contract), ...]`.
+
+    A release never says "unreleased". The first release carrying the file records history
+    dated when it happened, at or before itself. After that, an exception that first appears in
+    a release is dated to that release.
+    """
+    problems = []
+    seen: dict = {}
+    for index, (version, contract) in enumerate(history):
+        for name, release in _exception_map(contract).items():
+            if release == UNRELEASED:
+                problems.append(
+                    f"release v{version} carries exception {name!r} still marked unreleased; "
+                    "the release that ships it dates it to itself"
+                )
+                continue
+            if name in seen:
+                continue  # its date is held by compare(): it may never change
+            seen[name] = release
+            key, here = _version_key(release), _version_key(version)
+            if index == 0:
+                if key is None or here is None or key > here:
+                    problems.append(
+                        f"exception {name!r} in v{version}, the first release carrying the "
+                        f"record, is dated {release}, after that release"
+                    )
+            elif release != version:
+                problems.append(
+                    f"exception {name!r} first appears in v{version} but is dated {release}; "
+                    "it is dated to the release that ships it"
+                )
+    return problems
+
+
+def compare(
+    old: dict,
+    new: dict,
+    previous_release: str | None = None,
+    current_version: str | None = None,
+) -> list[str]:
+    """What `new` takes away from `old` without the new contract major that would allow it.
+
+    `previous_release` is the version `old` was released as, when it is a release tag;
+    `current_version` is the plugin's own version in `new`'s tree. With them, an exception's
+    date is checked too: see `_date_problem`.
+    """
     old_major = old.get("contract")
     new_major = new.get("contract")
     if not isinstance(old_major, int) or not isinstance(new_major, int):
@@ -497,16 +584,28 @@ def compare(old: dict, new: dict) -> list[str]:
                 )
 
     # A named exception is part of the record for good: a consumer upgrading across it needs to
-    # find it. It may only move from "unreleased" to the release that shipped it.
+    # find it. It may only move from "unreleased" to the release that ships it, and a new one
+    # says "unreleased" or names that release - never an earlier one.
     old_exceptions, new_exceptions = _exception_map(old), _exception_map(new)
     for name in sorted(old_exceptions):
         if name not in new_exceptions:
             problems.append(f"exception {name!r} was dropped from the record")
-        elif old_exceptions[name] != "unreleased" and new_exceptions[name] != old_exceptions[name]:
-            problems.append(
-                f"exception {name!r} was re-dated from {old_exceptions[name]!r} "
-                f"to {new_exceptions[name]!r}"
+        elif old_exceptions[name] != UNRELEASED:
+            if new_exceptions[name] != old_exceptions[name]:
+                problems.append(
+                    f"exception {name!r} was re-dated from {old_exceptions[name]!r} "
+                    f"to {new_exceptions[name]!r}"
+                )
+        else:
+            found = _date_problem(
+                name, new_exceptions[name], previous_release, current_version
             )
+            if found:
+                problems.append(found)
+    for name in sorted(set(new_exceptions) - set(old_exceptions)):
+        found = _date_problem(name, new_exceptions[name], previous_release, current_version)
+        if found:
+            problems.append(found)
     return problems
 
 
@@ -536,47 +635,104 @@ def _carries_contract(root: Path, ref: str) -> bool:
     return _git(root, "cat-file", "-e", f"{ref}:{CONTRACT_PATH}").returncode == 0
 
 
-def _previous_contract(root: Path, previous: str) -> tuple[str | None, dict | None]:
-    """(ref, contract at ref), or (None, None) in the one case where nothing is legitimate.
+def _contract_at(root: Path, ref: str) -> dict:
+    shown = _git(root, "show", f"{ref}:{CONTRACT_PATH}")
+    try:
+        return json.loads(shown.stdout)
+    except ValueError as error:
+        raise CannotCompare(f"{CONTRACT_PATH} at {ref} is not JSON: {error}") from error
+
+
+def _tag_version(tag: str | None) -> str | None:
+    """`v1.2.3` -> `1.2.3`; anything that is not a release tag -> None."""
+    if tag and tag.startswith("v") and VERSION.match(tag[1:]):
+        return tag[1:]
+    return None
+
+
+def _plugin_version(root: Path) -> str | None:
+    """The version this tree builds, read the way tools/build-ipk.sh reads it."""
+    try:
+        source = (root / "src" / "MQTTBridge" / "version.py").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', source, re.M)
+    return match.group(1) if match else None
+
+
+def _head_release(root: Path) -> str | None:
+    """The release tag on HEAD itself - a release being checked - or None."""
+    tags = _git(root, "tag", "--points-at", "HEAD", "--list", RELEASE_TAGS).stdout.split()
+    versions = sorted((v for v in map(_tag_version, tags) if v), key=_version_key)
+    return versions[-1] if versions else None
+
+
+class Previous:
+    """What the working copy is compared with."""
+
+    def __init__(self, ref=None, contract=None, history=()):
+        self.ref = ref
+        self.contract = contract
+        # [(version, contract)] of the release tags before HEAD that carry the file, oldest first
+        self.history = list(history)
+
+
+def _previous_contract(root: Path, previous: str) -> Previous:
+    """The contract to compare with. Empty only in the one case where nothing is legitimate.
 
     Raises CannotCompare for everything else: an unknown ref, no release tag reachable, or a
-    release tag without the file although an earlier one had it.
+    release tag without the file although an earlier one had it. A release tag on HEAD itself
+    is the release being checked, never its own previous release.
     """
     if previous != "tag":
         if _git(root, "rev-parse", "--verify", "--quiet", f"{previous}^{{commit}}").returncode:
             raise CannotCompare(f"{previous!r} is not a commit, tag or branch in this repository")
         if not _carries_contract(root, previous):
             raise CannotCompare(f"{previous} carries no {CONTRACT_PATH} to compare against")
-    else:
-        reachable = _git(root, "tag", "--list", RELEASE_TAGS, "--merged", "HEAD")
-        if reachable.returncode or not reachable.stdout.split():
+        return Previous(previous, _contract_at(root, previous))
+
+    reachable = _git(root, "tag", "--list", RELEASE_TAGS, "--merged", "HEAD").stdout.split()
+    if not reachable:
+        raise CannotCompare(
+            "no release tag is reachable from HEAD - a checkout without tags? "
+            "(the CI job needs `fetch-depth: 0`)"
+        )
+    on_head = set(_git(root, "tag", "--points-at", "HEAD", "--list", RELEASE_TAGS).stdout.split())
+    earlier = [tag for tag in reachable if tag not in on_head]
+    if not earlier:
+        print("the release on HEAD is the first release tag; there is nothing earlier to compare")
+        return Previous()
+    exclude = [argument for tag in sorted(on_head) for argument in ("--exclude", tag)]
+    described = _git(
+        root, "describe", "--tags", "--abbrev=0", "--match", RELEASE_TAGS, *exclude, "HEAD"
+    )
+    newest = described.stdout.strip()
+    if described.returncode or not newest:
+        raise CannotCompare(f"git describe found no release tag: {described.stderr.strip()}")
+    history = sorted(
+        (
+            (_tag_version(tag), _contract_at(root, tag))
+            for tag in earlier
+            if _tag_version(tag) and _carries_contract(root, tag)
+        ),
+        key=lambda item: _version_key(item[0]),
+    )
+    if not _carries_contract(root, newest):
+        every = _git(root, "tag", "--list", RELEASE_TAGS).stdout.split()
+        carrying = [tag for tag in every if _carries_contract(root, tag)]
+        if carrying:
             raise CannotCompare(
-                "no release tag is reachable from HEAD - a checkout without tags? "
-                "(the CI job needs `fetch-depth: 0`)"
+                f"{newest}, the newest release tag before HEAD, carries no {CONTRACT_PATH}, "
+                f"although {', '.join(sorted(carrying))} did - a maintenance branch of a release "
+                "older than the first one carrying the file lands here too"
             )
-        described = _git(root, "describe", "--tags", "--abbrev=0", "--match", RELEASE_TAGS)
-        previous = described.stdout.strip()
-        if described.returncode or not previous:
-            raise CannotCompare(f"git describe found no release tag: {described.stderr.strip()}")
-        if not _carries_contract(root, previous):
-            every = _git(root, "tag", "--list", RELEASE_TAGS).stdout.split()
-            carrying = [tag for tag in every if _carries_contract(root, tag)]
-            if carrying:
-                raise CannotCompare(
-                    f"{previous}, the newest release tag reachable from HEAD, carries no "
-                    f"{CONTRACT_PATH}, although {', '.join(sorted(carrying))} did"
-                )
-            print(
-                f"no release tag carries {CONTRACT_PATH} yet (checked {', '.join(sorted(every))});"
-                " nothing to compare against - legitimate only until the first release that"
-                " ships the file"
-            )
-            return None, None
-    shown = _git(root, "show", f"{previous}:{CONTRACT_PATH}")
-    try:
-        return previous, json.loads(shown.stdout)
-    except ValueError as error:
-        raise CannotCompare(f"{CONTRACT_PATH} at {previous} is not JSON: {error}") from error
+        print(
+            f"no release tag carries {CONTRACT_PATH} yet (checked {', '.join(sorted(every))});"
+            " nothing to compare against - legitimate only until the first release that"
+            " ships the file"
+        )
+        return Previous()
+    return Previous(newest, _contract_at(root, newest), history)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -606,17 +762,33 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.previous:
         try:
-            ref, old = _previous_contract(root, args.previous)
+            head_release = _head_release(root)
+            previous = _previous_contract(root, args.previous)
         except CannotCompare as error:
             print(f"cannot compare with the previous release: {error}")
             return EXIT_CANNOT_COMPARE
-        if old is not None:
-            found = compare(old, contract)
-            for line in found:
-                print(f"{CONTRACT_PATH} against {ref}: {line}")
-            if not found:
-                print(f"{CONTRACT_PATH} keeps every promise {ref} made")
-            problems += found
+        # The version the working copy ships as: the tag on HEAD, when this is a release.
+        current_version = head_release or _plugin_version(root)
+        found = []
+        if previous.contract is not None:
+            found += compare(
+                previous.contract,
+                contract,
+                previous_release=_tag_version(previous.ref),
+                current_version=current_version,
+            )
+        # The record across releases: every tag before HEAD that carries it, and HEAD itself when
+        # HEAD is a release - a release never says "unreleased".
+        history = list(previous.history)
+        if head_release:
+            history.append((head_release, contract))
+        found += check_record(history)
+        where = previous.ref or "the release record"
+        for line in found:
+            print(f"{CONTRACT_PATH} against {where}: {line}")
+        if previous.contract is not None and not found:
+            print(f"{CONTRACT_PATH} keeps every promise {previous.ref} made")
+        problems += found
     return EXIT_PROBLEMS if problems else EXIT_OK
 
 

@@ -418,7 +418,7 @@ def _git(repo, *args):
     subprocess.run([*GIT, *args], cwd=repo, check=True, capture_output=True)
 
 
-def _write(repo, topics, contract_data):
+def _write(repo, topics, contract_data, version="1.0.0"):
     (repo / "docs").mkdir(exist_ok=True)
     (repo / "docs" / "TOPICS.md").write_text(topics, encoding="utf-8")
     target = repo / "docs" / "contract.json"
@@ -426,6 +426,28 @@ def _write(repo, topics, contract_data):
         target.unlink(missing_ok=True)
     else:
         target.write_text(json.dumps(contract_data, indent=2) + "\n", encoding="utf-8")
+    source = repo / "src" / "MQTTBridge"
+    source.mkdir(parents=True, exist_ok=True)
+    (source / "version.py").write_text(f'__version__ = "{version}"\n', encoding="utf-8")
+
+
+def _with_exceptions(topics_text, contract, rows):
+    """The real pair, with its exception record replaced by `rows` - (name, release) - on both
+    sides, so the two still agree."""
+    lines = topics_text.splitlines(keepends=True)
+    start = next(i for i, line in enumerate(lines) if line.startswith("| Exception | Release |"))
+    end = start + 2
+    while lines[end].startswith("|"):
+        end += 1
+    table = [f"| `{name}` | {release} | a change | nobody reads it |\n" for name, release in rows]
+    changed = copy.deepcopy(contract)
+    changed["exceptions"] = [{"name": name, "release": release} for name, release in rows]
+    return "".join(lines[: start + 2] + table + lines[end:]), changed
+
+
+# The record as the first release that carries the file would have it: history dated when it
+# happened (at or before that release), nothing left "unreleased".
+FIRST_RECORD = [("zap-moves-channel-list", "0.3.0"), ("timers-lists-finished", "1.0.0")]
 
 
 def _commit(repo, message, tag=None):
@@ -458,7 +480,13 @@ def _without_reboot(topics_text, contract):
     return "".join(kept), smaller
 
 
-def test_cli_a_removal_against_the_release_tag_fails(repo, topics_text, contract):
+@pytest.fixture()
+def released(topics_text, contract):
+    return _with_exceptions(topics_text, contract, FIRST_RECORD)
+
+
+def test_cli_a_removal_against_the_release_tag_fails(repo, released):
+    topics_text, contract = released
     _write(repo, topics_text, contract)
     _commit(repo, "release", tag="v1.0.0")
     _write(repo, *_without_reboot(topics_text, contract))
@@ -469,7 +497,8 @@ def test_cli_a_removal_against_the_release_tag_fails(repo, topics_text, contract
     assert "against v1.0.0" in output
 
 
-def test_cli_an_unchanged_contract_passes_against_the_tag(repo, topics_text, contract):
+def test_cli_an_unchanged_contract_passes_against_the_tag(repo, released):
+    topics_text, contract = released
     _write(repo, topics_text, contract)
     _commit(repo, "release", tag="v1.0.0")
     _commit(repo, "later")
@@ -507,12 +536,14 @@ def test_cli_nothing_to_compare_only_before_any_tag_carries_the_file(
     assert "no release tag carries docs/contract.json yet (checked v0.3.0)" in output
 
 
-def test_cli_a_newer_tag_without_the_file_fails(repo, topics_text, contract):
+def test_cli_a_newer_tag_without_the_file_fails(repo, released):
+    topics_text, contract = released
     _write(repo, topics_text, contract)
     _commit(repo, "release", tag="v1.0.0")
     _write(repo, topics_text, None)
     _commit(repo, "the file went missing", tag="v1.1.0")
     _write(repo, topics_text, contract)
+    _commit(repo, "the file is back")
     status, output = _run(repo, "--previous", "tag")
     assert status == 2, output
     assert "v1.1.0" in output and "although v1.0.0 did" in output
@@ -539,3 +570,132 @@ def test_cli_a_disagreement_alone_exits_one(repo, topics_text, contract):
 def test_cli_an_unknown_option_exits_two(repo):
     status, _output = _run(repo, "--previus", "tag")
     assert status == 2
+
+
+# ----------------------------------------------- the exception record keeps its dates --
+#
+# Criterion 4 of TOPICS.md's exceptions: a change of meaning is decided in the pull request that
+# makes it, and the record says which release shipped it. A record that can be back-dated says
+# nothing. The rule: the first release that carries contract.json dates its history when it
+# happened; after that, a new exception says "unreleased" until the release that ships it, which
+# dates it to itself; a release tag never says "unreleased"; a date never changes.
+
+
+def test_cli_a_new_exception_back_dated_is_refused(repo, released):
+    topics_text, contract = released
+    _write(repo, topics_text, contract)
+    _commit(repo, "release", tag="v1.0.0")
+    later = FIRST_RECORD + [("sneaky-meaning-change", "0.3.0")]
+    _write(repo, *_with_exceptions(topics_text, contract, later), version="1.1.0")
+    _commit(repo, "a change of meaning")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 1, output
+    assert "sneaky-meaning-change" in output
+
+
+def test_cli_a_new_exception_dated_to_the_previous_release_is_refused(repo, released):
+    topics_text, contract = released
+    _write(repo, topics_text, contract)
+    _commit(repo, "release", tag="v1.0.0")
+    later = FIRST_RECORD + [("sneaky-meaning-change", "1.0.0")]
+    _write(repo, *_with_exceptions(topics_text, contract, later), version="1.1.0")
+    _commit(repo, "a change of meaning")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 1, output
+    assert "sneaky-meaning-change" in output
+
+
+def test_cli_a_release_that_forgot_its_version_bump_cannot_date_back(repo, released):
+    # version.py still says 1.0.0 after the 1.0.0 tag: "the shipping version" is no guide then,
+    # and the previous release is the one that refuses the date.
+    topics_text, contract = released
+    _write(repo, topics_text, contract)
+    _commit(repo, "release", tag="v1.0.0")
+    later = FIRST_RECORD + [("sneaky-meaning-change", "1.0.0")]
+    _write(repo, *_with_exceptions(topics_text, contract, later), version="1.0.0")
+    _commit(repo, "a change of meaning, no bump")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 1, output
+    assert "not later than the previous release 1.0.0" in output
+
+
+def test_cli_an_exception_dated_before_the_tag_it_first_appears_in_is_refused(repo, released):
+    topics_text, contract = released
+    _write(repo, topics_text, contract)
+    _commit(repo, "release", tag="v1.0.0")
+    later = FIRST_RECORD + [("late-meaning-change", "1.0.0")]
+    _write(repo, *_with_exceptions(topics_text, contract, later), version="1.1.0")
+    _commit(repo, "release", tag="v1.1.0")
+    _commit(repo, "later")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 1, output
+    assert "late-meaning-change" in output and "v1.1.0" in output
+
+
+def test_cli_a_release_tag_still_saying_unreleased_is_refused(repo, released):
+    topics_text, contract = released
+    left_open = FIRST_RECORD + [("forgotten-date", "unreleased")]
+    _write(repo, *_with_exceptions(topics_text, contract, left_open))
+    _commit(repo, "release", tag="v1.0.0")
+    dated = FIRST_RECORD + [("forgotten-date", "1.1.0")]
+    _write(repo, *_with_exceptions(topics_text, contract, dated), version="1.1.0")
+    _commit(repo, "the next release")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 1, output
+    assert "carries exception 'forgotten-date' still marked unreleased" in output
+
+
+def test_cli_unreleased_dated_to_an_old_release_is_refused(repo, released):
+    # Against a commit that is not a release, where "unreleased" is legitimate.
+    topics_text, contract = released
+    _write(repo, topics_text, contract)
+    _commit(repo, "release", tag="v1.0.0")
+    work = FIRST_RECORD + [("pending-change", "unreleased")]
+    _write(repo, *_with_exceptions(topics_text, contract, work), version="1.1.0")
+    _commit(repo, "work in progress")
+    _git(repo, "branch", "work")
+    dated = FIRST_RECORD + [("pending-change", "0.1.0")]
+    _write(repo, *_with_exceptions(topics_text, contract, dated), version="1.1.0")
+    status, output = _run(repo, "--previous", "work")
+    assert status == 1, output
+    assert "pending-change" in output
+
+
+def test_cli_a_tagged_checkout_saying_unreleased_is_refused(repo, released):
+    topics_text, contract = released
+    _write(repo, topics_text, contract)
+    _commit(repo, "release", tag="v1.0.0")
+    left_open = FIRST_RECORD + [("forgotten-date", "unreleased")]
+    _write(repo, *_with_exceptions(topics_text, contract, left_open), version="1.1.0")
+    _commit(repo, "release", tag="v1.1.0")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 1, output
+    assert "carries exception 'forgotten-date' still marked unreleased" in output
+
+
+def test_cli_a_new_exception_unreleased_passes(repo, released):
+    topics_text, contract = released
+    _write(repo, topics_text, contract)
+    _commit(repo, "release", tag="v1.0.0")
+    later = FIRST_RECORD + [("next-meaning-change", "unreleased")]
+    _write(repo, *_with_exceptions(topics_text, contract, later), version="1.0.0")
+    _commit(repo, "a change of meaning")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 0, output
+
+
+def test_cli_the_release_dates_its_exceptions_to_itself(repo, released):
+    topics_text, contract = released
+    _write(repo, topics_text, contract)
+    _commit(repo, "release", tag="v1.0.0")
+    shipped = FIRST_RECORD + [("next-meaning-change", "1.1.0")]
+    _write(repo, *_with_exceptions(topics_text, contract, shipped), version="1.1.0")
+    _commit(repo, "the release pull request")
+    # The release pull request, before the tag exists...
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 0, output
+    # ...and the tagged release itself, compared with the release before it.
+    _git(repo, "tag", "v1.1.0")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 0, output
+    assert "against v1.0.0" in output or "every promise v1.0.0 made" in output

@@ -190,7 +190,11 @@ again whenever that transaction had begun to restore, or cannot say:
 
 - **the self-update** says where it was: its marker and its `status.json` carry the phase (§4);
 - **the SSH installer** writes no phase record, today or in this plan, so an interrupted installer
-  rollback is treated as "cannot say", and its newest snapshot is restored again.
+  rollback is treated as "cannot say", and its snapshot is restored again. **Which** snapshot is
+  not decided by modification time - receivers without a battery-backed clock boot in 1970 and jump
+  when NTP answers, so "newest" can be wrong. Planned: the installer writes its transaction `<id>`
+  into the lock's `owner.json` (the `id` key of §2.2), and a recovery restores
+  `ha-installer-<id>` by that id.
 
 Either way the recovery first needs the lock, and the two programs' locks age differently: a dead
 self-update's lock is stale 30 minutes after its last heartbeat, but the SSH installer's lock has
@@ -352,6 +356,9 @@ So:
 - An interruption the trap does cover, arriving before the restore has begun, starts the interface
   on the plugin as it was: the picture comes first. The lock and the snapshot are still there, and
   the recovery of §3.3 restores from them.
+- A restore child killed part-way - by a signal to the whole process group, which the detached
+  start is there to prevent - leaves a partial restore. The trap still starts the interface, and
+  the recovery of §3.3 repeats the restore, which is safe to repeat.
 - **Test**: **close the SSH connection** between `init 4` and `init 3` - not a signal delivered by
   the test - and the receiver ends in runlevel 3, with the restore complete and the recorded
   `lastservice` written.

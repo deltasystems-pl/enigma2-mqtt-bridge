@@ -22,14 +22,17 @@ version that has no section here.
   `epg-grid-generated-means-changed`, recorded after the fact, and this release's
   `timers-lists-finished` and `zap-under-popup-recorded`. Every enumeration is open - a consumer
   treats a value it does not know as unknown - and the section says where the companion integration
-  stands on that today, including the one place it does not: a new `oscam` reader `kind` makes it
-  drop the whole payload. The `process` heading now says it is new in 0.3.0.
+  stands on that today, including the two places it does not: a new `oscam` reader `kind` makes it
+  drop the whole payload, and a new `key` `press` is read as a short press. The `process` heading
+  now says it is new in 0.3.0.
 - **The same contract as data**: [docs/contract.json](docs/contract.json) lists every state topic
   with its payload kind and retain flag, every command, every `info` member with its type, every
   setting with its type and whether `cmd/config` may write it, every capability name, the named
   exceptions and the planned additions. `tools/check-contract.py` fails when it and TOPICS.md
   disagree, and - in a new CI job, against the previous release tag's copy - when a change removes
-  or retypes an entry without a new contract major, or drops or re-dates an exception. It fails
+  or retypes an entry without a new contract major, or drops, re-dates or back-dates an exception:
+  a new one says `unreleased` until the release that ships it dates it to itself, and no release
+  tag says `unreleased` - which the release workflow now also checks before it publishes. It fails
   closed: an unknown ref, a checkout without tags, or a release tag without the file where an older
   one had it is an error (exit 2), and "nothing to compare against" passes only while no release
   tag carries the file at all, which the output says. Tests hold the file to the plugin's own
