@@ -2,16 +2,20 @@
 
 The receiver puts a popup on the screen with `AddPopup`: the info bar opens it
 with `session.open`, so the popup becomes the executing dialog and the info bar
-waits under it on `dialog_stack` as one `(screen, shown)` tuple. Before this, a
+waits under it, on top of `dialog_stack`, as a `(screen, shown)` tuple. Before this, a
 zap from Home Assistant in those seconds - under the plugin's own `cmd/message`
 popup, or under the image's "Zapped to timer service" one - was played directly
 and left out of the zap history, as if somebody were working in a menu.
 
 Every popup here reaches the screen the way the receiver puts it there:
-`Receiver(modal=True)` runs `StartEnigma`'s modal session with the info bar as
-its first dialog (`ModalInfoBar` in `conftest.py`), and the popup comes through
-the notification queue. No test sets `current_dialog` or `dialog_stack` to build
-the popup state; the few that change something afterwards say what and why.
+`Receiver(modal=True)` runs `StartEnigma`'s modal session with the info bar on
+it (`ModalInfoBar` in `conftest.py`), and the popup comes through the
+notification queue. Every test runs twice: with the info bar as the session's
+first dialog, and with a screen a session-start plugin opened under it - the
+Vu+ HbbTV plugin's `VBMain` on the receiver this was accepted on, where a rule
+that wanted the info bar to be the only entry refused every popup. No test sets
+`current_dialog` or `dialog_stack` to build the popup state; the few that
+change something afterwards say what and why.
 
 The rule (`service.info_popup_over_infobar`) is narrow on purpose, and each
 refusal below is a case it must not take for a popup: a question, a box with
@@ -49,10 +53,10 @@ LAST_ERROR = ROOT + "/last_error"
 BOUQUET = ROOT + "/bouquet"
 
 
-@pytest.fixture
-def receiver():
+@pytest.fixture(params=[False, True], ids=["info bar first", "session-start screen under it"])
+def receiver(request):
     """This module's receiver runs the modal session, as the image does."""
-    return Receiver(modal=True)
+    return Receiver(modal=True, session_start_screen=request.param)
 
 
 @pytest.fixture
@@ -90,7 +94,16 @@ def box(make_bridge, factory, settings, receiver, usage):
     box.receiver = receiver
     box.session = receiver.session
     box.factory = factory
+    # What the session-start plugins left under the info bar, as the session
+    # stacked it when the info bar opened over it: shown then.
+    start = receiver.session_start_screen
+    box.below = [] if start is None else [(start, True)]
     return box
+
+
+def under_popup(box, info_bar_shown=False):
+    """The dialog stack under a popup opened over the info bar."""
+    return box.below + [(InfoBar.instance, info_bar_shown)]
 
 
 def send(box, name, body):
@@ -128,7 +141,7 @@ def assert_popup_state(box):
     """Built by the model, not by hand: one popup, the info bar under it, hidden."""
     popup = box.session.current_dialog
     assert type(popup) is MessageBox
-    assert box.session.dialog_stack == [(InfoBar.instance, False)]
+    assert box.session.dialog_stack == under_popup(box)
     assert box.session.in_exec is True
     return popup
 
@@ -147,7 +160,7 @@ def test_a_zap_under_the_plugins_own_popup_is_recorded(box, kind):
     # The popup is left alone, as the image's own channel-list zap leaves it: it
     # is still what the receiver shows, and closes on its own timeout.
     assert box.session.current_dialog is popup
-    assert box.session.dialog_stack == [(InfoBar.instance, False)]
+    assert box.session.dialog_stack == under_popup(box)
     assert popup.execing is True
 
 
@@ -165,7 +178,7 @@ def test_a_zap_under_the_images_zap_timer_popup_is_recorded(box, osd_showing):
         InfoBar.instance.show()
     AddPopup("Zapped to timer service TVN HD!", MessageBox.TYPE_INFO, 5)
     assert type(box.session.current_dialog) is MessageBox
-    assert box.session.dialog_stack == [(InfoBar.instance, osd_showing)]
+    assert box.session.dialog_stack == under_popup(box, osd_showing)
     assert InfoBar.instance.shown is False
 
     send(box, "zap", {"sref": TVN})
@@ -297,7 +310,7 @@ def test_a_subclass_of_the_message_box_is_played_directly(box):
     popup = box.session.current_dialog
     assert type(popup) is InformationSubclass
     assert popup.type == MessageBox.TYPE_INFO and popup.list == []
-    assert box.session.dialog_stack == [(InfoBar.instance, False)]
+    assert box.session.dialog_stack == under_popup(box)
     assert service_module.info_popup_over_infobar(box.session) is False
 
     send(box, "zap", {"sref": TVN})
@@ -314,7 +327,9 @@ def test_an_information_popup_two_screens_deep_is_played_directly(box):
     osd.show("Dinner is ready", "info", 15)
     popup = box.session.current_dialog
     assert type(popup) is MessageBox and popup.type == MessageBox.TYPE_INFO
-    assert [screen for screen, _shown in box.session.dialog_stack] == [InfoBar.instance, player]
+    below = [screen for screen, _shown in box.below]
+    assert [screen for screen, _shown in box.session.dialog_stack] == below + [
+        InfoBar.instance, player]
     assert service_module.info_popup_over_infobar(box.session) is False
 
     send(box, "zap", {"sref": TVN})
@@ -330,7 +345,7 @@ def test_an_information_popup_over_another_screen_than_the_info_bar_is_played_di
     screen that is not the info bar, which is the case the stack test is for.
     """
     osd.show("Dinner is ready", "info", 15)
-    base = box.session.dialog_stack[0][0]
+    base = box.session.dialog_stack[-1][0]
     InfoBar.instance = InfoBar(box.list)
     assert base is not InfoBar.instance
     assert service_module.info_popup_over_infobar(box.session) is False
@@ -363,7 +378,7 @@ def test_an_unexpected_stack_entry_is_a_screen_open_and_nothing_raises(box):
     """`StartEnigma` stacks `(screen, shown)` tuples; anything else is not trusted."""
     osd.show("Dinner is ready", "info", 15)
     assert_popup_state(box)
-    box.session.dialog_stack[0] = InfoBar.instance
+    box.session.dialog_stack[-1] = InfoBar.instance
     assert service_module.info_popup_over_infobar(box.session) is False
 
     send(box, "zap", {"sref": TVN})
@@ -408,3 +423,32 @@ def test_history_clear_is_still_refused_under_an_information_popup(box):
     assert last_error(box)["reason"] == "screen_open"
     assert last_error(box)["error"] == zaphistory.SCREEN_OPEN[0]
     assert InfoBar.instance.keys == []
+
+
+def test_a_refused_popup_says_in_the_log_which_condition_refused(box, plugin_log):
+    """The next hardware surprise explains itself, at the default level."""
+    AddNotification(MessageBox, "A timer failed to record! Disable TV and try again?",
+                    timeout=20)
+    assert_popup_state(box)
+
+    send(box, "zap", {"sref": TVN})
+
+    assert_played_directly(box, TVN)
+    log = plugin_log()
+    assert (
+        "INFO MQTTBridge.service: the channel list is not used for this zap: "
+        "the message box is of type 0, not information, warning or error"
+    ) in log
+    assert "A timer failed" not in log
+
+
+def test_a_popup_over_the_movie_player_names_the_stack_in_the_log(box, plugin_log):
+    box.session.open(PlayerWithNotifications)
+    osd.show("Dinner is ready", "info", 15)
+
+    send(box, "zap", {"sref": TVN})
+
+    below = "SessionStartScreen > " if box.below else ""
+    assert ("the screen under the message box is not the info bar (stack: " + below
+            + "ModalInfoBar > PlayerWithNotifications)") in plugin_log()
+    assert "Dinner" not in plugin_log()
