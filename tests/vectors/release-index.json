@@ -1001,6 +1001,15 @@
   },
   {
    "memory": {
+    "serials": {},
+    "silenced": [],
+    "rank": 2
+   },
+   "valid": true,
+   "note": "a member a later build writes"
+  },
+  {
+   "memory": {
     "6848dd4f906e62e3": 5
    },
    "valid": false,
@@ -1082,11 +1091,12 @@
   {
    "memory": {
     "serials": {},
-    "silenced": [],
-    "rank": 2
+    "silenced": "k",
+    "rank": 2,
+    "extra": null
    },
    "valid": false,
-   "note": "a member no reader writes"
+   "note": "a known member of the wrong type next to an unknown one"
   },
   {
    "memory": [],
@@ -1135,6 +1145,28 @@
   },
   {
    "state": {
+    "schema": 2,
+    "release": {
+     "abababababababababababababababababababababababababababababababab": {
+      "keys": [
+       "6848dd4f906e62e3"
+      ],
+      "serials": {
+       "6848dd4f906e62e3": 2
+      },
+      "silenced": [],
+      "note": "later"
+     }
+    },
+    "acceptance": {},
+    "trial": {},
+    "seen": 7
+   },
+   "valid": true,
+   "note": "a later schema: an extra member, a third lineage, an extra entry member"
+  },
+  {
+   "state": {
     "serials": {
      "6848dd4f906e62e3": 2
     },
@@ -1145,12 +1177,40 @@
   },
   {
    "state": {
-    "schema": 2,
+    "schema": 0,
     "release": {},
     "acceptance": {}
    },
    "valid": false,
-   "note": "another schema"
+   "note": "schema 0"
+  },
+  {
+   "state": {
+    "schema": "2",
+    "release": {},
+    "acceptance": {}
+   },
+   "valid": false,
+   "note": "a schema that is a string"
+  },
+  {
+   "state": {
+    "schema": 2,
+    "release": {
+     "abababababababababababababababababababababababababababababababab": {
+      "keys": [
+       "6848dd4f906e62e3"
+      ],
+      "serials": {
+       "6848dd4f906e62e3": "2"
+      },
+      "silenced": []
+     }
+    },
+    "acceptance": {}
+   },
+   "valid": false,
+   "note": "a later schema whose known member has the wrong type"
   },
   {
    "state": {

@@ -108,7 +108,9 @@ acceptance with the build id:
 
 **Settled with the index's tooling (2026-09-26).** Decisions 2 and 7 are built as far as they reach
 without a reader: the index format, the two embedded keys and their ranks, the acceptance rule and
-its shared vectors, the verifier, and the three publication workflows
+its shared vectors, the verifier, and the three publication workflows - in which the job that
+signs runs no code from the repository at all, because the runner holds a job's secrets for the
+whole job; the repository's checks run in key-free jobs before and after it
 ([RELEASE-INDEX.md](../RELEASE-INDEX.md)). Two points are made precise there. A reader's memory is
 kept per `key_id`: the last accepted serial, and the keys it has silenced - every key of its set
 ranked below one it accepted. The rank floor is derived from it within the reader's own key set,

@@ -134,13 +134,28 @@ key with its own, and nothing from a set that shares none: a release that adds o
 what was known, a downgrade to an older set cannot forget what a newer one learned, and a disjoint
 set is never consulted.
 
-**Loading it.** A stored state or memory in any other shape - the bare map of serials an earlier
-draft used, a serial that is not a whole number of at least 1, a silenced entry that is not a key
-id, a member nobody writes - is refused (`trust.BadMemory`), never read as "nothing remembered":
-that would put a reader back at first sight with no key silenced, the one direction a damaged file
-must not move it. The reader then judges no index and reports it. **Recovery:** remove the file on
-purpose; that is a factory reset of this memory, and the build's baselines apply again. The vectors
-carry the shapes that must load and the ones that must be refused.
+**Loading it.** The format is **open for extension and closed for known members**, as the index
+is. A reader tolerates what it does not know - a member at the top, a member in an entry, a third
+part beside `release` and `acceptance` - and reads a higher `schema` by its known members, because a
+later build may add to the state and a downgrade (which this project supports from the TV and the
+page) brings back a build that has never heard of it. The rule for a later schema: it only adds,
+never changes what a known member means or its type; a change that would, uses another file. And a
+build that stores the state keeps everything it does not know as it was, a higher schema number
+included. What a reader knows must be right: a known member that is missing or of the wrong type
+- the bare map of serials an earlier draft used, a serial that is not a whole number of at least 1,
+a silenced entry that is not a key id, either part missing, a schema below 1 - is refused
+(`trust.BadMemory`), never read as "nothing remembered": that would put a reader back at first sight
+with no key silenced, the one direction a damaged file must not move it. The reader then judges no
+index and reports it; installing over SSH, from the bundle or by hand does not read the file.
+**Recovery:** remove the file on purpose - `/etc/enigma2/mqttbridge-index.json` on the receiver,
+the integration's store in Home Assistant. That is a factory reset of this memory: the build's
+baselines apply again, and **which keys were silenced is forgotten**. Until the reader accepts the
+published index again - which silences them again if a higher key signed it - it would accept an
+index from a silenced key within that key's first-sight window, as a reflashed receiver would. The
+vectors carry the shapes that must load and the ones that must be refused.
+
+Which part a reader uses is never a default: `memory_for` and `store` take `acceptance` as a
+required keyword, answered by `trust.configured`.
 
 A reader that finds the exact bytes it already holds re-delivered has nothing new: `replay` is the
 verdict, and it is not a failure. This is the spec's "ignored for good" rank rule written per key:
@@ -203,6 +218,14 @@ serve it: each stops the build, and nothing is signed.
 
 Three workflows, and no job can do what the next one does.
 
+**No code from the repository runs in the job that holds the key.** The runner process keeps the
+job's secrets in memory for the whole job - to mask them in its log - and hosted runners give the
+job's user passwordless `sudo`, so any code running anywhere in that job, before or after the step
+that uses the key, could read it. The repository's own checks therefore run in jobs that never see
+the key - before signing (`precheck`) and after (`publish`) - and the job that signs runs only the
+pinned `download-artifact`, the runner's own `sha256sum`, bash builtins, `base64` and `openssl`.
+What remains is the residual this design accepts: those pinned programs and the runner image.
+
 - **`index.yml`** runs on every pull request and every push to `main` - not only on the files it is
   about, so it can be a required check. It holds no secret and writes nothing. It runs
   `tools/check-workflows.py` (below), `make-index.py tree` (policy, `COMPATIBILITY`, the published
@@ -218,20 +241,21 @@ Three workflows, and no job can do what the next one does.
   - **build** (`contents: read`, no key) builds the unsigned index - failing if the triggering
     release's package is not there yet - and puts its **sha256 at the top of the job summary** and
     into a job output;
+  - **precheck** (`contents: read`, no key) runs the repository's checks on that file before
+    anything is signed: the sha256 build reported, every member, the main key's id, the next serial,
+    the branch's whole history. `sign` waits for it;
   - **sign** runs in the `release-signing` environment, which admits the `main` branch only and
-    waits for the maintainer's approval, on a fresh hosted `ubuntu-24.04` runner. It has **no
-    permissions**, uses only `actions/download-artifact` and `actions/checkout`, and installs
-    nothing. Its order is the point: **no code from the repository runs before the key has been
-    used.** First the artifact, outside the workspace; then its sha256 against build's output, with
-    the runner's own `/usr/bin/sha256sum`; then the signature - `/usr/bin/openssl pkeyutl -sign -rawin
-    -keyform DER -inkey /dev/stdin` with fixed arguments, the secret (one line of base64 of the raw
-    32-byte seed) expanded once, piped as DER behind the fixed 16-byte PKCS#8 prefix into
-    `/usr/bin/base64 -d` under `/usr/bin/env -u INDEX_SIGNING_KEY`, nothing written but the
-    signature. Only then the checkout, the full re-check of the file - every member, the main key's
-    id, the next serial, the branch's history - and the verification with the embedded main key;
-    the signature leaves the runner as the job's output only if both pass;
-  - **publish** (`contents: write`, no key) accepts the pair exactly as a reader that has seen the
-    published index would, and pushes both files to `gh-pages`.
+    waits for the maintainer's approval, on a fresh hosted `ubuntu-24.04` runner, with **no
+    permissions** and **no checkout**. It is exactly four steps: download the artifact, outside the
+    workspace; check its sha256 against build's output with the runner's own `/usr/bin/sha256sum`;
+    sign - `/usr/bin/openssl pkeyutl -sign -rawin -keyform DER -inkey /dev/stdin` with fixed
+    arguments, the secret (one line of base64 of the raw 32-byte seed) expanded once, piped as DER
+    behind the fixed 16-byte PKCS#8 prefix into `/usr/bin/base64 -d` under `/usr/bin/env -u
+    INDEX_SIGNING_KEY`, nothing written but the signature; and hand the raw signature on, in
+    base64, as the job's output;
+  - **publish** (`contents: write`, no key) verifies that signature with the embedded main key
+    (`make-index.py wrap`), accepts the pair exactly as a reader that has seen the published index
+    would (`verify`), and pushes both files to `gh-pages`.
 
   The chain runs in one concurrency group, `publish-index`, never cancelled, so two chains never
   both sign "published + 1".
@@ -240,11 +264,11 @@ Three workflows, and no job can do what the next one does.
   `main`. See below.
 
 `tools/check-workflows.py` fails a pull request that would weaken this. Its docstring lists every
-rule; in short: the sign job's whole text is pinned by sha256, and its hash and sign steps are fixed
-texts written in the checker, byte for byte; nothing but the artifact download and the hash check
-runs before the key; no step of the job becomes root, runs in the background, touches `/usr`,
-`GITHUB_PATH`, `GITHUB_ENV`, `BASH_ENV` or `PATH`, or declares `env` or `defaults`; the job runs on
-a hosted `ubuntu-24.04` runner; the `secrets` context appears once in the whole repository; only
+rule; in short: the sign job's whole text is pinned by sha256; it is exactly the four steps
+above, its hash, sign and emit steps fixed texts written in the checker, byte for byte, with no
+checkout and nothing from the repository; it waits for `precheck`, and `precheck` and `publish` keep
+running the repository's checks without the key; it declares no `env` or `defaults` and runs on a
+hosted `ubuntu-24.04` runner; the `secrets` context appears once in the whole repository; only
 that job may name the `release-signing` environment; every `uses:`, flow style included, is pinned
 to a full commit SHA with its version beside it; no `pull_request_target`; in the chain and in
 `index.yml` every run step is `shell: bash` (pipefail), carries no condition but build's release

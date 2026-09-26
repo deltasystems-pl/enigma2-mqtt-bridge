@@ -6,10 +6,11 @@ repository (`indexlab.Lab`):
 
 - **build**: `make-index.py build` from the releases, the feed and the published index, writing the
   sha256 to the job output file and the summary;
-- **sign**: `make-index.py check` against that sha256, then **the sign step's own text, taken out of
-  publish-index.yml**, run by `bash -eo pipefail` with a throwaway seed as `INDEX_SIGNING_KEY`, then
-  `make-index.py wrap`;
-- **publish**: `make-index.py verify`, then the files onto the lab's `gh-pages`.
+- **precheck**: `make-index.py check` against that sha256, with no key;
+- **sign**: **the hash, sign and emit steps' own texts, taken out of publish-index.yml**, run by
+  `bash -eo pipefail` with a throwaway seed as `INDEX_SIGNING_KEY` - no repository code;
+- **publish**: `make-index.py wrap` on the emitted signature, then `verify`, then the files onto
+  the lab's `gh-pages`.
 
 A second round follows the first, and the chain refuses what it must: a replayed or tampered pair,
 a wrong key, and the main key after the spare's emergency index. The keys are the vectors' test
@@ -70,13 +71,21 @@ def _round(lab, keyset, work, seed_name="t1"):
     assert hashlib.sha256(index_path.read_bytes()).hexdigest() == sha256
 
     assert _cli(lab, keyset, "check", "--index", str(index_path), "--sha256", sha256) == 0
+    # sign: the hash, sign and emit steps' own texts, as the key-holding job runs them - no
+    # repository code there.
+    code, out = rehearse.run_hash_step(work, sha256)
+    assert code == 0, out
     code, out = rehearse.run_sign_step(work, indexlab.seed_of(seed_name))
     assert code == 0, out
     assert sorted(path.name for path in (work / "index").iterdir()) == [
         "releases.json", "releases.json.raw-sig"]
+    code, out = rehearse.run_emit_step(work, work / "github-output")
+    assert code == 0, out
+    # publish: decode what sign handed on, verify it with the embedded key, accept the pair.
+    handed_on = work / "handed-on.raw-sig"
+    handed_on.write_bytes(rehearse.emitted_signature(work / "github-output"))
     assert _cli(lab, keyset, "wrap", "--index", str(index_path), "--raw-signature",
-                str(work / "index" / "releases.json.raw-sig"),
-                "--out", str(work / "index" / "releases.json.sig")) == 0
+                str(handed_on), "--out", str(work / "index" / "releases.json.sig")) == 0
 
     assert _cli(lab, keyset, "verify", "--index", str(index_path), "--sig",
                 str(work / "index" / "releases.json.sig"), "--sha256", sha256) == 0

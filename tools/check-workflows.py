@@ -6,9 +6,9 @@
 `index.yml` runs this on every pull request. The main key signs the release index in CI
 (ADR-0015, decision 2), so the files under `.github/workflows/` decide who can reach it; the
 `main` ruleset makes a change to them go through a pull request, and this is what that pull
-request is checked against. The job that holds the key is pinned whole, and its two steps
-before any repository code are fixed texts; behind the pin, every rule below is checked on its own,
-so a pull request that re-pins still meets them. It fails when:
+request is checked against. The job that holds the key is pinned whole and made of fixed steps
+only; behind the pin, every rule below is checked on its own, so a pull request that re-pins still
+meets them. It fails when:
 
 - any workflow is triggered by `pull_request_target` - the one trigger that runs a fork's code
   with this repository's token and secrets;
@@ -23,15 +23,15 @@ so a pull request that re-pins still meets them. It fails when:
 - the sign job's text is not the one pinned here by sha256 (any change updates the pin in the
   same pull request, where review sees both); it does not run in `release-signing` with
   `permissions: {}` on a fresh hosted `ubuntu-24.04` runner; it declares `env`, `defaults`,
-  `container` or `services` (or the workflow declares `env` or `defaults`); it uses any action but
-  `actions/checkout` and `actions/download-artifact`; it installs or downloads anything; a step of
-  it becomes root, starts something in the background, touches `/usr`, or touches `GITHUB_PATH`,
-  `GITHUB_ENV`, `BASH_ENV`, `ENV`, `PATH` or `LD_PRELOAD`; or anything but the artifact download
-  and the hash check runs before the key is used - no checkout, no code from the repository;
-- the sign step and the hash step are not, byte for byte, the texts written here (`SIGN_STEP`,
-  `HASH_STEP`): the key is expanded once, into the pipeline that decodes it for OpenSSL's stdin,
-  and OpenSSL's arguments are fixed - so no slice of the key can be printed and no provider,
-  engine or configuration loaded into the process that reads it;
+  `container` or `services` (or the workflow declares `env` or `defaults`); or it is anything but
+  exactly four steps - download the artifact into `${{ runner.temp }}`, check its hash, sign, emit
+  the signature - with **no checkout and no code from the repository**: the runner keeps the
+  job's secrets in memory for the whole job and hosted runners give passwordless sudo, so anything
+  running anywhere in that job could read the key;
+- the hash, sign and emit steps are not, byte for byte, the texts written here (`HASH_STEP`,
+  `SIGN_STEP`, `EMIT_STEP`): the key is expanded once, into the pipeline that decodes it for
+  OpenSSL's stdin, and OpenSSL's arguments are fixed - so no slice of the key can be printed and no
+  provider, engine or configuration loaded into the process that reads it;
 - any workflow passes `--keyset`, which only the tests and the rehearsal may use;
 - `publish-index.yml`, `emergency-index.yml` or `index.yml` could let a failed guard pass: a run
   step without `shell: bash` (so without pipefail); a `continue-on-error`; a step condition other
@@ -295,7 +295,7 @@ def load(text):
 # The sign job's whole text, pinned: any change to the one job that holds the key must change this
 # pin in the same pull request, so it can never pass review unnoticed - the diff shows the new
 # text and the new hash side by side.
-SIGN_JOB_SHA256 = "ff121e5c6561cdf033d6de2b67a245d548d331132e0e6270dfa9f09f97f93292"
+SIGN_JOB_SHA256 = "e816a640876e8bbf1363aaf442551d9941c35e1e6a9a66d6af0e1e01113a5c78"
 
 # The two steps that run before any code from the repository, exactly - not a pattern. The sign
 # step expands the key once, into the one pipeline that decodes it for OpenSSL's stdin, and
@@ -315,14 +315,20 @@ umask 077
 } | /usr/bin/env -u INDEX_SIGNING_KEY /usr/bin/openssl pkeyutl -sign -rawin -keyform DER \\
       -inkey /dev/stdin -in index/releases.json -out index/releases.json.raw-sig
 """
+EMIT_STEP = ("printf 'signature=%s\\n' \"$(/usr/bin/base64 --wrap=0 index/releases.json.raw-sig)\" "
+             ">> \"$GITHUB_OUTPUT\"")
 SIGN_RUNNER = "ubuntu-24.04"
-
-# Environment files and variables a step can use to change what a later step runs.
-_STEERING = re.compile(r"\b(GITHUB_PATH|GITHUB_ENV|BASH_ENV|ENV|LD_PRELOAD|PATH)\b")
-# What a step of the sign job may not do at all: become root, leave something running, write
-# where the programs the key passes through live.
-_SIGN_JOB_FORBIDDEN = ("sudo", "su", "doas", "nohup", "setsid", "disown", "&", "at", "crontab",
-                       "systemd-run")
+RUNNER_TEMP = "${{ runner.temp }}"
+SIGN_JOB_KINDS = ("download", "hash", "sign", "emit")
+DOWNLOAD_WITH = {"name": "unsigned-index", "path": "${{ runner.temp }}/index"}
+SIGN_JOB_ENV = {
+    "hash": {"EXPECTED": "${{ needs.build.outputs.sha256 }}"},
+    "sign": {SECRET: "${{ secrets." + SECRET + " }}"},
+    "emit": {},
+}
+# What the repository's own code looks like on a command line, for the message only: the job that
+# holds the key runs none of it, and none of anything else either.
+_REPOSITORY_CODE = re.compile(r"(\btools/|\bsrc/|\.py\b|\bpython)")
 _STATUS_FUNCTIONS = re.compile(r"\b(always|failure|cancelled)\s*\(")
 
 # The commands whose failure must fail their step: in the chain workflows and index.yml each runs
@@ -546,7 +552,20 @@ def check(workflows=WORKFLOWS):
     return problems
 
 
+def _step_kind(step):
+    """What a step of the key-holding job is: one of the four it may hold, or None."""
+    if not isinstance(step, dict):
+        return None
+    uses = step.get("uses")
+    if uses is not None:
+        return "download" if str(uses).split("@")[0] == "actions/download-artifact" else None
+    return {HASH_STEP: "hash", SIGN_STEP: "sign", EMIT_STEP: "emit"}.get(step.get("run"))
+
+
 def check_sign_job(loaded, texts):
+    """The job that maps the key: exactly download, hash, sign and emit - no checkout and nothing
+    from the repository, because the runner keeps the job's secrets in memory for the whole job
+    and anything running anywhere in it could read them."""
     problems = []
     sign_steps = []
     for name, workflow in loaded.items():
@@ -570,12 +589,6 @@ def check_sign_job(loaded, texts):
         if step.get("run") != SIGN_STEP:
             problems.append(f"{where}: the sign step is not the fixed one - it must be "
                             "tools/check-workflows.py's SIGN_STEP, byte for byte")
-        if step.get("shell") != "bash":
-            problems.append(f"{where}: must declare `shell: bash` (bash -eo pipefail), exactly")
-        env = step.get("env") or {}
-        if env != {SECRET: "${{ secrets." + SECRET + " }}"}:
-            problems.append(f"{where}: the step's environment is {SECRET} from secrets.{SECRET} "
-                            "and nothing else")
         if _environment_name(job) != ENVIRONMENT:
             problems.append(f"{where}: the job must run in the {ENVIRONMENT} environment")
         if job.get("permissions") != {}:
@@ -591,44 +604,68 @@ def check_sign_job(loaded, texts):
             if key in loaded[name]:
                 problems.append(f"{name}: may not declare `{key}` at the top: it would reach the "
                                 "sign step")
-        # Before the key: the artifact and its hash, and nothing from the repository.
-        for other_number, other in enumerate(job.get("steps") or [], 1):
+        if job.get("needs") != ["build", "precheck"]:
+            problems.append(f"{name}: job {job_name} waits for build and the key-free precheck: "
+                            "`needs: [build, precheck]`")
+        problems.extend(_around_the_key(name, loaded[name]))
+        steps = job.get("steps") or []
+        kinds = [_step_kind(other) for other in steps]
+        for other_number, (other, kind) in enumerate(zip(steps, kinds), 1):
             other_where = f"{name}: job {job_name}, step {other_number}"
-            if other is step:
-                break
-            uses = other.get("uses") if isinstance(other, dict) else None
-            if uses and uses.split("@")[0] == "actions/download-artifact":
+            if kind is not None:
                 continue
-            if isinstance(other, dict) and other.get("run") == HASH_STEP and \
-                    other.get("shell") == "bash":
-                continue
-            problems.append(f"{other_where}: before the sign step the job may only download the "
-                            "artifact and check its hash - no checkout, no code from the "
-                            "repository")
-        for other_number, other in enumerate(job.get("steps") or [], 1):
+            if isinstance(other, dict) and other.get("uses"):
+                problems.append(f"{other_where}: `{other['uses']}` - no checkout and no action "
+                                "but download-artifact in the job that holds the key")
+            elif other is not step:
+                run = str(other.get("run") if isinstance(other, dict) else other)
+                code = " - it runs code from the repository" if _REPOSITORY_CODE.search(run) \
+                    else ""
+                problems.append(f"{other_where}: the job that holds the key runs only the fixed "
+                                f"hash, sign and emit steps{code}")
+        if kinds != list(SIGN_JOB_KINDS):
+            problems.append(f"{name}: job {job_name}: the job that holds the key is exactly "
+                            f"{', '.join(SIGN_JOB_KINDS)} - in that order, nothing else")
+        for other_number, (other, kind) in enumerate(zip(steps, kinds), 1):
             other_where = f"{name}: job {job_name}, step {other_number}"
-            if not isinstance(other, dict):
-                problems.append(f"{other_where}: not a step")
+            if kind in (None, "download"):
+                if kind == "download" and other.get("with") != DOWNLOAD_WITH:
+                    problems.append(f"{other_where}: download the unsigned index into "
+                                    "${{ runner.temp }}/index, outside the workspace")
                 continue
-            uses = other.get("uses")
-            if uses and uses.split("@")[0] not in SIGN_JOB_ACTIONS:
-                problems.append(f"{other_where}: `{uses}` - the sign job uses only "
-                                f"{', '.join(SIGN_JOB_ACTIONS)}")
-            run = other.get("run") or ""
-            if re.search(r"\b(pip|pip3|setup-python|apt-get|apt|npm|curl|wget)\b", run):
-                problems.append(f"{other_where}: the sign job installs and downloads nothing")
-            steering = _STEERING.findall(run) + [
-                variable for variable in (other.get("env") or {}) if _STEERING.fullmatch(variable)]
-            if steering:
-                problems.append(f"{other_where}: `{steering[0]}` - no step of the sign job may "
-                                "change what a later step runs")
-            if other is not step and run != HASH_STEP:
-                for words in _words(run):
-                    bad = [word for word in words if word in _SIGN_JOB_FORBIDDEN
-                           or word.startswith("/usr/")]
-                    if bad:
-                        problems.append(f"{other_where}: `{bad[0]}` - no step of the sign job "
-                                        "becomes root, runs in the background or touches /usr")
+            if other.get("shell") != "bash":
+                problems.append(f"{other_where}: must declare `shell: bash` (bash -eo pipefail), "
+                                "exactly")
+            if other.get("working-directory") != RUNNER_TEMP:
+                problems.append(f"{other_where}: runs in ${{{{ runner.temp }}}}, beside the "
+                                "downloaded index")
+            if (other.get("env") or {}) != SIGN_JOB_ENV[kind]:
+                problems.append(f"{other_where}: its environment is exactly "
+                                f"{SIGN_JOB_ENV[kind] or 'nothing'}")
+            extra = set(other) - {"name", "id", "shell", "working-directory", "env", "run"}
+            if extra:
+                problems.append(f"{other_where}: `{sorted(extra)[0]}` has no place in the job "
+                                "that holds the key")
+    return problems
+
+
+def _runs(job, command):
+    return any(isinstance(step, dict) and command in str(step.get("run") or "")
+               for step in job.get("steps") or [])
+
+
+def _around_the_key(name, workflow):
+    """The repository's own checks run before and after the key-holding job, in jobs without it."""
+    problems = []
+    jobs = workflow.get("jobs") or {}
+    for job_name, command, words in (
+        ("precheck", "tools/make-index.py check", "re-checks the unsigned index before signing"),
+        ("publish", "tools/make-index.py wrap", "verifies the signature with the embedded key"),
+        ("publish", "tools/make-index.py verify", "accepts the pair as a reader would"),
+    ):
+        job = jobs.get(job_name)
+        if not isinstance(job, dict) or not _runs(job, command):
+            problems.append(f"{name}: job {job_name} {words} (`{command}`), without the key")
     return problems
 
 
@@ -640,6 +677,11 @@ def sign_step_script(workflows=WORKFLOWS):
 def hash_step_script(workflows=WORKFLOWS):
     """The hash step's `run` text - for the rehearsal."""
     return _sign_job_step(workflows, lambda step: "sha256sum" in str(step.get("run") or ""))
+
+
+def emit_step_script(workflows=WORKFLOWS):
+    """The emit step's `run` text - for the rehearsal."""
+    return _sign_job_step(workflows, lambda step: step.get("id") == "emit")
 
 
 def _sign_job_step(workflows, wanted):

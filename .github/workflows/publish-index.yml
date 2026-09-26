@@ -1,13 +1,14 @@
 name: Publish the release index
 
-# The signed release index (docs/RELEASE-INDEX.md, ADR-0015) is built, signed and published by
-# three jobs, and no job can do what the next one does:
+# The signed release index (docs/RELEASE-INDEX.md, ADR-0015) is built, checked, signed and
+# published by four jobs, and no job can do what the next one does:
 #
-#   build    reads everything, holds no key, writes nothing but an artifact and a hash;
-#   sign     holds the main key - only after the maintainer approves the run in the
-#            release-signing environment, which admits the main branch and nothing else - and
-#            cannot write to the repository;
-#   publish  can write to the repository, and holds no key.
+#   build     reads everything, holds no key, writes nothing but an artifact and a hash;
+#   precheck  runs the repository's checks on that file, and holds no key;
+#   sign      holds the main key - only after the maintainer approves the run in the
+#             release-signing environment, which admits the main branch and nothing else - runs
+#             no code from the repository, and cannot write to it;
+#   publish   verifies the signature, can write to the repository, and holds no key.
 #
 # Every trigger runs this file as it is on main: workflow_run and a push to main always do, and a
 # manual run is refused on any other branch. The version a release run is for comes from the
@@ -88,24 +89,57 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  sign:
-    name: Sign (the maintainer approves)
+  precheck:
+    name: Check the unsigned index (no key)
     needs: build
     if: github.ref == 'refs/heads/main'
-    # A fresh hosted runner: nothing of the key outlives the job.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # Everything the repository's own code checks before anything is signed, in a job that never
+    # sees the key: the file is the one build hashed, every member is right, the key id is the
+    # main key's, the serial is the next one, and gh-pages' history agrees. sign waits for it.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch the published index and its history
+        shell: bash
+        run: git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-index
+          path: index
+
+      - name: A consistent next index
+        shell: bash
+        env:
+          EXPECTED: ${{ needs.build.outputs.sha256 }}
+        run: python3 tools/make-index.py check --index index/releases.json --sha256 "$EXPECTED"
+
+  sign:
+    name: Sign (the maintainer approves)
+    needs: [build, precheck]
+    if: github.ref == 'refs/heads/main'
+    # A fresh hosted runner: nothing of the job outlives it.
     runs-on: ubuntu-24.04
     environment: release-signing
-    # Nothing: this job reads a public repository and an artifact of its own run, and writes
-    # nothing but its output. No setup-python and no pip either.
+    # Nothing: this job reads an artifact of its own run and writes nothing but its output.
     permissions: {}
     outputs:
-      signature: ${{ steps.wrap.outputs.signature }}
-    # The order is the point: no code from the repository runs on this runner until the key has
-    # been used and is gone. First the artifact, outside the workspace; then its hash against
-    # build's output with the runner's own sha256sum; then the signature, with nothing but bash
-    # builtins and /usr/bin; only then the checkout, the full re-check and the verification - and
-    # the signature leaves the runner only if both pass. This whole job's text is pinned by sha256
-    # in tools/check-workflows.py, so any change to it shows in review next to a new pin.
+      signature: ${{ steps.emit.outputs.signature }}
+    # This job runs no code from the repository at all - no checkout - only the pinned
+    # download-artifact, the runner's own sha256sum, bash builtins, base64 and openssl. That is
+    # the point, and not an optimisation: the runner process keeps the job's secrets in memory for
+    # the whole job, and hosted runners give passwordless sudo, so any code running anywhere in
+    # this job could read the key, before or after the step that uses it. What remains is the
+    # residual this design accepts: those pinned programs and the runner image itself. The whole
+    # job's text is pinned by sha256 in tools/check-workflows.py, so any change to it shows in
+    # review next to a new pin. The repository's code checks the file before (precheck) and the
+    # signature after (publish), in jobs that never see the key.
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -140,37 +174,17 @@ jobs:
           } | /usr/bin/env -u INDEX_SIGNING_KEY /usr/bin/openssl pkeyutl -sign -rawin -keyform DER \
                 -inkey /dev/stdin -in index/releases.json -out index/releases.json.raw-sig
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Fetch the published index and its history
+      - name: Hand the signature on
+        # The raw 64-byte signature, in base64 - no secret. publish verifies it with the embedded
+        # main key before anything is written.
+        id: emit
         shell: bash
-        run: git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages
-
-      - name: A consistent next index
-        # Checked here again rather than believed: every field, the main key's id, the next
-        # serial, the branch's history. A failure here keeps the signature on this runner.
-        shell: bash
-        env:
-          EXPECTED: ${{ needs.build.outputs.sha256 }}
-          INDEX: ${{ runner.temp }}/index
-        run: python3 tools/make-index.py check --index "$INDEX/releases.json" --sha256 "$EXPECTED"
-
-      - name: Verify with the embedded main key, and hand the signature on
-        id: wrap
-        shell: bash
-        env:
-          INDEX: ${{ runner.temp }}/index
-        run: |
-          python3 tools/make-index.py wrap --index "$INDEX/releases.json" \
-            --raw-signature "$INDEX/releases.json.raw-sig" --out "$INDEX/releases.json.sig"
-          echo "signature=$(cat "$INDEX/releases.json.sig")" >> "$GITHUB_OUTPUT"
+        working-directory: ${{ runner.temp }}
+        run: printf 'signature=%s\n' "$(/usr/bin/base64 --wrap=0 index/releases.json.raw-sig)" >> "$GITHUB_OUTPUT"
 
   publish:
     name: Publish to the feed
-    needs: [build, sign]
+    needs: [build, precheck, sign]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -186,15 +200,22 @@ jobs:
           name: unsigned-index
           path: index
 
+      - name: Verify the signature with the embedded main key
+        shell: bash
+        env:
+          SIGNATURE: ${{ needs.sign.outputs.signature }}
+        run: |
+          printf '%s' "$SIGNATURE" | /usr/bin/base64 -d > index/releases.json.raw-sig
+          python3 tools/make-index.py wrap --index index/releases.json \
+            --raw-signature index/releases.json.raw-sig --out index/releases.json.sig
+
       - name: Accept the pair as a reader would
         # The bytes build hashed, a signature from an embedded key, and a serial above the
         # published one within the bound - judged against the branch as it is now.
         shell: bash
         env:
           EXPECTED: ${{ needs.build.outputs.sha256 }}
-          SIGNATURE: ${{ needs.sign.outputs.signature }}
         run: |
-          printf '%s\n' "$SIGNATURE" > index/releases.json.sig
           git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages
           python3 tools/make-index.py verify --index index/releases.json \
             --sig index/releases.json.sig --sha256 "$EXPECTED"

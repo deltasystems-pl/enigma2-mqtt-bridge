@@ -79,7 +79,7 @@ def test_every_shared_scenario(scenario):
     for number, step in enumerate(scenario["steps"], 1):
         keys = sets[step["keyset"]]
         acceptance = step["lineage"] == "acceptance"
-        memory = trust.memory_for(json.loads(json.dumps(state)), keys, acceptance)
+        memory = trust.memory_for(json.loads(json.dumps(state)), keys, acceptance=acceptance)
         try:
             accepted = trust.accept(base64.b64decode(step["index"]), base64.b64decode(step["sig"]),
                                     keys, memory)
@@ -87,7 +87,7 @@ def test_every_shared_scenario(scenario):
             verdict = error.reason
         else:
             verdict = "accept"
-            state = trust.store(state, keys, accepted.memory, acceptance)
+            state = trust.store(state, keys, accepted.memory, acceptance=acceptance)
         assert verdict == step["expect"], f"step {number}: {step['note']}"
 
 
@@ -323,30 +323,33 @@ def test_a_stored_state_is_loaded_as_it_is_or_refused(case):
         assert trust.check_state(case["state"]) == case["state"]
     else:
         with pytest.raises(trust.BadMemory):
-            trust.memory_for(case["state"], _keysets()["test"])
+            trust.memory_for(case["state"], _keysets()["test"], acceptance=False)
 
 
 def test_a_state_ignores_disjoint_sets_and_merges_the_overlapping_ones():
     sets = _keysets()
     test, plus, other = sets["test"], sets["test-plus"], sets["other"]
     t1, t2 = test
-    state = trust.store(None, other, {"serials": {other[0].key_id: 900}, "silenced": []})
-    state = trust.store(state, test, {"serials": {t1.key_id: 40}, "silenced": []})
+    state = trust.store(None, other, {"serials": {other[0].key_id: 900}, "silenced": []},
+                        acceptance=False)
+    state = trust.store(state, test, {"serials": {t1.key_id: 40}, "silenced": []},
+                        acceptance=False)
     # A newer, overlapping set learned more; returning to the older set does not forget it.
     state = trust.store(state, plus, {"serials": {t1.key_id: 50, t2.key_id: 1},
-                                      "silenced": [t1.key_id]})
-    memory = trust.memory_for(state, test)
+                                      "silenced": [t1.key_id]}, acceptance=False)
+    memory = trust.memory_for(state, test, acceptance=False)
     assert memory == {"serials": {t1.key_id: 50, t2.key_id: 1}, "silenced": [t1.key_id]}
     # The disjoint set's serial is never read into this one; it shares t3 with test-plus only.
     assert other[0].key_id not in memory["serials"]
     # `other` holds t3, which test-plus carries too: it takes that entry's silenced keys, and
     # only its own serials.
-    assert trust.memory_for(state, other) == {"serials": {other[0].key_id: 900},
+    assert trust.memory_for(state, other, acceptance=False) == {"serials": {other[0].key_id: 900},
                                               "silenced": [t1.key_id]}
     # A set sharing no key with any entry starts fresh.
     lone = sets["test-spare-only"]
-    lone_state = trust.store(None, other, {"serials": {other[0].key_id: 1}, "silenced": []})
-    assert trust.memory_for(lone_state, lone) == trust.empty_memory()
+    lone_state = trust.store(None, other, {"serials": {other[0].key_id: 1}, "silenced": []},
+                             acceptance=False)
+    assert trust.memory_for(lone_state, lone, acceptance=False) == trust.empty_memory()
     # Acceptance and release never meet.
     assert trust.memory_for(state, test, acceptance=True) == trust.empty_memory()
 
@@ -355,9 +358,11 @@ def test_a_state_takes_the_largest_serial_whatever_order_it_was_stored_in():
     sets = _keysets()
     test, plus = sets["test"], sets["test-plus"]
     t1 = test[0]
-    newer_first = trust.store(None, plus, {"serials": {t1.key_id: 50}, "silenced": []})
-    newer_first = trust.store(newer_first, test, {"serials": {t1.key_id: 40}, "silenced": []})
-    assert trust.memory_for(newer_first, test)["serials"] == {t1.key_id: 50}
+    newer_first = trust.store(None, plus, {"serials": {t1.key_id: 50}, "silenced": []},
+                              acceptance=False)
+    newer_first = trust.store(newer_first, test, {"serials": {t1.key_id: 40}, "silenced": []},
+                              acceptance=False)
+    assert trust.memory_for(newer_first, test, acceptance=False)["serials"] == {t1.key_id: 50}
 
 
 def test_an_entry_sharing_no_key_is_never_read_even_when_it_names_one():
@@ -365,8 +370,9 @@ def test_an_entry_sharing_no_key_is_never_read_even_when_it_names_one():
     sets = _keysets()
     test, other = sets["test"], sets["other"]
     t1 = test[0]
-    state = trust.store(None, other, {"serials": {other[0].key_id: 5}, "silenced": [t1.key_id]})
-    assert trust.memory_for(state, test) == trust.empty_memory()
+    state = trust.store(None, other, {"serials": {other[0].key_id: 5}, "silenced": [t1.key_id]},
+                        acceptance=False)
+    assert trust.memory_for(state, test, acceptance=False) == trust.empty_memory()
 
 
 def test_the_signature_file_is_one_line_in_a_fixed_order():
@@ -374,3 +380,30 @@ def test_the_signature_file_is_one_line_in_a_fixed_order():
     assert sig.endswith(b"\n") and sig.count(b"\n") == 1
     assert list(json.loads(sig)) == ["key_id", "algorithm", "signature"]
     assert trust.parse_signature(sig) == (trust.MAIN.key_id, b"\x01" * 64)
+
+
+def test_which_part_of_the_state_is_meant_is_never_a_default():
+    # PR 7 and the integration must say it: `trust.configured` answers it.
+    test = _keysets()["test"]
+    with pytest.raises(TypeError):
+        trust.memory_for(None, test)
+    with pytest.raises(TypeError):
+        trust.store(None, test, trust.empty_memory())
+    with pytest.raises(TypeError):
+        trust.memory_for(None, test, acceptance=None)
+
+
+def test_a_later_build_s_members_survive_a_store_by_this_one():
+    # A downgrade stores through this build; what a later build wrote is kept for its return.
+    test = _keysets()["test"]
+    t1 = test[0]
+    later = {"schema": 3, "release": {}, "acceptance": {}, "seen": {"x": 1}, "trial": {}}
+    later["release"][trust.fingerprint(test)] = {
+        "keys": [key.key_id for key in test], "serials": {t1.key_id: 4}, "silenced": [],
+        "note": "from a later build"}
+    stored = trust.store(later, test, {"serials": {t1.key_id: 5}, "silenced": []},
+                         acceptance=False)
+    assert stored["schema"] == 3 and stored["seen"] == {"x": 1} and stored["trial"] == {}
+    entry = stored["release"][trust.fingerprint(test)]
+    assert entry["note"] == "from a later build" and entry["serials"] == {t1.key_id: 5}
+    assert trust.memory_for(stored, test, acceptance=False)["serials"] == {t1.key_id: 5}

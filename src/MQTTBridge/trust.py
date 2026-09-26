@@ -53,8 +53,9 @@ build reads and writes only its own part, so an acceptance build can never write
 production build reads; and an acceptance build's test keys may not include a release key at all
 (`configured`, `refuse_release_keys`). Within a part a reader merges what every entry sharing a key
 with its own set knows, so a release that adds or drops a key keeps everything the reader knew about
-the keys it still carries. A stored state or memory in any other shape is refused (`BadMemory`),
-never read as empty.
+the keys it still carries. The stored format is open for extension - unknown members and a
+higher schema are tolerated - but a known member that is missing or malformed is refused
+(`BadMemory`), never read as empty.
 
 Standard library only, and 3.9-safe: the update helper runs this outside enigma2 on whatever
 Python the image has, and the signing job in CI runs it on the runner's own, with nothing
@@ -445,12 +446,17 @@ def parse_index(raw, strict=False):
 
 
 class BadMemory(Exception):
-    """A stored memory or state that is not in the one shape every reader writes.
+    """A stored memory or state whose known parts are not what every reader writes.
 
     Never read as "nothing remembered": that would put a reader back at first sight, with no key
     silenced - the one direction a damaged file must not move it. A reader that meets this refuses
-    to judge any index and reports it; the recovery is to remove the file, which is exactly a
-    factory reset of this memory (the build's baselines apply again), done on purpose.
+    to judge any index and reports it, and nothing else: installs over SSH, from the bundle or by
+    hand never read this file. **Recovery:** remove the file on purpose - on a receiver
+    `/etc/enigma2/mqttbridge-index.json`, in Home Assistant the integration's store. That is a
+    factory reset of this memory: the build's baselines apply again, and **which keys were
+    silenced is forgotten** - until the reader next accepts the published index (which re-silences
+    them if a higher key signed it), it would accept an index from a silenced key within that key's
+    first-sight window, exactly as a reflashed receiver would.
     """
 
 
@@ -459,12 +465,19 @@ def empty_memory():
 
 
 def check_memory(memory):
-    """`memory` if it is `{"serials": {key_id: serial >= 1}, "silenced": [key_id]}` - or None,
-    which is a reader that has accepted nothing - else BadMemory. Nothing else is guessed at."""
+    """`memory` if its known members are what readers write - `serials` mapping key ids to whole
+    numbers >= 1, `silenced` a list of key ids - or None, a reader that has accepted nothing; else
+    BadMemory.
+
+    **Open for extension, closed for known members.** A member this reader does not know is
+    tolerated, as in the index, so a later build can add one without every earlier build - which
+    a downgrade brings back - refusing the file. A known member that is missing or of the wrong
+    type is refused, never guessed at.
+    """
     if memory is None:
         return empty_memory()
-    if not isinstance(memory, dict) or set(memory) != {"serials", "silenced"}:
-        raise BadMemory(f"a memory is exactly serials and silenced, not {memory!r:.80}")
+    if not isinstance(memory, dict) or not {"serials", "silenced"} <= set(memory):
+        raise BadMemory(f"a memory has serials and silenced, not {memory!r:.80}")
     serials, silenced = memory["serials"], memory["silenced"]
     if not isinstance(serials, dict) or not all(
         isinstance(key_id_, str) and _KEY_ID.fullmatch(key_id_) and _whole(serial) and serial >= 1
@@ -503,6 +516,10 @@ def remember(memory, key, serial, keys):
 
 # ------------------------------------------------------------------ stored state --
 
+# The schema this build writes. The rule for a later one: a higher number may only add - members,
+# lineages - and never change what a known member means or its type; a change that would has to
+# use another file. So a reader reads any schema >= 1 by its known members, and refuses a known
+# member it cannot read rather than guessing.
 STATE_SCHEMA = 1
 LINEAGES = ("release", "acceptance")
 
@@ -514,13 +531,18 @@ def empty_state():
 def check_state(state):
     """A reader's stored state - `{"schema": 1, "release": {...}, "acceptance": {...}}`, each
     part mapping a key-set fingerprint to `{"keys": [key_id], "serials": ..., "silenced": ...}` -
-    or BadMemory. None is a reader that has never stored anything."""
+    or BadMemory. None is a reader that has never stored anything.
+
+    Open for extension as `check_memory` is: unknown members - at the top, in an entry, a third
+    lineage - and a higher schema are tolerated; a known member that is missing or malformed is
+    refused. Both lineages are required: a part that is gone is not "nothing learned".
+    """
     if state is None:
         return empty_state()
-    if not isinstance(state, dict) or set(state) != {"schema", *LINEAGES}:
-        raise BadMemory(f"a state is exactly schema, release and acceptance, not {state!r:.80}")
-    if not _whole(state["schema"]) or state["schema"] != STATE_SCHEMA:
-        raise BadMemory(f"state schema {state['schema']!r} is not {STATE_SCHEMA}")
+    if not isinstance(state, dict) or not {"schema", *LINEAGES} <= set(state):
+        raise BadMemory(f"a state has schema, release and acceptance, not {state!r:.80}")
+    if not _whole(state["schema"]) or state["schema"] < 1:
+        raise BadMemory(f"state schema {state['schema']!r} is not a whole number >= 1")
     for lineage in LINEAGES:
         entries = state[lineage]
         if not isinstance(entries, dict):
@@ -528,8 +550,8 @@ def check_state(state):
         for fingerprint_, entry in entries.items():
             if not isinstance(fingerprint_, str) or not _SHA256.fullmatch(fingerprint_):
                 raise BadMemory(f"{lineage}: {fingerprint_!r:.20} is not a key-set fingerprint")
-            if not isinstance(entry, dict) or set(entry) != {"keys", "serials", "silenced"}:
-                raise BadMemory(f"{lineage} {fingerprint_[:12]}: not keys, serials and silenced")
+            if not isinstance(entry, dict) or not {"keys", "serials", "silenced"} <= set(entry):
+                raise BadMemory(f"{lineage} {fingerprint_[:12]}: needs keys, serials and silenced")
             keys = entry["keys"]
             if not isinstance(keys, list) or not keys or not all(
                 isinstance(key_id_, str) and _KEY_ID.fullmatch(key_id_) for key_id_ in keys
@@ -539,8 +561,17 @@ def check_state(state):
     return state
 
 
-def memory_for(state, keys, acceptance=False):
+def _lineage(acceptance):
+    if not isinstance(acceptance, bool):
+        raise TypeError("acceptance must be True or False: say which part of the state is meant")
+    return LINEAGES[1] if acceptance else LINEAGES[0]
+
+
+def memory_for(state, keys, *, acceptance):
     """The memory a reader holding `keys` judges with, from its stored `state`.
+
+    `acceptance` is required - `trust.configured` answers it - so no caller reads a part by
+    default.
 
     **Scoped twice.** By lineage: an acceptance build reads and writes only the acceptance part,
     a release build only the release part, so nothing a test index teaches a receiver can ever be
@@ -551,10 +582,11 @@ def memory_for(state, keys, acceptance=False):
     about the keys it still carries, and a returning older set cannot forget what a newer one
     learned, while a disjoint set of keys is never consulted at all.
     """
+    lineage = _lineage(acceptance)
     state = check_state(state)
     held = {key.key_id for key in keys}
     serials, silenced = {}, set()
-    for entry in state[LINEAGES[1] if acceptance else LINEAGES[0]].values():
+    for entry in state[lineage].values():
         if not held & set(entry["keys"]):
             continue
         for key_id_, serial in entry["serials"].items():
@@ -564,18 +596,27 @@ def memory_for(state, keys, acceptance=False):
     return {"serials": serials, "silenced": sorted(silenced)}
 
 
-def store(state, keys, memory, acceptance=False):
-    """The state after a reader holding `keys` accepted an index and holds `memory`."""
+def store(state, keys, memory, *, acceptance):
+    """The state after a reader holding `keys` accepted an index and holds `memory`.
+
+    Everything this build does not know about is kept as it was - other members, other lineages,
+    other members of the entry it rewrites, a higher schema number - so a downgrade and a return
+    lose nothing a later build wrote.
+    """
+    lineage = _lineage(acceptance)
     state = check_state(state)
     memory = check_memory(memory)
-    lineage = LINEAGES[1] if acceptance else LINEAGES[0]
-    updated = {name: dict(state[name]) for name in LINEAGES}
-    updated["schema"] = STATE_SCHEMA
-    updated[lineage][fingerprint(keys)] = {
-        "keys": sorted(key.key_id for key in keys),
+    updated = dict(state)
+    updated["schema"] = max(state["schema"], STATE_SCHEMA)
+    part = dict(state[lineage])
+    key = fingerprint(keys)
+    part[key] = {
+        **part.get(key, {}),
+        "keys": sorted(key_.key_id for key_ in keys),
         "serials": dict(memory["serials"]),
         "silenced": list(memory["silenced"]),
     }
+    updated[lineage] = part
     return updated
 
 

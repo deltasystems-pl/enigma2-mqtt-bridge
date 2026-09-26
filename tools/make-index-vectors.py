@@ -435,6 +435,7 @@ def memory_shapes(test_keys):
     good = [
         ({"serials": {}, "silenced": []}, "nothing accepted yet"),
         ({"serials": {k1: 3, k2: 1}, "silenced": [k1]}, "two keys, one silenced"),
+        ({"serials": {}, "silenced": [], "rank": 2}, "a member a later build writes"),
     ]
     bad = [
         ({k1: 5}, "the first shape: a bare map of serials"),
@@ -446,7 +447,8 @@ def memory_shapes(test_keys):
         ({"serials": {}, "silenced": ["x"]}, "a silenced entry that is not a key id"),
         ({"serials": {"KEY": 1}, "silenced": []}, "a serial for something that is not a key id"),
         ({"serials": {}}, "silenced missing"),
-        ({"serials": {}, "silenced": [], "rank": 2}, "a member no reader writes"),
+        ({"serials": {}, "silenced": [], "rank": 2, "extra": None} | {"silenced": "k"},
+         "a known member of the wrong type next to an unknown one"),
         ([], "not an object"),
     ]
     return ([{"memory": memory, "valid": True, "note": note} for memory, note in good]
@@ -460,10 +462,15 @@ def state_shapes(test_keys):
     good = [
         ({"schema": 1, "release": {}, "acceptance": {}}, "nothing stored"),
         ({"schema": 1, "release": {fp: entry}, "acceptance": {fp: entry}}, "one entry in each"),
+        ({"schema": 2, "release": {fp: dict(entry, note="later")}, "acceptance": {}, "trial": {},
+          "seen": 7}, "a later schema: an extra member, a third lineage, an extra entry member"),
     ]
     bad = [
         ({"serials": {k1: 2}, "silenced": []}, "a bare memory, not a state"),
-        ({"schema": 2, "release": {}, "acceptance": {}}, "another schema"),
+        ({"schema": 0, "release": {}, "acceptance": {}}, "schema 0"),
+        ({"schema": "2", "release": {}, "acceptance": {}}, "a schema that is a string"),
+        ({"schema": 2, "release": {fp: dict(entry, serials={k1: "2"})}, "acceptance": {}},
+         "a later schema whose known member has the wrong type"),
         ({"schema": 1, "release": {}}, "acceptance missing"),
         ({"schema": 1, "release": {"x": entry}, "acceptance": {}}, "a key that is no fingerprint"),
         ({"schema": 1, "release": {fp: dict(entry, keys=[])}, "acceptance": {}},

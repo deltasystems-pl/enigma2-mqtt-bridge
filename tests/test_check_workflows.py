@@ -71,14 +71,18 @@ def test_the_sign_job_is_pinned():
     assert hashlib.sha256(job.encode()).hexdigest() == check_workflows.SIGN_JOB_SHA256
 
 
-def test_the_key_is_used_before_any_code_from_the_repository_runs():
+def test_the_job_that_holds_the_key_runs_no_code_from_the_repository():
     workflow = check_workflows.load((WORKFLOWS / SIGN).read_text(encoding="utf-8"))
-    steps = workflow["jobs"]["sign"]["steps"]
-    kinds = [step.get("uses", "").split("@")[0] or step["run"][:16] for step in steps]
-    sign = next(number for number, step in enumerate(steps)
-                if "INDEX_SIGNING_KEY" in str(step.get("env")))
-    assert kinds[:sign] == ["actions/download-artifact", "printf '%s  inde"]
-    assert kinds[sign + 1] == "actions/checkout"
+    jobs = workflow["jobs"]
+    steps = jobs["sign"]["steps"]
+    assert [check_workflows._step_kind(step) for step in steps] == [
+        "download", "hash", "sign", "emit"]
+    assert not any("checkout" in str(step.get("uses")) for step in steps)
+    # The repository's checks run in key-free jobs, before and after.
+    assert jobs["sign"]["needs"] == ["build", "precheck"]
+    assert "tools/make-index.py check" in str(jobs["precheck"])
+    assert "tools/make-index.py wrap" in str(jobs["publish"])
+    assert "INDEX_SIGNING_KEY" not in str(jobs["precheck"]) + str(jobs["publish"])
 
 
 # ------------------------------------------------------- one change at a time --
@@ -115,6 +119,7 @@ OPENSSL = "} | /usr/bin/env -u INDEX_SIGNING_KEY /usr/bin/openssl pkeyutl"
 CHECK_RUN = ("        run: python3 tools/make-index.py check --index \"$INDEX/releases.json\" "
              "--sha256 \"$EXPECTED\"\n")
 NOT_FIXED = "the sign step is not the fixed one"
+CODE_OR_ACTION = "the job that holds the key"
 PIN = "the sign job's text is not the pinned one"
 
 # Changes to the sign step: refused by the pin as they stand, and by the fixed text once re-pinned.
@@ -156,6 +161,16 @@ def test_any_change_to_the_sign_step_is_refused(copy, monkeypatch, old, new, rep
 
 
 # Changes elsewhere in the sign job, each re-pinned, so the rule behind the pin is what refuses.
+EMIT = "        run: printf 'signature=%s\\n'"
+AFTER_EMIT = "  publish:\n"
+
+
+def _after_emit(step):
+    """A step appended to the sign job, after emit."""
+    return (AFTER_EMIT, step + "\n" + AFTER_EMIT)
+
+
+# Changes elsewhere in the sign job, each re-pinned, so the rule behind the pin is what refuses.
 SIGN_JOB_CHANGES = [
     ("    environment: release-signing\n", "", "release-signing environment"),
     ("    permissions: {}\n    outputs:", "    permissions:\n      contents: read\n    outputs:",
@@ -167,32 +182,49 @@ SIGN_JOB_CHANGES = [
      "only a fresh hosted"),
     ("    environment: release-signing\n", "    environment: release-signing\n    env:\n"
      "      BASH_ENV: x.sh\n", "may not declare `env`"),
-    (CHECK_RUN, "        run: |\n          python3 tools/make-index.py check --index "
-     "\"$INDEX/releases.json\" --sha256 \"$EXPECTED\"\n          sudo cp /tmp/x /usr/bin/openssl\n",
-     "becomes root"),
-    (CHECK_RUN, "        run: |\n          python3 tools/make-index.py check --index "
-     "\"$INDEX/releases.json\" --sha256 \"$EXPECTED\"\n          nohup watch-env &\n",
-     "becomes root, runs in the background"),
-    (CHECK_RUN, "        run: |\n          python3 tools/make-index.py check --index "
-     "\"$INDEX/releases.json\" --sha256 \"$EXPECTED\"\n"
-     "          echo \"$PWD\" >> \"$GITHUB_PATH\"\n",
-     "`GITHUB_PATH` - no step of the sign job"),
-    (CHECK_RUN, "        run: |\n          if ! python3 tools/make-index.py check --index "
-     "\"$INDEX/releases.json\" --sha256 \"$EXPECTED\"; then echo skipped; fi\n",
-     "a guard inside a condition"),
+    ("    needs: [build, precheck]\n", "    needs: build\n", "the key-free precheck"),
+    # Every step known, but the hash check gone: only the sequence rule sees it.
+    ("      - name: The file build hashed\n        shell: bash\n        working-directory: "
+     "${{ runner.temp }}\n        env:\n          EXPECTED: ${{ needs.build.outputs.sha256 }}\n"
+     "        run: printf '%s  index/releases.json\\n' \"$EXPECTED\" | /usr/bin/sha256sum --check "
+     "--strict\n\n", "", "is exactly download, hash, sign, emit - in that order"),
+    # The third review's point: nothing from the repository in the job that holds the key -
+    # before the key step or after it, because the runner holds the secret for the whole job.
+    _after_emit("      - uses: " + CHECKOUT.split("uses: ")[1].rstrip("\n") + "\n"),
+    _after_emit("      - shell: bash\n        run: python3 tools/make-index.py check --index x\n"),
+    # A sudo assembled from two strings: no word match finds it, so no word match is relied on.
+    _after_emit("      - shell: bash\n"
+                "        run: python3 -c 'import os; os.system(\"su\" \"do\")'\n"),
+    _after_emit("      - shell: bash\n        run: sudo cat /proc/1/environ\n"),
+    _after_emit("      - shell: bash\n        run: nohup watch-env &\n"),
+    _after_emit("      - shell: bash\n        run: echo \"$PWD\" >> \"$GITHUB_PATH\"\n"),
     ("      - name: The file build hashed\n", CHECKOUT + "\n      - name: The file build hashed\n",
-     "before the sign step the job may only download the artifact"),
+     "no checkout and no action but download-artifact"),
     ("      - name: The file build hashed\n",
      "      - name: Early\n        shell: bash\n        run: python3 tools/anything.py\n\n"
-     "      - name: The file build hashed\n", "before the sign step"),
-    ("--check --strict", "--check --strict --ignore-missing", "before the sign step"),
+     "      - name: The file build hashed\n", "it runs code from the repository"),
+    ("--check --strict", "--check --strict --ignore-missing",
+     "runs only the fixed hash, sign and emit steps"),
     ("      - name: The file build hashed\n",
      "      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0\n\n"
-     "      - name: The file build hashed\n", "the sign job uses only"),
+     "      - name: The file build hashed\n", "no checkout and no action but download-artifact"),
+    ("releases.json.raw-sig)\" >> \"$GITHUB_OUTPUT\"",
+     "releases.json.raw-sig)\" >> \"$GITHUB_OUTPUT\"; env",
+     "runs only the fixed hash, sign and emit steps"),
+    ("          path: ${{ runner.temp }}/index\n", "          path: index\n",
+     "download the unsigned index into"),
+    ("        id: emit\n        shell: bash\n        working-directory: ${{ runner.temp }}\n",
+     "        id: emit\n        shell: bash\n", "beside the downloaded index"),
+    ("        id: emit\n", "        id: emit\n        env:\n          X: y\n",
+     "its environment is exactly"),
+    ("        id: emit\n", "        id: emit\n        continue-on-error: true\n",
+     "has no place in the job that holds the key"),
     ("    if: github.ref == 'refs/heads/main'\n    # A fresh",
      "    if: github.ref == 'refs/heads/main' || true\n    # A fresh",
      "must be refused off `main`"),
 ]
+SIGN_JOB_CHANGES = [change if len(change) == 3 else (*change, CODE_OR_ACTION)
+                    for change in SIGN_JOB_CHANGES]
 
 
 @pytest.mark.parametrize("old, new, words", SIGN_JOB_CHANGES)
@@ -256,8 +288,8 @@ def _new(copy, name, job="", steps="      - run: echo hi\n", on=None):
                         "  group: publish-index\n"), "`emergency-index` concurrency group"),
     (lambda copy: _edit(copy, "emergency-index.yml", "cancel-in-progress: false",
                         "cancel-in-progress: true"), "concurrency group"),
-    (lambda copy: _edit(copy, SIGN, "    needs: [build, sign]\n    if: github.ref == "
-                        "'refs/heads/main'\n", "    needs: [build, sign]\n"),
+    (lambda copy: _edit(copy, SIGN, "    needs: [build, precheck, sign]\n    if: github.ref == "
+                        "'refs/heads/main'\n", "    needs: [build, precheck, sign]\n"),
      "must be refused off `main`"),
     (lambda copy: _edit(copy, SIGN, "    permissions:\n      contents: write\n",
                         "    environment: release-signing\n    permissions:\n"
@@ -304,6 +336,11 @@ def _new(copy, name, job="", steps="      - run: echo hi\n", on=None):
                         "          python3 tools/make-index.py verify",
                         "          true && python3 tools/make-index.py verify"),
      "a guard in a list can be skipped or ignored"),
+    (lambda copy: _edit(copy, SIGN, "        run: python3 tools/make-index.py check --index "
+                        "index/releases.json --sha256 \"$EXPECTED\"\n",
+                        "        run: |\n          if ! python3 tools/make-index.py check --index "
+                        "index/releases.json --sha256 \"$EXPECTED\"; then echo skipped; fi\n"),
+     "a guard inside a condition can never fail its step"),
 ])
 def test_each_weakening_is_refused(copy, change, words):
     assert check_workflows.check(copy) == []
@@ -321,6 +358,17 @@ def test_a_comment_about_a_trigger_is_not_the_trigger(copy):
 def test_a_missing_chain_workflow_is_noticed(copy):
     (copy / "emergency-index.yml").unlink()
     assert "emergency-index.yml: missing" in check_workflows.check(copy)
+
+
+@pytest.mark.parametrize("job, command, words", [
+    ("precheck", "tools/make-index.py check", "re-checks the unsigned index before signing"),
+    ("publish", "tools/make-index.py wrap", "verifies the signature with the embedded key"),
+    ("publish", "tools/make-index.py verify", "accepts the pair as a reader would"),
+])
+def test_the_key_free_checks_around_the_sign_job_stay(copy, job, command, words):
+    _edit(copy, SIGN, command, "tools/other.py")
+    problems = check_workflows.check(copy)
+    assert any(words in problem for problem in problems), problems
 
 
 def test_the_tool_reports_and_fails(copy, capsys):

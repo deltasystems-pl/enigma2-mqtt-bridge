@@ -11,14 +11,16 @@ maintainer approves a real run. The tests run it too. What it does:
    one-key test set around it - never the release keys, whose private halves are nowhere near a
    pull request;
 2. writes a small, well-formed unsigned index for that key and runs `make-index.py check` on it,
-   as the sign job does;
-3. takes the sign step's `run` text **out of publish-index.yml** - the text the real job will run,
-   not a copy - and runs it with `bash -eo pipefail` (what `shell: bash` means) and the throwaway
-   seed in `INDEX_SIGNING_KEY`, in a scratch directory;
-4. checks that the step wrote the raw signature and nothing else, and that the seed appears in no
-   file and in none of its output;
-5. runs `make-index.py wrap` and `verify` on the result, as the sign and publish jobs do - and
-   shows that a signature by any other key is refused by `wrap`.
+   as the key-free precheck job does;
+3. takes the sign job's three run steps **out of publish-index.yml** - the texts the real job will
+   run, not copies - and runs each with `bash -eo pipefail` (what `shell: bash` means), in a
+   scratch directory, as the sign job does and in its order: the hash check (the right sha256
+   passes, a wrong one stops the job), the sign step with the throwaway seed in
+   `INDEX_SIGNING_KEY`, and the emit step, which writes the signature to a `GITHUB_OUTPUT` file;
+4. checks that the sign step wrote the raw signature and nothing else, and that the seed appears in
+   no file and in none of the steps' output;
+5. decodes the emitted signature and runs `make-index.py wrap` and `verify` on it, as the key-free
+   publish job does - and shows that a signature by any other key is refused by `wrap`.
 
 Nothing is published and the scratch directory is removed.
 """
@@ -98,6 +100,21 @@ def run_sign_step(work, seed, script=None, bash="bash"):
     return run_step(work, script, {SECRET: base64.b64encode(seed).decode()}, bash)
 
 
+def run_emit_step(work, output_file, script=None, bash="bash"):
+    """Run the emit step's text in `work`, writing to `output_file` as GITHUB_OUTPUT."""
+    if script is None:
+        script = _tool("check-workflows").emit_step_script()
+    return run_step(work, script, {"GITHUB_OUTPUT": str(output_file)}, bash)
+
+
+def emitted_signature(output_file):
+    """The raw signature the emit step handed on, as publish decodes it."""
+    for line in Path(output_file).read_text(encoding="ascii").splitlines():
+        if line.startswith("signature="):
+            return base64.b64decode(line[len("signature="):], validate=True)
+    raise SystemExit("the emit step handed on no signature")
+
+
 def run_hash_step(work, expected, script=None, bash="bash"):
     """Run the hash step's text in `work` with `expected` as build's sha256."""
     if script is None:
@@ -143,9 +160,18 @@ def rehearse(openssl="openssl", log=print):
                 raise SystemExit(f"the seed is in {path.name}")
         if seed in output or encoded in output:
             raise SystemExit("the seed is in the sign step's output")
-        raw_signature = (work / "index" / "releases.json.raw-sig").read_bytes()
-        log(f"sign step: {len(raw_signature)}-byte signature, nothing else written, the seed "
-            "in no file and no output")
+        output_file = work / "github-output"
+        code, emit_output = run_emit_step(work, output_file)
+        if code:
+            raise SystemExit(f"the emit step failed ({code}): "
+                             + emit_output.decode("utf-8", "replace"))
+        if seed in output_file.read_bytes() or encoded in output_file.read_bytes():
+            raise SystemExit("the seed is in the emitted output")
+        raw_signature = emitted_signature(output_file)
+        if raw_signature != (work / "index" / "releases.json.raw-sig").read_bytes():
+            raise SystemExit("the emitted signature is not the one the sign step wrote")
+        log(f"sign and emit steps: {len(raw_signature)}-byte signature handed on, nothing else "
+            "written, the seed in no file and no output")
 
         sig = make_index.wrap(index_path.read_bytes(), raw_signature, keys, key.key_id)
         accepted = make_index.verify(index_path.read_bytes(), sig, keys, (None, None))

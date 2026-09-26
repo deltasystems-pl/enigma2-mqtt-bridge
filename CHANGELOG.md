@@ -52,8 +52,9 @@ version that has no section here.
   embeds. A release's key set keeps three rules against the previous release's (ranks never change,
   new keys rank above all before them, a key is never dropped while a lower one is kept), which
   `index.yml` enforces. A reader keeps its memory in one stored state with a `release` and an
-  `acceptance` part, each keyed by the key set's fingerprint, and refuses a stored state of any
-  other shape instead of reading it as empty; an acceptance build's test keys may never include a
+  `acceptance` part, each keyed by the key set's fingerprint, open for extension (unknown
+  members and a higher schema are kept and tolerated) and refused, never read as empty, when a
+  known member is missing or malformed; an acceptance build's test keys may never include a
   release key - the builder and the plugin both refuse such a set - and it never writes memory a
   release build reads. The
   receiver will verify with a pure-Python Ed25519 verifier the plugin carries
@@ -62,11 +63,11 @@ version that has no section here.
   `index.yml` checks every pull request (the workflows, the policy, the published index, and a
   rehearsal of the sign step with a throwaway key); `publish-index.yml` builds the index with no
   key, signs it in the `release-signing` environment only after the maintainer approves - with no
-  permissions, nothing installed, and no code from the repository run before the key is used:
-  the artifact, its hash with the runner's own `sha256sum`, then the signature from a fixed step -
-  the key on OpenSSL's stdin only, `base64` and `openssl` by absolute path, OpenSSL's arguments
-  fixed - and only then the re-check and the verification, the signature leaving the runner only if
-  both pass - and publishes it with no key; `emergency-index.yml`, in a concurrency group of its
+  permissions, nothing installed, and no code from the repository at all - the artifact, its
+  hash with the runner's own `sha256sum`, the signature from a fixed step (the key on OpenSSL's
+  stdin only, `base64` and `openssl` by absolute path, OpenSSL's arguments fixed) and the signature
+  handed on - while the repository's checks run in key-free jobs before (`precheck`) and after
+  (`publish`, which verifies the signature before it publishes); `emergency-index.yml`, in a concurrency group of its
   own and startable by hand, publishes an index signed offline with the spare. The build and publish
   jobs read the whole history of `gh-pages` and refuse to build on or publish over a pair older than
   the newest it ever published, or none after one was - a rollback of the branch would otherwise
