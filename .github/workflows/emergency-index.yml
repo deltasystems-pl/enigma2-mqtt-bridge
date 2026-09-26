@@ -1,0 +1,59 @@
+name: Publish an emergency release index
+
+# The spare key's path (docs/RELEASE-INDEX.md, "When the main key is lost or leaked"). The
+# maintainer signs an index offline with the sealed spare key and merges it under
+# release-index/emergency/ through a pull request, which index.yml has checked. This publishes it:
+# no environment, no secret - it only copies a file that is already signed, after accepting it
+# exactly as a reader that has seen the published index would. It cannot publish anything unsigned
+# or older, and it needs control of the repository: if the emergency is the account itself, the
+# spare-signed index reaches the maintainer's own installation through another channel.
+
+on:
+  push:
+    branches: [main]
+    paths: [release-index/emergency/**]
+  # To run it again - after a failure, or when a push that should have started it did not - on
+  # main only (the job refuses any other ref).
+  workflow_dispatch:
+
+permissions: {}
+
+# A group of its own: a publish-index run waiting days for approval must neither hold this back nor
+# cancel it. The two never publish the same serial - each accepts the pair against gh-pages as it is
+# when it runs, and a push that lost the race is refused as not a fast-forward.
+concurrency:
+  group: emergency-index
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish the spare-signed index
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Accept the pair as a reader would
+        shell: bash
+        run: |
+          git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages
+          python3 tools/make-index.py verify --index release-index/emergency/releases.json \
+            --sig release-index/emergency/releases.json.sig
+
+      - name: Push to gh-pages
+        shell: bash
+        run: |
+          serial=$(python3 -c 'import json; print(json.load(open("release-index/emergency/releases.json"))["serial"])')
+          git worktree add --detach ../pages origin/gh-pages
+          cp release-index/emergency/releases.json release-index/emergency/releases.json.sig \
+            ../pages/feed/
+          cd ../pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add feed/releases.json feed/releases.json.sig
+          git commit -m "Publish the emergency release index, serial $serial"
+          git push origin HEAD:gh-pages

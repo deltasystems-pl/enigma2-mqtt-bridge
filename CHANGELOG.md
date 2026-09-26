@@ -36,6 +36,66 @@ version that has no section here.
   bytes, with or without `.git`, which a new CI step proves on every pull request by building twice
   and from an export. A bundle of a release built from a source archive matches the released
   package only with all three - the commit, `MQTTBRIDGE_BUILD_FLAVOUR=release` and the commit's time.
+- **The signed release index**, the one list of versions the plugin and the companion integration
+  will install from ([docs/RELEASE-INDEX.md](docs/RELEASE-INDEX.md), ADR-0015 decisions 2 and 7).
+  Nothing reads it yet; this builds, signs and publishes it. `feed/releases.json` and
+  `feed/releases.json.sig` on the feed carry, per release, its size and sha256 - checked against
+  the release asset's own digest and against the feed's copy - its commit and time, its contract
+  major, the oldest integration it needs, its dependencies, whether it can update itself and
+  whether it is withdrawn, plus a floor and a serial. The values come from a new `COMPATIBILITY`
+  file read at each release tag and from `release-index/policy.json` on `main`, which sets the
+  floor, withdraws a release and corrects a declaration. Two Ed25519 public keys are embedded -
+  the main key (rank 1), which signs in CI, and a sealed spare (rank 2) - with the rule every
+  reader applies: a signature over the exact bytes by a key it holds, a serial above the last one
+  accepted from that key and at most 1000 above it, and never a lower rank after a higher one - a
+  key ranked below one a reader has accepted is silenced there for good, whatever a later release
+  embeds. A release's key set keeps three rules against the previous release's (ranks never change,
+  new keys rank above all before them, a key is never dropped while a lower one is kept), which
+  `index.yml` enforces. A reader keeps its memory in one stored state with a `release` and an
+  `acceptance` part, each keyed by the key set's fingerprint, open for extension (unknown
+  members and a higher schema are kept and tolerated) and refused, never read as empty, when a
+  known member is missing or malformed; an acceptance build's test keys may never include a
+  release key - the builder and the plugin both refuse such a set - and it never writes memory a
+  release build reads. The
+  receiver will verify with a pure-Python Ed25519 verifier the plugin carries
+  (`src/MQTTBridge/ed25519.py`, verify only). `tests/vectors/release-index.json` holds the RFC 8032
+  vectors, forgeries and the rule's scenarios, shared with the integration. Three workflows:
+  `index.yml` checks every pull request (the workflows, the policy, the published index, and a
+  rehearsal of the sign step with a throwaway key); `publish-index.yml` builds the index with no
+  key, signs it in the `release-signing` environment only after the maintainer approves - with no
+  permissions, nothing installed, and no code from the repository at all - the artifact, its
+  hash with the runner's own `sha256sum`, the signature from a fixed step (the key on OpenSSL's
+  stdin only, `base64` and `openssl` by absolute path, OpenSSL's arguments fixed) and the signature
+  handed on as its only output - while the repository's checks run in key-free jobs before
+  (`precheck`, a fixed check of the artifact against build's sha256 with gh-pages' whole history)
+  and after (`publish`, which verifies the signature before it publishes); `emergency-index.yml`, in a concurrency group of its
+  own and startable by hand, publishes an index signed offline with the spare. The build and publish
+  jobs read the whole history of `gh-pages` and refuse to build on or publish over a pair older than
+  the newest it ever published, or none after one was - a rollback of the branch would otherwise
+  make every reader refuse the next index - and the build waits while an emergency index is
+  unpublished. The merge that adds `release-index/policy.json` starts the first run by itself. New
+  tools:
+  `make-index.py`, `sign-index.py`, `check-workflows.py`, `rehearse-signing.py`,
+  `check-release-package.py` and `make-index-vectors.py`.
+- **Only an acceptance build may carry a test origin or test index keys.** `tools/build-ipk.sh`
+  takes `MQTTBRIDGE_BUILD_ORIGIN` and `MQTTBRIDGE_BUILD_INDEX_KEYS` for an `acceptance` build and
+  refuses either for any other flavour; the plugin honours them in no other flavour; and the
+  release workflow now reads the package back through its own modules and refuses one that names
+  either, or that trusts anything but the published origin and the release keys.
+
+### Security
+
+- Every action in every workflow is pinned to a full commit SHA, with its version beside it -
+  `ci.yml` and `release.yml` included, at the versions they used - and `index.yml` fails a pull
+  request that adds an unpinned one (flow-style steps included), a `pull_request_target` trigger, a
+  second use of the `secrets` context, another job naming the `release-signing` environment, a step
+  in the signing job that could steer a later one (`GITHUB_PATH`, `GITHUB_ENV`, `BASH_ENV`), a
+  guard loosened in any way its structure allows (a run step without `shell: bash`, a step
+  condition, `continue-on-error`, `||`, `set +e`, `always()`, or a guard command inside `if`, `!`,
+  an `&&`/`;` list or followed by `|`), `sudo`, a background process or a write under `/usr` in the
+  signing job, a runner other than a hosted `ubuntu-24.04` for it, or any change to the signing
+  job's text that does not also update its pinned sha256 - its hash and sign steps are fixed texts,
+  byte for byte.
 
 ### Documentation
 
@@ -144,6 +204,10 @@ version that has no section here.
 
 ### Changed
 
+- A dirty development build - one whose tracked files differed from its commit - now displays as
+  `0.3.0+g<first seven digits>.dirty` on the plugin's OpenWebif page and in its start line, so it
+  no longer looks like the clean build of the same commit. [TOPICS.md](docs/TOPICS.md) has the
+  rule for consumers. `info.build` itself is unchanged, and unreleased.
 - `timers` now lists every timer the receiver still lists - the pending ones and the ones it has
   finished with - and `state` has three new words: `disabled`, `failed` and `unknown`. A timer
   somebody switched off, or one the receiver switched off itself because it conflicted, was
@@ -228,6 +292,13 @@ version that has no section here.
 - `Receiver(modal=True, session_start_screen=True)` first opens a screen the way a session-start
   plugin does, so the info bar is not the bottom of the dialog stack, as on a receiver with the
   Vu+ HbbTV plugin. Every zap-under-a-popup test runs with and without it.
+- The plugin's OpenWebif page with no bridge running shows the build this process loaded; a test
+  now pins that row, which a checkout - where no build is loaded - could not tell from the plain
+  version.
+- The build, sign and publish chain of the release index is rehearsed end to end against a
+  made-up repository with throwaway keys (`tests/indexlab.py`, `tests/test_index_chain.py`),
+  running the sign step's own text out of `publish-index.yml`. `pyyaml` joins the test-only tools,
+  to hold `check-workflows.py`'s small YAML reader to a real one.
 
 ## [0.3.0] - 2026-09-25
 

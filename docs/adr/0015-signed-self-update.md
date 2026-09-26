@@ -37,7 +37,8 @@ anything that decides what runs as root on the receiver has to carry its own ver
    its checkout must be given the commit and its time, and the builder that gives them vouches for
    the tree and the tag - only the signed index confirms a release. Builds stay reproducible: the same
    commit, time and flavour give the same bytes, with or without `.git`. A development build displays
-   as `N.N.N+g<sha7>`, never with a pre-release suffix. `info.contract` publishes the contract
+   as `N.N.N+g<sha7>` - `N.N.N+g<sha7>.dirty` when its tracked files differed from the commit -
+   never with a pre-release suffix. `info.contract` publishes the contract
    major, and [TOPICS.md](../TOPICS.md#contract-version) defines what a major allows.
 2. **The only list of versions is a signed release index**, signed with an Ed25519 key. It carries,
    per release, size, sha256, commit, commit time, contract major, the lowest integration it needs,
@@ -96,13 +97,32 @@ acceptance with the build id:
   `release` build will be refused unless it carries the published source, so the flavour tells a
   consumer what it needs; and "origin" already means where a command came from and, in the planned
   `update` topic, whether the index could be reached. That reasoning rests on two refusals the
-  build does not make yet, because this build id has no source in it at all: the builder refusing a
-  source or key override for any flavour but `acceptance`, and the release workflow asserting the
-  published source and keys. Both come with the change that adds the source and the keys to the
-  build. If a consumer ever needs the source itself, adding it is an addition inside contract 1.
+  build did not make when this was accepted, because the build id had no source in it at all: the
+  builder refusing a source or key override for any flavour but `acceptance`, and the release
+  workflow asserting the published source and keys. Both are made since the change that added the
+  signed index's tooling ([RELEASE-INDEX.md](../RELEASE-INDEX.md), "Acceptance builds"). If a
+  consumer ever needs the source itself, adding it is an addition inside contract 1.
 - **The main key signs in CI** (decision 2), by the maintainer's decision of 2026-09-26. The
   proposal kept it off GitHub; the residual that trades for is stated under Consequences, in the
   same terms as the companion integration's ADR-0008.
+
+**Settled with the index's tooling (2026-09-26).** Decisions 2 and 7 are built as far as they reach
+without a reader: the index format, the two embedded keys and their ranks, the acceptance rule and
+its shared vectors, the verifier, and the three publication workflows - in which the job that
+signs runs no code from the repository at all, because the runner holds a job's secrets for the
+whole job; the repository's checks run in key-free jobs before and after it
+([RELEASE-INDEX.md](../RELEASE-INDEX.md)). Two points are made precise there. A reader's memory is
+kept per `key_id`: the last accepted serial, and the keys it has silenced - every key of its set
+ranked below one it accepted. The rank floor is derived from it within the reader's own key set,
+which scopes it to the key set as decision 7 requires, while "ignored for good" holds for the
+silenced keys whatever a later release embeds. That memory is stored in a release part and an
+acceptance part, and an acceptance build reads and writes only its own, and may not carry a release
+key among its test keys - so no test index can silence a release key. And a release's key set keeps
+three rules against
+the previous release's - ranks never change, a new key ranks above all before it, and a key is never
+dropped while a lower one is kept - which `index.yml` enforces. A dirty build now displays with
+`.dirty` after its commit (decision 1), so it no longer looks like the clean build of the same
+commit.
 
 ## Consequences
 

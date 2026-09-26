@@ -196,20 +196,67 @@ def test_an_unknown_time_is_null():
     (None, "0.3.0"),
     ({"commit": "", "dirty": None, "flavour": None}, "0.3.0"),
     (RELEASE, "0.3.0"),
-    ({**RELEASE, "dirty": True}, "0.3.0+g1111111"),
+    ({**RELEASE, "dirty": True}, "0.3.0+g1111111.dirty"),
     ({**RELEASE, "dirty": None}, "0.3.0+g1111111"),
     (DEVELOPMENT, "0.3.0+g2abcdef"),
+    ({**DEVELOPMENT, "dirty": True}, "0.3.0+g2abcdef.dirty"),
+    ({**DEVELOPMENT, "dirty": "yes"}, "0.3.0+g2abcdef"),
     ({**RELEASE, "flavour": "acceptance"}, "0.3.0+g1111111"),
+    ({**RELEASE, "flavour": "acceptance", "dirty": True}, "0.3.0+g1111111.dirty"),
     ({**RELEASE, "flavour": "nightly"}, "0.3.0+g1111111"),
+    ({"commit": "", "dirty": True, "flavour": "development"}, "0.3.0"),
 ])
 def test_the_display_string(build, shown):
     assert buildid.display_version("0.3.0", build) == shown
 
 
 def test_a_development_build_never_looks_like_a_pre_release():
-    shown = buildid.display_version("0.3.0", DEVELOPMENT)
-    assert re.fullmatch(r"\d+\.\d+\.\d+\+g[0-9a-f]{7}", shown)
-    assert "-" not in shown and "rc" not in shown
+    for build in (DEVELOPMENT, {**DEVELOPMENT, "dirty": True}):
+        shown = buildid.display_version("0.3.0", build)
+        # A PEP 440 local label: alphanumerics separated by dots, after the `+`.
+        assert re.fullmatch(r"\d+\.\d+\.\d+\+g[0-9a-f]{7}(\.dirty)?", shown)
+        assert "-" not in shown and "rc" not in shown
+
+
+def test_a_dirty_build_no_longer_displays_like_the_clean_build_of_its_commit():
+    # A tree nobody can check out again must not look like the one that can.
+    clean = buildid.display_version("0.3.0", DEVELOPMENT)
+    dirty = buildid.display_version("0.3.0", {**DEVELOPMENT, "dirty": True})
+    assert clean != dirty and dirty == clean + ".dirty"
+
+
+# ---------------------------------------------------------------- overrides --
+
+OVERRIDES = ('ORIGIN = "https://lab.example/feed/"\n'
+             "INDEX_KEYS = [{'key_id': 'aa', 'rank': 1, 'public': 'x', 'baseline': 0}]\n")
+
+
+def test_an_acceptance_builds_overrides_are_read_as_literals():
+    text = _render({**DEVELOPMENT, "flavour": "acceptance"}) + OVERRIDES
+    found = buildid.parse_overrides(text)
+    assert found["origin"] == "https://lab.example/feed/"
+    assert found["index_keys"][0]["key_id"] == "aa"
+    # The build id itself is unchanged by them: info.build has no origin.
+    assert buildid.parse(text) == {**DEVELOPMENT, "flavour": "acceptance"}
+
+
+@pytest.mark.parametrize("text", [
+    "", _render(RELEASE), "ORIGIN = 5\n", "INDEX_KEYS = []\n", "INDEX_KEYS = ['a']\n",
+    "ORIGIN = open('x')\n", "not python (",
+])
+def test_no_usable_override_is_none(text):
+    assert buildid.parse_overrides(text) is None
+
+
+@pytest.mark.parametrize("text, carries", [
+    (_render(RELEASE), False),
+    (_render(RELEASE) + 'ORIGIN = "https://lab.example/feed/"\n', True),
+    (_render(RELEASE) + "INDEX_KEYS = []\n", True),
+    (_render(RELEASE) + "INDEX_KEYS = ORIGIN = 1\n", True),
+    ("not python (", True),
+])
+def test_any_mention_of_an_override_counts_for_a_release_check(text, carries):
+    assert buildid.carries_overrides(text) is carries
 
 
 # ------------------------------------------------------------------ in info --

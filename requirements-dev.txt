@@ -17,5 +17,10 @@ pyflakes==3.4.0
 # offset written twice. The tests render every one of them instead, through
 # tests/hatemplate.py; nothing in src/ imports this and the IPK does not carry it.
 jinja2==3.1.6
+
+# Test-only as well. tools/check-workflows.py reads the workflows with a small YAML reader of its
+# own, because the signing job's Python has nothing installed; a test holds that reader to PyYAML's
+# reading of every workflow in the repository.
+pyyaml==6.0.3
 pytest==9.1.1 ; python_version >= "3.10"
 pytest==8.4.2 ; python_version < "3.10"

@@ -19,11 +19,11 @@ jobs:
     name: Build, publish and refresh the feed
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
@@ -88,23 +88,11 @@ jobs:
 
       - name: The package says it is this release
         # Read back out of the package itself rather than trusted from the build's exit status:
-        # the commit being released, its time, a clean tree, the release flavour.
-        run: |
-          ipk=$(ls dist/*.ipk)
-          member=./usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge/buildinfo.py
-          ar p "$ipk" data.tar.gz | tar xzO "$member" > /tmp/buildinfo.py
-          cat /tmp/buildinfo.py
-          PYTHONPATH=src python - "$(git rev-parse 'HEAD^{commit}')" \
-            "$(git show -s --format=%ct 'HEAD^{commit}')" <<'PY'
-          import sys
-          from MQTTBridge import buildid
-          found = buildid.read("/tmp/buildinfo.py")
-          expected = {"commit": sys.argv[1], "time": int(sys.argv[2]), "dirty": False,
-                      "flavour": "release"}
-          if found is None or any(found[key] != value for key, value in expected.items()):
-              sys.exit(f"::error::the package's build id is {found}, expected {expected}")
-          print("build id:", found)
-          PY
+        # the commit being released, its time, a clean tree, the release flavour - and no test
+        # origin or test keys, which only an acceptance build may carry: the package's own
+        # trust module, loaded from the package, must answer the published origin and the
+        # embedded release keys.
+        run: python tools/check-release-package.py dist/*.ipk
 
       - name: Extract the release notes
         run: |
@@ -128,7 +116,7 @@ jobs:
           cat release-notes.md
 
       - name: Publish the GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           body_path: release-notes.md
           files: |

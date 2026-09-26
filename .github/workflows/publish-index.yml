@@ -1,0 +1,235 @@
+name: Publish the release index
+
+# The signed release index (docs/RELEASE-INDEX.md, ADR-0015) is built, checked, signed and
+# published by four jobs, and no job can do what the next one does:
+#
+#   build     reads everything, holds no key, writes nothing but an artifact and a hash;
+#   precheck  runs the repository's checks on that file, and holds no key;
+#   sign      holds the main key - only after the maintainer approves the run in the
+#             release-signing environment, which admits the main branch and nothing else - runs
+#             no code from the repository, and cannot write to it;
+#   publish   verifies the signature, can write to the repository, and holds no key.
+#
+# Every trigger runs this file as it is on main: workflow_run and a push to main always do, and a
+# manual run is refused on any other branch. The version a release run is for comes from the
+# triggering commit's one v* tag, never from a branch name.
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  push:
+    branches: [main]
+    paths: [release-index/policy.json]
+  workflow_dispatch:
+
+permissions: {}
+
+# One chain at a time, never cancelled: two chains would both sign "published + 1", and the
+# maintainer would have approved a signature that is never published. The emergency workflow has a
+# group of its own, so a run waiting here for approval can neither hold nor cancel it.
+concurrency:
+  group: publish-index
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the unsigned index
+    # A release run counts only when Release succeeded for a tag pushed to this repository.
+    if: >-
+      github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || (
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Every tag: COMPATIBILITY is read at each release tag.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch the published index and the feed
+        shell: bash
+        run: git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages
+
+      - name: The release this run is for
+        id: release
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          version=$(python3 tools/make-index.py tag-for "$HEAD_SHA")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "This run follows the release of $version."
+
+      - name: Build
+        id: build
+        # Downloads every release's package and checks it against the release asset's digest and
+        # against the feed's copy; verifies the published index and the branch's history; writes
+        # the next one. The summary opens with the sha256 the maintainer reads before approving.
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRED: ${{ steps.release.outputs.version }}
+        run: |
+          python3 tools/make-index.py build --repo "$GITHUB_REPOSITORY" \
+            ${REQUIRED:+--require-version "$REQUIRED"} \
+            --out releases.json --summary "$GITHUB_STEP_SUMMARY" --github-output "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-index
+          path: releases.json
+          if-no-files-found: error
+          retention-days: 7
+
+  precheck:
+    name: Check the unsigned index (no key)
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # Everything the repository's own code checks before anything is signed, in a job that never
+    # sees the key: the file is the one build hashed, every member is right, the key id is the
+    # main key's, the serial is the next one, and gh-pages' history agrees. sign waits for it.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch the published index and its history
+        shell: bash
+        run: git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-index
+          path: index
+
+      - name: A consistent next index
+        shell: bash
+        env:
+          EXPECTED: ${{ needs.build.outputs.sha256 }}
+        run: python3 tools/make-index.py check --index index/releases.json --sha256 "$EXPECTED"
+
+  sign:
+    name: Sign (the maintainer approves)
+    needs: [build, precheck]
+    if: github.ref == 'refs/heads/main'
+    # A fresh hosted runner: nothing of the job outlives it.
+    runs-on: ubuntu-24.04
+    environment: release-signing
+    # Nothing: this job reads an artifact of its own run and writes nothing but its output.
+    permissions: {}
+    outputs:
+      signature: ${{ steps.emit.outputs.signature }}
+    # This job runs no code from the repository at all - no checkout - only the pinned
+    # download-artifact, the runner's own sha256sum, bash builtins, base64 and openssl. That is
+    # the point, and not an optimisation: the runner process keeps the job's secrets in memory for
+    # the whole job, and hosted runners give passwordless sudo, so any code running anywhere in
+    # this job could read the key, before or after the step that uses it. What remains is the
+    # residual this design accepts: those pinned programs and the runner image itself. The whole
+    # job's text is pinned by sha256 in tools/check-workflows.py, so any change to it shows in
+    # review next to a new pin. The repository's code checks the file before (precheck) and the
+    # signature after (publish), in jobs that never see the key.
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-index
+          path: ${{ runner.temp }}/index
+
+      - name: The file build hashed
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        env:
+          EXPECTED: ${{ needs.build.outputs.sha256 }}
+        run: printf '%s  index/releases.json\n' "$EXPECTED" | /usr/bin/sha256sum --check --strict
+
+      - name: Sign with the main key
+        # The secret is one line of base64: the raw 32-byte seed. It goes to OpenSSL's stdin as
+        # DER - the fixed 16-byte PKCS#8 prefix of an Ed25519 key, then the seed - so no key file
+        # is written and no printable form of it exists. base64 and openssl run by absolute path
+        # without the variable in their environment. index.yml refuses any other text here.
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        env:
+          INDEX_SIGNING_KEY: ${{ secrets.INDEX_SIGNING_KEY }}
+        run: |
+          if [ -z "${INDEX_SIGNING_KEY:+set}" ]; then
+            echo "::error::the release-signing environment has no INDEX_SIGNING_KEY"
+            exit 1
+          fi
+          umask 077
+          {
+            printf '\x30\x2e\x02\x01\x00\x30\x05\x06\x03\x2b\x65\x70\x04\x22\x04\x20'
+            printf '%s' "$INDEX_SIGNING_KEY" | /usr/bin/env -u INDEX_SIGNING_KEY /usr/bin/base64 -d
+          } | /usr/bin/env -u INDEX_SIGNING_KEY /usr/bin/openssl pkeyutl -sign -rawin -keyform DER \
+                -inkey /dev/stdin -in index/releases.json -out index/releases.json.raw-sig
+
+      - name: Hand the signature on
+        # The raw 64-byte signature, in base64 - no secret. publish verifies it with the embedded
+        # main key before anything is written.
+        id: emit
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: printf 'signature=%s\n' "$(/usr/bin/base64 --wrap=0 index/releases.json.raw-sig)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Publish to the feed
+    needs: [build, precheck, sign]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The whole history: the index is judged against every index gh-pages has published.
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-index
+          path: index
+
+      - name: Verify the signature with the embedded main key
+        shell: bash
+        env:
+          SIGNATURE: ${{ needs.sign.outputs.signature }}
+        run: |
+          printf '%s' "$SIGNATURE" | /usr/bin/base64 -d > index/releases.json.raw-sig
+          python3 tools/make-index.py wrap --index index/releases.json \
+            --raw-signature index/releases.json.raw-sig --out index/releases.json.sig
+
+      - name: Accept the pair as a reader would
+        # The bytes build hashed, a signature from an embedded key, and a serial above the
+        # published one within the bound - judged against the branch as it is now.
+        shell: bash
+        env:
+          EXPECTED: ${{ needs.build.outputs.sha256 }}
+        run: |
+          git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages
+          python3 tools/make-index.py verify --index index/releases.json \
+            --sig index/releases.json.sig --sha256 "$EXPECTED"
+
+      - name: Push to gh-pages
+        shell: bash
+        run: |
+          serial=$(python3 -c 'import json; print(json.load(open("index/releases.json"))["serial"])')
+          git worktree add --detach ../pages origin/gh-pages
+          cp index/releases.json index/releases.json.sig ../pages/feed/
+          cd ../pages
+          # Generated output, committed as the workflow - as release.yml does for the feed.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add feed/releases.json feed/releases.json.sig
+          git commit -m "Publish the release index, serial $serial"
+          git push origin HEAD:gh-pages

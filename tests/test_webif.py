@@ -898,6 +898,23 @@ def test_the_version_row_names_a_development_build(make_bridge, factory, setting
         bridge.stop()
 
 
+@pytest.mark.parametrize("dirty, label", [(False, "+g2abcdef"), (True, "+g2abcdef.dirty")])
+def test_the_version_row_names_the_running_build_when_there_is_no_bridge(
+    monkeypatch, page, dirty, label
+):
+    # With no bridge the page asks the build this process loaded. In a checkout that is no build
+    # at all, so the row looked right whichever build it read; on a receiver it is the package's.
+    from MQTTBridge import buildid
+    from MQTTBridge.version import __version__
+
+    loaded = {"commit": "2abcdef" + "0" * 33, "time": 1790000100, "dirty": dirty,
+              "flavour": "development"}
+    monkeypatch.setattr(buildid, "LOADED", loaded)
+    _request, body = get(page(None))
+    text = html.unescape(body.decode("utf-8"))
+    assert "<dt>Version</dt><dd>" + __version__ + label + "</dd>" in text
+
+
 def test_the_page_shows_the_last_payload_as_it_went_out(connected_bridge, page):
     connected_bridge.publish_state("process", {"rss": 1, "ts": 100}, volatile=("ts",))
     connected_bridge.publish_state("process", {"rss": 2, "ts": 300}, volatile=("ts",))
