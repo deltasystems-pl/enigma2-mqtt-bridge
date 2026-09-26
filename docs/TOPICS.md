@@ -1006,7 +1006,10 @@ until its own timeout, as it does after the receiver's own zap-timer zap. A prot
 PIN is queued behind the popup and appears when it closes, as it would for a direct play. Exactly
 this counts: the image's own
 `Screens.MessageBox.MessageBox` (not a class built on it), of type information, warning or error,
-with no answers to choose from, executing, with the info bar as the one screen under it. A question
+with no answers to choose from, executing, with the info bar directly under it. What is under the
+info bar does not matter: a screen a plugin opened when the interface started (the Vu+ HbbTV
+plugin keeps an invisible one there) is not on the screen. When a zap is played directly because
+of an open screen, the plugin's log says which of these conditions was not met. A question
 (which is what a message box queued without a type is), a type the image does not know, a popup
 over any other screen - the movie player, the channel list - and a popup already closing still
 count as a screen open. A toast is not a dialog at all and never counts as a screen open: a zap

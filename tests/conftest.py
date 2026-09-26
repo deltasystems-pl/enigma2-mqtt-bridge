@@ -2474,6 +2474,19 @@ class ModalInfoBar(InfoBar, NotifiableInfoBar):
         NotifiableInfoBar.__init__(self, session)
 
 
+class SessionStartScreen(ModelScreen):
+    """A screen a `WHERE_SESSIONSTART` plugin opens, and never closes.
+
+    `StartEnigma.Session.__init__` calls those plugins before the info bar is
+    opened, and a plugin that `session.open`s a screen there puts it at the
+    bottom of the dialog stack for the life of the interface: the info bar is
+    then opened over it, and a popup over the info bar is two deep. The Vu+
+    HbbTV plugin does exactly this with its zero-size `VBMain`
+    (`WebkitHbbTV/plugin.pyc` 348-349), so on a receiver that has it no
+    popup ever sits on a one-entry stack.
+    """
+
+
 parental_module = _module("Components.ParentalControl")
 
 
@@ -3041,11 +3054,12 @@ class Receiver:
 
     `modal=True` gives it `StartEnigma`'s modal session (`ModalSession`)
     instead of the recording one, and `with_channel_list` then opens the info
-    bar on it as its first dialog, so popups reach the screen as they do on
-    the receiver.
+    bar on it, so popups reach the screen as they do on the receiver.
+    `session_start_screen=True` first opens a `SessionStartScreen`, as a
+    session-start plugin does, so the info bar is not the bottom of the stack.
     """
 
-    def __init__(self, modal=False):
+    def __init__(self, modal=False, session_start_screen=False):
         self.modal = modal
         self.service_center = ServiceCenter.getInstance()
         self.epg = EPGCache.getInstance()
@@ -3061,6 +3075,9 @@ class Receiver:
         self.service = Service(self.info, self.frontend)
         self.nav = Navigation(self.service, TVP1)
         self.session = ModalSession(self.nav) if modal else Session(self.nav)
+        self.session_start_screen = None
+        if modal and session_start_screen:
+            self.session_start_screen = self.session.open(SessionStartScreen)
 
         self.service_center.contents = {
             BOUQUET_ROOT: [
@@ -3145,7 +3162,8 @@ class Receiver:
             nav=self.nav,
         )
         if self.modal:
-            # StartEnigma opens the info bar as the session's first dialog;
+            # StartEnigma opens the info bar over whatever the session-start
+            # plugins opened, or as the first dialog when they opened none;
             # its OSD hides itself a few seconds later, which is how it is
             # when a popup usually arrives.
             InfoBar.instance = self.session.open(ModalInfoBar, servicelist)
