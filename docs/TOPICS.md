@@ -41,7 +41,7 @@ The contract has a major number, and the current contract major is **1**.
 | 0 | 0.1.0 |
 | 1 | 0.2.0, 0.3.0, and every later release until a release declares contract 2 |
 
-A plugin will publish its major as `info.contract` ([planned](#5-planned-not-implemented-yet),
+A plugin publishes its major as `info.contract` from the first release after 0.3.0 (§1,
 [ADR-0015](adr/0015-signed-self-update.md)). A plugin that does not publish it is contract 0 when
 `info.plugin` is below 0.2.0 and contract 1 when it is 0.2.0 or a 0.3.x.
 
@@ -152,7 +152,7 @@ not by the checker; their types are the tables below.
 |---|---|---|
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
-| unreleased, on `main` after 0.3.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
+| unreleased, on `main` after 0.3.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
 
 ---
 
@@ -182,6 +182,9 @@ announcement retained.
   "image": "OpenViX 6.6.007",
   "enigma": "2024-09-11-Release",
   "plugin": "0.3.0",
+  "build": {"commit": "3f6c0a2d9e41b7c85a0f2e6d1c9b8a7f6e5d4c3b", "time": 1790000000,
+            "dirty": false, "flavour": "release", "on_disk": null},
+  "contract": 1,
   "boxtype": "vuuno4kse",
   "mac": "00:00:5e:00:53:01",
   "ip": "192.0.2.12",
@@ -204,7 +207,9 @@ announcement retained.
 |---|---|---|
 | `image` | string | Image name and version as the box reports it |
 | `enigma` | string | enigma2's own version string, as `getEnigmaVersionString()` reports it - on OE-Alliance images a build date such as `2024-09-11-Release`, not a number |
-| `plugin` | string | This plugin's version - what an `update` entity compares against |
+| `plugin` | string | This plugin's version - what an `update` entity compares against. The same for a release and for every development build that carries its number; `build` tells them apart |
+| `build` | object | Which build of the plugin is running, and which one is waiting on disk. Added after 0.3.0 (unreleased). See below |
+| `contract` | int | The [contract major](#contract-version) this plugin implements. Added after 0.3.0 (unreleased); a plugin without it is contract 0 below 0.2.0 and contract 1 otherwise |
 | `boxtype` | string | Machine name, lowercase |
 | `mac` | string | Lowercase, colon-separated; the Wake-on-LAN target |
 | `ip` | string | Current LAN address |
@@ -289,6 +294,35 @@ own menu as well. A consumer that wants to warn before deep standby reads `suppo
 like an older plugin that publishes no `wol` at all: silence, not `false`. And `supported: true` says the
 image has a switch - it is not evidence that a magic packet wakes the receiver, which no drill has
 shown on any image yet.
+
+**`build` says which code runs, which a version number cannot.** Added after 0.3.0 (unreleased;
+[ADR-0015](adr/0015-signed-self-update.md), decision 1). A development build of the commit after a
+release carries that release's number until the next release pull request changes it, so `plugin`
+alone makes a receiver running it look up to date. The values come from whoever built the package
+(`tools/build-ipk.sh`, which records them in the package) and are never worked out on the
+receiver. Always present with every key.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `commit` | string | The commit the package was built from, 40 lowercase hex digits. Empty when the builder did not know it - a package built from a source archive nobody named the commit of - and for a copy of the plugin that was not built into a package at all |
+| `time` | int or `null` | The commit's time, epoch seconds: the timestamp every file in the package carries. `null` when unknown, and for a copy that was not built |
+| `dirty` | bool or `null` | Whether the tracked files differed from `commit` when it was built. `null` for a copy that was not built |
+| `flavour` | string or `null` | `release`, `development` or `acceptance`. `release` is only ever built clean at its release tag - the build refuses otherwise; `development` is every other build of the published code; `acceptance` is a build for a hardware acceptance run. A consumer reads a flavour it does not know as "not a release". `null` for a copy that was not built |
+| `on_disk` | string or `null` | The `commit` of the build on disk, when that is another build than the one running - the files were replaced and the interface has not restarted yet. `null` when they are the same build, or when the file on disk cannot be read. Checked whenever `info` is built and every ten minutes; a change republishes `info` |
+
+**How to show the version.** `plugin` as it is for a release build - `flavour` `release` and
+`dirty` `false` - and for a build whose `commit` is empty, which cannot be named any other way;
+`plugin` + `+g` + the first seven digits of `commit` for everything else: `0.3.0+g3f6c0a2`. The part
+after `+` is a local label, not a pre-release: a consumer never orders versions by it. Two builds with
+the same `plugin` are told apart by `time`, the later one being the newer. A consumer that knows a
+release's commit from somewhere the plugin cannot see - a signed list of releases - holds a
+`release` build to that commit as well.
+
+There is deliberately no `origin` member. Where a build fetches its releases from is not something
+this object has to say to tell builds apart - a build with another source is an `acceptance` build,
+and a release build is refused unless it carries the published one - and "origin" already means two
+other things in this contract: where a command came from, and whether the release index could be
+reached (the planned `update.origin`).
 
 ### `<base>/<node>/power`
 
@@ -1677,11 +1711,12 @@ retained ghost nobody can find: the list is the only record that they exist.
 
 This section is where a planned addition is written down before it is built, so that a consumer can
 be written against its shape; the previous ones - `uninstall_allowed` and `cmd/uninstall`
-([ADR-0004](adr/0004-remote-uninstall.md)) - are in §1 and §2 now. Until a capability is in
+([ADR-0004](adr/0004-remote-uninstall.md)), and `info.build` and `info.contract` - are in §1 and
+§2 now. Until a capability is in
 `info.capabilities`, the box does not have it - that rule is unchanged, and it is how a consumer
 tells a plan from a feature. **No released plugin publishes, accepts or reads anything below.**
 
-### Updates from a signed release index - [ADR-0015](adr/0015-signed-self-update.md) (proposed)
+### Updates from a signed release index - [ADR-0015](adr/0015-signed-self-update.md) (accepted)
 
 The plugin checks for, and installs, its own releases from a signed release index, and the
 companion integration relays that index and the package to a receiver without internet access. Every
@@ -1691,8 +1726,6 @@ how a restart keeps the household's channel - is described in [TRANSACTION.md](T
 
 | Kind | Name | Shape |
 |---|---|---|
-| Info member | `build` | object: `commit` (40 hex digits, or empty when the builder did not know it), `time` (the commit's epoch seconds), `dirty` (bool), `flavour` (`release` \| `acceptance`), `on_disk` (the commit of the build on disk when it differs from the running one, else `null`) |
-| Info member | `contract` | int, the contract major - see [Contract version](#contract-version) |
 | Setting | `update_check` | bool, off by default, **read-only** in `info.settings`: set on the receiver, never through `cmd/config`. With it on, the plugin checks the index once a day and answers `cmd/update_check` |
 | Setting | `update_allowed` | bool permission, off by default, **read-only** in `info.settings`: whether `cmd/update` is obeyed over MQTT |
 | Capability | `self_update` | the package manager installed this copy and the receiver can run the update helper detached from enigma2 |

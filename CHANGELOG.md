@@ -9,6 +9,31 @@ version that has no section here.
 
 ## [Unreleased]
 
+### Added
+
+- **Every package says which build it is.** `info` gains `build` - the commit the package was
+  built from, the commit's time, whether the tracked files matched it, the flavour, and the commit
+  of another build waiting on disk after the files were replaced and before the interface restarts
+  (`on_disk`, checked whenever `info` is built and every ten minutes, and republished when it
+  changes) - and `contract`, the topic contract's major, 1. A development build carries the number
+  of the release before it, so a receiver running one used to look exactly like a receiver running
+  that release; `build` tells them apart, and the plugin's OpenWebif page and its start line in the
+  log show such a build as `0.3.0+g<first seven digits of the commit>` - a local label, never a
+  pre-release suffix. The values are written into the package by whoever builds it, through the
+  new `tools/make-buildinfo.py`, and never worked out on the receiver; a copy of the plugin that was
+  not built into a package says so, with an empty commit. There is deliberately no `origin` member:
+  [TOPICS.md](docs/TOPICS.md) says why. ADR-0015 is accepted with this, its first code.
+- **`tools/build-ipk.sh` takes the build id from its builder**: `MQTTBRIDGE_BUILD_COMMIT` names the
+  commit for a build without its git checkout - the companion integration rebuilds its bundled
+  package from a `git archive` that has none - and must match HEAD when there is one;
+  `MQTTBRIDGE_BUILD_FLAVOUR` is `development` by default, or `release` or `acceptance`. A `release`
+  build is refused unless the tracked files are clean, HEAD carries the tag of `version.py`'s
+  version, the timestamp is that commit's, the version is a plain `N.N.N` and the changelog has its
+  section; the release workflow builds with it and then reads the build id back out of the package.
+  The package stays reproducible: the same commit, timestamp and flavour give the same bytes, with
+  or without `.git`, which a new CI step proves on every pull request by building twice and from an
+  export.
+
 ### Documentation
 
 - **The topic contract has a version.** [TOPICS.md](docs/TOPICS.md#contract-version) gains a
@@ -41,11 +66,14 @@ version that has no section here.
   command table, settings and their types, `info` members, raw topics and capability names, and run
   the command line against throwaway git repositories. Payload fields are not in the data.
 - **Updates from a signed release index are planned**, in
-  [ADR-0015](docs/adr/0015-signed-self-update.md) (proposed): a receiver-only `update_check`
-  setting, a receiver-only `update_allowed` permission, the `self_update` capability, an `update`
-  topic, `cmd/update_check`, `cmd/update` (upgrades only), the relay a receiver without internet
-  uses through Home Assistant, and `info.build` and `info.contract`. TOPICS.md §5 lists their shapes;
-  nothing is built yet and no released plugin publishes or accepts any of them.
+  [ADR-0015](docs/adr/0015-signed-self-update.md) (accepted with the build id, above): a
+  receiver-only `update_check` setting, a receiver-only `update_allowed` permission, the
+  `self_update` capability, an `update` topic, `cmd/update_check`, `cmd/update` (upgrades only),
+  and the relay a receiver without internet uses through Home Assistant. TOPICS.md §5 lists their
+  shapes; none of them is built yet and no released plugin publishes or accepts any of them. The
+  index is signed with a main key in the repository's CI, behind an environment that runs only for
+  release tags and `main` and only after the maintainer approves each run, with a spare key of
+  higher rank kept sealed offline; ADR-0015 states what that does not protect against.
 - [docs/TRANSACTION.md](docs/TRANSACTION.md) is new: the contract between the companion
   integration's SSH installer and the planned self-update - the names on the receiver's disk, the
   shared lock and when it is stale (the released installer's 30-minute rule, unchanged), the
@@ -58,7 +86,7 @@ version that has no section here.
   are marked as hypotheses still to be measured on a receiver, and what is released today is told
   apart from what is planned throughout.
 - ADR-0000 §7 and SECURITY.md's "no outbound connection other than the broker" are marked as
-  superseded in part by ADR-0015 (proposed). Both still describe every released plugin exactly;
+  superseded in part by ADR-0015. Both still describe every released plugin exactly;
   SECURITY.md's policy is rewritten when the first release that implements ADR-0015 ships.
 - The README is now a short landing page: what the plugin does, how to install it, what it needs.
   The milestones and open items moved to [ROADMAP.md](ROADMAP.md); the privacy notes and the
@@ -129,6 +157,9 @@ version that has no section here.
 
 ### Fixed
 
+- `tools/build-ipk.sh` no longer takes its timestamp from a repository it merely sits inside. A
+  source archive unpacked in a subdirectory of some other checkout was stamped with that
+  checkout's last commit time; it now uses `SOURCE_DATE_EPOCH`, or its own checkout's, or 0.
 - A zap from Home Assistant made while an information popup was on the television - the one
   `cmd/message` shows, or the receiver's own "Zapped to timer service" - was played directly and
   left out of the receiver's zap history, as if a menu were open. It now goes through the channel

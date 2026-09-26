@@ -878,6 +878,26 @@ def test_the_status_carries_what_the_bridge_holds(connected_bridge, page, factor
     assert html.escape(INFO) in text
 
 
+def test_the_version_row_names_a_development_build(make_bridge, factory, settings, page):
+    # The release and a development build of the same number must not look alike on the one
+    # page a person opens to find out what the receiver runs.
+    from MQTTBridge.version import __version__
+
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    development = {"commit": "2abcdef" + "0" * 33, "time": 1790000100, "dirty": False,
+                   "flavour": "development"}
+    release = dict(development, flavour="release")
+    for build, shown in ((development, __version__ + "+g2abcdef"), (release, __version__)):
+        bridge = make_bridge(build=build)
+        bridge.start()
+        factory.client.fire_connect()
+        _request, body = get(page(bridge))
+        text = html.unescape(body.decode("utf-8"))
+        assert "<dt>Version</dt><dd>" + shown + "</dd>" in text, shown
+        bridge.stop()
+
+
 def test_the_page_shows_the_last_payload_as_it_went_out(connected_bridge, page):
     connected_bridge.publish_state("process", {"rss": 1, "ts": 100}, volatile=("ts",))
     connected_bridge.publish_state("process", {"rss": 2, "ts": 300}, volatile=("ts",))

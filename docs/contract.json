@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "about": "The topic contract of docs/TOPICS.md as data: the contract major, every state topic (payload kind, retain flag), command, info member with its type, setting with its type and whether cmd/config may write it, capability name, topic outside the node's tree, the named in-major exceptions of the Contract version section, and the planned additions of TOPICS.md section 5. Topic names are relative to <base>/<node>/. 'since' appears only where TOPICS.md states it. tools/check-contract.py fails when this file and TOPICS.md disagree, and when a release removes or retypes an entry of the previous release's copy without a new contract major, or drops an exception. Payload fields are not here; their types are the tables in TOPICS.md.",
+  "about": "The topic contract of docs/TOPICS.md as data: the contract major, every state topic (payload kind, retain flag), command, info member with its type and the members of info.wol and info.build with theirs, setting with its type and whether cmd/config may write it, capability name, topic outside the node's tree, the named in-major exceptions of the Contract version section, and the planned additions of TOPICS.md section 5. Topic names are relative to <base>/<node>/. 'since' appears only where TOPICS.md states it. tools/check-contract.py fails when this file and TOPICS.md disagree, and when a release removes or retypes an entry of the previous release's copy without a new contract major, or drops an exception. Payload fields are not here; their types are the tables in TOPICS.md.",
   "contract": 1,
   "state_topics": {
     "availability": {
@@ -142,6 +142,8 @@
     "image": "string",
     "enigma": "string",
     "plugin": "string",
+    "build": "object",
+    "contract": "int",
     "boxtype": "string",
     "mac": "string",
     "ip": "string",
@@ -156,6 +158,13 @@
     "armed": "bool or null",
     "iface": "string or null",
     "mechanism": "string or null"
+  },
+  "info_build_members": {
+    "commit": "string",
+    "time": "int or null",
+    "dirty": "bool or null",
+    "flavour": "string or null",
+    "on_disk": "string or null"
   },
   "settings": {
     "publish_keys": {
@@ -261,14 +270,6 @@
     }
   ],
   "planned": [
-    {
-      "kind": "info member",
-      "name": "build"
-    },
-    {
-      "kind": "info member",
-      "name": "contract"
-    },
     {
       "kind": "setting",
       "name": "update_check"

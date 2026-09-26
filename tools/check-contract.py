@@ -205,7 +205,24 @@ def _commands(text: str) -> dict:
     return commands
 
 
-def _info(text: str) -> tuple[dict, dict, list[str]]:
+FIELD_TABLE = re.compile(r"^\| Field \| Type \|")
+
+
+def _member_table(lines: list[str], member: str) -> dict:
+    """The `| Field | Type |` table of one object member of `info`: the first such table after
+    the one paragraph that opens with the member's name in bold, "**`wol` ...".
+    """
+    lead = f"**`{member}`"
+    starts = [index for index, line in enumerate(lines) if line.startswith(lead)]
+    if len(starts) != 1:
+        raise ContractParseError(f"the `info` section has no single paragraph opening {lead}")
+    tables = _tables(lines[starts[0]:], FIELD_TABLE)
+    if not tables:
+        raise ContractParseError(f"the `info` section has no field table after {lead}")
+    return {_first_name(row[0]): _plain_type(row[1]) for row in tables[0]}
+
+
+def _info(text: str) -> tuple[dict, dict, dict, list[str]]:
     sections = [
         lines
         for heading, lines in _sections("\n".join(_top_section(text, "## 1.")), "### ")
@@ -213,15 +230,16 @@ def _info(text: str) -> tuple[dict, dict, list[str]]:
     ]
     if len(sections) != 1:
         raise ContractParseError("section 1 has no single `info` heading")
-    tables = _tables(sections[0], re.compile(r"^\| Field \| Type \|"))
-    if len(tables) < 2:
-        raise ContractParseError("the `info` section needs its field table and the `wol` table")
+    tables = _tables(sections[0], FIELD_TABLE)
+    if not tables:
+        raise ContractParseError("the `info` section has no field table")
     members = {_first_name(row[0]): _plain_type(row[1]) for row in tables[0]}
-    wol = {_first_name(row[0]): _plain_type(row[1]) for row in tables[1]}
+    wol = _member_table(sections[0], "wol")
+    build = _member_table(sections[0], "build")
     settings_rows = [row for row in tables[0] if _first_name(row[0]) == "settings"]
     if len(settings_rows) != 1:
         raise ContractParseError("the `info` table has no single `settings` row")
-    return members, wol, settings_rows[0]
+    return members, wol, build, settings_rows[0]
 
 
 def _settings(text: str, settings_row: list[str]) -> tuple[dict, list[str]]:
@@ -337,7 +355,7 @@ def _parse(text: str) -> tuple[dict, list[str]]:
     major = CONTRACT_MAJOR.findall(text)
     if len(major) != 1:
         raise ContractParseError("expected one 'current contract major is **N**' sentence")
-    members, wol, settings_row = _info(text)
+    members, wol, build, settings_row = _info(text)
     settings, problems = _settings(text, settings_row)
     parsed = {
         "contract": int(major[0]),
@@ -345,6 +363,7 @@ def _parse(text: str) -> tuple[dict, list[str]]:
         "commands": _commands(text),
         "info_members": members,
         "info_wol_members": wol,
+        "info_build_members": build,
         "settings": settings,
         "capabilities": _capabilities(text),
         "other_topics": _other_topics(text),
@@ -363,6 +382,7 @@ LABELS = {
     "commands": "command",
     "info_members": "info member",
     "info_wol_members": "info.wol member",
+    "info_build_members": "info.build member",
     "settings": "setting",
     "capabilities": "capability",
     "other_topics": "topic",

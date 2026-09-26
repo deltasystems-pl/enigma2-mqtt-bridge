@@ -79,6 +79,7 @@ except ImportError:  # OpenWebif is optional; tests exercise the resource as a d
         INTERNAL_SERVER_ERROR = 500
 
 
+from . import buildid
 from . import config as settings_module
 from . import log as log_module
 from .i18n import _
@@ -1272,6 +1273,11 @@ def _actions_section(request, bridge, token):
     )
 
 
+def _build(bridge):
+    """The running build's id: the bridge's, or this process's when there is no bridge."""
+    return getattr(bridge, "build", buildid.LOADED) if bridge is not None else buildid.LOADED
+
+
 def _status_section(bridge, section):
     value = settings_module.value
     if bridge is None:
@@ -1284,7 +1290,7 @@ def _status_section(bridge, section):
     host = (value("host", section) or "").strip()
     last_error = bridge.last_error() if bridge is not None else None
     rows = (
-        (_("Version"), __version__),
+        (_("Version"), buildid.display_version(__version__, _build(bridge))),
         (_("Bridge"), state),
         (_("MQTT"), _("Connected") if connected else _("Disconnected")),
         (_("Broker"), host + ":" + str(value("port", section)) if host else "-"),

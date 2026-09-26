@@ -42,7 +42,7 @@ everything else:
    the integration's business and is off by default. TLS to the broker is supported; client
    certificates are not in v1.
 
-   > **Superseded in part by [ADR-0015](docs/adr/0015-signed-self-update.md) (proposed):** a
+   > **Superseded in part by [ADR-0015](docs/adr/0015-signed-self-update.md) (accepted 2026-09-26):** a
    > plugin that updates itself fetches a signed release index and its own packages from one fixed
    > HTTPS address - only when a person asks, when an install needs it, or when the receiver-only
    > setting `update_check` is on. That is not built: every released plugin makes no connection
