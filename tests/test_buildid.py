@@ -201,7 +201,8 @@ def test_a_build_staged_on_disk_is_published_within_one_check(
     on_disk = _write(tmp_path / "buildinfo.py", RELEASE)
     bridge = _connected(make_bridge, factory, settings, build=RELEASE, build_path=str(on_disk))
     timer = _build_timer(bridge)
-    assert timer.started == (buildid.CHECK_MILLISECONDS, False)
+    # Ten minutes, as TOPICS.md promises: written out, not read from the constant under test.
+    assert timer.started == (10 * 60 * 1000, False)
     before = len(factory.client.all_for(INFO))
 
     timer.fire()

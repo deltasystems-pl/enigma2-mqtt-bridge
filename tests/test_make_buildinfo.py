@@ -103,6 +103,14 @@ def test_an_untracked_file_does_not(tool, checkout):
     assert _decide(tool, checkout)["dirty"] is False
 
 
+def test_a_checkout_whose_state_cannot_be_read_is_not_called_clean(tool, checkout):
+    # A damaged index makes `git status` fail while HEAD still resolves. Not knowing whether the
+    # tree is clean is not the same as knowing it is.
+    (checkout / ".git" / "index").write_bytes(b"not an index")
+    with pytest.raises(tool.BuildRefused, match="git status failed"):
+        _decide(tool, checkout)
+
+
 def test_a_repository_without_a_commit_names_none(tool, tmp_path):
     repo = _tree(tmp_path / "fresh")
     _git(repo, "init", "-q")
