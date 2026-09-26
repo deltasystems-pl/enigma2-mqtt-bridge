@@ -11,8 +11,10 @@ enigma2's main loop: the check worker and the update helper call it.
 
 **What it is.** RFC 8032 section 5.1.7, in the shape of the RFC's own reference code (section 6):
 extended twisted Edwards coordinates, double-and-add. It checks the unbatched, cofactorless
-equation `[S]B = R + [k]A` - the one OpenSSL checks, and so the one the companion integration's
-`cryptography` checks - with strict decoding, so both halves refuse exactly the same inputs:
+equation `[S]B = R + [k]A` with `k` reduced mod `L` - the one OpenSSL checks, and so the one the
+companion integration's `cryptography` checks - with strict decoding, so for every well-formed
+public key both halves accept exactly the same signatures (on a malformed key - a non-canonical
+encoding - this is stricter than OpenSSL; no embedded key set can contain one):
 
 - a public key of 32 bytes and a signature of 64, nothing else;
 - `S` below the group order `L`: `S + L` names the same point, so a verifier that skips this
@@ -20,7 +22,7 @@ equation `[S]B = R + [k]A` - the one OpenSSL checks, and so the one the companio
 - a point's `y` below the field prime, and no "negative zero" `x`: a non-canonical encoding of a
   point is not the point, so `R` has exactly one spelling;
 - both coordinates compared: two points that share `x` differ in `y`, and a comparison of one
-  coordinate accepts a signature forged from that ambiguity (the vectors carry one).
+  coordinate accepts a signature forged from that ambiguity (the vectors carry one for each).
 
 **What it is not.** Constant-time. It handles only public data - an embedded public key, a
 published index and its signature - so there is no secret for timing to reveal. It has no signing

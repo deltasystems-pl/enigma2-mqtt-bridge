@@ -29,20 +29,26 @@ of sha256 over the raw 32-byte public key, so an id cannot name another key - a 
    index is believed;
 4. the index is well formed (`malformed_index`), and its own `key_id` is the signature file's
    (`key_mismatch`), so one key's signature cannot stand for another's index;
-5. the key's rank is not below the highest rank this reader has accepted under its embedded keys
-   (`rank`);
+5. the key has not been silenced, and its rank is not below the highest rank this reader has
+   accepted under its embedded keys (`rank`);
 6. the serial is above the last one accepted **for that key** (`replay`) and at most 1000 above it
    (`jump`); for a key this reader has never accepted, it lies within 1000 of the key's embedded
    baseline (`first_sight`) - the serial that was published when the release was built, so a
    receiver installed late in a key's life is not locked out.
 
-**The memory** a reader keeps is one number per key: the last serial it accepted, keyed by `key_id`.
-Because a `key_id` names exactly one public key, that memory means the same thing under every set
-of embedded keys, and nothing else needs to be stored: the highest accepted rank is the highest
-rank, **in the reader's own embedded set**, of a key it has accepted. So a build carrying test keys
-(an acceptance build) remembers only test keys, which the release keys never meet - it can never
-raise the rank the release keys are judged by - while a release that adds or drops a key keeps
-everything it knew about the keys it still carries, the silenced main key included.
+**The memory** a reader keeps is keyed by `key_id`, which names exactly one public key, so it means
+the same thing under every set of embedded keys:
+
+- the last serial accepted from each key;
+- the keys it has **silenced**: accepting an index from a key silences, for good, every key of the
+  reader's embedded set ranked below it. "Ignored for good" is a fact about those keys, not about a
+  set, so it survives a release that changes the set - even one that dropped the higher key and
+  kept a silenced one, which the release rules forbid (RELEASE-INDEX.md, "Keys").
+
+The rank floor is the highest rank, **in the reader's own embedded set**, of a key it has accepted.
+So a build carrying test keys (an acceptance build) remembers and silences only test keys, which the
+release keys never meet - it can never raise the rank the release keys are judged by - while a
+release that adds or drops a key keeps everything the reader knew about the keys it still carries.
 
 Standard library only, and 3.9-safe: the update helper runs this outside enigma2 on whatever
 Python the image has, and the signing job in CI runs it on the runner's own, with nothing
@@ -409,9 +415,31 @@ def parse_index(raw, strict=False):
 # --------------------------------------------------------------------- accepting --
 
 
+def empty_memory():
+    return {"serials": {}, "silenced": []}
+
+
+def _serials(memory):
+    return (memory or {}).get("serials") or {}
+
+
+def _silenced(memory):
+    return set((memory or {}).get("silenced") or ())
+
+
 def rank_floor(keys, memory):
     """The highest rank, among `keys`, of a key this reader has accepted an index from (0: none)."""
-    return max((key.rank for key in keys if key.key_id in memory), default=0)
+    serials = _serials(memory)
+    return max((key.rank for key in keys if key.key_id in serials), default=0)
+
+
+def remember(memory, key, serial, keys):
+    """The memory after accepting `serial` from `key`: its serial, and every key of `keys` ranked
+    below it silenced for good. Returns a new memory; `memory` is not changed."""
+    serials = dict(_serials(memory))
+    serials[key.key_id] = serial
+    silenced = _silenced(memory) | {other.key_id for other in keys if other.rank < key.rank}
+    return {"serials": serials, "silenced": sorted(silenced)}
 
 
 def authenticate(index_raw, signature_raw, keys):
@@ -441,9 +469,10 @@ def authenticate(index_raw, signature_raw, keys):
 def accept(index_raw, signature_raw, keys, memory):
     """Accept a signed index, or raise Refused - the rule in the module docstring, in its order.
 
-    `memory` maps `key_id` to the last serial this reader accepted from that key, and is not
-    changed; the Accepted result carries the memory to store. A reader that already holds these
-    exact bytes has nothing new and need not ask: an equal serial is refused as `replay`.
+    `memory` is `{"serials": {key_id: last accepted serial}, "silenced": [key_id, ...]}` (None or
+    `{}` for a reader that has accepted nothing) and is not changed; the Accepted result carries the
+    memory to store. A reader that already holds these exact bytes has nothing new and need not
+    ask: an equal serial is refused as `replay`.
     """
     index, key = authenticate(index_raw, signature_raw, keys)
     return Accepted(index, key, judge(index, key, keys, memory))
@@ -451,13 +480,17 @@ def accept(index_raw, signature_raw, keys, memory):
 
 def judge(index, key, keys, memory):
     """Steps 5 and 6 for an authentic index: the memory to store after it, or Refused."""
+    if key.key_id in _silenced(memory):
+        raise Refused(
+            "rank", f"key {key.key_id} was silenced by an index signed with a higher-ranked key"
+        )
     floor = rank_floor(keys, memory)
     if key.rank < floor:
         raise Refused(
             "rank", f"key {key.key_id} has rank {key.rank}, and rank {floor} is already accepted"
         )
     serial = index["serial"]
-    stored = memory.get(key.key_id)
+    stored = _serials(memory).get(key.key_id)
     if stored is None:
         if not key.baseline <= serial <= key.baseline + MAX_JUMP:
             raise Refused(
@@ -469,9 +502,7 @@ def judge(index, key, keys, memory):
         raise Refused("replay", f"serial {serial} is not above {stored}, the last accepted")
     elif serial > stored + MAX_JUMP:
         raise Refused("jump", f"serial {serial} is more than {MAX_JUMP} above {stored}")
-    updated = dict(memory)
-    updated[key.key_id] = serial
-    return updated
+    return remember(memory, key, serial, keys)
 
 
 # The embedded set is checked when the module loads: a typo in a key must stop every reader, not

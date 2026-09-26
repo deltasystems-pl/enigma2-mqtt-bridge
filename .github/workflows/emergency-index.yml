@@ -12,11 +12,17 @@ on:
   push:
     branches: [main]
     paths: [release-index/emergency/**]
+  # To run it again - after a failure, or when a push that should have started it did not - on
+  # main only (the job refuses any other ref).
+  workflow_dispatch:
 
 permissions: {}
 
+# A group of its own: a publish-index run waiting days for approval must neither hold this back nor
+# cancel it. The two never publish the same serial - each accepts the pair against gh-pages as it is
+# when it runs, and a push that lost the race is refused as not a fast-forward.
 concurrency:
-  group: publish-index
+  group: emergency-index
   cancel-in-progress: false
 
 jobs:
@@ -28,6 +34,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
 
       - name: Accept the pair as a reader would
         run: |

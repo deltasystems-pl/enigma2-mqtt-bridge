@@ -6,6 +6,7 @@ time. The index is what a receiver will install from, so each spoilt input must 
 rather than end up signed.
 """
 
+import base64
 import hashlib
 import json
 from pathlib import Path
@@ -342,15 +343,15 @@ def _tree(tmp_path, published, emergency=None):
 @needs_openssl
 def test_the_tree_check_verifies_the_published_index(lab, tmp_path):
     published = _signed(_build(lab, lab.policy(**POLICY)))
-    assert "verified" in _tree(tmp_path, published)[0]
-    assert _tree(tmp_path / "none", (None, None)) == ["nothing is published yet"]
+    assert "published: serial 1, key " in _tree(tmp_path, published)[1]
+    assert _tree(tmp_path / "none", (None, None))[1] == "nothing is published yet"
 
 
 @needs_openssl
 def test_the_tree_check_fails_before_a_baseline_falls_too_far_behind(lab, tmp_path):
     margin = trust.MAX_JUMP - make_index.BASELINE_MARGIN
     near = _signed(_build(lab, lab.policy(**POLICY), serial=margin))
-    assert "verified" in _tree(tmp_path / "near", near)[0]
+    assert "verified" in _tree(tmp_path / "near", near)[1]
     far = _signed(_build(lab, lab.policy(**POLICY), serial=margin + 1))
     with pytest.raises(Failed, match="raise it in src/MQTTBridge/trust.py"):
         _tree(tmp_path / "far", far)
@@ -394,3 +395,154 @@ def test_one_release_per_line():
                              "key_id": T1.key_id, "floor": "0.2.0", "releases": []})
     assert raw.endswith(b'  "releases": []\n}\n')
     assert json.loads(raw)["releases"] == []
+
+
+# ------------------------------------------------------ gh-pages history guard --
+
+
+def _history(lab):
+    return make_index.published_history("gh-pages", KEYS, lab.repo)
+
+
+def _publish(lab, pair):
+    lab.publish(*pair)
+    return make_index.published_pair("gh-pages", root=lab.repo)
+
+
+@needs_openssl
+def test_a_rolled_back_or_deleted_published_index_stops_the_build(lab):
+    first = _publish(lab, _signed(_build(lab, lab.policy(**POLICY))))
+    second = _publish(lab, _signed(_build(lab, lab.policy(**POLICY), published=first,
+                                          history=_history(lab))))
+    assert json.loads(second[0])["serial"] == 2
+    history = _history(lab)
+    assert history.count == 2 and history.memory["serials"] == {T1.key_id: 2}
+    assert "the highest serial 2 by key" in history.describe()
+    # An ordinary commit putting serial 1 back: the next build would be 2 again - a replay.
+    rolled_back = _publish(lab, first)
+    with pytest.raises(Failed, match="below serial 2, which gh-pages published before"):
+        _build(lab, lab.policy(**POLICY), published=rolled_back, history=_history(lab))
+    with pytest.raises(Failed, match="rolled back"):
+        make_index.verify(*second, KEYS, rolled_back, _history(lab))
+    # Deleted: the build would start again at serial 1.
+    with pytest.raises(Failed, match="the files were deleted"):
+        _build(lab, lab.policy(**POLICY), published=(None, None), history=_history(lab))
+    # The recovery the message names: the newest pair back, in a new commit.
+    restored = _publish(lab, second)
+    index = trust.parse_index(_build(lab, lab.policy(**POLICY), published=restored,
+                                     history=_history(lab)))
+    assert index["serial"] == 3
+
+
+@needs_openssl
+def test_a_rollback_past_the_spare_stops_the_build(lab):
+    main = _publish(lab, _signed(_build(lab, lab.policy(**POLICY))))
+    _publish(lab, _signed(_build(lab, lab.policy(**POLICY), key=T2, published=main,
+                                 history=_history(lab)), "t2"))
+    back = _publish(lab, main)
+    with pytest.raises(Failed, match="silenced"):
+        _build(lab, lab.policy(**POLICY), published=back, history=_history(lab))
+
+
+@needs_openssl
+def test_history_ignores_what_does_not_verify(lab):
+    raw, sig = _signed(_build(lab, lab.policy(**POLICY)))
+    lab.publish(raw.replace(b'"floor": "0.2.0"', b'"floor": "0.1.0"'), sig)
+    history = _history(lab)
+    assert history.count == 0 and history.unverified >= 1
+    assert "no signed index has ever been published" in history.describe()
+
+
+# ------------------------------------------------------- a waiting emergency index --
+
+
+@needs_openssl
+def test_no_index_is_built_past_an_emergency_index_waiting_on_main(lab):
+    published = _publish(lab, _signed(_build(lab, lab.policy(**POLICY))))
+    spare = _signed(_build(lab, lab.policy(**POLICY), key=T2, published=published), "t2")
+    folder = lab.repo / "release-index" / "emergency"
+    folder.mkdir(parents=True)
+    (folder / "releases.json").write_bytes(spare[0])
+    (folder / "releases.json.sig").write_bytes(spare[1])
+    with pytest.raises(Failed, match="emergency index .* not published yet"):
+        _build(lab, lab.policy(**POLICY), published=published)
+    # Once published it is history, and the spare goes on from it.
+    published = _publish(lab, spare)
+    index = trust.parse_index(_build(lab, lab.policy(**POLICY), key=T2, published=published))
+    assert index["serial"] == 2
+
+
+# ------------------------------------------------------------ the key set's rules --
+
+
+def _key(name, rank, baseline=0):
+    key = indexlab.VECTORS["test_keys"][name]
+    return trust.Key(key["key_id"], rank, base64.b64decode(key["public"]), baseline)
+
+
+@pytest.mark.parametrize("current, words", [
+    ((("t1", 1, 5), ("t2", 2)), None),
+    ((("t1", 1, 5), ("t2", 2), ("t3", 3)), None),
+    ((("t2", 2), ("t3", 3)), None),
+    ((("t1", 1, 5), ("t2", 3)), "changed rank 2 -> 3"),
+    ((("t1", 1, 0), ("t2", 2)), "lowered its baseline 5 -> 0"),
+    ((("t1", 1, 5), ("t3", 3)), "is dropped while"),
+    ((("t3", 2),), "not above 2"),
+])
+def test_a_release_keeps_ranks_adds_higher_keys_and_drops_from_the_bottom(current, words):
+    previous = trust.check_keys((_key("t1", 1, 5), _key("t2", 2)))
+    problems = make_index.key_evolution_problems(
+        previous, trust.check_keys(_key(*item) for item in current))
+    if words is None:
+        assert problems == []
+    else:
+        assert any(words in problem for problem in problems), problems
+
+
+def test_a_new_key_must_rank_above_every_key_before_it():
+    previous = trust.check_keys((_key("t1", 1), _key("t3", 3)))
+    problems = make_index.key_evolution_problems(previous, trust.check_keys(
+        (_key("t1", 1), _key("t3", 3), _key("t2", 2))))
+    assert any("new key" in problem and "not above 3" in problem for problem in problems)
+
+
+def test_the_key_set_is_read_from_trust_py_as_literals():
+    text = (REPO_ROOT / "src" / "MQTTBridge" / "trust.py").read_text(encoding="utf-8")
+    assert make_index.keys_in_source(text) == trust.EMBEDDED
+
+
+def test_the_tree_check_holds_the_keys_to_the_last_release_that_carried_them(lab):
+    assert make_index.previous_release_keys(lab.repo) == (None, None)
+    source = lab.repo / "src" / "MQTTBridge"
+    source.mkdir(parents=True)
+    (source / "trust.py").write_text(
+        (REPO_ROOT / "src" / "MQTTBridge" / "trust.py").read_text(encoding="utf-8"),
+        encoding="utf-8")
+    lab.release("0.4.0")
+    assert make_index.previous_release_keys(lab.repo) == ("v0.4.0", trust.EMBEDDED)
+    (lab.repo / "release-index").mkdir()
+    (lab.repo / "release-index" / "policy.json").write_text(json.dumps(
+        {"schema": 1, "floor": "0.2.0", "withdrawn": {}, "corrections": {}}))
+    lines = []
+    make_index.tree(lab.repo, trust.EMBEDDED, (None, None), log=lines.append)
+    assert "embedded keys: consistent with v0.4.0" in lines
+    # A tree that drops the spare but keeps the main key is refused.
+    with pytest.raises(Failed, match="is dropped while"):
+        make_index.tree(lab.repo, (trust.MAIN,), (None, None), log=lines.append)
+
+
+# ------------------------------------------------------------------------ misc --
+
+
+def test_a_release_commit_with_a_non_release_tag_beside_its_tag(lab):
+    commit = lab.git("rev-parse", "v0.2.0^{commit}")
+    lab.git("tag", "v0.2.0-rc1", commit)
+    lab.git("tag", "v0.2", commit)
+    assert make_index.tag_for(commit, root=lab.repo) == "0.2.0"
+
+
+def test_a_missing_file_is_an_answer_not_a_traceback(tmp_path, capsys):
+    status = make_index.main(["--published-dir", str(tmp_path), "verify", "--index",
+                              str(tmp_path / "gone.json"), "--sig", str(tmp_path / "gone.sig")])
+    assert status == 1
+    assert "No such file or directory" in capsys.readouterr().err

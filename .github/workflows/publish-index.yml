@@ -25,7 +25,8 @@ on:
 permissions: {}
 
 # One chain at a time, never cancelled: two chains would both sign "published + 1", and the
-# maintainer would have approved a signature that is never published.
+# maintainer would have approved a signature that is never published. The emergency workflow has a
+# group of its own, so a run waiting here for approval can neither hold nor cancel it.
 concurrency:
   group: publish-index
   cancel-in-progress: false
@@ -120,8 +121,10 @@ jobs:
         # The secret is one line of base64: the raw 32-byte seed. It goes to OpenSSL's stdin as
         # DER - the fixed 16-byte PKCS#8 prefix of an Ed25519 key, then the seed - so no key file
         # is written and no printable form of it exists. base64 and openssl run without the
-        # variable in their environment. Never add tracing here; index.yml refuses it, and
-        # refuses any command that could print or copy what passes through.
+        # variable in their environment, and by absolute path, so nothing earlier in the job can
+        # put another program in their place. Never add tracing here: index.yml refuses it, any
+        # command but these, and any change to this text that does not also change the pin in
+        # tools/check-workflows.py - which makes every change to it visible in review.
         shell: bash
         env:
           INDEX_SIGNING_KEY: ${{ secrets.INDEX_SIGNING_KEY }}
@@ -133,8 +136,8 @@ jobs:
           umask 077
           {
             printf '\x30\x2e\x02\x01\x00\x30\x05\x06\x03\x2b\x65\x70\x04\x22\x04\x20'
-            printf '%s' "$INDEX_SIGNING_KEY" | env -u INDEX_SIGNING_KEY base64 -d
-          } | env -u INDEX_SIGNING_KEY openssl pkeyutl -sign -rawin -keyform DER \
+            printf '%s' "$INDEX_SIGNING_KEY" | /usr/bin/env -u INDEX_SIGNING_KEY /usr/bin/base64 -d
+          } | /usr/bin/env -u INDEX_SIGNING_KEY /usr/bin/openssl pkeyutl -sign -rawin -keyform DER \
                 -inkey /dev/stdin -in index/releases.json -out index/releases.json.raw-sig
 
       - name: Verify with the embedded main key, and hand the signature on
@@ -153,6 +156,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The whole history: the index is judged against every index gh-pages has published.
+          fetch-depth: 0
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:

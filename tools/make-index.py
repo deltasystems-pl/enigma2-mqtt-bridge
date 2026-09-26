@@ -36,6 +36,8 @@ nothing, and the receiver runs the same verifier.
 from __future__ import annotations
 
 import argparse
+import ast
+import base64
 import gzip
 import hashlib
 import importlib.util
@@ -314,7 +316,106 @@ def verified_published(index_raw, sig_raw, keys):
         index, key = trust.authenticate(index_raw, sig_raw, keys)
     except trust.Refused as error:
         _fail(f"the published index does not verify ({error.reason}): {error.detail}")
-    return index, key, {key.key_id: index["serial"]}
+    return index, key, trust.remember(None, key, index["serial"], keys)
+
+
+class History:
+    """What the `gh-pages` history has published: every authentic index, oldest first.
+
+    The branch ruleset refuses force pushes and deletion, so its history only grows; the files at
+    its tip can still be changed by any ordinary commit. `memory` is what a reader that had seen
+    every one of those indexes would remember - which is what every up-to-date receiver does.
+    """
+
+    def __init__(self, keys):
+        self.keys = keys
+        self.count = 0
+        self.unverified = 0
+        self.memory = trust.empty_memory()
+        self.top = {}  # key_id -> (serial, commit)
+
+    def add(self, commit, index, key):
+        self.count += 1
+        serials = dict(self.memory["serials"])
+        if index["serial"] > serials.get(key.key_id, 0):
+            serials[key.key_id] = index["serial"]
+            self.top[key.key_id] = (index["serial"], commit)
+        silenced = set(self.memory["silenced"]) | {
+            other.key_id for other in self.keys if other.rank < key.rank}
+        self.memory = {"serials": serials, "silenced": sorted(silenced)}
+
+    def describe(self):
+        if not self.count:
+            return "gh-pages history: no signed index has ever been published"
+        highest = ", ".join(f"serial {serial} by key {key_id} (commit {commit[:12]})"
+                            for key_id, (serial, commit) in sorted(self.top.items()))
+        extra = f"; {self.unverified} states that do not verify ignored" if self.unverified else ""
+        return (f"gh-pages history: {self.count} signed indexes published, the highest {highest}"
+                f"{extra}")
+
+
+def published_history(ref=PUBLISHED_REF, keys=trust.EMBEDDED, root=REPO_ROOT):
+    """Every state of the published pair in the history of `ref`, authentic ones remembered."""
+    history = History(keys)
+    paths = [f"{FEED_DIR}/{trust.INDEX_FILE}", f"{FEED_DIR}/{trust.SIGNATURE_FILE}"]
+    listed = _git("log", "--format=%H", "--reverse", ref, "--", *paths, root=root, check=False)
+    if listed.returncode:
+        return history
+    for commit in listed.stdout.decode().split():
+        pair = (git_file(commit, paths[0], root), git_file(commit, paths[1], root))
+        if None in pair:
+            continue
+        try:
+            index, key = trust.authenticate(*pair, keys)
+        except trust.Refused:
+            history.unverified += 1
+            continue
+        history.add(commit, index, key)
+    return history
+
+
+def guard_history(published, history, keys):
+    """Refuse to build on, or publish over, a published pair older than what gh-pages published.
+
+    A commit that restores an older genuine pair, or deletes it, is no forgery - but the next index
+    built on it would be refused as `replay` by every reader that saw the newer one, or would start
+    again at serial 1. Recovery: restore both files from the commit named here, in a new commit.
+    """
+    if history is None or not history.count:
+        return
+    old, old_key, _memory = verified_published(*published, keys)
+    top = ", ".join(f"serial {serial} by key {key_id} in gh-pages commit {commit[:12]}"
+                    for key_id, (serial, commit) in sorted(history.top.items()))
+    restore = (f"restore feed/{trust.INDEX_FILE} and feed/{trust.SIGNATURE_FILE} from the commit "
+               "that published the highest serial, in a new commit, and run again")
+    if old is None:
+        _fail(f"nothing is published now, but gh-pages has published {history.count} signed "
+              f"indexes ({top}): the files were deleted - {restore}")
+    if old_key.key_id in history.memory["silenced"]:
+        _fail(f"the published index is signed by key {old_key.key_id}, which an index gh-pages "
+              f"published later silenced ({top}): the branch was rolled back - {restore}")
+    highest = history.memory["serials"].get(old_key.key_id, 0)
+    if old["serial"] < highest:
+        _fail(f"the published serial {old['serial']} is below serial {highest}, which gh-pages "
+              f"published before ({top}): the branch was rolled back - {restore}")
+
+
+def waiting_emergency(root, keys, published):
+    """An emergency index on `main` that readers would accept and that is not published yet."""
+    folder = Path(root) / EMERGENCY
+    index_file, sig_file = folder / trust.INDEX_FILE, folder / trust.SIGNATURE_FILE
+    if not (index_file.exists() and sig_file.exists()):
+        return None
+    pair = (index_file.read_bytes(), sig_file.read_bytes())
+    if pair == published:
+        return None
+    _old, _old_key, memory = verified_published(*published, keys)
+    try:
+        index, key = trust.authenticate(*pair, keys)
+        trust.judge(index, key, keys, memory)
+    except trust.Refused:
+        return None
+    return index
 
 
 def next_serial(key, published, published_key):
@@ -339,12 +440,18 @@ def _release_version(release):
 
 def build(source, policy, keys, key_id, *, root=REPO_ROOT, published=(None, None),
           feed_ref=PUBLISHED_REF, feed_dir=None, issued=None, serial=None, require=None,
-          log=print):
+          history=None, log=print):
     """The unsigned index as bytes, with the published index it follows - or IndexError_."""
     key = trust.by_id(keys, key_id)
     if key is None:
         _fail(f"key {key_id} is not one of the keys")
     old, old_key, _memory = verified_published(*published, keys)
+    guard_history(published, history, keys)
+    waiting = waiting_emergency(root, keys, published)
+    if waiting is not None:
+        _fail(f"an emergency index (serial {waiting['serial']}, key {waiting['key_id']}) is on "
+              f"{EMERGENCY} and not published yet: publish it first with emergency-index.yml - "
+              "every reader that sees it would refuse an index built past it")
 
     entries = []
     for release in source.releases():
@@ -438,7 +545,7 @@ def build(source, policy, keys, key_id, *, root=REPO_ROOT, published=(None, None
     raw = render(index)
     # An explicit serial is the emergency path's, or a test's: its form is checked, and the reader's
     # judgement is left to `verify`, which the emergency workflow runs before it publishes.
-    check_unsigned(raw, keys, key_id, published, expect_next=serial is None)
+    check_unsigned(raw, keys, key_id, published, expect_next=serial is None, history=history)
     return raw, old
 
 
@@ -458,7 +565,7 @@ def render(index):
     return ("{\n" + body + "\n}\n").encode("ascii")
 
 
-def check_unsigned(raw, keys, key_id, published, expect_next=True):
+def check_unsigned(raw, keys, key_id, published, expect_next=True, history=None):
     """Everything `sign` re-checks before it signs, on the file it was handed."""
     try:
         index = trust.parse_index(raw, strict=True)
@@ -470,6 +577,7 @@ def check_unsigned(raw, keys, key_id, published, expect_next=True):
     if key is None or index["key_id"] != key.key_id:
         _fail(f"the index names key {index['key_id']}, and only {key_id} signs here")
     old, old_key, _memory = verified_published(*published, keys)
+    guard_history(published, history, keys)
     if not expect_next:
         return index
     # Exactly the next serial: the published one + 1 for the same key, the baseline + 1 for a key
@@ -515,9 +623,10 @@ def diff(old, new):
 # ------------------------------------------------------------------------ verify --
 
 
-def verify(index_raw, sig_raw, keys, published):
+def verify(index_raw, sig_raw, keys, published, history=None):
     """Accept the signed pair as a reader that has seen the published index would, or fail."""
     _old, _old_key, memory = verified_published(*published, keys)
+    guard_history(published, history, keys)
     try:
         return trust.accept(index_raw, sig_raw, keys, memory)
     except trust.Refused as error:
@@ -548,10 +657,23 @@ def tag_for(commit, root=REPO_ROOT):
     return versions[0]
 
 
-def tree(root, keys, published, log=print):
-    """`index.yml`'s check of the tree: policy, COMPATIBILITY, baselines, emergency index."""
+def tree(root, keys, published, history=None, log=print):
+    """`index.yml`'s check of the tree: policy, COMPATIBILITY, the key set against the last
+    release's, the published index against the branch's history, baselines, emergency index."""
     parse_policy((root / POLICY).read_bytes())
     parse_compatibility((root / COMPATIBILITY).read_bytes())
+    tag, previous = previous_release_keys(root)
+    if previous is None:
+        log("no release tag carries a key set yet")
+    else:
+        problems = key_evolution_problems(previous, keys)
+        if problems:
+            _fail(f"the embedded keys break the release rules against {tag}: "
+                  + "; ".join(problems))
+        log(f"embedded keys: consistent with {tag}")
+    if history is not None:
+        log(history.describe())
+    guard_history(published, history, keys)
     old, old_key, memory = verified_published(*published, keys)
     if old is None:
         log("nothing is published yet")
@@ -585,6 +707,81 @@ def tree(root, keys, published, log=print):
             return
         log(f"emergency index: serial {index['serial']}, key {key.key_id}, accepted against "
             "the published one - it is published when it reaches main")
+
+
+# ------------------------------------------------------------------ the key set --
+
+TRUST_PY = "src/MQTTBridge/trust.py"
+
+
+def keys_in_source(text):
+    """The embedded key set a `trust.py` declares, read as literals - never run."""
+    tree_ = ast.parse(text)
+    named, embedded = {}, None
+    for node in tree_.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        value = node.value
+        if (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+                and value.func.id == "_key" and len(value.args) == 4):
+            key_id_, rank, public, baseline = (ast.literal_eval(arg) for arg in value.args)
+            named[target.id] = trust.Key(key_id_, rank, base64.b64decode(public), baseline)
+        elif target.id == "EMBEDDED" and isinstance(value, ast.Tuple):
+            embedded = [element.id for element in value.elts if isinstance(element, ast.Name)]
+    if embedded is None or any(name not in named for name in embedded):
+        _fail("cannot read the embedded key set from trust.py")
+    return trust.check_keys(named[name] for name in embedded)
+
+
+def previous_release_keys(root=REPO_ROOT):
+    """`(tag, keys)` of the newest release tag that embeds a key set, or `(None, None)`."""
+    result = _git("tag", "--list", "v*", root=root, check=False)
+    if result.returncode:
+        return None, None
+    listed = result.stdout.decode().split()
+    tags = sorted((tag for tag in listed if _TAG.fullmatch(tag)),
+                  key=lambda tag: trust.version_key(tag[1:]), reverse=True)
+    for tag in tags:
+        text = git_file(tag, TRUST_PY, root)
+        if text is not None:
+            return tag, keys_in_source(text.decode("utf-8"))
+    return None, None
+
+
+def key_evolution_problems(previous, current):
+    """How `current` breaks the rules a release's key set must keep against the previous one.
+
+    A key keeps its rank, and its baseline never goes down; a new key ranks above every key the
+    previous release carried; and a release never drops a key while keeping one ranked below it -
+    the lower key is the one to drop (after a theft, the main key). Readers are safe even when a
+    release breaks the last rule (a silenced key stays silenced), but a reader that never saw the
+    higher key would then trust the lower one again.
+    """
+    problems = []
+    before = {key.key_id: key for key in previous}
+    after = {key.key_id: key for key in current}
+    for key_id in sorted(set(before) & set(after)):
+        if before[key_id].rank != after[key_id].rank:
+            problems.append(f"key {key_id} changed rank {before[key_id].rank} -> "
+                            f"{after[key_id].rank}")
+        if after[key_id].baseline < before[key_id].baseline:
+            problems.append(f"key {key_id} lowered its baseline {before[key_id].baseline} -> "
+                            f"{after[key_id].baseline}")
+    highest = max(key.rank for key in previous)
+    for key_id in sorted(set(after) - set(before)):
+        if after[key_id].rank <= highest:
+            problems.append(f"new key {key_id} has rank {after[key_id].rank}, not above "
+                            f"{highest}")
+    for key_id in sorted(set(before) - set(after)):
+        kept_below = [key.key_id for key in current if key.key_id in before
+                      and key.rank < before[key_id].rank]
+        if kept_below:
+            problems.append(f"key {key_id} (rank {before[key_id].rank}) is dropped while "
+                            f"{', '.join(kept_below)}, ranked below it, is kept")
+    return problems
 
 
 # --------------------------------------------------------------------- the tool --
@@ -654,8 +851,11 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         keys = load_keys(args.keyset)
-        published = (published_pair(directory=args.published_dir) if args.published_dir
-                     else published_pair(args.published_ref, root=args.root))
+        if args.published_dir:
+            published, history = published_pair(directory=args.published_dir), None
+        else:
+            published = published_pair(args.published_ref, root=args.root)
+            history = published_history(args.published_ref, keys, args.root)
         if args.command == "build":
             if args.releases_json:
                 source = LocalAssets(args.releases_json, args.assets_dir)
@@ -669,7 +869,7 @@ def main(argv=None):
             raw, old = build(source, policy, keys, key_id, root=args.root, published=published,
                              feed_ref=args.published_ref, feed_dir=args.feed_dir,
                              issued=args.issued, serial=args.serial,
-                             require=args.require_version)
+                             require=args.require_version, history=history)
             args.out.write_bytes(raw)
             sha256 = hashlib.sha256(raw).hexdigest()
             new = trust.parse_index(raw)
@@ -684,6 +884,10 @@ def main(argv=None):
                 "",
                 *diff(old, new),
                 "",
+                history.describe() + "; the published index is the newest of them."
+                if history is not None and history.count else
+                (history.describe() + "." if history is not None else ""),
+                "",
             ])
             print(report)
             _append(args.summary, report + "\n")
@@ -692,7 +896,7 @@ def main(argv=None):
             raw = args.index.read_bytes()
             _check_sha(raw, _sha256_arg(args.sha256))
             key_id = args.key_id or trust.main_key(keys).key_id
-            index = check_unsigned(raw, keys, key_id, published)
+            index = check_unsigned(raw, keys, key_id, published, history=history)
             print(f"unsigned index checked: serial {index['serial']}, key {index['key_id']}, "
                   f"{len(index['releases'])} releases")
         elif args.command == "wrap":
@@ -704,14 +908,19 @@ def main(argv=None):
         elif args.command == "verify":
             raw = args.index.read_bytes()
             _check_sha(raw, _sha256_arg(args.sha256))
-            accepted = verify(raw, args.sig.read_bytes(), keys, published)
+            accepted = verify(raw, args.sig.read_bytes(), keys, published, history)
             print(f"accepted: serial {accepted.index['serial']}, key {accepted.key.key_id}")
         elif args.command == "tag-for":
             print(tag_for(args.commit, root=args.root))
         elif args.command == "tree":
-            tree(args.root, keys, published)
+            tree(args.root, keys, published, history)
     except (IndexError_, trust.Refused) as error:
         print(f"make-index.py: {error}", file=sys.stderr)
+        return 1
+    except OSError as error:
+        # A file that is not there - an emergency index removed from main, a wrong path - is an
+        # answer, not a traceback.
+        print(f"make-index.py: {error.strerror}: {error.filename}", file=sys.stderr)
         return 1
     return 0
 

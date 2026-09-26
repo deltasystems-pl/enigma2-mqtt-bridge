@@ -39,18 +39,21 @@ def test_every_shared_signature_vector(vector):
 def test_the_rfc_vectors_are_all_there():
     names = {vector["name"] for vector in SIGNATURES if vector["valid"]}
     assert names == {"rfc8032 test 1", "rfc8032 test 2", "rfc8032 test 3",
-                     "rfc8032 test sha(abc)"}
+                     "rfc8032 test sha(abc)", "a key with a torsion part: k is reduced mod L"}
     sha_abc = next(vector for vector in SIGNATURES if vector["name"] == "rfc8032 test sha(abc)")
     assert bytes.fromhex(sha_abc["message"]) == hashlib.sha512(b"abc").digest()
 
 
 def test_the_forgeries_that_need_each_check_are_there():
-    # Each of these is accepted by a verifier missing exactly one check: S < L, a canonical y,
-    # both coordinates compared. Without them the corresponding mutant survives.
+    # Each of these is accepted by a verifier missing exactly one check: S < L (twice: S + L, and
+    # S = L exactly), a canonical y, both coordinates compared (x alone, and y alone). And the
+    # torsion-key vector is refused by one that does not reduce k mod L.
     names = {vector["name"] for vector in SIGNATURES if not vector["valid"]}
     assert "S + L, the same point: S must be below L" in names
+    assert "S = L under the identity key, R the identity: S must be below L" in names
     assert "R spelled non-canonically: y = p + 1" in names
     assert "R + [k]A and [S]B share x, not y" in names
+    assert "(R, L - S): [S]B negated, the same y" in names
 
 
 @pytest.mark.parametrize("value", [None, "", "a" * 64, 0, [1, 2]])

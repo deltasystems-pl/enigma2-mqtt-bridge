@@ -102,20 +102,34 @@ def test_the_vectors_key_sets_derive_their_ids_and_fingerprints():
 
 def test_accepting_does_not_change_the_memory_it_was_given():
     step = SCENARIOS[0]["steps"][0]
-    memory = {}
+    other = "0" * 16
+    memory = {"serials": {other: 3}, "silenced": []}
     accepted = trust.accept(base64.b64decode(step["index"]), base64.b64decode(step["sig"]),
                             _keysets()["test"], memory)
-    assert memory == {}
-    assert accepted.memory == {accepted.key.key_id: 1}
+    assert memory == {"serials": {other: 3}, "silenced": []}
+    assert accepted.memory == {"serials": {other: 3, accepted.key.key_id: 1}, "silenced": []}
 
 
 def test_the_rank_floor_counts_only_keys_of_this_set():
     keys = _keysets()["test"]
     main, spare = keys
-    assert trust.rank_floor(keys, {}) == 0
-    assert trust.rank_floor(keys, {main.key_id: 5}) == 1
-    assert trust.rank_floor(keys, {main.key_id: 5, spare.key_id: 1}) == 2
-    assert trust.rank_floor(keys, {"0" * 16: 9}) == 0
+    assert trust.rank_floor(keys, None) == 0
+    assert trust.rank_floor(keys, {"serials": {main.key_id: 5}}) == 1
+    assert trust.rank_floor(keys, {"serials": {main.key_id: 5, spare.key_id: 1}}) == 2
+    assert trust.rank_floor(keys, {"serials": {"0" * 16: 9}}) == 0
+
+
+def test_accepting_a_key_silences_every_key_ranked_below_it_in_the_set():
+    main, spare = _keysets()["test"]
+    after_main = trust.remember(None, main, 3, _keysets()["test"])
+    assert after_main == {"serials": {main.key_id: 3}, "silenced": []}
+    after_spare = trust.remember(after_main, spare, 1, _keysets()["test"])
+    assert after_spare == {"serials": {main.key_id: 3, spare.key_id: 1},
+                           "silenced": [main.key_id]}
+    # A silenced key is refused whatever set it is judged under, and the memory is plain data.
+    with pytest.raises(trust.Refused, match="silenced"):
+        trust.judge({"serial": 4}, main, (main,), after_spare)
+    assert json.loads(json.dumps(after_spare)) == after_spare
 
 
 def test_the_vectors_are_what_the_generator_writes():

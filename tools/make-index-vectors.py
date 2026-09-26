@@ -135,6 +135,40 @@ def forge_x_only(secret, public, message):
     return r_bytes + s.to_bytes(32, "little")
 
 
+def torsion_of_order_8():
+    """A point of order 8: the torsion part [L]P of some curve point P that has one."""
+    identity = ed25519._IDENTITY
+    for y in range(2, 1000):
+        point = ed25519.decode_point(y.to_bytes(32, "little"))
+        if point is None:
+            continue
+        torsion = ed25519._multiply(ed25519.L, point)
+        four = ed25519._multiply(4, torsion)
+        if not ed25519._equal(four, identity):
+            return torsion
+    raise SystemExit("no point of order 8 found")
+
+
+def mixed_order_signature(secret, public, message):
+    """A key A' = A + T8 with a torsion part, and a signature that satisfies the cofactorless
+    equation only when k is reduced mod L - as RFC 8032 and OpenSSL reduce it. A verifier that
+    uses the unreduced hash accepts nothing here; OpenSSL and the plugin both accept it."""
+    t8 = torsion_of_order_8()
+    a_point = ed25519.decode_point(public)
+    mixed = encode(ed25519._add(a_point, t8))
+    a = scalar_of(secret)
+    for r in range(1, 5000):
+        for j in range(8):
+            torsion = ed25519._multiply(j, t8) if j else ed25519._IDENTITY
+            r_bytes = encode(ed25519._add(ed25519._multiply(r, ed25519.B), torsion))
+            full = int.from_bytes(hashlib.sha512(r_bytes + mixed + message).digest(), "little")
+            k = full % ed25519.L
+            if (j + k) % 8 == 0 and full % 8 != k % 8:
+                s = (r + k * a) % ed25519.L
+                return mixed, r_bytes + s.to_bytes(32, "little")
+    raise SystemExit("no mixed-order signature found")
+
+
 def _flip(data, position):
     data = bytearray(data)
     data[position] ^= 0x01
@@ -149,12 +183,17 @@ def signature_vectors(test_secret, test_public):
     _name, public, message, signature = RFC8032[1]
     sig = bytes.fromhex(signature)
     s_plus_l = sig[:32] + (int.from_bytes(sig[32:], "little") + ed25519.L).to_bytes(32, "little")
+    negated = sig[:32] + (ed25519.L - int.from_bytes(sig[32:], "little")).to_bytes(32, "little")
+    identity = (1).to_bytes(32, "little")
     tampered = [
         ("tampered message", public, "73", signature),
         ("tampered R", public, message, _flip(sig, 0).hex()),
         ("tampered S", public, message, _flip(sig, 40).hex()),
         ("tampered key", RFC8032[2][1], message, signature),
         ("S + L, the same point: S must be below L", public, message, s_plus_l.hex()),
+        ("(R, L - S): [S]B negated, the same y", public, message, negated.hex()),
+        ("S = L under the identity key, R the identity: S must be below L", identity.hex(),
+         message, (identity + ed25519.L.to_bytes(32, "little")).hex()),
         ("signature of 63 bytes", public, message, signature[:-2]),
         ("key of 31 bytes", public[:-2], message, signature),
     ]
@@ -166,6 +205,10 @@ def signature_vectors(test_secret, test_public):
     for name, public, message, signature in tampered:
         vectors.append({"name": name, "public": public, "message": message,
                         "signature": signature, "valid": False})
+    message = b"release index"
+    mixed, mixed_signature = mixed_order_signature(test_secret, test_public, message)
+    vectors.append({"name": "a key with a torsion part: k is reduced mod L", "public": mixed.hex(),
+                    "message": message.hex(), "signature": mixed_signature.hex(), "valid": True})
     return vectors
 
 
@@ -182,6 +225,8 @@ def key_sets(test_keys):
         "test": [item("t1", 1), item("t2", 2)],
         "test-plus": [item("t1", 1), item("t2", 2), item("t3", 3)],
         "test-dropped": [item("t2", 2), item("t3", 3)],
+        "test-spare-dropped": [item("t1", 1), item("t3", 3)],
+        "test-spare-only": [item("t2", 2)],
         "other": [item("t3", 1)],
         "test-baseline": [item("t1", 1, 5000), item("t2", 2)],
     }
@@ -273,6 +318,9 @@ def scenarios(b):
                sig=b.sig("t1", raw("t1", 1))),
              s("test", "t2", raw("t1", 1), "bad_signature", "t2 signed, the file names t1",
                sig=b.sig("t2", raw("t1", 1), as_key="t1")),
+             s("test", "t2", b"not an index at all\n", "bad_signature",
+               "neither signed by the named key nor JSON: the signature is judged first",
+               sig=b.sig("t2", b"not an index at all\n", as_key="t1")),
              s("test", "t1", raw("t1", 1), "accept", "and the genuine pair"))
     genuine = raw("t1", 1)
     good_sig = json.loads(b.sig("t1", genuine))
@@ -289,9 +337,15 @@ def scenarios(b):
              s("test", "t1", genuine, "malformed_signature", "not JSON", sig=b"key_id=t1\n"),
              s("test", "t1", genuine, "too_large", "a signature file over 1024 bytes",
                sig=(json.dumps(dict(good_sig, padding="x" * 1100)) + "\n").encode()))
-    big = raw("t1", 1, entry={"withdrawn": "x" * (trust.MAX_INDEX_BYTES + 1)})
-    scenario("an index over 64 KiB is refused before anything else",
-             s("test", "t1", big, "too_large", "65 KiB, validly signed"),
+    # Pad a valid index with a long withdrawal reason to exactly 64 KiB, and to one byte more.
+    unpadded = len(raw("t1", 1, entry={"withdrawn": "x"})) - 1
+    exact = raw("t1", 1, entry={"withdrawn": "x" * (trust.MAX_INDEX_BYTES - unpadded)})
+    big = raw("t1", 2, entry={"withdrawn": "x" * (trust.MAX_INDEX_BYTES + 1 - unpadded)})
+    assert len(exact) == trust.MAX_INDEX_BYTES and len(big) == trust.MAX_INDEX_BYTES + 1
+    scenario("an index of exactly 64 KiB is accepted; one byte more is refused before anything "
+             "else",
+             s("test", "t1", exact, "accept", "65536 bytes, validly signed"),
+             s("test", "t1", big, "too_large", "65537 bytes, validly signed"),
              s("test", "t1", big, "too_large", "65 KiB, signed by another key: the cap comes "
                "before the signature", sig=b.sig("t2", big, as_key="t1")))
 
@@ -335,7 +389,9 @@ def scenarios(b):
                          "an unknown member in a release", "accept"))
     scenario("memory kept under another key set does not raise this set's rank",
              s("test", "t2", raw("t2", 1), "accept", "test set: the spare"),
-             s("other", "t3", raw("t3", 1), "accept", "another set, whose rank-1 key is t3"),
+             s("other", "t3", raw("t3", 1), "accept",
+               "a disjoint set - another lineage, as release keys are to test keys - whose "
+               "rank-1 key is t3"),
              s("test", "t1", raw("t1", 2), "rank", "back under the test set: still silenced"))
     scenario("a release that adds a key keeps what the reader knew about the others",
              s("test", "t1", raw("t1", 10), "accept", "serial 10"),
@@ -343,6 +399,16 @@ def scenarios(b):
              s("test-plus", "t1", raw("t1", 11), "accept", "serial 11"),
              s("test-plus", "t2", raw("t2", 1), "accept", "the spare"),
              s("test-plus", "t1", raw("t1", 12), "rank", "the silenced key stays silenced"))
+    scenario("a release that drops the spare but keeps the main key: the main key stays silenced",
+             s("test", "t1", raw("t1", 1), "accept", "the main key"),
+             s("test", "t2", raw("t2", 1), "accept", "the spare silences it"),
+             s("test-spare-dropped", "t1", raw("t1", 2), "rank",
+               "a release without the spare: the main key is still silenced"),
+             s("test-spare-dropped", "t3", raw("t3", 1), "accept", "a higher key, first sight"))
+    scenario("a key added below one already accepted is refused by the rank floor",
+             s("test-spare-only", "t2", raw("t2", 1), "accept", "a set with the spare alone"),
+             s("test", "t1", raw("t1", 1), "rank",
+               "a release adds the main key below it: never silenced, still refused"))
     scenario("a release that drops a key refuses it",
              s("test", "t1", raw("t1", 3), "accept", "serial 3"),
              s("test-dropped", "t1", raw("t1", 4), "unknown_key", "t1 no longer embedded"),
