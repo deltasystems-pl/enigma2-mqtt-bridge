@@ -102,19 +102,22 @@ acceptance with the build id:
   workflow asserting the published source and keys. Both are made since the change that added the
   signed index's tooling ([RELEASE-INDEX.md](../RELEASE-INDEX.md), "Acceptance builds"). If a
   consumer ever needs the source itself, adding it is an addition inside contract 1.
+- **The main key signs in CI** (decision 2), by the maintainer's decision of 2026-09-26. The
+  proposal kept it off GitHub; the residual that trades for is stated under Consequences, in the
+  same terms as the companion integration's ADR-0008.
 
 **Settled with the index's tooling (2026-09-26).** Decisions 2 and 7 are built as far as they reach
 without a reader: the index format, the two embedded keys and their ranks, the acceptance rule and
 its shared vectors, the verifier, and the three publication workflows
-([RELEASE-INDEX.md](../RELEASE-INDEX.md)). One point is made precise there: a reader's memory is
-the last accepted
-serial per `key_id`, and the highest accepted rank is derived from it within the reader's own key
-set - which scopes it to the key set, as decision 7 requires, while a release that keeps a key keeps
-what was known about it. And a dirty build now displays with `.dirty` after its commit (decision
-1), so it no longer looks like the clean build of the same commit.
-- **The main key signs in CI** (decision 2), by the maintainer's decision of 2026-09-26. The
-  proposal kept it off GitHub; the residual that trades for is stated under Consequences, in the
-  same terms as the companion integration's ADR-0008.
+([RELEASE-INDEX.md](../RELEASE-INDEX.md)). Two points are made precise there. A reader's memory is
+kept per `key_id`: the last accepted serial, and the keys it has silenced - every key of its set
+ranked below one it accepted. The rank floor is derived from it within the reader's own key set,
+which scopes it to the key set as decision 7 requires, while "ignored for good" holds for the
+silenced keys whatever a later release embeds. And a release's key set keeps three rules against
+the previous release's - ranks never change, a new key ranks above all before it, and a key is never
+dropped while a lower one is kept - which `index.yml` enforces. A dirty build now displays with
+`.dirty` after its commit (decision 1), so it no longer looks like the clean build of the same
+commit.
 
 ## Consequences
 
