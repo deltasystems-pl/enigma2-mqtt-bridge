@@ -201,6 +201,23 @@ version that has no section here.
   and the buffer links go at the next channel change either way - and what is not measured.
   [ADR-0014](docs/adr/0014-the-zap-history-is-the-receivers.md) carries a dated amendment, and
   TROUBLESHOOTING.md has a short entry on a channel missing from the zap history.
+- [docs/TRANSACTION.md](docs/TRANSACTION.md) now describes what the companion integration's `main`
+  does - unreleased, for its 0.4.0, and not yet run on a receiver - apart from what its released
+  0.3.1 does. It names the places that adds on the receiver: the stop-and-restore script's own
+  directory `/tmp/enigma2-mqtt-r2-<id>/` (the script's copy of the helper, the script, its status
+  and its output), removed only after the script was seen to start the interface again, and the
+  staging and set-aside directories beside `Plugins/`, each removed only by its exact name. It
+  gives the transaction id in the lock's owner record and the recovery of an abandoned transaction
+  by that id; the script's status lines in order; its detachment by a new session rather than
+  `start-stop-daemon`; its bounds - 30 s for the interface to stop, after which only the files go
+  back, and 90 s for the restore; the lock held until the script's end is seen; the 30 s grace and
+  the receiver's own answer after a lost reply to the command that starts it; and the outcomes
+  `restart_withdrawn`, `restart_unconfirmed`, `withdraw_failed`, `restart_unobserved` and
+  `rollback_unobserved`, with the channel and standby values `lost` and `not recorded`. The
+  residual of a killed script is corrected: the receiver has no picture until it is switched off
+  and on again, not for up to 30 minutes. The two hypotheses the restart rule rests on are still
+  unmeasured, and the text now says the integration's code that relies on them is merged and is
+  measured with them before its release.
 
 ### Changed
 
