@@ -27,12 +27,15 @@ version that has no section here.
   commit for a build without its git checkout - the companion integration rebuilds its bundled
   package from a `git archive` that has none - and must match HEAD when there is one;
   `MQTTBRIDGE_BUILD_FLAVOUR` is `development` by default, or `release` or `acceptance`. A `release`
-  build is refused unless the tracked files are clean, HEAD carries the tag of `version.py`'s
-  version, the timestamp is that commit's, the version is a plain `N.N.N` and the changelog has its
-  section; the release workflow builds with it and then reads the build id back out of the package.
-  The package stays reproducible: the same commit, timestamp and flavour give the same bytes, with
-  or without `.git`, which a new CI step proves on every pull request by building twice and from an
-  export.
+  build needs a plain `N.N.N` version, its changelog section and a known timestamp; in a git
+  checkout it is also refused unless the tracked files are clean, HEAD carries the tag of
+  `version.py`'s version and the timestamp is that commit's, while a build from a source archive
+  must be given the commit and its time and the builder vouches for the rest. The release workflow
+  builds with it and then reads the build id - commit, time, clean, flavour - back out of the
+  package. The package stays reproducible: the same commit, timestamp and flavour give the same
+  bytes, with or without `.git`, which a new CI step proves on every pull request by building twice
+  and from an export. A bundle of a release built from a source archive matches the released
+  package only with all three - the commit, `MQTTBRIDGE_BUILD_FLAVOUR=release` and the commit's time.
 
 ### Documentation
 
@@ -71,9 +74,14 @@ version that has no section here.
   `self_update` capability, an `update` topic, `cmd/update_check`, `cmd/update` (upgrades only),
   and the relay a receiver without internet uses through Home Assistant. TOPICS.md §5 lists their
   shapes; none of them is built yet and no released plugin publishes or accepts any of them. The
-  index is signed with a main key in the repository's CI, behind an environment that runs only for
-  release tags and `main` and only after the maintainer approves each run, with a spare key of
-  higher rank kept sealed offline; ADR-0015 states what that does not protect against.
+  index is signed with a main key in the repository's CI, by a job in an environment that admits
+  the `main` branch only and releases the key only to a run the maintainer approves; that job
+  cannot write to the repository, and the job that publishes holds no key. Release tags are
+  protected by a tag ruleset. A spare key of higher rank stays sealed offline, and its emergency
+  publication is a separate workflow that holds no secret. ADR-0015 states, in the same terms as
+  the companion integration's ADR-0008, what a lost, deleted or leaked key means, and what CI
+  signing does not protect against: an account compromise is detectable and recoverable, not
+  prevented.
 - [docs/TRANSACTION.md](docs/TRANSACTION.md) is new: the contract between the companion
   integration's SSH installer and the planned self-update - the names on the receiver's disk, the
   shared lock and when it is stale (the released installer's 30-minute rule, unchanged), the

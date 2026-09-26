@@ -307,22 +307,26 @@ receiver. Always present with every key.
 | `commit` | string | The commit the package was built from, 40 lowercase hex digits. Empty when the builder did not know it - a package built from a source archive nobody named the commit of - and for a copy of the plugin that was not built into a package at all |
 | `time` | int or `null` | The commit's time, epoch seconds: the timestamp every file in the package carries. `null` when unknown, and for a copy that was not built |
 | `dirty` | bool or `null` | Whether the tracked files differed from `commit` when it was built. `null` for a copy that was not built |
-| `flavour` | string or `null` | `release`, `development` or `acceptance`. `release` is only ever built clean at its release tag - the build refuses otherwise; `development` is every other build of the published code; `acceptance` is a build for a hardware acceptance run. A consumer reads a flavour it does not know as "not a release". `null` for a copy that was not built |
-| `on_disk` | string or `null` | The `commit` of the build on disk, when that is another build than the one running - the files were replaced and the interface has not restarted yet. `null` when they are the same build, or when the file on disk cannot be read. Checked whenever `info` is built and every ten minutes; a change republishes `info` |
+| `flavour` | string or `null` | `release`, `development` or `acceptance`. `release` is the builder's word that this is a release. Built in a git checkout, the build refuses it unless the tracked files are clean and HEAD carries the release tag. Built from a source archive, the build refuses it unless the builder names the commit and its time, and the builder vouches for the tree and the tag; only the signed release index confirms a release. `development` is every other build of the published code; `acceptance` is a build for a hardware acceptance run. A consumer reads a flavour it does not know as "not a release". `null` for a copy that was not built |
+| `on_disk` | string or `null` | Whether another build is staged: the files were replaced and the interface has not restarted yet. `null` means no other build is staged - the file on disk is the running build - or the file on disk cannot be read. A string means another build is staged, and it is that build's `commit`: `""` when that build's commit is unknown, so test for `null`, never for truth; and equal to the running `commit` when the staged build is the same commit built another way - another flavour, or dirty. Checked whenever `info` is built and every ten minutes; a change republishes `info` |
 
 **How to show the version.** `plugin` as it is for a release build - `flavour` `release` and
 `dirty` `false` - and for a build whose `commit` is empty, which cannot be named any other way;
 `plugin` + `+g` + the first seven digits of `commit` for everything else: `0.3.0+g3f6c0a2`. The part
-after `+` is a local label, not a pre-release: a consumer never orders versions by it. Two builds with
-the same `plugin` are told apart by `time`, the later one being the newer. A consumer that knows a
-release's commit from somewhere the plugin cannot see - a signed list of releases - holds a
-`release` build to that commit as well.
+after `+` is a local label, not a pre-release: a consumer never orders versions by it. Two builds of
+**different commits** with the same `plugin` are ordered by `time`, the later one being the newer.
+Builds of the same commit share `time` - clean and dirty, development, acceptance and release - and
+a dirty build displays exactly like the clean build of its commit: neither the order nor the display
+tells them apart, only `dirty` and `flavour` do. A consumer that knows a release's commit from
+somewhere the plugin cannot see - a signed list of releases - holds a `release` build to that commit
+as well.
 
 There is deliberately no `origin` member. Where a build fetches its releases from is not something
-this object has to say to tell builds apart - a build with another source is an `acceptance` build,
-and a release build is refused unless it carries the published one - and "origin" already means two
-other things in this contract: where a command came from, and whether the release index could be
-reached (the planned `update.origin`).
+this object has to say to tell builds apart - a build with another source will be an `acceptance`
+build, and a release build will be refused unless it carries the published one - and "origin"
+already means two other things in this contract: where a command came from, and whether the release
+index could be reached (the planned `update.origin`). Both refusals arrive with the change that puts
+a release source into the build; the build id has none today.
 
 ### `<base>/<node>/power`
 
