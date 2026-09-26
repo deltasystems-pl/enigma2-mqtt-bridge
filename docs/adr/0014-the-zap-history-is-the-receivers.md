@@ -109,7 +109,8 @@ dialog, and a zap made then - under a `cmd/message` popup, or under the image's 
 timer service" - was played directly and left out of the history. The exception is narrow: exactly
 `Screens.MessageBox.MessageBox`, of type information, warning or error (`TYPE_MESSAGE`, which only
 a type the image does not know becomes, is not included), with an empty answer list, executing,
-and with `dialog_stack` holding the info bar alone. A question - what a message box queued without
+and with ~~`dialog_stack` holding the info bar alone~~ the info bar directly under it (corrected
+below). A question - what a message box queued without
 a type is - never qualifies. The popup is left to its own timeout, as the image's channel-list zap
 leaves it. `cmd/zap`, `cmd/zap_history` and the zap of `cmd/bouquet` share the rule;
 `cmd/history_clear` does not, because it is the 0 key and a key goes to the popup.
@@ -131,6 +132,15 @@ timeshift, and never when it zaps the picture-in-picture; an EPG zap only once i
 and the awake zap timer's entry was measured. OpenWebif's own zap is still not read. `docs/TOPICS.md` ("What enters the receiver's zap history",
 "A zap from Home Assistant during timeshift") carries the full list, what is measured and what is
 not.
+
+**Amended 2026-09-26 (hardware acceptance).** "The info bar alone" on `dialog_stack` was wrong for
+a real receiver: `StartEnigma.Session` runs the `WHERE_SESSIONSTART` plugins before it opens the
+info bar, and one that opens a screen there leaves it under the info bar for the life of the
+interface - the Vu+ HbbTV plugin opens its zero-size `VBMain` that way. On such a receiver every
+popup sat on a two-entry stack and every zap under it was played directly; the acceptance run
+showed exactly that. The rule now looks only at the top of the stack - the screen directly under
+the popup must be the info bar - and ignores what lies under the info bar, which is not on the
+screen. When the rule says no, the plugin logs which condition failed, at the default level.
 
 **Discovery mode announces the clear button and no history select.** A core MQTT select carries its
 options inside the discovery payload, so a list that changes on every zap would mean republishing

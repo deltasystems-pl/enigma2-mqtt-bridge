@@ -85,7 +85,11 @@ version that has no section here.
   `cmd/zap_history` and for the zap `cmd/bouquet` makes. Only a plain information, warning or
   error popup directly over the info bar counts: a question, a popup over any other screen, or one
   already closing is still treated as a screen open, and `cmd/history_clear` still refuses under
-  any popup. [docs/TOPICS.md](docs/TOPICS.md) has the exact rule.
+  any popup. [docs/TOPICS.md](docs/TOPICS.md) has the exact rule. The first version of this
+  wanted the info bar to be the only screen under the popup, and on a receiver where a plugin
+  keeps an invisible screen under the info bar - the Vu+ HbbTV plugin does - it still played
+  every such zap directly; only the screen directly under the popup counts now. When a zap is
+  played directly because a screen is open, the log says which condition was not met.
 - `cmd/timer` `delete` refused a finished timer - "no timer on ..." - although OpenWebif and the
   receiver's own timer list still showed it, so a household panel built on OpenWebif offered a
   delete that always failed. It now deletes finished, failed and disabled timers too, and
@@ -127,6 +131,9 @@ version that has no section here.
   `Receiver(modal=True)` runs the modal session, and its channel list's info bar is
   `InfoBar.instance`, the session's first dialog and the screen that opens queued popups, as on
   the receiver. The zap-under-a-popup tests take their dialog stack from there.
+- `Receiver(modal=True, session_start_screen=True)` first opens a screen the way a session-start
+  plugin does, so the info bar is not the bottom of the dialog stack, as on a receiver with the
+  Vu+ HbbTV plugin. Every zap-under-a-popup test runs with and without it.
 
 ## [0.3.0] - 2026-09-25
 

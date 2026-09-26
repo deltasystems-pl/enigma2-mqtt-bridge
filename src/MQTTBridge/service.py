@@ -395,15 +395,33 @@ def infobar_on_screen(session):
 POPUP_TYPE_NAMES = ("TYPE_INFO", "TYPE_WARNING", "TYPE_ERROR")
 
 
-def info_popup_over_infobar(session):
-    """Whether the one thing open is an information popup, directly over the info bar.
+def _name(screen):
+    """A screen's class name for the log - never its text, which may be private."""
+    try:
+        return type(screen).__name__
+    except Exception:
+        return "?"
+
+
+def _stack_names(stack):
+    try:
+        return " > ".join(_name(entry[0]) for entry in stack) or "empty"
+    except Exception:
+        return "unreadable"
+
+
+def popup_refusal(session):
+    """None when the one thing open is an information popup directly over the info bar.
+
+    Otherwise a short phrase naming the condition that failed, for the log -
+    class names and numbers only, never the popup's text.
 
     A popup queued with `AddPopup` - by the image, or by `cmd/message` - is
     opened by the info bar with `session.open`, so it is the executing dialog,
-    and `StartEnigma.Session` keeps the info bar under it as the one
+    and `StartEnigma.Session` keeps the info bar under it as a
     `(dialog, shown)` tuple on `dialog_stack`. It is a notice, not a screen
-    anybody is working in: the channel list's zap goes under it exactly as the
-    remote's number zap would go before it, and the receiver closes it on its
+    anybody is working in: the channel list's zap goes under it as the
+    receiver's own zap timer's zap does, and the receiver closes it on its
     own timeout. So all of these, and anything else is a screen open:
 
     - the dialog is exactly `Screens.MessageBox.MessageBox` - not a subclass,
@@ -413,52 +431,87 @@ def info_popup_over_infobar(session):
       `current_dialog` for one more turn of the main loop, no longer
       executing. A popup on its way out is not the state this rule is about,
       so the old path is kept for that one turn;
-    - `dialog_stack` holds one entry, and it is the info bar. Two deep - over
-      the movie player, or over a screen over the info bar - is not this.
+    - the **top** of `dialog_stack` - the screen directly under the popup - is
+      the info bar. Over the movie player, or over a screen over the info
+      bar, it is not.
 
-    The second element of the tuple is the info bar's visibility when the
-    popup opened, usually hidden, and says nothing about what is open.
-    Nothing here may raise: any surprise is a screen open.
+    What lies **under** the info bar is not on the screen and does not count.
+    It is not always nothing: `StartEnigma.Session` runs the
+    `WHERE_SESSIONSTART` plugins before it opens the info bar, and one that
+    opens a screen there leaves it at the bottom of the stack for the life
+    of the interface - the Vu+ HbbTV plugin opens its zero-size `VBMain`
+    that way (`WebkitHbbTV/plugin.py` 348-349). A rule that wanted the info
+    bar to be the stack's only entry refused every popup on such a receiver.
+
+    The second element of each tuple is a screen's visibility when something
+    opened over it, and says nothing about what is open. Nothing here may
+    raise: any surprise is a screen open.
     """
     infobar = infobar_instance()
-    if infobar is None or session is None:
-        return False
+    if infobar is None:
+        return "this image has no info bar"
+    if session is None:
+        return "there is no session"
     try:
         from Screens.MessageBox import MessageBox
     except Exception:
-        return False
+        return "this image has no Screens.MessageBox"
     try:
         popup = getattr(session, "current_dialog", None)
         if type(popup) is not MessageBox:
-            return False
+            return "the executing screen is " + _name(popup) + ", not a message box"
         kind = getattr(popup, "type", None)
         allowed = [getattr(MessageBox, name, None) for name in POPUP_TYPE_NAMES]
         if type(kind) is not int or kind not in [v for v in allowed if type(v) is int]:
-            return False
+            return f"the message box is of type {kind!r}, not information, warning or error"
         answers = getattr(popup, "list", None)
-        if answers is None or len(answers) != 0:
-            return False
+        if answers is None:
+            return "the message box has no answer list"
+        if len(answers) != 0:
+            return f"the message box offers {len(answers)} answers"
         if getattr(session, "in_exec", False) is not True:
-            return False
+            return "the message box is closing"
         stack = getattr(session, "dialog_stack", None)
-        if stack is None or len(stack) != 1:
-            return False
-        under, _shown = stack[0]
-        return under is infobar
+        if not stack:
+            return "the dialog stack is empty"
+        under, _shown = stack[-1]
+        if under is not infobar:
+            names = _stack_names(stack)
+            return f"the screen under the message box is not the info bar (stack: {names})"
+        return None
     except Exception:
-        return False
+        return "the dialog stack could not be read"
+
+
+def info_popup_over_infobar(session):
+    """Whether the one thing open is an information popup directly over the info bar.
+
+    The rule and its reasons are `popup_refusal`'s.
+    """
+    return popup_refusal(session) is None
 
 
 def channel_list_may_zap(session):
     """Whether a zap may go through the channel list: nothing open but the info bar.
 
-    Or nothing but an information popup over it (`info_popup_over_infobar`).
-    The popup is left alone: the image's own channel-list zap does not close
-    it, and neither does this. `cmd/zap`, `cmd/zap_history` and the zap of
+    Or nothing but an information popup over it (`popup_refusal`). The popup
+    is left alone: the image's own channel-list zap does not close it, and
+    neither does this. `cmd/zap`, `cmd/zap_history` and the zap of
     `cmd/bouquet` all ask this. `cmd/history_clear` does not: it is the 0 key,
     and with a popup open the key goes to the popup.
+
+    When it says no, it logs which condition refused, at info: the plugin's
+    default level, so a receiver that plays a zap directly says why without
+    anybody changing a setting on it first. It happens only when a command
+    meets an open screen, which is a person's pace, not a loop's.
     """
-    return infobar_on_screen(session) or info_popup_over_infobar(session)
+    if infobar_on_screen(session):
+        return True
+    refusal = popup_refusal(session)
+    if refusal is None:
+        return True
+    LOG.info("the channel list is not used for this zap: %s", refusal)
+    return False
 
 
 def pin_may_be_pending(reference):
