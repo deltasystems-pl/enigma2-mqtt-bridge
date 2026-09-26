@@ -527,9 +527,10 @@ def test_cli_no_tags_cannot_be_a_pass(repo, topics_text, contract):
 def test_cli_nothing_to_compare_only_before_any_tag_carries_the_file(
     repo, topics_text, contract
 ):
-    _write(repo, topics_text, None)
+    # version.py stays at the last release on main: only a release pull request bumps it.
+    _write(repo, topics_text, None, version="0.3.0")
     _commit(repo, "before the contract file", tag="v0.3.0")
-    _write(repo, topics_text, contract)
+    _write(repo, topics_text, contract, version="0.3.0")
     _commit(repo, "the contract file")
     status, output = _run(repo, "--previous", "tag")
     assert status == 0, output
@@ -579,6 +580,107 @@ def test_cli_an_unknown_option_exits_two(repo):
 # nothing. The rule: the first release that carries contract.json dates its history when it
 # happened; after that, a new exception says "unreleased" until the release that ships it, which
 # dates it to itself; a release tag never says "unreleased"; a date never changes.
+
+
+# This project's own history, rebuilt: releases without contract.json, then the pull request
+# that brings it, then the release pull request that dates the record, then that release's tag
+# on HEAD - the first release carrying the file. The release workflow runs the check there.
+
+
+def _real_record(topics_text, contract, unreleased_as):
+    rows = [
+        (row["name"], unreleased_as if row["release"] == "unreleased" else row["release"])
+        for row in contract["exceptions"]
+    ]
+    assert any(row["release"] == "unreleased" for row in contract["exceptions"])
+    return _with_exceptions(topics_text, contract, rows)
+
+
+def _history_before_the_first_carrying_release(repo, topics_text, contract):
+    for version in ("0.1.0", "0.2.0", "0.3.0"):
+        _write(repo, topics_text, None, version=version)
+        _commit(repo, version, tag=f"v{version}")
+    _write(repo, topics_text, contract, version="0.3.0")
+    _commit(repo, "the contract lands, unreleased exceptions and all")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 0, output
+
+
+@pytest.mark.parametrize("annotated", [False, True], ids=["lightweight", "annotated"])
+def test_cli_the_first_release_carrying_the_file_can_be_released(
+    repo, topics_text, contract, annotated
+):
+    _history_before_the_first_carrying_release(repo, topics_text, contract)
+    _write(repo, *_real_record(topics_text, contract, "0.4.0"), version="0.4.0")
+    _commit(repo, "the release pull request")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 0, output
+    if annotated:
+        _git(repo, "tag", "-a", "v0.4.0", "-m", "0.4.0")
+    else:
+        _git(repo, "tag", "v0.4.0")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 0, output
+    _commit(repo, "main after the release")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 0, output
+    assert "keeps every promise v0.4.0 made" in output
+
+
+def test_cli_the_first_carrying_release_still_saying_unreleased_is_refused(
+    repo, topics_text, contract
+):
+    _history_before_the_first_carrying_release(repo, topics_text, contract)
+    _write(repo, topics_text, contract, version="0.4.0")
+    _commit(repo, "a release pull request that forgot the dates")
+    _git(repo, "tag", "v0.4.0")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 1, output
+    assert "release v0.4.0 carries exception 'timers-lists-finished' still marked unreleased" in (
+        output
+    )
+
+
+def test_cli_a_release_pull_request_must_date_its_exceptions(repo, topics_text, contract):
+    # version.py above the previous release tag is a release on its way: its exceptions are
+    # dated now, in the pull request, not discovered when the tag is pushed.
+    _history_before_the_first_carrying_release(repo, topics_text, contract)
+    _write(repo, topics_text, contract, version="0.4.0")
+    _commit(repo, "a release pull request that forgot the dates")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 1, output
+    assert "timers-lists-finished" in output and "0.4.0" in output
+
+
+def test_cli_a_release_pull_request_after_a_carrying_release_must_date_too(repo, released):
+    topics_text, contract = released
+    _write(repo, topics_text, contract)
+    _commit(repo, "release", tag="v1.0.0")
+    later = FIRST_RECORD + [("next-meaning-change", "unreleased")]
+    _write(repo, *_with_exceptions(topics_text, contract, later), version="1.1.0")
+    _commit(repo, "the 1.1.0 release pull request")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 1, output
+    assert "next-meaning-change" in output and "1.1.0" in output
+
+
+def test_cli_the_first_carrying_release_cannot_date_after_itself(repo, topics_text, contract):
+    record = [("zap-moves-channel-list", "0.3.0"), ("from-the-future", "2.0.0")]
+    _write(repo, *_with_exceptions(topics_text, contract, record))
+    _commit(repo, "release", tag="v1.0.0")
+    _commit(repo, "later")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 1, output
+    assert "'from-the-future' in v1.0.0, the first release carrying the record" in output
+
+
+def test_cli_a_tag_on_head_that_is_the_only_tag_has_nothing_earlier(repo, released):
+    topics_text, contract = released
+    _write(repo, topics_text, contract)
+    _commit(repo, "the very first release", tag="v1.0.0")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 0, output
+    assert "nothing earlier to compare" in output
 
 
 def test_cli_a_new_exception_back_dated_is_refused(repo, released):

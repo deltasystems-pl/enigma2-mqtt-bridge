@@ -24,7 +24,9 @@ the named in-major exceptions, and the planned additions. Two checks run on it:
    previous release; no release tag, HEAD's own included, says "unreleased"; and an exception is
    dated to the release tag it first appears in, except in the first release carrying the file,
    which records history. A release tag on HEAD is the release being checked, never its own
-   previous release.
+   previous release, and never evidence that a release before it carried the file. A tree whose
+   `version.py` is above the previous release tag is a release pull request, and may not leave an
+   exception "unreleased" either, so the omission fails there and not when the tag is pushed.
 
 **It fails closed.** Exit status 0: the files agree and, when asked, the previous release's
 promises are kept. 1: a contract problem, each one printed. 2: the comparison that was asked for
@@ -670,11 +672,13 @@ def _head_release(root: Path) -> str | None:
 class Previous:
     """What the working copy is compared with."""
 
-    def __init__(self, ref=None, contract=None, history=()):
+    def __init__(self, ref=None, contract=None, history=(), release=None):
         self.ref = ref
         self.contract = contract
         # [(version, contract)] of the release tags before HEAD that carry the file, oldest first
         self.history = list(history)
+        # The newest release tag before HEAD, whether or not it carries the file
+        self.release = release
 
 
 def _previous_contract(root: Path, previous: str) -> Previous:
@@ -718,7 +722,13 @@ def _previous_contract(root: Path, previous: str) -> Previous:
         key=lambda item: _version_key(item[0]),
     )
     if not _carries_contract(root, newest):
-        every = _git(root, "tag", "--list", RELEASE_TAGS).stdout.split()
+        # HEAD's own tag is the release being checked: that it carries the file says nothing
+        # about the releases before it - the first release to carry it has exactly this history.
+        every = [
+            tag
+            for tag in _git(root, "tag", "--list", RELEASE_TAGS).stdout.split()
+            if tag not in on_head
+        ]
         carrying = [tag for tag in every if _carries_contract(root, tag)]
         if carrying:
             raise CannotCompare(
@@ -731,8 +741,8 @@ def _previous_contract(root: Path, previous: str) -> Previous:
             " nothing to compare against - legitimate only until the first release that"
             " ships the file"
         )
-        return Previous()
-    return Previous(newest, _contract_at(root, newest), history)
+        return Previous(release=newest)
+    return Previous(newest, _contract_at(root, newest), history, release=newest)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -783,6 +793,24 @@ def main(argv: list[str] | None = None) -> int:
         if head_release:
             history.append((head_release, contract))
         found += check_record(history)
+        # A tree whose version.py is above the previous release is a release on its way - the
+        # release pull request. Its exceptions are dated in the pull request, not found undated
+        # when the tag is pushed and the release workflow refuses it.
+        previous_release = _tag_version(previous.release)
+        building = _plugin_version(root)
+        if (
+            not head_release
+            and _version_key(previous_release) is not None
+            and _version_key(building) is not None
+            and _version_key(building) > _version_key(previous_release)
+        ):
+            for name, release in sorted(_exception_map(contract).items()):
+                if release == UNRELEASED:
+                    found.append(
+                        f"exception {name!r} is still unreleased, but version.py says {building}, "
+                        f"above the previous release {previous_release}: the release pull "
+                        f"request dates it to {building}"
+                    )
         where = previous.ref or "the release record"
         for line in found:
             print(f"{CONTRACT_PATH} against {where}: {line}")

@@ -104,7 +104,9 @@ hold:
 4. **It is decided in the pull request that makes it**, not discovered afterwards, and its date
    says so. It is `unreleased` until the release that ships it, which dates it to itself - the
    version in `version.py`, later than the previous release; a release tag never carries
-   `unreleased`; a date never changes once it has shipped. The only departure is the first
+   `unreleased` - nor does a release pull request, recognised by `version.py` being above the
+   previous release tag, so an undated exception fails the pull request rather than the tag; a
+   date never changes once it has shipped. The only departure is the first
    release that carries `contract.json`: it records history, dated when it happened.
    `contract.json` carries the same names and dates in `exceptions`, and `tools/check-contract.py`
    fails when the two lists differ, when a later release drops or re-dates one, when a new one is

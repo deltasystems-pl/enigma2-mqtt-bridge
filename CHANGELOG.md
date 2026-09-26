@@ -31,8 +31,10 @@ version that has no section here.
   exceptions and the planned additions. `tools/check-contract.py` fails when it and TOPICS.md
   disagree, and - in a new CI job, against the previous release tag's copy - when a change removes
   or retypes an entry without a new contract major, or drops, re-dates or back-dates an exception:
-  a new one says `unreleased` until the release that ships it dates it to itself, and no release
-  tag says `unreleased` - which the release workflow now also checks before it publishes. It fails
+  a new one says `unreleased` until the release that ships it dates it to itself, and neither a
+  release pull request (its `version.py` above the previous release tag) nor a release tag says
+  `unreleased` - which the release workflow now also checks before it publishes, including on the
+  first release that carries the file, whose earlier tags do not have it. It fails
   closed: an unknown ref, a checkout without tags, or a release tag without the file where an older
   one had it is an error (exit 2), and "nothing to compare against" passes only while no release
   tag carries the file at all, which the output says. Tests hold the file to the plugin's own
