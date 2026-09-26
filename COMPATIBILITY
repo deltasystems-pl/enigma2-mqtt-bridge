@@ -1,0 +1,11 @@
+# What a release built from this commit promises its consumers. tools/make-index.py reads this file
+# at each release tag and copies it into that release's entry in the signed release index
+# (docs/RELEASE-INDEX.md); release-index/policy.json on main may correct a value found wrong later.
+#
+# contract         the topic contract's major (docs/TOPICS.md, "Contract version"); equal to
+#                  CONTRACT in src/MQTTBridge/version.py, which a test holds it to
+# min_integration  the oldest companion integration this release needs, or none
+# self_update      whether this release can update itself from the index (ADR-0015)
+contract = 1
+min_integration = none
+self_update = false

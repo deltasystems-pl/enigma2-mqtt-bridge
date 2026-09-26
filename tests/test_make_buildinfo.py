@@ -326,3 +326,83 @@ def test_the_epoch_is_printed_for_the_archive(tool, checkout, tmp_path, capsys):
     assert capsys.readouterr().out.strip() == str(COMMITTED_AT)
     assert tool.main(["--root", str(_tree(tmp_path / "bare")), "--epoch"], environ={}) == 0
     assert capsys.readouterr().out.strip() == "0"
+
+
+# ------------------------------------------- test settings, acceptance builds only --
+
+TEST_ORIGIN = "https://lab.example/feed/"
+
+
+def _test_keys():
+    import json
+
+    vectors = json.loads((REPO_ROOT / "tests" / "vectors" / "release-index.json").read_text())
+    return json.dumps(vectors["keysets"]["test"]["keys"])
+
+
+@pytest.mark.parametrize("flavour", ["development", "release"])
+@pytest.mark.parametrize("name", ["MQTTBRIDGE_BUILD_ORIGIN", "MQTTBRIDGE_BUILD_INDEX_KEYS"])
+def test_only_an_acceptance_build_may_carry_a_test_origin_or_test_keys(
+    tool, checkout, tmp_path, capsys, flavour, name
+):
+    value = TEST_ORIGIN if name.endswith("ORIGIN") else _test_keys()
+    if flavour == "release":
+        _git(checkout, "tag", f"v{VERSION}")
+    output = tmp_path / "buildinfo.py"
+    status = tool.main(
+        ["--root", str(checkout), "--version", VERSION, "--output", str(output)],
+        environ={"MQTTBRIDGE_BUILD_FLAVOUR": flavour, name: value},
+    )
+    assert status == 1
+    assert not output.exists()
+    error = capsys.readouterr().err
+    assert name in error and "only an acceptance build" in error
+
+
+def test_the_default_flavour_is_refused_them_too(tool, checkout):
+    with pytest.raises(tool.BuildRefused, match="this is a development build"):
+        tool.decide_overrides({"MQTTBRIDGE_BUILD_ORIGIN": TEST_ORIGIN}, "development")
+
+
+def test_an_acceptance_build_carries_them_and_the_plugin_reads_them(tool, checkout, tmp_path):
+    from MQTTBridge import buildid, trust
+
+    output = tmp_path / "buildinfo.py"
+    status = tool.main(
+        ["--root", str(checkout), "--version", VERSION, "--output", str(output)],
+        environ={"MQTTBRIDGE_BUILD_FLAVOUR": "acceptance",
+                 "MQTTBRIDGE_BUILD_ORIGIN": TEST_ORIGIN,
+                 "MQTTBRIDGE_BUILD_INDEX_KEYS": _test_keys()},
+    )
+    assert status == 0
+    text = output.read_text(encoding="utf-8")
+    build = buildid.parse(text)
+    assert build["flavour"] == "acceptance"
+    origin, keys = trust.configured(build, buildid.parse_overrides(text))
+    assert origin == TEST_ORIGIN
+    assert [key.rank for key in keys] == [1, 2]
+    assert keys != trust.EMBEDDED
+
+
+def test_a_build_without_them_writes_neither(tool, checkout, tmp_path):
+    from MQTTBridge import buildid
+
+    output = tmp_path / "buildinfo.py"
+    tool.main(["--root", str(checkout), "--version", VERSION, "--output", str(output)],
+              environ={"MQTTBRIDGE_BUILD_FLAVOUR": "acceptance"})
+    assert not buildid.carries_overrides(output.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("name, value, words", [
+    ("MQTTBRIDGE_BUILD_ORIGIN", "http://lab.example/feed/", "not an https"),
+    ("MQTTBRIDGE_BUILD_ORIGIN", "https://lab.example/feed", "not an https"),
+    ("MQTTBRIDGE_BUILD_INDEX_KEYS", "[]", "not a usable key set"),
+    ("MQTTBRIDGE_BUILD_INDEX_KEYS", "not json", "not a usable key set"),
+    ("MQTTBRIDGE_BUILD_INDEX_KEYS",
+     '[{"key_id": "0000000000000000", "rank": 1, '
+     '"public": "39Ndn8vAkeWAhYIYWvNubezKuF5F/5aY5E1uo+hSnqQ=", "baseline": 0}]',
+     "not a usable key set"),
+])
+def test_an_acceptance_build_refuses_a_test_setting_it_could_not_use(tool, name, value, words):
+    with pytest.raises(tool.BuildRefused, match=words):
+        tool.decide_overrides({name: value}, "acceptance")

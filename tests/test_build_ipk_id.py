@@ -35,6 +35,7 @@ GIT = ("git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
        "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-c", "init.defaultBranch=main")
 COMMITTED_AT = 1790000000
 BUILD_ENVIRONMENT = ("SOURCE_DATE_EPOCH", "MQTTBRIDGE_BUILD_COMMIT", "MQTTBRIDGE_BUILD_FLAVOUR",
+                     "MQTTBRIDGE_BUILD_ORIGIN", "MQTTBRIDGE_BUILD_INDEX_KEYS",
                      "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
 
 
@@ -197,3 +198,59 @@ def test_a_release_build_is_refused_off_its_tag_and_made_at_it(checkout, tmp_pat
     info, _member = _buildinfo(_build(repo, MQTTBRIDGE_BUILD_FLAVOUR="release"))
     assert info["flavour"] == "release" and info["dirty"] is False
     assert buildid.display_version(__version__, info) == __version__
+
+
+def _check_release_package():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "check_release_package", REPO_ROOT / "tools" / "check-release-package.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_release_read_back_accepts_the_release_package_and_nothing_else(checkout, tmp_path):
+    # What release.yml runs before it publishes: the package's own modules, imported from the
+    # unpacked package, must say this commit, this time, clean, release - and the release keys.
+    check = _check_release_package()
+    repo = tmp_path / "release"
+    shutil.copytree(checkout, repo)
+    shutil.rmtree(repo / "dist", ignore_errors=True)
+    _git(repo, "tag", f"v{__version__}")
+    commit = _git(repo, "rev-parse", "HEAD")
+    released = repo / "dist" / "released.ipk"
+    released.write_bytes(_build(repo, MQTTBRIDGE_BUILD_FLAVOUR="release"))
+    found = check.check(released, commit, COMMITTED_AT)
+    assert found["origin"] == "https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/"
+    assert found["keys"] == ["5de3b24c97e88660", "c72fd83e3e514a25"]
+
+    development = repo / "dist" / "development.ipk"
+    development.write_bytes(_build(repo))
+    with pytest.raises(check.Refused, match="build id is"):
+        check.check(development, commit, COMMITTED_AT)
+    with pytest.raises(check.Refused, match="build id is"):
+        check.check(released, commit, COMMITTED_AT + 1)
+
+
+def test_an_acceptance_build_carries_its_test_settings_and_is_no_release(checkout, tmp_path):
+    import json
+
+    vectors = json.loads((REPO_ROOT / "tests" / "vectors" / "release-index.json").read_text())
+    keys = json.dumps(vectors["keysets"]["test"]["keys"])
+    repo = tmp_path / "acceptance"
+    shutil.copytree(checkout, repo)
+    shutil.rmtree(repo / "dist", ignore_errors=True)
+    refused = _build(repo, expect_success=False, MQTTBRIDGE_BUILD_ORIGIN="https://lab.example/f/")
+    assert refused.returncode != 0 and "only an acceptance build" in refused.stderr
+    assert not list((repo / "dist").glob("*.ipk")), "a refused build leaves no package"
+
+    ipk = _build(repo, MQTTBRIDGE_BUILD_FLAVOUR="acceptance",
+                 MQTTBRIDGE_BUILD_ORIGIN="https://lab.example/f/", MQTTBRIDGE_BUILD_INDEX_KEYS=keys)
+    info, _member = _buildinfo(ipk)
+    assert info["flavour"] == "acceptance"
+    path = repo / "dist" / "acceptance.ipk"
+    path.write_bytes(ipk)
+    check = _check_release_package()
+    with pytest.raises(check.Refused, match="test origin or test index keys"):
+        check.check(path, _git(repo, "rev-parse", "HEAD"), COMMITTED_AT)

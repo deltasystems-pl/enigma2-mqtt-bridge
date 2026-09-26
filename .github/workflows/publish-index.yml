@@ -1,0 +1,185 @@
+name: Publish the release index
+
+# The signed release index (docs/RELEASE-INDEX.md, ADR-0015) is built, signed and published by
+# three jobs, and no job can do what the next one does:
+#
+#   build    reads everything, holds no key, writes nothing but an artifact and a hash;
+#   sign     holds the main key - only after the maintainer approves the run in the
+#            release-signing environment, which admits the main branch and nothing else - and
+#            cannot write to the repository;
+#   publish  can write to the repository, and holds no key.
+#
+# Every trigger runs this file as it is on main: workflow_run and a push to main always do, and a
+# manual run is refused on any other branch. The version a release run is for comes from the
+# triggering commit's one v* tag, never from a branch name.
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  push:
+    branches: [main]
+    paths: [release-index/policy.json]
+  workflow_dispatch:
+
+permissions: {}
+
+# One chain at a time, never cancelled: two chains would both sign "published + 1", and the
+# maintainer would have approved a signature that is never published.
+concurrency:
+  group: publish-index
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the unsigned index
+    # A release run counts only when Release succeeded for a tag pushed to this repository.
+    if: >-
+      github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || (
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Every tag: COMPATIBILITY is read at each release tag.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch the published index and the feed
+        run: git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages
+
+      - name: The release this run is for
+        id: release
+        if: github.event_name == 'workflow_run'
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          version=$(python3 tools/make-index.py tag-for "$HEAD_SHA")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "This run follows the release of $version."
+
+      - name: Build
+        id: build
+        # Downloads every release's package and checks it against the release asset's digest and
+        # against the feed's copy; verifies the published index; writes the next one. The summary
+        # opens with the sha256 the maintainer reads before approving the sign job.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRED: ${{ steps.release.outputs.version }}
+        run: |
+          python3 tools/make-index.py build --repo "$GITHUB_REPOSITORY" \
+            ${REQUIRED:+--require-version "$REQUIRED"} \
+            --out releases.json --summary "$GITHUB_STEP_SUMMARY" --github-output "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-index
+          path: releases.json
+          if-no-files-found: error
+          retention-days: 7
+
+  sign:
+    name: Sign (the maintainer approves)
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release-signing
+    # Nothing: this job reads a public repository and an artifact of its own run, and writes
+    # nothing but its output. No setup-python and no pip either - the runner's own python3 and
+    # OpenSSL, and the plugin's own verifier.
+    permissions: {}
+    outputs:
+      signature: ${{ steps.wrap.outputs.signature }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Fetch the published index
+        run: git fetch --no-tags --depth=1 origin gh-pages:refs/remotes/origin/gh-pages
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-index
+          path: index
+
+      - name: The file build hashed, and a consistent next index
+        # Checked here again rather than believed: the sha256 build reported (a job output,
+        # stored by GitHub, not in the artifact), every field, the main key's id, the next serial.
+        env:
+          EXPECTED: ${{ needs.build.outputs.sha256 }}
+        run: python3 tools/make-index.py check --index index/releases.json --sha256 "$EXPECTED"
+
+      - name: Sign with the main key
+        # The secret is one line of base64: the raw 32-byte seed. It goes to OpenSSL's stdin as
+        # DER - the fixed 16-byte PKCS#8 prefix of an Ed25519 key, then the seed - so no key file
+        # is written and no printable form of it exists. base64 and openssl run without the
+        # variable in their environment. Never add tracing here; index.yml refuses it, and
+        # refuses any command that could print or copy what passes through.
+        shell: bash
+        env:
+          INDEX_SIGNING_KEY: ${{ secrets.INDEX_SIGNING_KEY }}
+        run: |
+          if [ -z "${INDEX_SIGNING_KEY:-}" ]; then
+            echo "::error::the release-signing environment has no INDEX_SIGNING_KEY"
+            exit 1
+          fi
+          umask 077
+          {
+            printf '\x30\x2e\x02\x01\x00\x30\x05\x06\x03\x2b\x65\x70\x04\x22\x04\x20'
+            printf '%s' "$INDEX_SIGNING_KEY" | env -u INDEX_SIGNING_KEY base64 -d
+          } | env -u INDEX_SIGNING_KEY openssl pkeyutl -sign -rawin -keyform DER \
+                -inkey /dev/stdin -in index/releases.json -out index/releases.json.raw-sig
+
+      - name: Verify with the embedded main key, and hand the signature on
+        id: wrap
+        run: |
+          python3 tools/make-index.py wrap --index index/releases.json \
+            --raw-signature index/releases.json.raw-sig --out index/releases.json.sig
+          echo "signature=$(cat index/releases.json.sig)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Publish to the feed
+    needs: [build, sign]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-index
+          path: index
+
+      - name: Accept the pair as a reader would
+        # The bytes build hashed, a signature from an embedded key, and a serial above the
+        # published one within the bound - judged against the branch as it is now.
+        env:
+          EXPECTED: ${{ needs.build.outputs.sha256 }}
+          SIGNATURE: ${{ needs.sign.outputs.signature }}
+        run: |
+          printf '%s\n' "$SIGNATURE" > index/releases.json.sig
+          git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages
+          python3 tools/make-index.py verify --index index/releases.json \
+            --sig index/releases.json.sig --sha256 "$EXPECTED"
+
+      - name: Push to gh-pages
+        run: |
+          serial=$(python3 -c 'import json; print(json.load(open("index/releases.json"))["serial"])')
+          git worktree add --detach ../pages origin/gh-pages
+          cp index/releases.json index/releases.json.sig ../pages/feed/
+          cd ../pages
+          # Generated output, committed as the workflow - as release.yml does for the feed.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add feed/releases.json feed/releases.json.sig
+          git commit -m "Publish the release index, serial $serial"
+          git push origin HEAD:gh-pages

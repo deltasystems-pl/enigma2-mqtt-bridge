@@ -312,21 +312,22 @@ receiver. Always present with every key.
 
 **How to show the version.** `plugin` as it is for a release build - `flavour` `release` and
 `dirty` `false` - and for a build whose `commit` is empty, which cannot be named any other way;
-`plugin` + `+g` + the first seven digits of `commit` for everything else: `0.3.0+g3f6c0a2`. The part
-after `+` is a local label, not a pre-release: a consumer never orders versions by it. Two builds of
-**different commits** with the same `plugin` are ordered by `time`, the later one being the newer.
-Builds of the same commit share `time` - clean and dirty, development, acceptance and release - and
-a dirty build displays exactly like the clean build of its commit: neither the order nor the display
-tells them apart, only `dirty` and `flavour` do. A consumer that knows a release's commit from
-somewhere the plugin cannot see - a signed list of releases - holds a `release` build to that commit
-as well.
+`plugin` + `+g` + the first seven digits of `commit` for everything else: `0.3.0+g3f6c0a2`, and
+`0.3.0+g3f6c0a2.dirty` when `dirty` is `true`. The part after `+` is a local label, not a
+pre-release: a consumer never orders versions by it. Two builds of **different commits** with the
+same `plugin` are ordered by `time`, the later one being the newer. Builds of the same commit share
+`time` - clean and dirty, development, acceptance and release - so the order cannot tell them
+apart; the display tells a dirty build from a clean one, and only `flavour` tells the flavours
+apart. A consumer that knows a release's commit from somewhere the plugin cannot see - the signed
+release index ([RELEASE-INDEX.md](RELEASE-INDEX.md)) - holds a `release` build to that commit as
+well.
 
 There is deliberately no `origin` member. Where a build fetches its releases from is not something
-this object has to say to tell builds apart - a build with another source will be an `acceptance`
-build, and a release build will be refused unless it carries the published one - and "origin"
-already means two other things in this contract: where a command came from, and whether the release
-index could be reached (the planned `update.origin`). Both refusals arrive with the change that puts
-a release source into the build; the build id has none today.
+this object has to say to tell builds apart - only an `acceptance` build may carry another source
+or other index keys, and the build refuses both for every other flavour - and "origin" already
+means two other things in this contract: where a command came from, and whether the release index
+could be reached (the planned `update.origin`). The release workflow reads every release package
+back and refuses one that carries either.
 
 ### `<base>/<node>/power`
 
@@ -1726,7 +1727,10 @@ The plugin checks for, and installs, its own releases from a signed release inde
 companion integration relays that index and the package to a receiver without internet access. Every
 addition is additive under [Contract version](#contract-version), so it stays contract 1. The
 install itself - the lock it shares with the integration's installer, the snapshot, the marker, and
-how a restart keeps the household's channel - is described in [TRANSACTION.md](TRANSACTION.md).
+how a restart keeps the household's channel - is described in [TRANSACTION.md](TRANSACTION.md). The
+index itself - its format, its keys, the rule for accepting one, and how it is published - is
+built already and described in [RELEASE-INDEX.md](RELEASE-INDEX.md); what `release_index` below
+carries is that index, byte for byte.
 
 | Kind | Name | Shape |
 |---|---|---|

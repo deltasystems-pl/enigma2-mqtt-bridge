@@ -32,12 +32,21 @@ inside the connect handler, and an exception there would cost the whole session.
 
 **What a consumer shows.** `display_version` is the one rule: the plain version
 for a release build, and for a build nobody can name the commit of (every plugin
-up to 0.3.x, which has no build id at all); `0.3.0+g1a2b3c4` for everything else.
+up to 0.3.x, which has no build id at all); `0.3.0+g1a2b3c4` for everything else,
+and `0.3.0+g1a2b3c4.dirty` when the tracked files differed from that commit - a
+build of a tree nobody can check out again must not look like the one that can.
 The part after `+` is a local label, never a pre-release suffix - opkg and PEP 440
 disagree about how `0.4.0rc1` sorts against `0.4.0`, and `+g<sha>` is not ordered
 by either. The companion integration applies the same rule and additionally holds
 a release build's commit against the signed release index, which this side
 cannot see.
+
+**Overrides, for acceptance builds only.** An `acceptance` build may carry
+`ORIGIN` and `INDEX_KEYS` - another place to fetch releases from and other keys
+to trust - so a hardware acceptance run can be driven by a test index. The
+builder refuses both for any other flavour, and `trust.configured` honours them
+for no other flavour; they are read here with the build id and never published
+(`info.build` has no `origin`, see TOPICS.md).
 """
 
 import ast
@@ -60,6 +69,7 @@ MAX_BYTES = 4096
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _FLAVOUR = re.compile(r"^[a-z][a-z_]{0,31}$")
 _NAMES = {"COMMIT": "commit", "COMMIT_TIME": "time", "DIRTY": "dirty", "FLAVOUR": "flavour"}
+_OVERRIDE_NAMES = {"ORIGIN": "origin", "INDEX_KEYS": "index_keys"}
 
 
 def validated(values):
@@ -145,6 +155,69 @@ def _loaded():
 LOADED = _loaded()
 
 
+def overrides_of(values):
+    """`{"origin", "index_keys"}` from an acceptance build's literals, or None when it has none.
+
+    Only the shape is checked here - a string, a list of objects; `trust` judges the values when it
+    uses them. Absent or malformed is None: a reader that cannot use an override uses the embedded
+    origin and keys, which is the safe side.
+    """
+    origin = values.get("origin")
+    keys = values.get("index_keys")
+    if origin is None and keys is None:
+        return None
+    if origin is not None and not isinstance(origin, str):
+        return None
+    if keys is not None and not (
+        isinstance(keys, list) and keys and all(isinstance(item, dict) for item in keys)
+    ):
+        return None
+    return {"origin": origin, "index_keys": keys}
+
+
+def _loaded_overrides():
+    try:
+        from . import buildinfo
+    except Exception:
+        return None
+    return overrides_of({
+        "origin": getattr(buildinfo, "ORIGIN", None),
+        "index_keys": getattr(buildinfo, "INDEX_KEYS", None),
+    })
+
+
+LOADED_OVERRIDES = _loaded_overrides()
+
+
+def carries_overrides(text):
+    """Whether a `buildinfo.py` names an override at all - well formed or not, or unreadable.
+
+    For the checks that a release package carries none: there, an override the reader would
+    ignore is still one the builder should have refused, so anything but a clear "no" is "yes".
+    """
+    try:
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, ast.Name) and node.id in _OVERRIDE_NAMES:
+                return True
+        return False
+    except Exception:
+        return True
+
+
+def parse_overrides(text):
+    """The overrides in the text of a `buildinfo.py`, read as literals, or None. Never raises."""
+    try:
+        values = {}
+        for node in ast.parse(text).body:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = node.targets[0]
+                if isinstance(target, ast.Name) and target.id in _OVERRIDE_NAMES:
+                    values[_OVERRIDE_NAMES[target.id]] = ast.literal_eval(node.value)
+        return overrides_of(values)
+    except Exception:
+        return None
+
+
 def report(loaded, on_disk):
     """`info.build`: the running build, and the one on disk when that is another build.
 
@@ -167,14 +240,17 @@ def report(loaded, on_disk):
 
 
 def display_version(version, build):
-    """`0.3.0` for a release build or one whose commit is unknown, else `0.3.0+g<sha7>`.
+    """`0.3.0` for a release build or one whose commit is unknown, else `0.3.0+g<sha7>`,
+    with `.dirty` after it when the tracked files differed from that commit.
 
     `build` is a build id or an `info.build` payload; both carry `commit`,
     `dirty` and `flavour`. A release build is one whose builder said `release`
     about a clean tree - the builder refuses to say it about anything else.
+    Only a `dirty` of exactly `true` adds the marker: `null` says nothing.
     """
     if not build or not build.get("commit"):
         return version
     if build.get("flavour") == RELEASE and build.get("dirty") is False:
         return version
-    return "{}+g{}".format(version, build["commit"][:7])
+    marker = ".dirty" if build.get("dirty") is True else ""
+    return "{}+g{}{}".format(version, build["commit"][:7], marker)

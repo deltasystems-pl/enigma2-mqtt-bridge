@@ -27,6 +27,10 @@
 #                             without one it needs the commit and the timestamp,
 #                             and the builder vouches for the rest
 #   SOURCE_DATE_EPOCH         the timestamp; the commit's own time by default
+#   MQTTBRIDGE_BUILD_ORIGIN, MQTTBRIDGE_BUILD_INDEX_KEYS
+#                             a test origin and test index keys, for an
+#                             acceptance build only: any other flavour given
+#                             either is refused
 #
 # Same commit, same timestamp, same flavour: same bytes, with or without .git.
 # A bundle of a release built from a source archive matches the released
@@ -38,7 +42,7 @@ ALLOW_UNRELEASED=0
 for arg in "$@"; do
     case "$arg" in
         --allow-unreleased) ALLOW_UNRELEASED=1 ;;
-        -h|--help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "build-ipk.sh: unknown argument: $arg" >&2; exit 2 ;;
     esac
 done

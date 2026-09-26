@@ -1,0 +1,70 @@
+name: Release index
+
+# The read-only half of the signed release index (docs/RELEASE-INDEX.md). It runs on every pull
+# request and every push to main, not only on the files it is about, because it is meant to be a
+# required check - and a required check that does not run leaves a pull request waiting for ever.
+# It holds no secret and writes nothing.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: index-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Release index
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: The workflows
+        # No pull_request_target anywhere; every action pinned to a full commit SHA with its
+        # version beside it; the sign step in its place, with nothing in it that could print or
+        # copy the key; the key referenced by that step alone; no test key set passed anywhere.
+        run: python3 tools/check-workflows.py
+
+      - name: Fetch the published index and the feed
+        run: git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages
+
+      - name: The tree
+        # policy.json and COMPATIBILITY well formed; the published index verified with the
+        # embedded keys; their baselines not left too far behind it; an emergency index, if one
+        # is waiting, accepted against the published one.
+        run: python3 tools/make-index.py tree
+
+      - name: The index this tree would publish, against the published one
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/make-index.py build --repo "$GITHUB_REPOSITORY" \
+            --out candidate.json --summary "$GITHUB_STEP_SUMMARY"
+
+  rehearse:
+    name: Sign step rehearsal
+    # The sign job's own steps on a real runner, under the sign job's permissions (none), with a
+    # throwaway key made for this run and thrown away with it: the runner's OpenSSL signs from
+    # stdin exactly as publish-index.yml asks it to, the plugin's verifier accepts the result, and
+    # a signature from any other key is refused. Nothing here is ever published.
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Fetch the published index
+        run: git fetch --no-tags --depth=1 origin gh-pages:refs/remotes/origin/gh-pages
+
+      - name: Rehearse
+        run: python3 tools/rehearse-signing.py

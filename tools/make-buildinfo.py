@@ -46,14 +46,25 @@ its bundle is byte-identical to the released package only when it passes both
 `MQTTBRIDGE_BUILD_COMMIT` and `MQTTBRIDGE_BUILD_FLAVOUR=release` (with `SOURCE_DATE_EPOCH`, which it
 already passes).
 `development` is every other build of the production code: a pull request's CI run, a developer's
-package, a candidate. `acceptance` is a build made for a hardware acceptance run, which later
-changes may give test settings that a release must never carry. A consumer reads any flavour it
-does not know as "not a release".
+package, a candidate. `acceptance` is a build made for a hardware acceptance run. A consumer reads
+any flavour it does not know as "not a release".
+
+**Test settings, for `acceptance` only.** A hardware acceptance run drives the update path with a
+test index, served from a test origin and signed with throwaway keys, so its build may carry
+`MQTTBRIDGE_BUILD_ORIGIN` (an `https://.../` address) and `MQTTBRIDGE_BUILD_INDEX_KEYS` (the key set
+as JSON, `[{"key_id", "rank", "public", "baseline"}]`, `public` in base64). They are written into
+`buildinfo.py` as `ORIGIN` and `INDEX_KEYS`, and only then: a build of any other flavour that is
+given either is **refused**, so a `development` or `release` package can never trust anything but
+the embedded keys and the published origin. That refusal is what lets `info.build` leave the
+origin out - the flavour already says whether a build could have another one - and the release
+workflow reads the package back to confirm it carries neither. The plugin honours them only in an
+`acceptance` build as well (`trust.configured`).
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -65,6 +76,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 COMMIT_ENV = "MQTTBRIDGE_BUILD_COMMIT"
 FLAVOUR_ENV = "MQTTBRIDGE_BUILD_FLAVOUR"
 EPOCH_ENV = "SOURCE_DATE_EPOCH"
+ORIGIN_ENV = "MQTTBRIDGE_BUILD_ORIGIN"
+INDEX_KEYS_ENV = "MQTTBRIDGE_BUILD_INDEX_KEYS"
 
 RELEASE = "release"
 DEVELOPMENT = "development"
@@ -212,9 +225,45 @@ def _release_or_refuse(root, version, commit, checked_out, dirty, when):
         raise BuildRefused(f"a release needs its section in CHANGELOG.md, and [{version}] has none")
 
 
-def render(info: dict) -> str:
+def _trust():
+    """The plugin's own `trust` module, from this tool's tree, to judge an override with."""
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
+    from MQTTBridge import trust
+
+    return trust
+
+
+def decide_overrides(environ, flavour: str) -> dict | None:
+    """The acceptance build's test origin and keys, None when there are none. Refuses them for
+    any other flavour, and refuses a value the plugin could not use."""
+    origin = environ.get(ORIGIN_ENV, "").strip()
+    keys = environ.get(INDEX_KEYS_ENV, "").strip()
+    if not origin and not keys:
+        return None
+    if flavour != ACCEPTANCE:
+        named = " and ".join(name for name, value in ((ORIGIN_ENV, origin), (INDEX_KEYS_ENV, keys))
+                             if value)
+        raise BuildRefused(
+            f"{named}: only an {ACCEPTANCE} build may carry another origin or other index keys, "
+            f"and this is a {flavour} build"
+        )
+    trust = _trust()
+    if origin and not trust.is_origin(origin):
+        raise BuildRefused(f"{ORIGIN_ENV}={origin!r} is not an https://host/.../ address")
+    parsed = None
+    if keys:
+        try:
+            parsed = trust.keys_to_data(trust.keys_from_data(json.loads(keys)))
+        except (ValueError, trust.Refused) as error:
+            raise BuildRefused(f"{INDEX_KEYS_ENV} is not a usable key set: {error}") from error
+    return {"origin": origin or None, "index_keys": parsed}
+
+
+def render(info: dict, overrides: dict | None = None) -> str:
     """The file's text. Only literals, so it is read without running it."""
-    return (
+    text = (
         HEADER
         + "\n"
         + f'COMMIT = "{info["commit"]}"\n'
@@ -222,6 +271,13 @@ def render(info: dict) -> str:
         + f"DIRTY = {bool(info['dirty'])}\n"
         + f'FLAVOUR = "{info["flavour"]}"\n'
     )
+    if overrides:
+        # Test settings of an acceptance build, never anything else's (decide_overrides).
+        if overrides.get("origin"):
+            text += f"ORIGIN = {overrides['origin']!r}\n"
+        if overrides.get("index_keys"):
+            text += f"INDEX_KEYS = {overrides['index_keys']!r}\n"
+    return text
 
 
 def main(argv: list[str] | None = None, environ=None) -> int:
@@ -241,15 +297,21 @@ def main(argv: list[str] | None = None, environ=None) -> int:
         if not args.version or args.output is None:
             parser.error("--version and --output are required unless --epoch is given")
         info = decide(args.root, args.version, environ)
+        overrides = decide_overrides(environ, info["flavour"])
     except BuildRefused as error:
         print(f"make-buildinfo.py: {error}", file=sys.stderr)
         return 1
-    args.output.write_text(render(info), encoding="utf-8")
+    args.output.write_text(render(info, overrides), encoding="utf-8")
     print(
         "build id: commit={} time={} dirty={} flavour={}".format(
             info["commit"] or "unknown", info["time"], info["dirty"], info["flavour"]
         )
     )
+    if overrides:
+        print("acceptance test settings: origin={} index keys={}".format(
+            overrides["origin"] or "published",
+            ",".join(item["key_id"] for item in overrides["index_keys"] or []) or "embedded",
+        ))
     return 0
 
 
