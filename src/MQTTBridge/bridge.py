@@ -38,12 +38,13 @@ import json
 import time
 from collections import OrderedDict
 
-from . import boxinfo, discovery, wol
+from . import boxinfo, buildid, discovery, wol
 from . import config as settings_module
 from .cec import TOPIC as CEC_TOPIC
 from .cec import CecPublisher
 from .commands import CommandDispatcher
 from .diagnostics import LoopMonitor
+from .enigma2 import Ticker
 from .log import configure as configure_logging
 from .log import get_logger, register_secret
 from .mqttclient import BrokerSettings, MqttClient
@@ -51,7 +52,7 @@ from .publisher import Publisher
 from .uninstall import DEFERRED as UNINSTALL_DEFERRED
 from .uninstall import RUNNING as UNINSTALL_RUNNING
 from .uninstall import Uninstaller
-from .version import __version__
+from .version import CONTRACT, __version__
 
 # `Publisher` is re-exported: it is part of this module's interface - every
 # publisher subclasses it and the tests import it from here - and it lives in
@@ -150,7 +151,7 @@ _DEFAULT_MONITOR = object()
 class Bridge:
     def __init__(self, session=None, settings=None, client_factory=None, dispatcher=None,
                  state_store=None, provisioning_path=None, log_path=None,
-                 loop_monitor=_DEFAULT_MONITOR):
+                 loop_monitor=_DEFAULT_MONITOR, build=buildid.LOADED, build_path=None):
         self.session = session
         self.settings = settings if settings is not None else settings_module.settings
         self.client = None
@@ -190,6 +191,12 @@ class Bridge:
         # what `reload` compares a save against.
         self._will_topic = None
         self._session_settings = None
+        # The build this process runs, and where the build on disk is read from:
+        # `info.build`. Arguments only so that a test can say which build it is.
+        self._build = build
+        self._build_path = build_path if build_path is not None else buildid.ON_DISK_PATH
+        self._build_reported = None
+        self._build_ticker = Ticker(self.check_build_on_disk, "build")
 
     # ----------------------------------------------------------------- settings --
 
@@ -426,6 +433,11 @@ class Bridge:
         return str(topic)[len(prefix):].strip("/") or None
 
     @property
+    def build(self):
+        """The build id of the code this process runs, or None for a copy nobody built."""
+        return self._build
+
+    @property
     def connected(self):
         return self.client is not None and self.client.connected
 
@@ -436,7 +448,7 @@ class Bridge:
         try:
             self._start()
         except Exception:
-            self._stop_loop_monitor()
+            self._stop_timers()
             LOG.exception("the bridge failed to start; the receiver is unaffected")
             self.idle_reason = "the bridge failed to start"
         return self
@@ -506,6 +518,7 @@ class Bridge:
             return
         if self._loop_monitor is not None:
             self._loop_monitor.start()
+        self._build_ticker.start(buildid.CHECK_MILLISECONDS)
         self._will_topic = self.topic("availability")
         self._session_settings = self._connection_settings()
         self.client.set_will(self._will_topic, OFFLINE, qos=WILL_QOS, retain=True)
@@ -518,15 +531,16 @@ class Bridge:
         self.idle_reason = None
         self.running = True
         LOG.info(
-            "starting: ha_mode=%s plugin=%s capabilities=%d",
+            "starting: ha_mode=%s plugin=%s capabilities=%d build=%s",
             self.value("ha_mode"),
             __version__,
             len(self.capabilities()),
+            buildid.display_version(__version__, self._build),
         )
         self.client.start()
 
     def _idle(self, reason):
-        self._stop_loop_monitor()
+        self._stop_timers()
         self.running = False
         self.idle_reason = reason
         LOG.warning("idle: %s", reason)
@@ -536,7 +550,7 @@ class Bridge:
         try:
             self.running = False
             self._uninstaller.abandon()
-            self._stop_loop_monitor()
+            self._stop_timers()
             if self.client is None:
                 self._stop_publishers()
                 return
@@ -570,9 +584,11 @@ class Bridge:
                 LOG.exception("stopping the %s publisher raised", publisher.name)
         self._publishers = []
 
-    def _stop_loop_monitor(self):
+    def _stop_timers(self):
+        """The session's own timers: the loop monitor and the build-on-disk check."""
         if self._loop_monitor is not None:
             self._loop_monitor.stop()
+        self._build_ticker.stop()
 
     def reload(self):
         """Apply changed settings. Called by the setup screen after a save.
@@ -600,7 +616,7 @@ class Bridge:
         thread, where waiting on a broker is what the user would feel.
         """
         try:
-            self._stop_loop_monitor()
+            self._stop_timers()
             if self.connected:
                 self.retract_stale()
                 if self._says_offline_on_reload():
@@ -957,11 +973,37 @@ class Bridge:
         self._forget(topic)
         return info
 
+    def build_report(self):
+        """`info.build`, with the file on disk read now."""
+        return buildid.report(self._build, buildid.read(self._build_path))
+
+    def check_build_on_disk(self):
+        """Publish `info` again when the build on disk is not the one it last reported.
+
+        Runs every ten minutes, and is what an install on the receiver calls when
+        it has replaced the files: until the interface restarts, the receiver
+        runs one build and has another on disk, and a consumer deciding whether
+        to offer an update needs to know both. Says so only when it changed,
+        and only on an open session - a connect publishes `info` anyway.
+        """
+        if not self.connected:
+            return False
+        if self.build_report() == self._build_reported:
+            return False
+        info = self.build_info()
+        LOG.info("the build on disk changed: on_disk=%s", info["build"]["on_disk"] or "-")
+        self.publish_json(self.topic("info"), info)
+        return True
+
     def build_info(self):
+        build = self.build_report()
+        self._build_reported = build
         return {
             "image": boxinfo.image_version(),
             "enigma": boxinfo.enigma_version(),
             "plugin": __version__,
+            "build": build,
+            "contract": CONTRACT,
             "boxtype": boxinfo.box_type(),
             "mac": boxinfo.mac_address(),
             "ip": boxinfo.local_ip(self.value("host")),
@@ -1202,7 +1244,7 @@ class Bridge:
         """
         self.running = False
         self.idle_reason = "the plugin is being removed"
-        self._stop_loop_monitor()
+        self._stop_timers()
         if self.client is not None:
             self.client.stop()
             self.client = None

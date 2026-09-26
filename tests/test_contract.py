@@ -203,6 +203,25 @@ def test_a_wol_member_missing_is_named(checker, topics_text, contract):
     assert _mentions(problems, "info.wol member", "mechanism")
 
 
+def test_a_build_member_missing_is_named(checker, topics_text, contract):
+    del contract["info_build_members"]["on_disk"]
+    problems = checker.check_consistency(topics_text, contract)
+    assert _mentions(problems, "info.build member", "on_disk")
+
+
+def test_a_build_member_retyped_in_the_prose_is_named(checker, topics_text, contract):
+    row = "| `dirty` | bool or `null` |"
+    assert topics_text.count(row) == 1
+    problems = checker.check_consistency(topics_text.replace(row, "| `dirty` | bool |"), contract)
+    assert _mentions(problems, "info.build member", "dirty", "differs")
+
+
+def test_a_removed_build_member_is_refused(checker, contract):
+    newer = copy.deepcopy(contract)
+    del newer["info_build_members"]["time"]
+    assert _mentions(checker.compare(contract, newer), "info.build member", "time", "removed")
+
+
 def test_a_setting_made_writable_in_the_data_is_named(checker, topics_text, contract):
     contract["settings"]["uninstall_allowed"]["writable"] = True
     problems = checker.check_consistency(topics_text, contract)

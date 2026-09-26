@@ -103,6 +103,19 @@ jobs:
       - name: Build
         run: ./tools/build-ipk.sh --allow-unreleased
 
+      - name: Install the test tooling
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: The build id, twice the same bytes, and a build without .git
+        # The whole script, run for real on a committed copy of this tree: two builds of one
+        # commit are byte-identical; a `git archive` export - what the companion integration
+        # rebuilds its bundled package from - gives the same bytes when the commit is named and
+        # still builds when it is not; a release build is refused off its tag. The test matrix
+        # has no gettext and skips these; here a skip is a failure.
+        env:
+          MQTTBRIDGE_REQUIRE_BUILD_TOOLS: "1"
+        run: pytest -q tests/test_build_ipk_id.py tests/test_make_buildinfo.py
+
       - name: Check the archive members
         run: |
           ipk=$(ls dist/*.ipk)
@@ -121,6 +134,8 @@ jobs:
           echo "--- control ---"
           tar tzvf control.tar.gz
           tar xzf control.tar.gz -O ./control
+          echo "--- build id ---"
+          tar xzf data.tar.gz -O ./usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge/buildinfo.py
           echo "--- data ---"
           tar tzvf data.tar.gz | head -40
 

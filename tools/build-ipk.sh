@@ -15,13 +15,30 @@
 # mode is written into the archive explicitly, so a build from a Windows
 # checkout and a build from an ext4 one agree byte for byte.
 #
+# Every package carries its build id (tools/make-buildinfo.py writes it): the
+# commit, its time, whether the tracked files matched it, and the flavour. The
+# builder supplies them; nothing is guessed. Environment:
+#
+#   MQTTBRIDGE_BUILD_COMMIT   the commit, for a build without its git checkout
+#                             (a source archive); must match HEAD when there is one
+#   MQTTBRIDGE_BUILD_FLAVOUR  development (the default), release or acceptance;
+#                             in a checkout, release is refused unless the tree
+#                             is clean and HEAD carries the tag v<version>;
+#                             without one it needs the commit and the timestamp,
+#                             and the builder vouches for the rest
+#   SOURCE_DATE_EPOCH         the timestamp; the commit's own time by default
+#
+# Same commit, same timestamp, same flavour: same bytes, with or without .git.
+# A bundle of a release built from a source archive matches the released
+# package only when all three are given, the flavour being release.
+#
 set -euo pipefail
 
 ALLOW_UNRELEASED=0
 for arg in "$@"; do
     case "$arg" in
         --allow-unreleased) ALLOW_UNRELEASED=1 ;;
-        -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "build-ipk.sh: unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
@@ -58,14 +75,10 @@ fi
 
 # ------------------------------------------------------------ determinism ----
 # Every timestamp in the archive comes from the last commit, so two builds of
-# the same tree agree byte for byte.
-if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
-    if SOURCE_DATE_EPOCH=$(git log -1 --format=%ct 2>/dev/null) && [ -n "$SOURCE_DATE_EPOCH" ]; then
-        :
-    else
-        SOURCE_DATE_EPOCH=0
-    fi
-fi
+# the same tree agree byte for byte. Read from this tree's own checkout only: a
+# source archive unpacked inside another repository must not borrow that
+# repository's time - with no checkout and no SOURCE_DATE_EPOCH it is 0.
+SOURCE_DATE_EPOCH=$(python3 tools/make-buildinfo.py --root "$REPO_ROOT" --epoch)
 export SOURCE_DATE_EPOCH
 
 # Permissions are written into the archive by tar rather than read off the
@@ -102,6 +115,11 @@ cp -r src/MQTTBridge/. "$STAGE/data/$PLUGIN_DIR/"
 cp src/WebInterface/WebChilds/External/MQTTBridge.py "$STAGE/data/$WEBIF_EXTERNAL_DIR/"
 find "$STAGE/data" -name '__pycache__' -type d -prune -exec rm -rf {} +
 find "$STAGE/data" -name '*.pyc' -delete
+
+# The build id, written over anything of that name the source tree may hold. A
+# release build that is not what it claims stops here, before dist/ is touched.
+python3 tools/make-buildinfo.py --root "$REPO_ROOT" --version "$VERSION" \
+    --output "$STAGE/data/$PLUGIN_DIR/buildinfo.py"
 
 # Translations: .po lives in git, .mo is built here and never committed.
 if compgen -G "$STAGE/data/$PLUGIN_DIR/locale/*/LC_MESSAGES/*.po" > /dev/null; then
