@@ -88,17 +88,19 @@ jobs:
 
       - name: The package says it is this release
         # Read back out of the package itself rather than trusted from the build's exit status:
-        # the commit being released, a clean tree, the release flavour.
+        # the commit being released, its time, a clean tree, the release flavour.
         run: |
           ipk=$(ls dist/*.ipk)
           member=./usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge/buildinfo.py
           ar p "$ipk" data.tar.gz | tar xzO "$member" > /tmp/buildinfo.py
           cat /tmp/buildinfo.py
-          PYTHONPATH=src python - "$(git rev-parse 'HEAD^{commit}')" <<'PY'
+          PYTHONPATH=src python - "$(git rev-parse 'HEAD^{commit}')" \
+            "$(git show -s --format=%ct 'HEAD^{commit}')" <<'PY'
           import sys
           from MQTTBridge import buildid
           found = buildid.read("/tmp/buildinfo.py")
-          expected = {"commit": sys.argv[1], "dirty": False, "flavour": "release"}
+          expected = {"commit": sys.argv[1], "time": int(sys.argv[2]), "dirty": False,
+                      "flavour": "release"}
           if found is None or any(found[key] != value for key, value in expected.items()):
               sys.exit(f"::error::the package's build id is {found}, expected {expected}")
           print("build id:", found)

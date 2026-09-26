@@ -22,11 +22,15 @@
 #   MQTTBRIDGE_BUILD_COMMIT   the commit, for a build without its git checkout
 #                             (a source archive); must match HEAD when there is one
 #   MQTTBRIDGE_BUILD_FLAVOUR  development (the default), release or acceptance;
-#                             release is refused unless the tree is clean and
-#                             HEAD carries the tag v<version>
+#                             in a checkout, release is refused unless the tree
+#                             is clean and HEAD carries the tag v<version>;
+#                             without one it needs the commit and the timestamp,
+#                             and the builder vouches for the rest
 #   SOURCE_DATE_EPOCH         the timestamp; the commit's own time by default
 #
 # Same commit, same timestamp, same flavour: same bytes, with or without .git.
+# A bundle of a release built from a source archive matches the released
+# package only when all three are given, the flavour being release.
 #
 set -euo pipefail
 
@@ -34,7 +38,7 @@ ALLOW_UNRELEASED=0
 for arg in "$@"; do
     case "$arg" in
         --allow-unreleased) ALLOW_UNRELEASED=1 ;;
-        -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "build-ipk.sh: unknown argument: $arg" >&2; exit 2 ;;
     esac
 done

@@ -24,7 +24,11 @@ tools/build-ipk.sh --allow-unreleased
 A package built this way is a `development` build: it carries its commit, and the receiver shows
 it as `0.3.0+g<first seven digits>` rather than as the release with the same number. Only the
 release workflow makes `release` builds, and `tools/build-ipk.sh --help` lists the variables a
-build without its git checkout is given its commit by.
+build without its git checkout is given its commit by. A package built from a source archive - the
+companion integration's bundle - is byte-identical to the released one only when it is given all
+three: `MQTTBRIDGE_BUILD_COMMIT` (the tag's commit), `MQTTBRIDGE_BUILD_FLAVOUR=release` and
+`SOURCE_DATE_EPOCH` (that commit's time). The integration's bundle builder and its CI rebuild must
+pass them together.
 
 **On a box** - the half that decides. Nothing counts as working until it has been seen working on
 real hardware:

@@ -39,8 +39,12 @@ receiver, and a guess made there would be a guess about somebody else's tree.
 build time, where it can still be checked: the tree is a git checkout whose tracked files are
 clean, its HEAD carries the tag `v<version>`, `SOURCE_DATE_EPOCH` - when given - is that commit's
 time, the version is a plain `N.N.N`, and the changelog has its section. A release built without a
-checkout cannot be checked that way, so it has to name its commit, and the builder that names it
-answers for the rest - that is the companion integration bundling a released plugin from its tag.
+checkout cannot be checked that way, so it has to name its commit and its time, and the builder
+that names them answers for the rest - clean tree, tag - which only the signed release index
+confirms afterwards. That is the companion integration bundling a released plugin from its tag, and
+its bundle is byte-identical to the released package only when it passes both
+`MQTTBRIDGE_BUILD_COMMIT` and `MQTTBRIDGE_BUILD_FLAVOUR=release` (with `SOURCE_DATE_EPOCH`, which it
+already passes).
 `development` is every other build of the production code: a pull request's CI run, a developer's
 package, a candidate. `acceptance` is a build made for a hardware acceptance run, which later
 changes may give test settings that a release must never carry. A consumer reads any flavour it
@@ -181,6 +185,12 @@ def _release_or_refuse(root, version, commit, checked_out, dirty, when):
         raise BuildRefused(
             "a release build must name its commit: build it in its git checkout, "
             f"or set {COMMIT_ENV}"
+        )
+    if when <= 0:
+        # Without a checkout there is no commit time to fall back on, and 0 is "unknown": a
+        # release published with an unknown time could never be ordered against another build.
+        raise BuildRefused(
+            f"a release build needs its commit's time: set {EPOCH_ENV} when there is no checkout"
         )
     if checked_out:
         if dirty:

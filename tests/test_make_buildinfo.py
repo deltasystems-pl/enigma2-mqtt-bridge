@@ -223,7 +223,7 @@ def test_a_release_without_its_changelog_section_is_refused(tool, tmp_path):
         _decide(tool, repo, MQTTBRIDGE_BUILD_FLAVOUR="release")
 
 
-@pytest.mark.parametrize("version", ["1.2.3rc1", "1.2.3-rc.1", "1.2.3+g0123456", "1.2"])
+@pytest.mark.parametrize("version", ["1.2.3rc1", "1.2.3-rc.1", "1.2.3+g0123456", "1.2", "x1.2.3"])
 def test_a_release_is_a_plain_version(tool, tmp_path, version):
     repo = _tree(tmp_path / "checkout", version=version)
     _git(repo, "init", "-q")
@@ -232,6 +232,50 @@ def test_a_release_is_a_plain_version(tool, tmp_path, version):
     _git(repo, "tag", "v" + version)
     with pytest.raises(tool.BuildRefused, match="plain N.N.N"):
         _decide(tool, repo, version=version, MQTTBRIDGE_BUILD_FLAVOUR="release")
+
+
+def test_a_release_tag_on_an_earlier_commit_is_refused(tool, checkout):
+    _git(checkout, "tag", "v" + VERSION)
+    (checkout / "notes.md").write_text("after the tag\n", encoding="utf-8")
+    _git(checkout, "add", "-A")
+    _git(checkout, "commit", "-q", "-m", "after the release")
+    with pytest.raises(tool.BuildRefused, match="does not carry v1.2.3"):
+        _decide(tool, checkout, MQTTBRIDGE_BUILD_FLAVOUR="release")
+
+
+def test_a_release_tag_on_a_later_commit_is_refused(tool, checkout):
+    released = _head(checkout)
+    (checkout / "notes.md").write_text("after\n", encoding="utf-8")
+    _git(checkout, "add", "-A")
+    _git(checkout, "commit", "-q", "-m", "the tagged one")
+    _git(checkout, "tag", "v" + VERSION)
+    _git(checkout, "checkout", "-q", released)
+    with pytest.raises(tool.BuildRefused, match="does not carry v1.2.3"):
+        _decide(tool, checkout, MQTTBRIDGE_BUILD_FLAVOUR="release")
+
+
+def test_a_release_stamped_later_than_its_commit_is_refused(tool, checkout):
+    _git(checkout, "tag", "v" + VERSION)
+    with pytest.raises(tool.BuildRefused, match="not the time of the commit"):
+        _decide(tool, checkout, MQTTBRIDGE_BUILD_FLAVOUR="release",
+                SOURCE_DATE_EPOCH=str(COMMITTED_AT + 1))
+
+
+def test_a_release_without_git_needs_its_changelog_section(tool, tmp_path):
+    exported = _tree(tmp_path / "exported", changelog=False)
+    with pytest.raises(tool.BuildRefused, match="CHANGELOG.md"):
+        _decide(tool, exported, MQTTBRIDGE_BUILD_FLAVOUR="release",
+                MQTTBRIDGE_BUILD_COMMIT="c" * 40, SOURCE_DATE_EPOCH=str(COMMITTED_AT))
+
+
+@pytest.mark.parametrize("given", [{}, {"SOURCE_DATE_EPOCH": "0"}])
+def test_a_release_without_git_needs_its_timestamp(tool, tmp_path, given):
+    # Without a checkout there is no commit time to fall back on, and 0 is "unknown": a release
+    # published with `time: null` could never be ordered against a development build of it.
+    exported = _tree(tmp_path / "exported")
+    with pytest.raises(tool.BuildRefused, match="SOURCE_DATE_EPOCH"):
+        _decide(tool, exported, MQTTBRIDGE_BUILD_FLAVOUR="release",
+                MQTTBRIDGE_BUILD_COMMIT="c" * 40, **given)
 
 
 def test_a_release_without_git_must_name_its_commit(tool, tmp_path):
