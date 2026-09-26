@@ -18,7 +18,8 @@ What is built and what is not:
 | Restoring while the interface runs (§3.4) | planned | planned |
 | The marker (§4) | not used | planned |
 | The restart rule (§5) | planned; **the released installer stops and starts the interface with `init 4` / `init 3` on every path** | planned |
-| Proof that the new plugin started (§6) | released (live `offline` and `online`, then `info` with the new version) | planned |
+| Proof that the new plugin started (§6) | **released** (live `online`, `info` with the new version, a new enigma2 pid) | planned |
+| Tests against the other program's released code (§2.5) | - | planned |
 
 Paths are the ones on the receiver. `<id>` is twelve lowercase hexadecimal digits
 (`secrets.token_hex(6)`), one per transaction; it names the snapshot, the self-update's transaction
@@ -53,7 +54,8 @@ A name is recognised by an exact match - `ha-installer-[0-9a-f]{12}`, `self-upda
 
 - **Claim**: `mkdir` of `.ha-installer.lock` with mode 0700 and no parents. If it exists, it is
   judged by the stale rule (§2.3). A stale lock is reclaimed by **renaming** it to
-  `.ha-installer.lock-stale-<pid>-<8 hex>`, judging the renamed directory again, and only then
+  `..ha-installer.lock-stale-<pid>-<8 hex>` - two dots: a dot is prefixed to the lock's own name,
+  which already starts with one - judging the renamed directory again, and only then
   deleting it and making a fresh one; a lock that turns out to be alive after all is renamed back
   and the claim fails busy. A rename has one winner, so two claimers can never both believe they
   hold the lock.
@@ -76,7 +78,11 @@ A name is recognised by an exact match - `ha-installer-[0-9a-f]{12}`, `self-upda
 | `target` | string | planned | The version being installed |
 
 A reader ignores keys it does not know. The released installer's helper reads only `boot_id`,
-`uptime` and `started`, so the three planned keys change nothing for it.
+`uptime` and `started`, so the three planned keys change nothing for it. 🔴 **The record is ASCII**:
+the released helper decodes it as ASCII, and a record it cannot decode falls to rule 1 of §2.3 -
+judged by the directory's age, so a live lock with a non-ASCII record looks stale after 30 minutes
+however fresh its heartbeat. A record **without** `origin` is the SSH installer's, and is reported
+as `started_by: ssh`.
 
 ### 2.3 When a lock is stale (released, and unchanged)
 
@@ -128,10 +134,11 @@ helper keeps the lock visibly alive:
 | an SSH install (no heartbeat) | a self-update | busy, unless stale by the same rule |
 | anybody, before a reboot | anybody | reclaimed at once (§2.3 rule 3) |
 
-These are tested against the **released** code, not a description of it: the plugin's tests carry a
-copy of the integration's released `installer_helper.py` with its MIT licence header, and assert
-that a lock with a fresh heartbeat is not stale for it at 31 minutes - also while a fake `opkg`
-blocks the helper - and that a lock with no heartbeat is.
+**Planned, not yet written:** these are to be tested against the **released** code, not a
+description of it. The self-update's pull request adds to the plugin's tests a copy of the
+integration's released `installer_helper.py`, with its MIT licence header, and asserts that a lock
+with a fresh heartbeat is not stale for it at 31 minutes - also while a fake `opkg` blocks the
+helper - and that a lock with no heartbeat is. No such test or copy exists yet.
 
 ### 2.6 opkg's own lock (released)
 
@@ -171,12 +178,23 @@ name, whatever the clock says, and the newest other one - and deletes only direc
 its own name exactly (§1). The lock, the other program's snapshots, a transaction directory and
 anything a person put there are never candidates.
 
-### 3.3 Which snapshot a rollback uses
+### 3.3 Which snapshot a rollback uses (planned)
 
-Always the one its own transaction took. A later transaction that reclaims a stale lock and finds
-the snapshot of the interrupted one beside it restores that snapshot only when the interrupted
-transaction's own record - its marker or its `status.json` - says it was restoring; this is how a
-forced reinstall recovers "an interrupted transaction of ours" (§5.2).
+Released today: each program's rollback restores the snapshot its own transaction took, and
+nothing recovers another transaction's.
+
+Planned, for the recovery of an interrupted transaction (§5.2): **restoring the same snapshot
+twice is safe** - a restore replaces the package's status stanza, its info files, the plugin
+directory and the hook wholesale - so the recovery restores the interrupted transaction's snapshot
+again whenever that transaction had begun to restore, or cannot say:
+
+- **the self-update** says where it was: its marker and its `status.json` carry the phase (§4);
+- **the SSH installer** writes no phase record, today or in this plan, so an interrupted installer
+  rollback is treated as "cannot say", and its newest snapshot is restored again.
+
+Either way the recovery first needs the lock, and the two programs' locks age differently: a dead
+self-update's lock is stale 30 minutes after its last heartbeat, but the SSH installer's lock has
+no heartbeat and stays fresh for **30 minutes from its claim** - the residual named in §5.2.
 
 ### 3.4 Restoring while the interface runs (planned)
 
@@ -232,11 +250,21 @@ package is installed and verified:
 **Why.** The image saves its settings - the channel being watched among them, as
 `config.tv.lastservice` - only on a **clean** quit: `StartEnigma.py` runs `stopService()`,
 `nav.shutdown()` and `configfile.save()` after the main loop returns. A signal stop never reaches
-that code. Measured on a receiver: after enigma2 was stopped by a signal, it came back on another
-channel than the one playing, because the saved channel was older. `init 4` stops the interface the
-same way, by signal; OpenWebif's restart (power state 3) opens the image's own `TryQuitMainloop`,
-which is the clean quit. Today every restart of the released installer - install, and both steps of
-its rollback - is `init 4` then `init 3`, with nothing recorded and nothing restored.
+that code (read from the image's code). Measured on a receiver: after enigma2 was stopped by a
+signal, it came back on another channel than the one playing, because the saved channel was older.
+OpenWebif's restart (power state 3) opens the image's own `TryQuitMainloop`, which is the clean quit
+(read from OpenWebif's code). Today every restart of the released installer - install, and both
+steps of its rollback - is `init 4` then `init 3`, with nothing recorded and nothing restored.
+
+**Two hypotheses this rule rests on, not yet measured.** Both are to be measured on a receiver
+before the code that relies on them merges (spike S2 in the plan); until then they are hypotheses,
+and the rule is built so that a wrong answer costs a zap, not a lost channel:
+
+- **H1 - `init 4` loses unsaved settings like any signal stop.** Expected from the above: init stops
+  the respawn entry by signal, so the image's save never runs. Not measured.
+- **H2 - the image reads `config.tv.lastservice` at start**, so a service written into the settings
+  while enigma2 is stopped is the one it comes back on. Not measured. If it is wrong, R3's zap back
+  restores the channel instead.
 
 ### 5.1 The three cases
 
@@ -244,7 +272,7 @@ its rollback - is `init 4` then `init 3`, with nothing recorded and nothing rest
 |---|---|---|
 | **R1 - restart**: the interface is running and healthy, and only the plugin's files changed | The plugin: `TryQuitMainloop(session, 3, timeout=60, default_yes=False)`. The SSH paths: the preflight refuses while recording, streaming, in standby, or with a timer due within 10 minutes; then OpenWebif's power state 3, called on the receiver itself, and **at most 60 s** for the enigma2 pid to change | A clean quit runs `configfile.save()` |
 | R1, no new pid within 60 s | The image asked a question on the television (timeshift, a background job). The installer **does not force it**: it restores the plugin's files and opkg metadata as in §3.4, reads the pid again, releases the lock and says so - that the receiver asked whether to restart, that the update was withdrawn and the previous plugin is running, and that the question may still be on the television, where either answer is safe | Nothing was stopped |
-| **R2 - stop**: the interface must not run - a rollback that puts the settings block back, or a forced reinstall into an interface that keeps crashing | Record the playing service and the standby state (below); `init 4`; do the work; write the recorded service into `config.tv.lastservice` while enigma2 is stopped; `init 3`; wait for a new pid | The image reads `lastservice` when it starts |
+| **R2 - stop**: the interface must not run - a rollback that puts the settings block back, or a forced reinstall into an interface that keeps crashing | Record the playing service and the standby state (below); `init 4`; do the work; write the recorded service into `config.tv.lastservice` while enigma2 is stopped; `init 3`; wait for a new pid | Hypothesis H2: the image reads `lastservice` when it starts. R3 covers it being wrong |
 | **R3 - verify**, after every restart on every path | Compare the playing service and the standby state with the record. A different service: zap back to the recorded one through OpenWebif, once, and compare again. Standby recorded: enter it through OpenWebif (power state 5) | By effect, not by assumption |
 
 - **A restart is judged by the enigma2 pid changing**, never by the exit status of the call that
@@ -275,37 +303,62 @@ its rollback - is `init 4` then `init 3`, with nothing recorded and nothing rest
   `TryQuitMainloop`'s own callback, standby from the image's standby flag, and "an update is being
   applied" from the plugin's own state.
 
-### 5.2 R2 runs as one unit, and an interruption ends with the interface running
+### 5.2 R2 runs as one unit, and an interruption ends with the interface running (planned)
 
 Between `init 4` and `init 3` the household has no picture. Nothing that can be interrupted from
-outside the receiver may sit between the two:
+outside the receiver may sit between the two. What a shell does when it is interrupted was
+measured for this section - busybox 1.36.1 `sh` and `dash` on a development machine, not on a
+receiver, with a stand-in script in which "`init 3`" writes a marker and "the restore" is a child
+process:
 
-- **The SSH installer** runs the whole of R2 - the stop, the restore, the `lastservice` write and
-  the start - as **one script started by one SSH command**, never as several. Its trap, set
-  **before** `init 4` on `EXIT HUP INT TERM`, writes the recorded `lastservice` if that has not
-  happened yet and runs `init 3`. A dropped connection or a Home Assistant restart in the middle
-  therefore ends in runlevel 3. (The released installer's install restart already runs under such a
-  trap; its rollback does not - it sends `init 4` and `init 3` as two separate commands, which is the
-  case this rule removes.)
+| What happened to the script | `trap ... EXIT HUP INT TERM` | the same plus `PIPE` |
+|---|---|---|
+| The reader of its output went away (a dropped connection, no signal) | the shell died of `SIGPIPE` on its next write and **the trap did not run** | the trap ran |
+| `HUP` or `TERM` to the shell while the restore child ran | the trap ran **at once, while the child was still running**; the child finished after the shell had exited | the same |
+| `HUP` or `TERM` to the whole process group | the child was killed too - the restore cut off - and then the trap ran | the same |
+| After a signal trap that does not end in `exit` | the script **carried on** with its next step, and the `EXIT` trap ran a second time | the same |
+
+So:
+
+- **The SSH installer starts R2 detached**, as one script in a session of its own
+  (`start-stop-daemon -S -b`, as the self-update's helper starts), with its output going to a file
+  on the receiver from its first line; the installer follows it by reading a status file over SSH.
+  A dropped connection or a Home Assistant restart then sends it nothing at all. It is **one**
+  script started once: the stop, the restore, the `lastservice` write and the start, never several
+  SSH commands. (The released installer's rollback sends `init 4` and `init 3` as two separate
+  commands, which is the case this rule removes; its install restart already runs under a trap.)
 - **The plugin's helper** runs R2 inside itself - detached from enigma2 and from any SSH session -
-  with handlers for `HUP`, `INT` and `TERM` that do the same.
+  with handlers for `HUP`, `INT`, `TERM` and `PIPE` that do the same as the trap below.
+- **The trap is still there**, set **before** `init 4`, on `EXIT HUP INT TERM PIPE`. It **waits for
+  a restore still running** - the script starts the restore as a child, keeps its pid, and the trap
+  waits for that pid - then writes the recorded `lastservice` if that has not happened yet, runs
+  `init 3`, and ends in `exit`. It is idempotent, because the `EXIT` trap runs it again.
 - **Order inside**: the settings block is restored first and `lastservice` written after it, each
-  by an atomic rename, so a restore can never overwrite the channel and a trap never meets a
-  half-written settings file.
-- **What the trap cannot cover**: a `SIGKILL`, or power, between the two. The receiver is then in
-  runlevel 4 with a lock, a marker or a transaction directory of this project's left behind. A
-  forced reinstall recognises exactly that state as "ours" and recovers it with `init 3` and R3; in
-  runlevel 4 **without** anything of ours it refuses, because somebody stopped the interface on
-  purpose.
-- An interruption that fired the trap before the restore finished starts the interface on a
-  partly restored plugin: the picture comes first. The lock and the snapshot are still there, and
-  the next transaction restores from them.
-- **Test**: a `HUP` delivered after `init 4` ends in runlevel 3 with the recorded `lastservice`
-  written.
+  by an atomic rename, so a restore can never overwrite the channel, and waiting for the restore
+  keeps the trap from writing the channel under a restore that then renames the settings file over
+  it.
+- **Not measured**: which signal, if any, dropbear sends a command without a terminal when its
+  connection closes. The detached start makes the answer not matter; the trap list covers each
+  possibility that was measured.
+- **What the trap cannot cover**: a `SIGKILL`, or power, between `init 4` and `init 3`. Power
+  reboots the receiver, and a reboot reclaims every lock at once (§2.3 rule 3). A `SIGKILL` leaves
+  the receiver in runlevel 4 with a lock, a marker or a transaction directory of this project's. A
+  forced reinstall recognises that state as "ours" and recovers it with `init 3` and R3 - but it
+  needs the lock first, and 🔴 **the SSH installer's lock has no heartbeat, so it stays fresh for up
+  to 30 minutes after its claim**: that long without a picture is the residual of a killed
+  installer R2. Whether the R2 script should keep that lock alive itself, so a dead one is noticed
+  sooner, is decided where it is built. In runlevel 4 **without** anything of ours the forced
+  reinstall refuses, because somebody stopped the interface on purpose.
+- An interruption the trap does cover, arriving before the restore has begun, starts the interface
+  on the plugin as it was: the picture comes first. The lock and the snapshot are still there, and
+  the recovery of §3.3 restores from them.
+- **Test**: **close the SSH connection** between `init 4` and `init 3` - not a signal delivered by
+  the test - and the receiver ends in runlevel 3, with the restore complete and the recorded
+  `lastservice` written.
 
-### 5.3 The SSH path has no doors - a bounded residual
+### 5.3 The SSH path has no doors - a bounded residual (planned R1)
 
-The plugin running during an SSH update - 0.2.0, 0.3.x, or any plugin that is not itself driving
+With the planned R1 restart, the plugin running during an SSH update - 0.2.0, 0.3.x, or any plugin that is not itself driving
 the transaction - keeps running with the new files on disk from `opkg` until the restart: a few
 seconds normally, **up to 60 seconds** when the image asks a question (with `init 4` it was a few
 seconds). A module that plugin imports for the first time in that window is new code in an old
@@ -319,7 +372,7 @@ with "an update is being applied on the receiver" until the restart or the withd
 
 | Path | Proof |
 |---|---|
-| SSH installer (released) | Within 120 s of the restart, the plugin's `availability` going `offline` and back `online` as live messages (a retained replay does not count), then a live `info` with the expected `info.plugin` and `ha_mode: integration`. Planned: a new enigma2 pid as well, and `info.build.commit` when the target publishes one |
+| SSH installer (released) | Within 120 s of the restart: the plugin's `availability` back `online` as a live message (a retained replay does not count) - preceded by a live `offline` only when the plugin was running before the install; then a live `info` with the expected `info.plugin` and `ha_mode: integration`. After that, a new SSH connection must find an enigma2 pid that was not running before the restart. Planned: `info.build.commit` too, when the target publishes one |
 | Self-update, a target that knows the marker (planned) | The new plugin writes `started`, with its version and build commit, into the transaction's `status.json`; both must match the request |
 | Self-update, a target that does not (0.2.0, 0.3.x - planned) | The **new** enigma2 pid holds the plugin's log file open (`/proc/<pid>/fd`), polled every 2 s through the whole window, because a log rotation closes the file for a moment. Both released plugins configure logging before anything else at start, whether or not they are switched on and whether or not the broker answers. When neither log path was writable before the restart, those plugins hold no file, and the proof is the OpenWebif hook answering anything but 404 after the pid change. The transaction's record says which proof it used. A log line is corroboration only, read from the byte offset recorded at the pid change - never matched by its timestamp, which a broker client can forge into the log |
 

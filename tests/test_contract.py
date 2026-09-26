@@ -13,6 +13,8 @@ break. A checker that passes the real files and nothing else would pass an empty
 import copy
 import importlib.util
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -99,16 +101,55 @@ def test_the_settings_are_the_configs(contract):
 
 
 def test_the_capabilities_are_the_bridges(contract):
-    # The same enumeration test_discovery_templates.every_capability() makes, which its own
-    # test keeps complete: one per publisher, plus the three no publisher stands behind.
-    from MQTTBridge import bridge, zaphistory
+    # Imported, not copied: test_discovery_templates keeps this enumeration complete - every
+    # `*_CAPABILITY` constant must be in it - so one list is guarded, and this reads that list.
+    from test_discovery_templates import every_capability
+
+    assert every_capability() == contract["capabilities"]
+
+
+def test_the_setting_types_are_the_configs(contract):
+    from MQTTBridge import config
+
+    for name, entry in contract["settings"].items():
+        kind = config.SETTING_KINDS[name]
+        if kind == "choice":
+            expected = "enum(" + "|".join(config.CHOICES[name]) + ")"
+        else:
+            expected = kind
+        assert entry["type"] == expected, name
+
+
+def test_the_info_members_are_build_infos(contract):
+    # Read from the source rather than by running it: build_info needs a whole bridge, and its
+    # member list is a literal. A member added there alone fails here.
+    import ast
+
+    tree = ast.parse((REPO_ROOT / "src" / "MQTTBridge" / "bridge.py").read_text(encoding="utf-8"))
+    builds = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "build_info"
+    ]
+    assert len(builds) == 1
+    returned = [node.value for node in ast.walk(builds[0]) if isinstance(node, ast.Return)]
+    assert len(returned) == 1 and isinstance(returned[0], ast.Dict)
+    keys = [key.value for key in returned[0].keys]
+    assert sorted(keys) == sorted(contract["info_members"])
+
+
+def test_the_topics_that_are_not_json_are_the_raw_ones(contract):
+    # `availability` is the bridge's own; every other topic published as raw bytes is named in
+    # its publisher's `raw`. Topic names and retain flags have no such list in the code - they
+    # are held to the prose only.
     from MQTTBridge.publishers import PUBLISHER_CLASSES
 
-    names = set(bridge.CORE_CAPABILITIES)
-    names.update(publisher.name for publisher in PUBLISHER_CLASSES if publisher.name)
-    names.update({bridge.MESSAGE_CAPABILITY, bridge.UNINSTALL_CAPABILITY})
-    names.add(zaphistory.CLEAR_CAPABILITY)
-    assert sorted(names) == contract["capabilities"]
+    raw = {"availability"}
+    for publisher in PUBLISHER_CLASSES:
+        raw.update(getattr(publisher, "raw", ()))
+    not_json = {
+        name for name, entry in contract["state_topics"].items() if entry["payload"] != "json"
+    }
+    assert not_json == raw
 
 
 # ------------------------------------------------- a deliberately broken pair --
@@ -207,6 +248,54 @@ def test_a_planned_item_that_is_already_implemented_is_refused(checker, topics_t
     assert _mentions(problems, "planned", "zap", "already")
 
 
+def test_topics_disagreeing_with_itself_on_cmd_config_is_named(checker, topics_text, contract):
+    # The `settings` row and `cmd/config`'s payload both spell out the writable keys.
+    assert '"screenshot_delay": 4, ' in topics_text
+    broken = topics_text.replace('"screenshot_delay": 4, ', "", 1)
+    problems = checker.check_consistency(broken, contract)
+    assert _mentions(problems, "disagrees with itself", "cmd/config")
+
+
+def test_topics_disagreeing_with_itself_on_read_only_members_is_named(
+    checker, topics_text, contract
+):
+    # The `settings` row and the read-only table both name the read-only members.
+    lines = topics_text.splitlines(keepends=True)
+    row = [line for line in lines if line.startswith("| `uninstall_allowed` | 0.3.0 |")]
+    assert len(row) == 1
+    broken = "".join(line for line in lines if line is not row[0])
+    problems = checker.check_consistency(broken, contract)
+    assert _mentions(problems, "disagrees with itself", "read-only")
+
+
+def test_an_unknown_part_of_the_data_is_named(checker, topics_text, contract):
+    contract["hidden_promises"] = {"x": 1}
+    problems = checker.check_consistency(topics_text, contract)
+    assert _mentions(problems, "has a part", "hidden_promises")
+
+
+def test_an_exception_missing_from_the_data_is_named(checker, topics_text, contract):
+    contract["exceptions"] = [
+        row for row in contract["exceptions"] if row["name"] != "timers-lists-finished"
+    ]
+    problems = checker.check_consistency(topics_text, contract)
+    assert _mentions(problems, "exception", "timers-lists-finished", "contract.json")
+
+
+def test_an_exception_missing_from_the_prose_is_named(checker, topics_text, contract):
+    contract["exceptions"].append({"name": "quietly-different", "release": "unreleased"})
+    problems = checker.check_consistency(topics_text, contract)
+    assert _mentions(problems, "exception", "quietly-different", "TOPICS.md")
+
+
+def test_an_exception_dated_differently_is_named(checker, topics_text, contract):
+    for row in contract["exceptions"]:
+        if row["name"] == "timers-lists-finished":
+            row["release"] = "0.3.0"
+    problems = checker.check_consistency(topics_text, contract)
+    assert _mentions(problems, "exception", "timers-lists-finished", "release")
+
+
 # ------------------------------------------------ against the previous release --
 
 
@@ -263,3 +352,190 @@ def test_a_plan_may_be_dropped(checker, contract):
     newer = copy.deepcopy(contract)
     newer["planned"] = []
     assert checker.compare(contract, newer) == []
+
+
+def test_a_setting_retyped_is_refused(checker, contract):
+    newer = copy.deepcopy(contract)
+    newer["settings"]["publish_keys"]["type"] = "int"
+    problems = checker.compare(contract, newer)
+    assert _mentions(problems, "setting", "publish_keys", "changed")
+
+
+def test_a_new_setting_choice_is_an_addition(checker, contract):
+    newer = copy.deepcopy(contract)
+    newer["settings"]["screenshot"]["type"] = "enum(off|on_zap|interval|on_record)"
+    assert checker.compare(contract, newer) == []
+
+
+def test_a_setting_choice_taken_away_is_refused(checker, contract):
+    newer = copy.deepcopy(contract)
+    newer["settings"]["screenshot"]["type"] = "enum(off|on_zap)"
+    problems = checker.compare(contract, newer)
+    assert _mentions(problems, "setting", "screenshot", "interval")
+
+
+def test_a_removed_outside_topic_is_refused(checker, contract):
+    newer = copy.deepcopy(contract)
+    newer["other_topics"] = [
+        topic for topic in newer["other_topics"] if not topic.startswith("enigma2mqtt/")
+    ]
+    problems = checker.compare(contract, newer)
+    assert _mentions(problems, "topic", "enigma2mqtt/discovery/<node>/config", "removed")
+
+
+def test_a_dropped_exception_is_refused(checker, contract):
+    newer = copy.deepcopy(contract)
+    newer["exceptions"] = [
+        row for row in newer["exceptions"] if row["name"] != "zap-moves-channel-list"
+    ]
+    assert _mentions(checker.compare(contract, newer), "exception", "zap-moves-channel-list")
+
+
+def test_an_unreleased_exception_may_be_dated_once(checker, contract):
+    newer = copy.deepcopy(contract)
+    for row in newer["exceptions"]:
+        if row["release"] == "unreleased":
+            row["release"] = "0.4.0"
+    assert checker.compare(contract, newer) == []
+    redated = copy.deepcopy(newer)
+    for row in redated["exceptions"]:
+        if row["release"] == "0.4.0":
+            row["release"] = "0.4.1"
+    assert _mentions(checker.compare(newer, redated), "exception", "re-dated")
+
+
+# ------------------------------------------------------ the command line, in git --
+#
+# The CI job runs `tools/check-contract.py --previous tag`. Everything the job relies on - the
+# exit status, finding the tag, refusing to call "I could not compare" a pass - is exercised
+# here through the real script in a throwaway repository, as a separate process.
+
+GIT = ("git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+       "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-c", "init.defaultBranch=main")
+
+
+def _git(repo, *args):
+    subprocess.run([*GIT, *args], cwd=repo, check=True, capture_output=True)
+
+
+def _write(repo, topics, contract_data):
+    (repo / "docs").mkdir(exist_ok=True)
+    (repo / "docs" / "TOPICS.md").write_text(topics, encoding="utf-8")
+    target = repo / "docs" / "contract.json"
+    if contract_data is None:
+        target.unlink(missing_ok=True)
+    else:
+        target.write_text(json.dumps(contract_data, indent=2) + "\n", encoding="utf-8")
+
+
+def _commit(repo, message, tag=None):
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", message)
+    if tag:
+        _git(repo, "tag", tag)
+
+
+def _run(repo, *args):
+    result = subprocess.run(
+        [sys.executable, str(CHECKER), "--root", str(repo), *args],
+        capture_output=True, text=True,
+    )
+    return result.returncode, result.stdout + result.stderr
+
+
+@pytest.fixture()
+def repo(tmp_path):
+    _git(tmp_path, "init", "-q")
+    return tmp_path
+
+
+def _without_reboot(topics_text, contract):
+    lines = topics_text.splitlines(keepends=True)
+    kept = [line for line in lines if not line.startswith("| `reboot` |")]
+    assert len(kept) == len(lines) - 1
+    smaller = copy.deepcopy(contract)
+    del smaller["commands"]["reboot"]
+    return "".join(kept), smaller
+
+
+def test_cli_a_removal_against_the_release_tag_fails(repo, topics_text, contract):
+    _write(repo, topics_text, contract)
+    _commit(repo, "release", tag="v1.0.0")
+    _write(repo, *_without_reboot(topics_text, contract))
+    _commit(repo, "drop reboot")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 1, output
+    assert "command 'reboot' was removed inside contract major 1" in output
+    assert "against v1.0.0" in output
+
+
+def test_cli_an_unchanged_contract_passes_against_the_tag(repo, topics_text, contract):
+    _write(repo, topics_text, contract)
+    _commit(repo, "release", tag="v1.0.0")
+    _commit(repo, "later")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 0, output
+    assert "keeps every promise v1.0.0 made" in output
+
+
+def test_cli_an_unknown_ref_cannot_be_a_pass(repo, topics_text, contract):
+    _write(repo, topics_text, contract)
+    _commit(repo, "release", tag="v1.0.0")
+    status, output = _run(repo, "--previous", "v9.9.9-typo")
+    assert status == 2, output
+    assert "v9.9.9-typo" in output and "not a commit" in output
+
+
+def test_cli_no_tags_cannot_be_a_pass(repo, topics_text, contract):
+    # What a checkout without `fetch-depth: 0` looks like to the job.
+    _write(repo, topics_text, contract)
+    _commit(repo, "untagged")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 2, output
+    assert "no release tag is reachable" in output
+
+
+def test_cli_nothing_to_compare_only_before_any_tag_carries_the_file(
+    repo, topics_text, contract
+):
+    _write(repo, topics_text, None)
+    _commit(repo, "before the contract file", tag="v0.3.0")
+    _write(repo, topics_text, contract)
+    _commit(repo, "the contract file")
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 0, output
+    assert "no release tag carries docs/contract.json yet (checked v0.3.0)" in output
+
+
+def test_cli_a_newer_tag_without_the_file_fails(repo, topics_text, contract):
+    _write(repo, topics_text, contract)
+    _commit(repo, "release", tag="v1.0.0")
+    _write(repo, topics_text, None)
+    _commit(repo, "the file went missing", tag="v1.1.0")
+    _write(repo, topics_text, contract)
+    status, output = _run(repo, "--previous", "tag")
+    assert status == 2, output
+    assert "v1.1.0" in output and "although v1.0.0 did" in output
+
+
+def test_cli_an_explicit_ref_without_the_file_fails(repo, topics_text, contract):
+    _write(repo, topics_text, None)
+    _commit(repo, "old", tag="v0.3.0")
+    _write(repo, topics_text, contract)
+    status, output = _run(repo, "--previous", "v0.3.0")
+    assert status == 2, output
+    assert "carries no docs/contract.json" in output
+
+
+def test_cli_a_disagreement_alone_exits_one(repo, topics_text, contract):
+    broken = copy.deepcopy(contract)
+    del broken["commands"]["uninstall"]
+    _write(repo, topics_text, broken)
+    status, output = _run(repo)
+    assert status == 1, output
+    assert "command 'uninstall' is in docs/TOPICS.md but not in docs/contract.json" in output
+
+
+def test_cli_an_unknown_option_exits_two(repo):
+    status, _output = _run(repo, "--previus", "tag")
+    assert status == 2

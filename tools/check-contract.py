@@ -5,24 +5,33 @@
 contract written for a machine: every state topic with its payload kind and retain flag, every
 command, every `info` member with its type, every setting with its type and whether `cmd/config`
 may write it, every capability name, the fixed topics outside the node's tree, the contract major,
-and the planned additions. Two checks run on it:
+the named in-major exceptions, and the planned additions. Two checks run on it:
 
 1. **Agreement.** The prose is parsed at the places where it states the contract - the state-topic
    headings of section 1, the command table of section 2, the `info` field tables, the settings
    row and the read-only table, the capability sentence, the announcement and discovery topics,
-   the "Contract version" section and the planned table - and every difference from the data is a
-   problem. Neither side is the master: a change to one without the other fails, whichever it is.
-2. **Promises kept.** Against `docs/contract.json` at the previous release tag: inside one contract
-   major nothing may be removed and nothing retyped - a topic's payload kind or retain flag, an
-   `info` member's type, a setting's type or the side of `cmd/config` it is on. A higher major
-   allows anything; a lower one is refused. Planned rows are promises about a shape, not features,
-   and are not compared. A tag that carries no `docs/contract.json` (every release before the one
-   that introduced it) is reported and passes.
+   the "Contract version" section with its exception table, and the planned table - and every
+   difference from the data is a problem. Neither side is the master: a change to one without the
+   other fails, whichever it is.
+2. **Promises kept** (`--previous`). Against `docs/contract.json` at the previous release tag:
+   inside one contract major nothing may be removed and nothing retyped - a topic's payload kind or
+   retain flag, an `info` member's type, a setting's type or the side of `cmd/config` it is on - and
+   no named exception may be dropped or re-dated. A new choice of an enumerated setting is an
+   addition; a choice taken away is a retype. A higher major allows anything; a lower one is
+   refused. Planned rows are promises about a shape, not features, and are not compared.
+
+**It fails closed.** Exit status 0: the files agree and, when asked, the previous release's
+promises are kept. 1: a contract problem, each one printed. 2: the comparison that was asked for
+could not be made - an unknown ref, no release tag reachable (a checkout without tags), or a tag
+that should carry `docs/contract.json` and does not. "Nothing to compare against" is a pass only in
+one case, said so in the output: no release tag in the repository carries the file yet, which is
+true until the first release that ships it.
 
 What the data deliberately does not hold: the fields of each state topic's payload. They are
 tables in the prose, several with nested members, and a type there is a sentence ("integer or
 `null`") more often than a word. The `info` members are the exception because a consumer reads
-them to decide what the box can do.
+them to decide what the box can do. So a change to a payload field - which is where most consumer
+breaks happen - is caught by review against TOPICS.md, not by this checker.
 
 Standard library only, Python 3.9, because it runs in the same test matrix as the plugin.
 """
@@ -285,6 +294,18 @@ def _other_topics(text: str) -> list[str]:
     return sorted([announcement[0]] + [_first_name(row[0]) for row in tables[0]])
 
 
+def _exceptions(text: str) -> list[dict]:
+    """The named in-major exceptions: `| Exception | Release | ...` in "Contract version"."""
+    tables = _tables(
+        _top_section(text, "## Contract version"), re.compile(r"^\| Exception \| Release \|")
+    )
+    if len(tables) != 1:
+        raise ContractParseError(
+            "the Contract version section has no single `| Exception | Release |` table"
+        )
+    return [{"name": _first_name(row[0]), "release": row[1].strip()} for row in tables[0]]
+
+
 def _planned(text: str) -> list[dict]:
     tables = _tables(_top_section(text, "## 5."), re.compile(r"^\| Kind \| Name \|"))
     if len(tables) != 1:
@@ -319,6 +340,7 @@ def _parse(text: str) -> tuple[dict, list[str]]:
         "settings": settings,
         "capabilities": _capabilities(text),
         "other_topics": _other_topics(text),
+        "exceptions": _exceptions(text),
         "planned": _planned(text),
     }
     return parsed, problems
@@ -392,7 +414,44 @@ def check_consistency(topics_text: str, contract: dict) -> list[str]:
                 f"planned {kind} {name!r} is already implemented: it is in the contract's "
                 f"{LABELS[part]}s, so it cannot also be a plan"
             )
+
+    prose_exceptions = {row["name"]: row["release"] for row in parsed["exceptions"]}
+    data_exceptions = _exception_map(contract)
+    for name in sorted(set(prose_exceptions) | set(data_exceptions)):
+        if name not in data_exceptions:
+            problems.append(
+                f"exception {name!r} is in docs/TOPICS.md but not in docs/contract.json"
+            )
+        elif name not in prose_exceptions:
+            problems.append(
+                f"exception {name!r} is in docs/contract.json but not in docs/TOPICS.md"
+            )
+        elif prose_exceptions[name] != data_exceptions[name]:
+            problems.append(
+                f"exception {name!r} differs: docs/TOPICS.md says release "
+                f"{prose_exceptions[name]!r}, docs/contract.json says {data_exceptions[name]!r}"
+            )
     return problems
+
+
+def _exception_map(contract: dict) -> dict:
+    return {
+        row.get("name"): row.get("release")
+        for row in contract.get("exceptions", [])
+        if isinstance(row, dict)
+    }
+
+
+ENUM = re.compile(r"^enum\((.*)\)$")
+
+
+def _enum_choices(value):
+    """The choices of an `enum(a|b)` setting type, or None for any other type."""
+    if isinstance(value, dict) and isinstance(value.get("type"), str):
+        match = ENUM.match(value["type"])
+        if match:
+            return set(match.group(1).split("|"))
+    return None
 
 
 def compare(old: dict, new: dict) -> list[str]:
@@ -416,6 +475,17 @@ def compare(old: dict, new: dict) -> list[str]:
             )
         for name in sorted(set(before) & set(after)):
             was, now = before[name], after[name]
+            old_choices, new_choices = _enum_choices(was), _enum_choices(now)
+            if old_choices is not None and new_choices is not None:
+                # A new choice is an addition, as a new value of any enumeration is (TOPICS.md,
+                # Contract version); a choice taken away is not.
+                for choice in sorted(old_choices - new_choices):
+                    problems.append(
+                        f"{label} {name!r} lost the choice {choice!r} inside contract major "
+                        f"{new_major}; that needs a new major"
+                    )
+                was = {key: value for key, value in was.items() if key != "type"}
+                now = {key: value for key, value in now.items() if key != "type"}
             if isinstance(was, dict) and isinstance(now, dict):
                 # `since` may be corrected; every other key is a promise.
                 was = {key: value for key, value in was.items() if key != "since"}
@@ -425,21 +495,88 @@ def compare(old: dict, new: dict) -> list[str]:
                     f"{label} {name!r} changed inside contract major {new_major}, from "
                     f"{json.dumps(was)} to {json.dumps(now)}; that needs a new major"
                 )
+
+    # A named exception is part of the record for good: a consumer upgrading across it needs to
+    # find it. It may only move from "unreleased" to the release that shipped it.
+    old_exceptions, new_exceptions = _exception_map(old), _exception_map(new)
+    for name in sorted(old_exceptions):
+        if name not in new_exceptions:
+            problems.append(f"exception {name!r} was dropped from the record")
+        elif old_exceptions[name] != "unreleased" and new_exceptions[name] != old_exceptions[name]:
+            problems.append(
+                f"exception {name!r} was re-dated from {old_exceptions[name]!r} "
+                f"to {new_exceptions[name]!r}"
+            )
     return problems
 
 
 # -------------------------------------------------------------------- CLI --
 
 
-def _git(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, check=False
-    )
+EXIT_OK = 0
+EXIT_PROBLEMS = 1
+EXIT_CANNOT_COMPARE = 2
+RELEASE_TAGS = "v[0-9]*"
 
 
-def _previous_tag() -> str | None:
-    result = _git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*")
-    return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+class CannotCompare(RuntimeError):
+    """The comparison that was asked for could not be made. Never a pass."""
+
+
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(
+            ["git", *args], cwd=root, capture_output=True, text=True, check=False
+        )
+    except OSError as error:
+        raise CannotCompare(f"git could not be run: {error}") from error
+
+
+def _carries_contract(root: Path, ref: str) -> bool:
+    return _git(root, "cat-file", "-e", f"{ref}:{CONTRACT_PATH}").returncode == 0
+
+
+def _previous_contract(root: Path, previous: str) -> tuple[str | None, dict | None]:
+    """(ref, contract at ref), or (None, None) in the one case where nothing is legitimate.
+
+    Raises CannotCompare for everything else: an unknown ref, no release tag reachable, or a
+    release tag without the file although an earlier one had it.
+    """
+    if previous != "tag":
+        if _git(root, "rev-parse", "--verify", "--quiet", f"{previous}^{{commit}}").returncode:
+            raise CannotCompare(f"{previous!r} is not a commit, tag or branch in this repository")
+        if not _carries_contract(root, previous):
+            raise CannotCompare(f"{previous} carries no {CONTRACT_PATH} to compare against")
+    else:
+        reachable = _git(root, "tag", "--list", RELEASE_TAGS, "--merged", "HEAD")
+        if reachable.returncode or not reachable.stdout.split():
+            raise CannotCompare(
+                "no release tag is reachable from HEAD - a checkout without tags? "
+                "(the CI job needs `fetch-depth: 0`)"
+            )
+        described = _git(root, "describe", "--tags", "--abbrev=0", "--match", RELEASE_TAGS)
+        previous = described.stdout.strip()
+        if described.returncode or not previous:
+            raise CannotCompare(f"git describe found no release tag: {described.stderr.strip()}")
+        if not _carries_contract(root, previous):
+            every = _git(root, "tag", "--list", RELEASE_TAGS).stdout.split()
+            carrying = [tag for tag in every if _carries_contract(root, tag)]
+            if carrying:
+                raise CannotCompare(
+                    f"{previous}, the newest release tag reachable from HEAD, carries no "
+                    f"{CONTRACT_PATH}, although {', '.join(sorted(carrying))} did"
+                )
+            print(
+                f"no release tag carries {CONTRACT_PATH} yet (checked {', '.join(sorted(every))});"
+                " nothing to compare against - legitimate only until the first release that"
+                " ships the file"
+            )
+            return None, None
+    shown = _git(root, "show", f"{previous}:{CONTRACT_PATH}")
+    try:
+        return previous, json.loads(shown.stdout)
+    except ValueError as error:
+        raise CannotCompare(f"{CONTRACT_PATH} at {previous} is not JSON: {error}") from error
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -447,13 +584,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--previous",
         metavar="REF",
-        help="compare against docs/contract.json at this git ref; "
-        "'tag' means the newest v* tag reachable from HEAD",
+        help="also compare against docs/contract.json at this git ref; "
+        "'tag' means the newest release tag (v*) reachable from HEAD",
+    )
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=REPO_ROOT,
+        help="the repository to check (default: the one this script is in)",
     )
     args = parser.parse_args(argv)
+    root = args.root
 
-    topics_text = (REPO_ROOT / TOPICS_PATH).read_text(encoding="utf-8")
-    contract = json.loads((REPO_ROOT / CONTRACT_PATH).read_text(encoding="utf-8"))
+    topics_text = (root / TOPICS_PATH).read_text(encoding="utf-8")
+    contract = json.loads((root / CONTRACT_PATH).read_text(encoding="utf-8"))
     problems = check_consistency(topics_text, contract)
     for line in problems:
         print(f"{TOPICS_PATH} vs {CONTRACT_PATH}: {line}")
@@ -461,22 +605,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{TOPICS_PATH} and {CONTRACT_PATH} agree (contract major {contract['contract']})")
 
     if args.previous:
-        ref = _previous_tag() if args.previous == "tag" else args.previous
-        if ref is None:
-            print("no release tag is reachable from HEAD; nothing to compare against")
-        else:
-            shown = _git("show", f"{ref}:{CONTRACT_PATH}")
-            if shown.returncode != 0:
-                print(f"{ref} carries no {CONTRACT_PATH}; nothing to compare against")
-            else:
-                old = json.loads(shown.stdout)
-                found = compare(old, contract)
-                for line in found:
-                    print(f"{CONTRACT_PATH} against {ref}: {line}")
-                if not found:
-                    print(f"{CONTRACT_PATH} keeps every promise {ref} made")
-                problems += found
-    return 1 if problems else 0
+        try:
+            ref, old = _previous_contract(root, args.previous)
+        except CannotCompare as error:
+            print(f"cannot compare with the previous release: {error}")
+            return EXIT_CANNOT_COMPARE
+        if old is not None:
+            found = compare(old, contract)
+            for line in found:
+                print(f"{CONTRACT_PATH} against {ref}: {line}")
+            if not found:
+                print(f"{CONTRACT_PATH} keeps every promise {ref} made")
+            problems += found
+    return EXIT_PROBLEMS if problems else EXIT_OK
 
 
 if __name__ == "__main__":

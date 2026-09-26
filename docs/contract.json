@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "about": "The topic contract of docs/TOPICS.md as data: the contract major, every state topic (payload kind, retain flag), command, info member with its type, setting with its type and whether cmd/config may write it, capability name, topic outside the node's tree, and the planned additions of TOPICS.md section 5. Topic names are relative to <base>/<node>/. 'since' appears only where TOPICS.md states it. tools/check-contract.py fails when this file and TOPICS.md disagree, and when a release removes or retypes an entry of the previous release's copy without a new contract major. Payload fields are not here; their types are the tables in TOPICS.md.",
+  "about": "The topic contract of docs/TOPICS.md as data: the contract major, every state topic (payload kind, retain flag), command, info member with its type, setting with its type and whether cmd/config may write it, capability name, topic outside the node's tree, the named in-major exceptions of the Contract version section, and the planned additions of TOPICS.md section 5. Topic names are relative to <base>/<node>/. 'since' appears only where TOPICS.md states it. tools/check-contract.py fails when this file and TOPICS.md disagree, and when a release removes or retypes an entry of the previous release's copy without a new contract major, or drops an exception. Payload fields are not here; their types are the tables in TOPICS.md.",
   "contract": 1,
   "state_topics": {
     "availability": {
@@ -241,6 +241,24 @@
     "enigma2mqtt/discovery/<node>/config",
     "homeassistant/device/<node>/config",
     "homeassistant/device_automation/<node>/<colour>_<press>/config"
+  ],
+  "exceptions": [
+    {
+      "name": "zap-moves-channel-list",
+      "release": "0.3.0"
+    },
+    {
+      "name": "epg-grid-generated-means-changed",
+      "release": "0.3.0"
+    },
+    {
+      "name": "timers-lists-finished",
+      "release": "unreleased"
+    },
+    {
+      "name": "zap-under-popup-recorded",
+      "release": "unreleased"
+    }
   ],
   "planned": [
     {

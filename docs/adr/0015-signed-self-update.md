@@ -5,9 +5,10 @@
 **Supersedes:** in part, once accepted - [ADR-0000](0000-prd.md) §7 "no outbound connection other
 than the user's broker"; the matching sentence of [SECURITY.md](../../SECURITY.md) ("The LAN is the
 trust boundary. The plugin makes no outbound connection other than to the broker the user
-configures"); and the same promise in the package description, `CONTROL/control`. Until this record
-is accepted, all three describe every released plugin exactly, and they are rewritten when the
-first release that implements it ships.
+configures"); the README's "The plugin has no telemetry, no cloud part and no update check of its
+own" - its last clause; and the same promise in the package description, `CONTROL/control`. Until
+this record is accepted, all four describe every released plugin exactly, and they are rewritten
+when the first release that implements it ships.
 
 ## Context
 
@@ -33,9 +34,9 @@ anything that decides what runs as root on the receiver has to carry its own ver
    publishes the contract major, and [TOPICS.md](../TOPICS.md#contract-version) defines what a
    major allows.
 2. **The only list of versions is a signed release index**, signed with an Ed25519 key kept off
-   GitHub. It carries, per release, size, sha256, commit, contract major, the lowest integration it
-   needs, its package dependencies and whether it has been withdrawn, plus a floor and a monotonic
-   serial. The receiver verifies it with an embedded public key and a bundled pure-Python verifier,
+   GitHub. It carries, per release, size, sha256, commit, commit time, contract major, the lowest
+   integration it needs, its package dependencies, whether it can update itself (`self_update`) and
+   whether it has been withdrawn, plus a floor and a monotonic serial. The receiver verifies it with an embedded public key and a bundled pure-Python verifier,
    and refuses an older serial.
 3. **One fixed origin.** The index and the packages come from a fixed HTTPS address, fetched with
    verified TLS and no redirects. Without internet, the receiver accepts both from a relay - the Home

@@ -73,7 +73,7 @@ What this costs, what it rules out, and what has to change if it is ever reverse
 | [0012](0012-wake-on-lan-is-the-image-s-switch.md) | Wake-on-LAN is reported from the image, and armed only through the image's own switch | accepted 2026-09-23 |
 | [0013](0013-the-uninstall-closes-the-doors-and-waits-for-the-broker.md) | The remote uninstall closes the doors first, retracts at QoS 1 and waits for the broker, and puts everything back when a step fails | accepted 2026-09-23 |
 | [0014](0014-the-zap-history-is-the-receivers.md) | The zap history is the receiver's, and the plugin's zaps are in it | accepted 2026-09-24, amended 2026-09-25 and 2026-09-26 |
-| [0015](0015-signed-self-update.md) | The plugin updates itself only to releases from a signed index, in a detached transaction that proves the new plugin started or puts the old one back | proposed 2026-09-26 - accepted with the first code that implements it. Supersedes in part [ADR-0000](0000-prd.md) §7 and the "no outbound connection" sentence of [SECURITY.md](../../SECURITY.md) |
+| [0015](0015-signed-self-update.md) | The plugin updates itself only to releases from a signed index, in a detached transaction that proves the new plugin started or puts the old one back | proposed 2026-09-26 - accepted with the first code that implements it. Supersedes in part [ADR-0000](0000-prd.md) §7, the "no outbound connection" sentence of [SECURITY.md](../../SECURITY.md), the README's "no update check of its own" and the same promise in `CONTROL/control` |
 
 "Superseded in part by a proposed record" means: the earlier text still describes every released
 plugin exactly, and the proposed record says where it will stop doing so. It becomes a supersession
