@@ -65,6 +65,25 @@ jobs:
       - name: pytest
         run: pytest -q
 
+  contract:
+    name: Contract
+    # docs/contract.json is docs/TOPICS.md as data. The tests already hold the two to each
+    # other; this job adds the question only history can answer: does this change take
+    # away or retype anything the previous release promised, without a new contract major?
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Every tag, so the check can read the previous release's contract.json.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: TOPICS.md and contract.json agree, and keep the previous release's promises
+        run: python tools/check-contract.py --previous tag
+
   build-ipk:
     name: Build IPK
     runs-on: ubuntu-latest

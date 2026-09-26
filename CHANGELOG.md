@@ -11,6 +11,38 @@ version that has no section here.
 
 ### Documentation
 
+- **The topic contract has a version.** [TOPICS.md](docs/TOPICS.md#contract-version) gains a
+  "Contract version" section: the current contract major is 1 (0.2.0 and later; 0.1.0 is contract
+  0), what a release may change inside a major and what needs a new one, and the history classified
+  by that rule - including what it would now refuse. 0.2.0 -> 0.3.0 was additive with four named
+  behaviour changes: popup text losing its backslashes, `cmd/zap` moving the channel list,
+  `epg_grid`'s `generated` meaning "last changed", and new refusals of existing commands. The
+  unreleased change to `timers` is recorded as not yet classified; the release that ships it
+  decides. The `process` heading now says it is new in 0.3.0.
+- **The same contract as data**: [docs/contract.json](docs/contract.json) lists every state topic
+  with its payload kind and retain flag, every command, every `info` member with its type, every
+  setting with its type and whether `cmd/config` may write it, every capability name and the planned
+  additions. `tools/check-contract.py` fails when it and TOPICS.md disagree, and - in a new CI job,
+  against the previous release tag's copy - when a change removes or retypes an entry without a new
+  contract major. Tests also hold the file to the plugin's own command table, settings lists and
+  capability names.
+- **Updates from a signed release index are planned**, in
+  [ADR-0015](docs/adr/0015-signed-self-update.md) (proposed): a receiver-only `update_check`
+  setting, a receiver-only `update_allowed` permission, the `self_update` capability, an `update`
+  topic, `cmd/update_check`, `cmd/update` (upgrades only), the relay a receiver without internet
+  uses through Home Assistant, and `info.build` and `info.contract`. TOPICS.md §5 lists their shapes;
+  nothing is built yet and no released plugin publishes or accepts any of them.
+- [docs/TRANSACTION.md](docs/TRANSACTION.md) is new: the contract between the companion
+  integration's SSH installer and the planned self-update - the names on the receiver's disk, the
+  shared lock and when it is stale (the released installer's 30-minute rule, unchanged), the
+  heartbeat that keeps a long self-update's lock alive, the snapshot layout, the marker, and the
+  restart rule that keeps the household's channel: the image's clean quit wherever the interface
+  only needs to restart, and where it must be stopped, the channel recorded, written back while it
+  is stopped and checked afterwards, with the stop and the start run as one unit that an
+  interruption cannot leave half done.
+- ADR-0000 §7 and SECURITY.md's "no outbound connection other than the broker" are marked as
+  superseded in part by ADR-0015 (proposed). Both still describe every released plugin exactly;
+  SECURITY.md's policy is rewritten when the first release that implements ADR-0015 ships.
 - The README is now a short landing page: what the plugin does, how to install it, what it needs.
   The milestones and open items moved to [ROADMAP.md](ROADMAP.md); the privacy notes and the
   ACL's role as the privacy boundary moved to [docs/SETUP.md](docs/SETUP.md#privacy). The release

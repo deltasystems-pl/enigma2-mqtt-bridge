@@ -2,8 +2,10 @@
 
 This is the interface between the plugin and everything that consumes it - the companion Home
 Assistant integration, an openHAB binding, a Node-RED flow, a shell script with `mosquitto_sub`.
-It is versioned with the plugin: a change to a payload is a change to this file, to the
-compatibility table in both READMEs, and to the changelog.
+It is versioned with the plugin: a change to a payload is a change to this file, to
+[`contract.json`](contract.json) - the same contract as data, which CI holds to this file - to the
+compatibility table in both READMEs, and to the changelog. Which changes a release may make
+without a new contract major is in [Contract version](#contract-version).
 
 Two names appear throughout:
 
@@ -27,6 +29,56 @@ Conventions that hold everywhere:
 Everything the plugin publishes it also publishes again on every `on_connect` - the full state
 snapshot, the announcement and, in discovery mode, the discovery payloads. A broker that lost its
 retained store, or a box that reconnected after an outage, converges without anybody asking.
+
+---
+
+## Contract version
+
+The contract has a major number, and the current contract major is **1**.
+
+| Contract | Plugin releases |
+|---|---|
+| 0 | 0.1.0 |
+| 1 | 0.2.0, 0.3.0, and every later release until a release declares contract 2 |
+
+A plugin will publish its major as `info.contract` ([planned](#5-planned-not-implemented-yet),
+[ADR-0015](adr/0015-signed-self-update.md)). A plugin that does not publish it is contract 0 when
+`info.plugin` is below 0.2.0 and contract 1 when it is 0.2.0 or a 0.3.x.
+
+**Inside one major a release may** add a topic, a payload member, an `info` member, a command, a
+capability name or a setting - writable or read-only - and may tighten the validation of free text
+(text a person typed, such as a popup's). **It may not** remove any of those, retype one - a
+topic's payload kind or retain flag, a member's type, a setting's type or which side of `cmd/config`
+it is on - or change what an existing field or command means. That needs a new major.
+
+Anything else a release changes inside a major is a **named in-major behaviour change**: it is
+listed in the table below, it is marked as a behaviour change in the changelog, and it is decided in
+the pull request that makes it, not discovered afterwards. The rule was written down after 0.3.0,
+so the table classifies the releases before it by what they did, including what the rule would now
+refuse.
+
+The consumer's half: ignore a topic, a member, a capability name or a setting you do not know;
+treat a member you expect and do not find as the older plugin it is; and accept `info` more than
+once per connection. A consumer that does this and is written for contract N works with every
+plugin of contract N, older or newer - which is why there is **no upper bound** inside a major, and
+why "contract 1: plugin 0.2.0 and later, integration 0.2.0 and later" is the whole compatibility
+statement. The lockstep table in the READMEs lists the pairs that were released together; they are
+compatible, but they are not the only compatible pairs, and the table is to be replaced by this
+rule.
+
+**The same contract as data.** [`contract.json`](contract.json) lists every state topic with its
+payload kind and retain flag, every command, every `info` member with its type, every setting with
+its type and whether `cmd/config` may write it, every capability name, the topics outside the
+node's tree, the major, and the planned additions of section 5. `tools/check-contract.py` runs in
+CI and fails when that file and this one disagree, and - against `contract.json` at the previous
+release tag - when a release removes or retypes something without a new major. The fields inside
+each payload are not in the data; their types are the tables below.
+
+| Step | Classification | What changed |
+|---|---|---|
+| 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
+| 0.2.0 -> 0.3.0 | contract 1: additions, and four named in-major behaviour changes | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **Named**: (1) `cmd/message` removes every backslash from a popup's text, as from a toast's - a tightening of free text, which the rule allows; a sender that used a literal `\n` for a line break sends a newline instead. (2) `cmd/zap` goes through the receiver's channel list, so a zap to a channel outside the bouquet being browsed moves the channel list to that channel's bouquet, and `bouquet` changes with it. (3) `epg_grid/<bouquet_slug>`'s `generated` means when the grid last changed, not when it was last built - a change of what an existing field means, which the rule now reserves for a new major; recorded here as history, not as a precedent. (4) New refusals of existing commands: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift - each a sentence on `last_error`, which a consumer already handles for every command |
+| unreleased, on `main` after 0.3.0 | **not yet classified** - decided in the release pull request that ships it | `timers` lists the timers the receiver has finished with, not only the pending ones, and `state` gains `disabled`, `failed` and `unknown`. A consumer that treated every entry as pending has to filter on `state` now. That changes what the list means, so the release that ships it either names it here as an in-major behaviour change, with the reason, or declares contract 2 |
 
 ---
 
@@ -771,7 +823,7 @@ not optional - two binaries differing only after the fifteenth character truncat
 `mounted` boolean, `path` string, `free_mb` integer megabytes or `null` when nothing is mounted.
 Checked on a slow timer; a recording disk that silently unmounts is the point of this topic.
 
-### `<base>/<node>/process`
+### `<base>/<node>/process` - since 0.3.0
 
 ```json
 {"rss_kb": 164208, "hwm_kb": 187432, "threads": 22, "fds": 61, "started": 1789042109}
@@ -1549,11 +1601,76 @@ retained ghost nobody can find: the list is the only record that they exist.
 
 ## 5. Planned (not implemented yet)
 
-Nothing at the moment. This section is where a planned addition is written down before it is built,
-so that a consumer can be written against its shape; the last ones - `uninstall_allowed` and
-`cmd/uninstall` ([ADR-0004](adr/0004-remote-uninstall.md)) - are now in §1 and §2. Until a
-capability is in `info.capabilities`, the box does not have it - that rule is unchanged, and it is
-how a consumer tells a plan from a feature.
+This section is where a planned addition is written down before it is built, so that a consumer can
+be written against its shape; the previous ones - `uninstall_allowed` and `cmd/uninstall`
+([ADR-0004](adr/0004-remote-uninstall.md)) - are in §1 and §2 now. Until a capability is in
+`info.capabilities`, the box does not have it - that rule is unchanged, and it is how a consumer
+tells a plan from a feature. **No released plugin publishes, accepts or reads anything below.**
+
+### Updates from a signed release index - [ADR-0015](adr/0015-signed-self-update.md) (proposed)
+
+The plugin checks for, and installs, its own releases from a signed release index, and the
+companion integration relays that index and the package to a receiver without internet access. Every
+addition is additive under [Contract version](#contract-version), so it stays contract 1. The
+install itself - the lock it shares with the integration's installer, the snapshot, the marker, and
+how a restart keeps the household's channel - is described in [TRANSACTION.md](TRANSACTION.md).
+
+| Kind | Name | Shape |
+|---|---|---|
+| Info member | `build` | object: `commit` (40 hex digits, or empty when the builder did not know it), `time` (the commit's epoch seconds), `dirty` (bool), `flavour` (`release` \| `acceptance`), `on_disk` (the commit of the build on disk when it differs from the running one, else `null`) |
+| Info member | `contract` | int, the contract major - see [Contract version](#contract-version) |
+| Setting | `update_check` | bool, off by default, **read-only** in `info.settings`: set on the receiver, never through `cmd/config`. With it on, the plugin checks the index once a day and answers `cmd/update_check` |
+| Setting | `update_allowed` | bool permission, off by default, **read-only** in `info.settings`: whether `cmd/update` is obeyed over MQTT |
+| Capability | `self_update` | the package manager installed this copy and the receiver can run the update helper detached from enigma2 |
+| State topic | `update` | retained, QoS 0, JSON, published on change - below |
+| Command | `update_check` | any; refused unless `update_check` is on; at most one fetch per 10 minutes, a repeat answers from the last result |
+| Command | `update` | JSON - below. Upgrades and repairs only, never a downgrade |
+| Command | `relay` | JSON `{"id", "version", "url", "expires"}`: Home Assistant's answer to a `relay_request` |
+| Event topic | `relay_request` | `<base>/<node>/relay_request`, **not retained**, QoS 1, JSON `{"id", "version", "serial"}`: a receiver without internet asks Home Assistant for a package |
+| Consumer topic | `enigma2mqtt/integration/<node>` | retained, QoS 1, **published by the companion integration**: `{"integration": "0.4.0", "contract": 1, "plugin_min": "0.2.0"}`; retracted when the integration's entry is removed |
+| Consumer topic | `enigma2mqtt/release_index` | retained, **published by the companion integration** after it verified a newer index: `{"index": "<base64 of the exact signed bytes>", "sig": "<base64 of the signature file>"}`. The plugin verifies it itself and never retracts it |
+
+**The `update` topic:**
+
+```json
+{"origin": "unreachable", "checked": 1790410000, "check_error": null,
+ "index": {"serial": 7, "issued": 1790500000, "source": "relay"},
+ "latest_compatible": "0.4.1",
+ "available": [{"version": "0.4.1", "compatible": true, "reason": null}],
+ "transaction": {"id": "a1b2c3d4e5f6", "started_by": "home_assistant", "target": "0.4.1",
+                 "from": "0.4.0", "phase": "installing", "started": 1790410100,
+                 "finished": null, "result": null, "error": null}}
+```
+
+`origin` is `reachable`, `unreachable` or `unknown`; `checked` is volatile in the sense of
+[ADR-0006](adr/0006-volatile-fields-and-publish-on-change.md). `available` holds the 20 newest
+releases at or above the index's floor that are not withdrawn, each with the reason when it is not
+compatible. `transaction.phase` is one of `downloading`, `verifying`, `snapshot`, `installing`,
+`restarting`, `proving`, `rolling_back`, `finished`; `transaction.result`, only with `finished`, is
+one of `installed`, `withdrawn_before_restart`, `rolled_back`, `failed`, `interrupted`;
+`transaction.started_by` is one of `mqtt`, `home_assistant`, `screen`, `page`, `ssh`.
+
+**`cmd/update`**, QoS 1, never retained:
+
+```json
+{"version": "0.4.1", "sha256": "<64 hex digits>",
+ "relay": {"url": "http://<host>:8123/api/enigma2_mqtt/relay/<token>", "expires": 1790410700}}
+```
+
+`version` is a release number or `latest`; `relay` is optional. It is refused, before anything
+changes and in this order, with a sentence on `last_error` and one of these `reason` codes:
+`not_permitted` (`update_allowed` off), `no_capability`, `busy` (a transaction is running),
+`opkg_busy`, `standby`, the existing recording guard (a recording running, one due within ten
+minutes, or an image that will not say), `epg_import`, the existing "this image cannot restart the
+interface" check - those two keep their existing sentences, and their codes are fixed when the
+command is built - then `unknown_version`, `withdrawn`, `below_floor`,
+`incompatible`, `depends` (a package the release needs is not installed), `downgrade`, `current`
+(that release is running, and the build on disk is that release too - so a receiver running the
+release with another build waiting on disk can still be put back on the release), `checksum`
+(`sha256` is not the signed one),
+`relay` (the address is not a valid relay address, or has expired), `no_space`, `rate_limited` (an
+update ended less than ten minutes ago). The command's answer is the `update` topic moving, as for
+every command.
 
 ---
 

@@ -41,6 +41,14 @@ everything else:
    broker the user configures. There is no telemetry, no cloud service, and the release check is
    the integration's business and is off by default. TLS to the broker is supported; client
    certificates are not in v1.
+
+   > **Superseded in part by [ADR-0015](docs/adr/0015-signed-self-update.md) (proposed):** a
+   > plugin that updates itself fetches a signed release index and its own packages from one fixed
+   > HTTPS address - only when a person asks, when an install needs it, or when the receiver-only
+   > setting `update_check` is on. That is not built: every released plugin makes no connection
+   > but the broker, exactly as this item says. The policy here - what is trusted, how keys are
+   > kept and rotated, what an unsigned path still allows - is rewritten when the first release
+   > that implements ADR-0015 ships, not before.
 3. **The broker credential must be scoped.** A box compromise must not become a Home Assistant
    compromise. The documented setup is a **dedicated broker login per box** with an ACL that
    limits it to that node's own topics:

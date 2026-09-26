@@ -102,8 +102,11 @@ drafted and marked `# needs-review` until a native speaker confirms it.
 - CI must be green: ruff, pyflakes, the tests on all three Python versions, and the IPK build.
 - Add a `CHANGELOG.md` entry under `## [Unreleased]` for anything a user would notice.
 - Update the docs in the same pull request. `docs/TOPICS.md` is the contract the companion
-  integration is written against - a change to a payload is a change to that file, and to the
-  compatibility table in both READMEs.
+  integration is written against - a change to a payload is a change to that file, to
+  `docs/contract.json` (the same contract as data; `tools/check-contract.py` fails CI when the two
+  disagree, or when a change removes or retypes something the last release promised without a new
+  contract major), and to the compatibility table in both READMEs. TOPICS.md's
+  "Contract version" section says what a release may change inside a major.
 - Describe what you verified and how. „Tested on OpenViX 6.6, zap -> `service` within 1 s" is
   worth more than a paragraph of intent.
 
