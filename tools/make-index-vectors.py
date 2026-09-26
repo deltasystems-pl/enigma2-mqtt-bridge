@@ -263,8 +263,8 @@ class Builder:
         named = trust.key_id(self.keys[as_key or signer]["public"])
         return trust.signature_file(named, sign(self.keys[signer]["secret"], raw))
 
-    def step(self, keyset, signer, raw, expect, note, sig=None):
-        return {"keyset": keyset, "note": note,
+    def step(self, keyset, signer, raw, expect, note, sig=None, lineage="release"):
+        return {"keyset": keyset, "lineage": lineage, "note": note,
                 "index": base64.b64encode(raw).decode(),
                 "sig": base64.b64encode(sig if sig is not None else self.sig(signer, raw)).decode(),
                 "expect": expect}
@@ -409,11 +409,70 @@ def scenarios(b):
              s("test-spare-only", "t2", raw("t2", 1), "accept", "a set with the spare alone"),
              s("test", "t1", raw("t1", 1), "rank",
                "a release adds the main key below it: never silenced, still refused"))
+    scenario("an acceptance build's memory is never read by a release build",
+             s("test", "t1", raw("t1", 1), "accept", "release lineage: the main key"),
+             s("test", "t2", raw("t2", 1), "accept",
+               "acceptance lineage, the same keys: the spare silences the main key there",
+               lineage="acceptance"),
+             s("test", "t1", raw("t1", 1), "rank", "acceptance lineage: silenced there",
+               lineage="acceptance"),
+             s("test", "t1", raw("t1", 2), "accept",
+               "release lineage: the main key goes on, nothing the test taught is read"))
     scenario("a release that drops a key refuses it",
              s("test", "t1", raw("t1", 3), "accept", "serial 3"),
              s("test-dropped", "t1", raw("t1", 4), "unknown_key", "t1 no longer embedded"),
              s("test-dropped", "t2", raw("t2", 1), "accept", "the spare, first sight"))
     return out
+
+
+# ------------------------------------------------------------ stored shapes --
+
+
+def memory_shapes(test_keys):
+    """Memories a reader must load as they are, and ones it must refuse - never read as empty."""
+    k1 = trust.key_id(test_keys["t1"]["public"])
+    k2 = trust.key_id(test_keys["t2"]["public"])
+    good = [
+        ({"serials": {}, "silenced": []}, "nothing accepted yet"),
+        ({"serials": {k1: 3, k2: 1}, "silenced": [k1]}, "two keys, one silenced"),
+    ]
+    bad = [
+        ({k1: 5}, "the first shape: a bare map of serials"),
+        ({"serials": {k1: "7"}, "silenced": []}, "a serial that is a string"),
+        ({"serials": {k1: True}, "silenced": []}, "a serial that is true"),
+        ({"serials": {k1: 0}, "silenced": []}, "serial 0"),
+        ({"serials": [], "silenced": []}, "serials as a list"),
+        ({"serials": {}, "silenced": 5}, "silenced as a number"),
+        ({"serials": {}, "silenced": ["x"]}, "a silenced entry that is not a key id"),
+        ({"serials": {"KEY": 1}, "silenced": []}, "a serial for something that is not a key id"),
+        ({"serials": {}}, "silenced missing"),
+        ({"serials": {}, "silenced": [], "rank": 2}, "a member no reader writes"),
+        ([], "not an object"),
+    ]
+    return ([{"memory": memory, "valid": True, "note": note} for memory, note in good]
+            + [{"memory": memory, "valid": False, "note": note} for memory, note in bad])
+
+
+def state_shapes(test_keys):
+    k1 = trust.key_id(test_keys["t1"]["public"])
+    entry = {"keys": [k1], "serials": {k1: 2}, "silenced": []}
+    fp = "ab" * 32
+    good = [
+        ({"schema": 1, "release": {}, "acceptance": {}}, "nothing stored"),
+        ({"schema": 1, "release": {fp: entry}, "acceptance": {fp: entry}}, "one entry in each"),
+    ]
+    bad = [
+        ({"serials": {k1: 2}, "silenced": []}, "a bare memory, not a state"),
+        ({"schema": 2, "release": {}, "acceptance": {}}, "another schema"),
+        ({"schema": 1, "release": {}}, "acceptance missing"),
+        ({"schema": 1, "release": {"x": entry}, "acceptance": {}}, "a key that is no fingerprint"),
+        ({"schema": 1, "release": {fp: dict(entry, keys=[])}, "acceptance": {}},
+         "an empty key list"),
+        ({"schema": 1, "release": {fp: dict(entry, serials={k1: -1})}, "acceptance": {}},
+         "a negative serial"),
+    ]
+    return ([{"state": state, "valid": True, "note": note} for state, note in good]
+            + [{"state": state, "valid": False, "note": note} for state, note in bad])
 
 
 # --------------------------------------------------------------------- tool --
@@ -446,6 +505,8 @@ def generate():
         "keysets": key_sets(test_keys),
         "signatures": signature_vectors(test_keys["t1"]["secret"], test_keys["t1"]["public"]),
         "scenarios": scenarios(b),
+        "memories": memory_shapes(test_keys),
+        "states": state_shapes(test_keys),
     }
     return (json.dumps(data, indent=1, ensure_ascii=True) + "\n").encode("ascii")
 

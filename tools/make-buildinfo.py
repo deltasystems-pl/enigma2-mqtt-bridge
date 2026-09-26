@@ -52,7 +52,8 @@ any flavour it does not know as "not a release".
 **Test settings, for `acceptance` only.** A hardware acceptance run drives the update path with a
 test index, served from a test origin and signed with throwaway keys, so its build may carry
 `MQTTBRIDGE_BUILD_ORIGIN` (an `https://.../` address) and `MQTTBRIDGE_BUILD_INDEX_KEYS` (the key set
-as JSON, `[{"key_id", "rank", "public", "baseline"}]`, `public` in base64). They are written into
+as JSON, `[{"key_id", "rank", "public", "baseline"}]`, `public` in base64 - never including a
+release key, which is refused). They are written into
 `buildinfo.py` as `ORIGIN` and `INDEX_KEYS`, and only then: a build of any other flavour that is
 given either is **refused**, so a `development` or `release` package can never trust anything but
 the embedded keys and the published origin. That refusal is what lets `info.build` leave the
@@ -255,9 +256,16 @@ def decide_overrides(environ, flavour: str) -> dict | None:
     parsed = None
     if keys:
         try:
-            parsed = trust.keys_to_data(trust.keys_from_data(json.loads(keys)))
+            parsed = trust.keys_from_data(json.loads(keys))
         except (ValueError, trust.Refused) as error:
             raise BuildRefused(f"{INDEX_KEYS_ENV} is not a usable key set: {error}") from error
+        try:
+            # One index signed by a higher-ranked test key would silence that release key on the
+            # receiver for good: test keys never include a release key.
+            trust.refuse_release_keys(parsed)
+        except trust.OverlappingKeys as error:
+            raise BuildRefused(f"{INDEX_KEYS_ENV}: {error}") from error
+        parsed = trust.keys_to_data(parsed)
     return {"origin": origin or None, "index_keys": parsed}
 
 

@@ -41,8 +41,8 @@ EXTENSIONS = "usr/lib/enigma2/python/Plugins/Extensions"
 _ASK = """
 import json
 from MQTTBridge import buildid, trust
-origin, keys = trust.configured(buildid.LOADED, buildid.LOADED_OVERRIDES)
-print(json.dumps({"build": buildid.LOADED, "origin": origin,
+origin, keys, acceptance = trust.configured(buildid.LOADED, buildid.LOADED_OVERRIDES)
+print(json.dumps({"build": buildid.LOADED, "origin": origin, "acceptance": acceptance,
                   "keys": [key.key_id for key in keys], "fingerprint": trust.fingerprint(keys)}))
 """
 

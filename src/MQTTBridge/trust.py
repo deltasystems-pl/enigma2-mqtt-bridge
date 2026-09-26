@@ -46,9 +46,15 @@ the same thing under every set of embedded keys:
   kept a silenced one, which the release rules forbid (RELEASE-INDEX.md, "Keys").
 
 The rank floor is the highest rank, **in the reader's own embedded set**, of a key it has accepted.
-So a build carrying test keys (an acceptance build) remembers and silences only test keys, which the
-release keys never meet - it can never raise the rank the release keys are judged by - while a
-release that adds or drops a key keeps everything the reader knew about the keys it still carries.
+
+**Where it is kept** (`memory_for`, `store`): one stored state, in two parts - `release` and
+`acceptance` - each mapping a key set's fingerprint to what a reader holding that set learned. A
+build reads and writes only its own part, so an acceptance build can never write memory a
+production build reads; and an acceptance build's test keys may not include a release key at all
+(`configured`, `refuse_release_keys`). Within a part a reader merges what every entry sharing a key
+with its own set knows, so a release that adds or drops a key keeps everything the reader knew about
+the keys it still carries. A stored state or memory in any other shape is refused (`BadMemory`),
+never read as empty.
 
 Standard library only, and 3.9-safe: the update helper runs this outside enigma2 on whatever
 Python the image has, and the signing job in CI runs it on the runner's own, with nothing
@@ -239,19 +245,42 @@ def by_id(keys, wanted):
     return None
 
 
+class OverlappingKeys(Exception):
+    """A test key set that contains a release key: one test-signed index would silence a release
+    key on the receiver for good, so neither the builder nor the reader accepts such a set."""
+
+
+def refuse_release_keys(keys):
+    """`keys` if none of them is a release key, else OverlappingKeys - by id and by public key."""
+    release_ids = {key.key_id for key in EMBEDDED}
+    release_publics = {key.public for key in EMBEDDED}
+    shared = sorted(key.key_id for key in keys
+                    if key.key_id in release_ids or key.public in release_publics)
+    if shared:
+        raise OverlappingKeys(
+            f"the test key set contains the release key {', '.join(shared)}: test keys never "
+            "include a release key"
+        )
+    return keys
+
+
 def configured(build=None, overrides=None):
-    """`(origin, keys)` this build uses: the embedded ones, unless it is an acceptance build that
-    carries its own.
+    """`(origin, keys, acceptance)` this build uses: the embedded ones, unless it is an acceptance
+    build that carries its own.
 
     `build` is `buildid.LOADED`, `overrides` is `buildid.LOADED_OVERRIDES`. The builder refuses an
     override for any other flavour; this refuses to honour one too, so a release build that somehow
-    carried one would still judge by the release keys.
+    carried one would still judge by the release keys. An acceptance build's test keys must not
+    include a release key: that raises OverlappingKeys - loudly, never by falling back to the
+    release keys, because an acceptance build that quietly judged by them could no longer be told
+    from the thing it tests. `acceptance` says which part of the stored state it reads and writes.
     """
-    if not build or build.get("flavour") != "acceptance" or not overrides:
-        return ORIGIN, EMBEDDED
+    if not build or build.get("flavour") != "acceptance":
+        return ORIGIN, EMBEDDED, False
+    overrides = overrides or {}
     origin = overrides.get("origin") or ORIGIN
     keys = overrides.get("index_keys")
-    return origin, keys_from_data(keys) if keys else EMBEDDED
+    return origin, refuse_release_keys(keys_from_data(keys)) if keys else EMBEDDED, True
 
 
 # ----------------------------------------------------------------------- parsing --
@@ -415,16 +444,46 @@ def parse_index(raw, strict=False):
 # --------------------------------------------------------------------- accepting --
 
 
+class BadMemory(Exception):
+    """A stored memory or state that is not in the one shape every reader writes.
+
+    Never read as "nothing remembered": that would put a reader back at first sight, with no key
+    silenced - the one direction a damaged file must not move it. A reader that meets this refuses
+    to judge any index and reports it; the recovery is to remove the file, which is exactly a
+    factory reset of this memory (the build's baselines apply again), done on purpose.
+    """
+
+
 def empty_memory():
     return {"serials": {}, "silenced": []}
 
 
+def check_memory(memory):
+    """`memory` if it is `{"serials": {key_id: serial >= 1}, "silenced": [key_id]}` - or None,
+    which is a reader that has accepted nothing - else BadMemory. Nothing else is guessed at."""
+    if memory is None:
+        return empty_memory()
+    if not isinstance(memory, dict) or set(memory) != {"serials", "silenced"}:
+        raise BadMemory(f"a memory is exactly serials and silenced, not {memory!r:.80}")
+    serials, silenced = memory["serials"], memory["silenced"]
+    if not isinstance(serials, dict) or not all(
+        isinstance(key_id_, str) and _KEY_ID.fullmatch(key_id_) and _whole(serial) and serial >= 1
+        for key_id_, serial in serials.items()
+    ):
+        raise BadMemory("serials must map key ids to whole numbers >= 1")
+    if not isinstance(silenced, list) or not all(
+        isinstance(key_id_, str) and _KEY_ID.fullmatch(key_id_) for key_id_ in silenced
+    ):
+        raise BadMemory("silenced must be a list of key ids")
+    return memory
+
+
 def _serials(memory):
-    return (memory or {}).get("serials") or {}
+    return check_memory(memory)["serials"]
 
 
 def _silenced(memory):
-    return set((memory or {}).get("silenced") or ())
+    return set(check_memory(memory)["silenced"])
 
 
 def rank_floor(keys, memory):
@@ -440,6 +499,84 @@ def remember(memory, key, serial, keys):
     serials[key.key_id] = serial
     silenced = _silenced(memory) | {other.key_id for other in keys if other.rank < key.rank}
     return {"serials": serials, "silenced": sorted(silenced)}
+
+
+# ------------------------------------------------------------------ stored state --
+
+STATE_SCHEMA = 1
+LINEAGES = ("release", "acceptance")
+
+
+def empty_state():
+    return {"schema": STATE_SCHEMA, "release": {}, "acceptance": {}}
+
+
+def check_state(state):
+    """A reader's stored state - `{"schema": 1, "release": {...}, "acceptance": {...}}`, each
+    part mapping a key-set fingerprint to `{"keys": [key_id], "serials": ..., "silenced": ...}` -
+    or BadMemory. None is a reader that has never stored anything."""
+    if state is None:
+        return empty_state()
+    if not isinstance(state, dict) or set(state) != {"schema", *LINEAGES}:
+        raise BadMemory(f"a state is exactly schema, release and acceptance, not {state!r:.80}")
+    if not _whole(state["schema"]) or state["schema"] != STATE_SCHEMA:
+        raise BadMemory(f"state schema {state['schema']!r} is not {STATE_SCHEMA}")
+    for lineage in LINEAGES:
+        entries = state[lineage]
+        if not isinstance(entries, dict):
+            raise BadMemory(f"{lineage} is not an object")
+        for fingerprint_, entry in entries.items():
+            if not isinstance(fingerprint_, str) or not _SHA256.fullmatch(fingerprint_):
+                raise BadMemory(f"{lineage}: {fingerprint_!r:.20} is not a key-set fingerprint")
+            if not isinstance(entry, dict) or set(entry) != {"keys", "serials", "silenced"}:
+                raise BadMemory(f"{lineage} {fingerprint_[:12]}: not keys, serials and silenced")
+            keys = entry["keys"]
+            if not isinstance(keys, list) or not keys or not all(
+                isinstance(key_id_, str) and _KEY_ID.fullmatch(key_id_) for key_id_ in keys
+            ):
+                raise BadMemory(f"{lineage} {fingerprint_[:12]}: keys is not a list of key ids")
+            check_memory({"serials": entry["serials"], "silenced": entry["silenced"]})
+    return state
+
+
+def memory_for(state, keys, acceptance=False):
+    """The memory a reader holding `keys` judges with, from its stored `state`.
+
+    **Scoped twice.** By lineage: an acceptance build reads and writes only the acceptance part,
+    a release build only the release part, so nothing a test index teaches a receiver can ever be
+    read by the production build that follows it - whatever keys the test build carried. And by
+    key set: an entry is stored under the fingerprint of the set that wrote it, and a reader takes
+    memory only from entries whose set shares a key with its own - the largest serial per key it
+    holds, and every silenced key - so a release that adds or drops a key keeps what was known
+    about the keys it still carries, and a returning older set cannot forget what a newer one
+    learned, while a disjoint set of keys is never consulted at all.
+    """
+    state = check_state(state)
+    held = {key.key_id for key in keys}
+    serials, silenced = {}, set()
+    for entry in state[LINEAGES[1] if acceptance else LINEAGES[0]].values():
+        if not held & set(entry["keys"]):
+            continue
+        for key_id_, serial in entry["serials"].items():
+            if key_id_ in held:
+                serials[key_id_] = max(serial, serials.get(key_id_, 0))
+        silenced |= set(entry["silenced"])
+    return {"serials": serials, "silenced": sorted(silenced)}
+
+
+def store(state, keys, memory, acceptance=False):
+    """The state after a reader holding `keys` accepted an index and holds `memory`."""
+    state = check_state(state)
+    memory = check_memory(memory)
+    lineage = LINEAGES[1] if acceptance else LINEAGES[0]
+    updated = {name: dict(state[name]) for name in LINEAGES}
+    updated["schema"] = STATE_SCHEMA
+    updated[lineage][fingerprint(keys)] = {
+        "keys": sorted(key.key_id for key in keys),
+        "serials": dict(memory["serials"]),
+        "silenced": list(memory["silenced"]),
+    }
+    return updated
 
 
 def authenticate(index_raw, signature_raw, keys):

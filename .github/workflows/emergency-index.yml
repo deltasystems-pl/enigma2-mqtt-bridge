@@ -38,12 +38,14 @@ jobs:
           fetch-depth: 0
 
       - name: Accept the pair as a reader would
+        shell: bash
         run: |
           git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages
           python3 tools/make-index.py verify --index release-index/emergency/releases.json \
             --sig release-index/emergency/releases.json.sig
 
       - name: Push to gh-pages
+        shell: bash
         run: |
           serial=$(python3 -c 'import json; print(json.load(open("release-index/emergency/releases.json"))["serial"])')
           git worktree add --detach ../pages origin/gh-pages

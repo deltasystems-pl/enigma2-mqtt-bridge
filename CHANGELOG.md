@@ -51,15 +51,22 @@ version that has no section here.
   key ranked below one a reader has accepted is silenced there for good, whatever a later release
   embeds. A release's key set keeps three rules against the previous release's (ranks never change,
   new keys rank above all before them, a key is never dropped while a lower one is kept), which
-  `index.yml` enforces. The
+  `index.yml` enforces. A reader keeps its memory in one stored state with a `release` and an
+  `acceptance` part, each keyed by the key set's fingerprint, and refuses a stored state of any
+  other shape instead of reading it as empty; an acceptance build's test keys may never include a
+  release key - the builder and the plugin both refuse such a set - and it never writes memory a
+  release build reads. The
   receiver will verify with a pure-Python Ed25519 verifier the plugin carries
   (`src/MQTTBridge/ed25519.py`, verify only). `tests/vectors/release-index.json` holds the RFC 8032
   vectors, forgeries and the rule's scenarios, shared with the integration. Three workflows:
   `index.yml` checks every pull request (the workflows, the policy, the published index, and a
   rehearsal of the sign step with a throwaway key); `publish-index.yml` builds the index with no
   key, signs it in the `release-signing` environment only after the maintainer approves - with no
-  permissions, nothing installed, the key on OpenSSL's stdin only, `base64` and `openssl` by
-  absolute path - and publishes it with no key; `emergency-index.yml`, in a concurrency group of its
+  permissions, nothing installed, and no code from the repository run before the key is used:
+  the artifact, its hash with the runner's own `sha256sum`, then the signature from a fixed step -
+  the key on OpenSSL's stdin only, `base64` and `openssl` by absolute path, OpenSSL's arguments
+  fixed - and only then the re-check and the verification, the signature leaving the runner only if
+  both pass - and publishes it with no key; `emergency-index.yml`, in a concurrency group of its
   own and startable by hand, publishes an index signed offline with the spare. The build and publish
   jobs read the whole history of `gh-pages` and refuse to build on or publish over a pair older than
   the newest it ever published, or none after one was - a rollback of the branch would otherwise
@@ -81,9 +88,12 @@ version that has no section here.
   request that adds an unpinned one (flow-style steps included), a `pull_request_target` trigger, a
   second use of the `secrets` context, another job naming the `release-signing` environment, a step
   in the signing job that could steer a later one (`GITHUB_PATH`, `GITHUB_ENV`, `BASH_ENV`), a
-  guard loosened by `continue-on-error`, `||` or `always()`, or any change to the signing step's
-  text that does not also update its pinned sha256 - the step itself may run only an allow-listed
-  handful of commands.
+  guard loosened in any way its structure allows (a run step without `shell: bash`, a step
+  condition, `continue-on-error`, `||`, `set +e`, `always()`, or a guard command inside `if`, `!`,
+  an `&&`/`;` list or followed by `|`), `sudo`, a background process or a write under `/usr` in the
+  signing job, a runner other than a hosted `ubuntu-24.04` for it, or any change to the signing
+  job's text that does not also update its pinned sha256 - its hash and sign steps are fixed texts,
+  byte for byte.
 
 ### Documentation
 

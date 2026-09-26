@@ -26,6 +26,7 @@ Nothing is published and the scratch directory is removed.
 from __future__ import annotations
 
 import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -79,17 +80,29 @@ def sample_index(key, serial=1):
     })
 
 
-def run_sign_step(work, seed, script=None, bash="bash"):
-    """Run the sign step's text in `work` with `seed` as the secret: (returncode, output)."""
-    if script is None:
-        script = _tool("check-workflows").sign_step_script()
-    step = Path(work) / "sign-step.sh"
+def run_step(work, script, environment, bash="bash"):
+    """Run a step's text in `work` as `shell: bash` does: (returncode, output)."""
+    step = Path(work) / "step.sh"
     step.write_text(script, encoding="utf-8")
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), SECRET: base64.b64encode(seed).decode()}
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), **environment}
     result = subprocess.run([bash, "--noprofile", "--norc", "-eo", "pipefail", str(step)],
                             cwd=work, env=env, capture_output=True, check=False)
     step.unlink()
     return result.returncode, result.stdout + result.stderr
+
+
+def run_sign_step(work, seed, script=None, bash="bash"):
+    """Run the sign step's text in `work` with `seed` as the secret: (returncode, output)."""
+    if script is None:
+        script = _tool("check-workflows").sign_step_script()
+    return run_step(work, script, {SECRET: base64.b64encode(seed).decode()}, bash)
+
+
+def run_hash_step(work, expected, script=None, bash="bash"):
+    """Run the hash step's text in `work` with `expected` as build's sha256."""
+    if script is None:
+        script = _tool("check-workflows").hash_step_script()
+    return run_step(work, script, {"EXPECTED": expected}, bash)
 
 
 def rehearse(openssl="openssl", log=print):
@@ -104,6 +117,18 @@ def rehearse(openssl="openssl", log=print):
         index_path.write_bytes(sample_index(key))
         make_index.check_unsigned(index_path.read_bytes(), keys, key.key_id, (None, None))
         log(f"throwaway key {key.key_id}: unsigned index checked")
+
+        # The hash step, as the sign job runs it before the key: the right hash passes, any other
+        # stops the job.
+        right = hashlib.sha256(index_path.read_bytes()).hexdigest()
+        code, output = run_hash_step(work, right)
+        if code:
+            raise SystemExit("the hash step refused the right hash: "
+                             + output.decode("utf-8", "replace"))
+        code, _output = run_hash_step(work, "0" * 64)
+        if code == 0:
+            raise SystemExit("the hash step accepted a wrong hash")
+        log("hash step: the right sha256 passes, a wrong one stops the job")
 
         code, output = run_sign_step(work, seed)
         if code:

@@ -378,10 +378,26 @@ def test_an_acceptance_build_carries_them_and_the_plugin_reads_them(tool, checko
     text = output.read_text(encoding="utf-8")
     build = buildid.parse(text)
     assert build["flavour"] == "acceptance"
-    origin, keys = trust.configured(build, buildid.parse_overrides(text))
-    assert origin == TEST_ORIGIN
+    origin, keys, acceptance = trust.configured(build, buildid.parse_overrides(text))
+    assert origin == TEST_ORIGIN and acceptance is True
     assert [key.rank for key in keys] == [1, 2]
     assert keys != trust.EMBEDDED
+
+
+@pytest.mark.parametrize("release", ["main", "spare"])
+def test_an_acceptance_build_refuses_test_keys_that_include_a_release_key(tool, release):
+    # One index signed by a higher-ranked test key would silence the release key on the receiver
+    # for good. The builder refuses the set; the plugin refuses it too (test_trust).
+    import json
+
+    from MQTTBridge import trust
+
+    key = trust.MAIN if release == "main" else trust.SPARE
+    test = json.loads(_test_keys())
+    overlapping = trust.keys_to_data([key]) + [dict(item, rank=item["rank"] + 2) for item in test]
+    with pytest.raises(tool.BuildRefused, match="test keys never include a release key"):
+        tool.decide_overrides({"MQTTBRIDGE_BUILD_INDEX_KEYS": json.dumps(overlapping)},
+                              "acceptance")
 
 
 def test_a_build_without_them_writes_neither(tool, checkout, tmp_path):

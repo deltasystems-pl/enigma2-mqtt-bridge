@@ -113,7 +113,10 @@ its shared vectors, the verifier, and the three publication workflows
 kept per `key_id`: the last accepted serial, and the keys it has silenced - every key of its set
 ranked below one it accepted. The rank floor is derived from it within the reader's own key set,
 which scopes it to the key set as decision 7 requires, while "ignored for good" holds for the
-silenced keys whatever a later release embeds. And a release's key set keeps three rules against
+silenced keys whatever a later release embeds. That memory is stored in a release part and an
+acceptance part, and an acceptance build reads and writes only its own, and may not carry a release
+key among its test keys - so no test index can silence a release key. And a release's key set keeps
+three rules against
 the previous release's - ranks never change, a new key ranks above all before it, and a key is never
 dropped while a lower one is kept - which `index.yml` enforces. A dirty build now displays with
 `.dirty` after its commit (decision 1), so it no longer looks like the clean build of the same

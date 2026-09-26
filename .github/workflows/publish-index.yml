@@ -53,11 +53,13 @@ jobs:
           persist-credentials: false
 
       - name: Fetch the published index and the feed
+        shell: bash
         run: git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages
 
       - name: The release this run is for
         id: release
         if: github.event_name == 'workflow_run'
+        shell: bash
         env:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
@@ -68,8 +70,9 @@ jobs:
       - name: Build
         id: build
         # Downloads every release's package and checks it against the release asset's digest and
-        # against the feed's copy; verifies the published index; writes the next one. The summary
-        # opens with the sha256 the maintainer reads before approving the sign job.
+        # against the feed's copy; verifies the published index and the branch's history; writes
+        # the next one. The summary opens with the sha256 the maintainer reads before approving.
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REQUIRED: ${{ steps.release.outputs.version }}
@@ -89,47 +92,44 @@ jobs:
     name: Sign (the maintainer approves)
     needs: build
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    # A fresh hosted runner: nothing of the key outlives the job.
+    runs-on: ubuntu-24.04
     environment: release-signing
     # Nothing: this job reads a public repository and an artifact of its own run, and writes
-    # nothing but its output. No setup-python and no pip either - the runner's own python3 and
-    # OpenSSL, and the plugin's own verifier.
+    # nothing but its output. No setup-python and no pip either.
     permissions: {}
     outputs:
       signature: ${{ steps.wrap.outputs.signature }}
+    # The order is the point: no code from the repository runs on this runner until the key has
+    # been used and is gone. First the artifact, outside the workspace; then its hash against
+    # build's output with the runner's own sha256sum; then the signature, with nothing but bash
+    # builtins and /usr/bin; only then the checkout, the full re-check and the verification - and
+    # the signature leaves the runner only if both pass. This whole job's text is pinned by sha256
+    # in tools/check-workflows.py, so any change to it shows in review next to a new pin.
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-
-      - name: Fetch the published index
-        run: git fetch --no-tags --depth=1 origin gh-pages:refs/remotes/origin/gh-pages
-
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: unsigned-index
-          path: index
+          path: ${{ runner.temp }}/index
 
-      - name: The file build hashed, and a consistent next index
-        # Checked here again rather than believed: the sha256 build reported (a job output,
-        # stored by GitHub, not in the artifact), every field, the main key's id, the next serial.
+      - name: The file build hashed
+        shell: bash
+        working-directory: ${{ runner.temp }}
         env:
           EXPECTED: ${{ needs.build.outputs.sha256 }}
-        run: python3 tools/make-index.py check --index index/releases.json --sha256 "$EXPECTED"
+        run: printf '%s  index/releases.json\n' "$EXPECTED" | /usr/bin/sha256sum --check --strict
 
       - name: Sign with the main key
         # The secret is one line of base64: the raw 32-byte seed. It goes to OpenSSL's stdin as
         # DER - the fixed 16-byte PKCS#8 prefix of an Ed25519 key, then the seed - so no key file
-        # is written and no printable form of it exists. base64 and openssl run without the
-        # variable in their environment, and by absolute path, so nothing earlier in the job can
-        # put another program in their place. Never add tracing here: index.yml refuses it, any
-        # command but these, and any change to this text that does not also change the pin in
-        # tools/check-workflows.py - which makes every change to it visible in review.
+        # is written and no printable form of it exists. base64 and openssl run by absolute path
+        # without the variable in their environment. index.yml refuses any other text here.
         shell: bash
+        working-directory: ${{ runner.temp }}
         env:
           INDEX_SIGNING_KEY: ${{ secrets.INDEX_SIGNING_KEY }}
         run: |
-          if [ -z "${INDEX_SIGNING_KEY:-}" ]; then
+          if [ -z "${INDEX_SIGNING_KEY:+set}" ]; then
             echo "::error::the release-signing environment has no INDEX_SIGNING_KEY"
             exit 1
           fi
@@ -140,12 +140,33 @@ jobs:
           } | /usr/bin/env -u INDEX_SIGNING_KEY /usr/bin/openssl pkeyutl -sign -rawin -keyform DER \
                 -inkey /dev/stdin -in index/releases.json -out index/releases.json.raw-sig
 
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch the published index and its history
+        shell: bash
+        run: git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages
+
+      - name: A consistent next index
+        # Checked here again rather than believed: every field, the main key's id, the next
+        # serial, the branch's history. A failure here keeps the signature on this runner.
+        shell: bash
+        env:
+          EXPECTED: ${{ needs.build.outputs.sha256 }}
+          INDEX: ${{ runner.temp }}/index
+        run: python3 tools/make-index.py check --index "$INDEX/releases.json" --sha256 "$EXPECTED"
+
       - name: Verify with the embedded main key, and hand the signature on
         id: wrap
+        shell: bash
+        env:
+          INDEX: ${{ runner.temp }}/index
         run: |
-          python3 tools/make-index.py wrap --index index/releases.json \
-            --raw-signature index/releases.json.raw-sig --out index/releases.json.sig
-          echo "signature=$(cat index/releases.json.sig)" >> "$GITHUB_OUTPUT"
+          python3 tools/make-index.py wrap --index "$INDEX/releases.json" \
+            --raw-signature "$INDEX/releases.json.raw-sig" --out "$INDEX/releases.json.sig"
+          echo "signature=$(cat "$INDEX/releases.json.sig")" >> "$GITHUB_OUTPUT"
 
   publish:
     name: Publish to the feed
@@ -168,6 +189,7 @@ jobs:
       - name: Accept the pair as a reader would
         # The bytes build hashed, a signature from an embedded key, and a serial above the
         # published one within the bound - judged against the branch as it is now.
+        shell: bash
         env:
           EXPECTED: ${{ needs.build.outputs.sha256 }}
           SIGNATURE: ${{ needs.sign.outputs.signature }}
@@ -178,6 +200,7 @@ jobs:
             --sig index/releases.json.sig --sha256 "$EXPECTED"
 
       - name: Push to gh-pages
+        shell: bash
         run: |
           serial=$(python3 -c 'import json; print(json.load(open("index/releases.json"))["serial"])')
           git worktree add --detach ../pages origin/gh-pages

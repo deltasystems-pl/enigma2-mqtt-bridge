@@ -436,11 +436,14 @@ def test_a_rolled_back_or_deleted_published_index_stops_the_build(lab):
 
 @needs_openssl
 def test_a_rollback_past_the_spare_stops_the_build(lab):
-    main = _publish(lab, _signed(_build(lab, lab.policy(**POLICY))))
+    main = _publish(lab, _signed(_build(lab, lab.policy(**POLICY), serial=40)))
     _publish(lab, _signed(_build(lab, lab.policy(**POLICY), key=T2, published=main,
                                  history=_history(lab)), "t2"))
+    spare_commit = lab.git("rev-parse", "gh-pages")
     back = _publish(lab, main)
-    with pytest.raises(Failed, match="silenced"):
+    # The main key's serial 40 is the highest serial, but the spare silenced it: the commit to
+    # restore from is the spare's.
+    with pytest.raises(Failed, match=f"silenced.*from gh-pages commit {spare_commit[:12]}"):
         _build(lab, lab.policy(**POLICY), published=back, history=_history(lab))
 
 

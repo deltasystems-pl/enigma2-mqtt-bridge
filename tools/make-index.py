@@ -309,7 +309,7 @@ def published_pair(ref=PUBLISHED_REF, directory=None, root=REPO_ROOT):
 def verified_published(index_raw, sig_raw, keys):
     """The published index, its key and the memory of a reader that accepted it - or all None."""
     if index_raw is None and sig_raw is None:
-        return None, None, {}
+        return None, None, trust.empty_memory()
     if index_raw is None or sig_raw is None:
         _fail("the published index and its signature must both be there, or neither")
     try:
@@ -344,6 +344,16 @@ class History:
             other.key_id for other in self.keys if other.rank < key.rank}
         self.memory = {"serials": serials, "silenced": sorted(silenced)}
 
+    def restore_from(self):
+        """The commit to restore from after a rollback: the newest index from the highest-ranked
+        key that no later index silenced - never merely the highest serial, which may be a key's
+        that readers now refuse."""
+        ranks = {key.key_id: key.rank for key in self.keys}
+        live = [(ranks.get(key_id, 0), serial, commit)
+                for key_id, (serial, commit) in self.top.items()
+                if key_id not in self.memory["silenced"]]
+        return max(live)[2][:12] if live else "(none)"
+
     def describe(self):
         if not self.count:
             return "gh-pages history: no signed index has ever been published"
@@ -358,7 +368,9 @@ def published_history(ref=PUBLISHED_REF, keys=trust.EMBEDDED, root=REPO_ROOT):
     """Every state of the published pair in the history of `ref`, authentic ones remembered."""
     history = History(keys)
     paths = [f"{FEED_DIR}/{trust.INDEX_FILE}", f"{FEED_DIR}/{trust.SIGNATURE_FILE}"]
-    listed = _git("log", "--format=%H", "--reverse", ref, "--", *paths, root=root, check=False)
+    # --full-history: no merge on the branch may hide a state from the walk.
+    listed = _git("log", "--format=%H", "--reverse", "--full-history", ref, "--", *paths,
+                  root=root, check=False)
     if listed.returncode:
         return history
     for commit in listed.stdout.decode().split():
@@ -386,8 +398,8 @@ def guard_history(published, history, keys):
     old, old_key, _memory = verified_published(*published, keys)
     top = ", ".join(f"serial {serial} by key {key_id} in gh-pages commit {commit[:12]}"
                     for key_id, (serial, commit) in sorted(history.top.items()))
-    restore = (f"restore feed/{trust.INDEX_FILE} and feed/{trust.SIGNATURE_FILE} from the commit "
-               "that published the highest serial, in a new commit, and run again")
+    restore = (f"restore feed/{trust.INDEX_FILE} and feed/{trust.SIGNATURE_FILE} from gh-pages "
+               f"commit {history.restore_from()}, in a new commit, and run again")
     if old is None:
         _fail(f"nothing is published now, but gh-pages has published {history.count} signed "
               f"indexes ({top}): the files were deleted - {restore}")

@@ -72,17 +72,22 @@ def test_the_published_origin_is_a_constant():
 
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=[scenario["name"] for scenario in SCENARIOS])
 def test_every_shared_scenario(scenario):
+    # The reader stores its state after every accepted index and reads it back before the next,
+    # as a receiver or Home Assistant does, through the one shape both halves store.
     sets = _keysets()
-    memory = {}
+    state = trust.empty_state()
     for number, step in enumerate(scenario["steps"], 1):
+        keys = sets[step["keyset"]]
+        acceptance = step["lineage"] == "acceptance"
+        memory = trust.memory_for(json.loads(json.dumps(state)), keys, acceptance)
         try:
             accepted = trust.accept(base64.b64decode(step["index"]), base64.b64decode(step["sig"]),
-                                    sets[step["keyset"]], memory)
+                                    keys, memory)
         except trust.Refused as error:
             verdict = error.reason
         else:
             verdict = "accept"
-            memory = accepted.memory
+            state = trust.store(state, keys, accepted.memory, acceptance)
         assert verdict == step["expect"], f"step {number}: {step['note']}"
 
 
@@ -114,9 +119,10 @@ def test_the_rank_floor_counts_only_keys_of_this_set():
     keys = _keysets()["test"]
     main, spare = keys
     assert trust.rank_floor(keys, None) == 0
-    assert trust.rank_floor(keys, {"serials": {main.key_id: 5}}) == 1
-    assert trust.rank_floor(keys, {"serials": {main.key_id: 5, spare.key_id: 1}}) == 2
-    assert trust.rank_floor(keys, {"serials": {"0" * 16: 9}}) == 0
+    assert trust.rank_floor(keys, {"serials": {main.key_id: 5}, "silenced": []}) == 1
+    both = {"serials": {main.key_id: 5, spare.key_id: 1}, "silenced": []}
+    assert trust.rank_floor(keys, both) == 2
+    assert trust.rank_floor(keys, {"serials": {"0" * 16: 9}, "silenced": []}) == 0
 
 
 def test_accepting_a_key_silences_every_key_ranked_below_it_in_the_set():
@@ -261,22 +267,106 @@ OVERRIDES = {"origin": "https://lab.example/feed/", "index_keys": TEST_KEYS}
 
 
 def test_an_acceptance_build_uses_its_own_origin_and_keys():
-    origin, keys = trust.configured(ACCEPTANCE, OVERRIDES)
+    origin, keys, acceptance = trust.configured(ACCEPTANCE, OVERRIDES)
     assert origin == "https://lab.example/feed/"
     assert trust.fingerprint(keys) == VECTORS["keysets"]["test"]["fingerprint"]
+    assert acceptance is True
 
 
 @pytest.mark.parametrize("flavour", ["release", "development", "nightly", None])
 def test_no_other_build_honours_an_override(flavour):
     build = dict(ACCEPTANCE, flavour=flavour)
-    assert trust.configured(build, OVERRIDES) == (trust.ORIGIN, trust.EMBEDDED)
+    assert trust.configured(build, OVERRIDES) == (trust.ORIGIN, trust.EMBEDDED, False)
 
 
 def test_without_overrides_or_a_build_the_release_values_apply():
-    assert trust.configured(None, OVERRIDES) == (trust.ORIGIN, trust.EMBEDDED)
-    assert trust.configured(ACCEPTANCE, None) == (trust.ORIGIN, trust.EMBEDDED)
+    assert trust.configured(None, OVERRIDES) == (trust.ORIGIN, trust.EMBEDDED, False)
+    # An acceptance build without test keys still keeps to its own part of the stored state.
+    assert trust.configured(ACCEPTANCE, None) == (trust.ORIGIN, trust.EMBEDDED, True)
     assert trust.configured(ACCEPTANCE, {"origin": None, "index_keys": TEST_KEYS})[0] == \
         trust.ORIGIN
+
+
+@pytest.mark.parametrize("release", [trust.MAIN, trust.SPARE])
+def test_a_test_key_set_containing_a_release_key_is_refused_loudly(release):
+    # One test-signed index from a higher-ranked test key would silence the release key on the
+    # receiver for good. Never honoured, and never quietly swapped for the release keys either.
+    overlapping = trust.keys_to_data([release]) + [
+        dict(item, rank=item["rank"] + 2) for item in TEST_KEYS]
+    with pytest.raises(trust.OverlappingKeys, match=release.key_id):
+        trust.configured(ACCEPTANCE, {"origin": None, "index_keys": overlapping})
+    with pytest.raises(trust.OverlappingKeys):
+        trust.refuse_release_keys(trust.keys_from_data(overlapping))
+
+
+# ------------------------------------------------------------- the stored state --
+
+MEMORIES = VECTORS["memories"]
+STATES = VECTORS["states"]
+
+
+@pytest.mark.parametrize("case", MEMORIES, ids=[case["note"] for case in MEMORIES])
+def test_a_stored_memory_is_loaded_as_it_is_or_refused(case):
+    if case["valid"]:
+        assert trust.check_memory(case["memory"]) == case["memory"]
+    else:
+        with pytest.raises(trust.BadMemory):
+            trust.check_memory(case["memory"])
+        # And a reader never judges with it: no fail-open to "nothing remembered".
+        with pytest.raises(trust.BadMemory):
+            trust.judge({"serial": 1}, _keysets()["test"][0], _keysets()["test"], case["memory"])
+
+
+@pytest.mark.parametrize("case", STATES, ids=[case["note"] for case in STATES])
+def test_a_stored_state_is_loaded_as_it_is_or_refused(case):
+    if case["valid"]:
+        assert trust.check_state(case["state"]) == case["state"]
+    else:
+        with pytest.raises(trust.BadMemory):
+            trust.memory_for(case["state"], _keysets()["test"])
+
+
+def test_a_state_ignores_disjoint_sets_and_merges_the_overlapping_ones():
+    sets = _keysets()
+    test, plus, other = sets["test"], sets["test-plus"], sets["other"]
+    t1, t2 = test
+    state = trust.store(None, other, {"serials": {other[0].key_id: 900}, "silenced": []})
+    state = trust.store(state, test, {"serials": {t1.key_id: 40}, "silenced": []})
+    # A newer, overlapping set learned more; returning to the older set does not forget it.
+    state = trust.store(state, plus, {"serials": {t1.key_id: 50, t2.key_id: 1},
+                                      "silenced": [t1.key_id]})
+    memory = trust.memory_for(state, test)
+    assert memory == {"serials": {t1.key_id: 50, t2.key_id: 1}, "silenced": [t1.key_id]}
+    # The disjoint set's serial is never read into this one; it shares t3 with test-plus only.
+    assert other[0].key_id not in memory["serials"]
+    # `other` holds t3, which test-plus carries too: it takes that entry's silenced keys, and
+    # only its own serials.
+    assert trust.memory_for(state, other) == {"serials": {other[0].key_id: 900},
+                                              "silenced": [t1.key_id]}
+    # A set sharing no key with any entry starts fresh.
+    lone = sets["test-spare-only"]
+    lone_state = trust.store(None, other, {"serials": {other[0].key_id: 1}, "silenced": []})
+    assert trust.memory_for(lone_state, lone) == trust.empty_memory()
+    # Acceptance and release never meet.
+    assert trust.memory_for(state, test, acceptance=True) == trust.empty_memory()
+
+
+def test_a_state_takes_the_largest_serial_whatever_order_it_was_stored_in():
+    sets = _keysets()
+    test, plus = sets["test"], sets["test-plus"]
+    t1 = test[0]
+    newer_first = trust.store(None, plus, {"serials": {t1.key_id: 50}, "silenced": []})
+    newer_first = trust.store(newer_first, test, {"serials": {t1.key_id: 40}, "silenced": []})
+    assert trust.memory_for(newer_first, test)["serials"] == {t1.key_id: 50}
+
+
+def test_an_entry_sharing_no_key_is_never_read_even_when_it_names_one():
+    # However such an entry came to list a key this reader holds, it is another key set's memory.
+    sets = _keysets()
+    test, other = sets["test"], sets["other"]
+    t1 = test[0]
+    state = trust.store(None, other, {"serials": {other[0].key_id: 5}, "silenced": [t1.key_id]})
+    assert trust.memory_for(state, test) == trust.empty_memory()
 
 
 def test_the_signature_file_is_one_line_in_a_fixed_order():
