@@ -233,6 +233,39 @@ def test_the_release_read_back_accepts_the_release_package_and_nothing_else(chec
         check.check(released, commit, COMMITTED_AT + 1)
 
 
+@pytest.mark.parametrize("old, new, words", [
+    # The spare's line, swapped for a throwaway test key (id and rank consistent, so it loads).
+    ('SPARE = _key("c72fd83e3e514a25", 2, "1F2ajhsDoTuqAGdV2QOHdRl8hV4B0kNE0xwVGrpHdfs=", 0)',
+     None, "not the release keys"),
+    ('ORIGIN = "https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/"',
+     'ORIGIN = "https://mirror.example/feed/"', "fetches from"),
+])
+def test_the_release_read_back_asks_the_package_what_it_trusts(checkout, tmp_path, old, new,
+                                                                words):
+    # A release package built from a tree whose keys or origin were changed - every release check
+    # but this one is about the build, not about what the package will trust.
+    import json
+
+    if new is None:
+        vectors = json.loads((REPO_ROOT / "tests" / "vectors" / "release-index.json").read_text())
+        key = vectors["test_keys"]["t3"]
+        new = f'SPARE = _key("{key["key_id"]}", 2, "{key["public"]}", 0)'
+    check = _check_release_package()
+    repo = tmp_path / "changed"
+    shutil.copytree(checkout, repo)
+    shutil.rmtree(repo / "dist", ignore_errors=True)
+    trust_py = repo / "src" / "MQTTBridge" / "trust.py"
+    text = trust_py.read_text(encoding="utf-8")
+    assert text.count(old) == 1
+    trust_py.write_text(text.replace(old, new), encoding="utf-8")
+    _git(repo, "commit", "-q", "-am", "other keys")
+    _git(repo, "tag", f"v{__version__}")
+    path = repo / "dist" / "changed.ipk"
+    path.write_bytes(_build(repo, MQTTBRIDGE_BUILD_FLAVOUR="release"))
+    with pytest.raises(check.Refused, match=words):
+        check.check(path, _git(repo, "rev-parse", "HEAD"), COMMITTED_AT)
+
+
 def test_an_acceptance_build_carries_its_test_settings_and_is_no_release(checkout, tmp_path):
     import json
 

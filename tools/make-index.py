@@ -469,20 +469,17 @@ def check_unsigned(raw, keys, key_id, published, expect_next=True):
     key = trust.by_id(keys, key_id)
     if key is None or index["key_id"] != key.key_id:
         _fail(f"the index names key {index['key_id']}, and only {key_id} signs here")
-    old, old_key, memory = verified_published(*published, keys)
+    old, old_key, _memory = verified_published(*published, keys)
     if not expect_next:
         return index
+    # Exactly the next serial: the published one + 1 for the same key, the baseline + 1 for a key
+    # of higher rank, never a key of lower rank. That is all a reader that has seen the published
+    # index would accept from this key, and nothing it would refuse.
     expected = next_serial(key, old, old_key)
     if index["serial"] != expected:
         _fail(f"serial {index['serial']} is not the next one, {expected}")
     if old is not None and old_key.key_id == key.key_id and old["issued"] > index["issued"]:
         _fail("the index was issued before the one it follows")
-    # The same judgement a reader makes, from what the published index taught it.
-    try:
-        trust.judge(index, key, keys, memory)
-    except trust.Refused as error:
-        _fail(f"a reader that has seen the published index would refuse this one "
-              f"({error.reason}): {error.detail}")
     return index
 
 

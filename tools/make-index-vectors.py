@@ -291,7 +291,9 @@ def scenarios(b):
                sig=(json.dumps(dict(good_sig, padding="x" * 1100)) + "\n").encode()))
     big = raw("t1", 1, entry={"withdrawn": "x" * (trust.MAX_INDEX_BYTES + 1)})
     scenario("an index over 64 KiB is refused before anything else",
-             s("test", "t1", big, "too_large", "65 KiB, validly signed"))
+             s("test", "t1", big, "too_large", "65 KiB, validly signed"),
+             s("test", "t1", big, "too_large", "65 KiB, signed by another key: the cap comes "
+               "before the signature", sig=b.sig("t2", big, as_key="t1")))
 
     def signed_text(text, note, expect):
         data = text.encode()
