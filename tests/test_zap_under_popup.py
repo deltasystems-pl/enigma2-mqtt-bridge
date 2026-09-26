@@ -36,6 +36,7 @@ from conftest import (
     TVP1,
     InfoBar,
     MainLoop,
+    ModalInfoBar,
     MoviePlayer,
     NotifiableInfoBar,
     Receiver,
@@ -341,12 +342,14 @@ def test_an_information_popup_over_another_screen_than_the_info_bar_is_played_di
     """One screen under the popup, and it is not the info bar the zap goes through.
 
     The popup is opened over the modelled info bar as usual; then the image's
-    `InfoBar.instance` is another object with the same channel list - a base
-    screen that is not the info bar, which is the case the stack test is for.
+    `InfoBar.instance` is another object of the very same class, with the same
+    channel list - a base screen that is not the info bar, which is the case
+    the stack test is for. The same class tells identity from class.
     """
     osd.show("Dinner is ready", "info", 15)
     base = box.session.dialog_stack[-1][0]
-    InfoBar.instance = InfoBar(box.list)
+    InfoBar.instance = ModalInfoBar(box.session, box.list)
+    assert type(base) is type(InfoBar.instance)
     assert base is not InfoBar.instance
     assert service_module.info_popup_over_infobar(box.session) is False
 
@@ -452,3 +455,127 @@ def test_a_popup_over_the_movie_player_names_the_stack_in_the_log(box, plugin_lo
     assert ("the screen under the message box is not the info bar (stack: " + below
             + "ModalInfoBar > PlayerWithNotifications)") in plugin_log()
     assert "Dinner" not in plugin_log()
+
+
+def test_a_zap_history_command_under_a_closing_popup_leaves_the_history_alone(box):
+    osd.show("Dinner is ready", "info", 15)
+    popup = assert_popup_state(box)
+    popup.close(True)
+    assert box.session.in_exec is False
+    before = [item[-1].toString() for item in box.list.history]
+
+    send(box, "zap_history", {"sref": TVN})
+
+    assert box.list.history_paths == 0
+    assert [item[-1].toString() for item in box.list.history] == before
+    assert box.receiver.nav.played == [TVN]
+
+
+# ------------------------------------------------------------ the log line --
+#
+# The refusal line is the acceptance signal on a receiver: present exactly when
+# a zap was played directly because of an open screen, absent otherwise, and
+# never carrying what the popup said.
+
+SECRET = "Private note 4711 for the household"
+
+
+def _question(box):
+    AddNotification(MessageBox, SECRET, timeout=20)
+
+
+def _answers(box):
+    osd.show(SECRET, "info", 15)
+    box.session.current_dialog.list = [("Yes", True), ("No", False)]
+
+
+def _unknown_type(box):
+    AddPopup(SECRET, 7, 5)
+
+
+def _no_type(box):
+    osd.show(SECRET, "info", 15)
+    del box.session.current_dialog.type
+
+
+def _no_list(box):
+    osd.show(SECRET, "info", 15)
+    del box.session.current_dialog.list
+
+
+def _subclass(box):
+    AddNotificationWithID("mine", InformationSubclass, text=SECRET,
+                          type=MessageBox.TYPE_INFO, timeout=5)
+
+
+def _closing(box):
+    osd.show(SECRET, "info", 15)
+    box.session.current_dialog.close(True)
+
+
+def _two_deep(box):
+    box.session.open(PlayerWithNotifications)
+    osd.show(SECRET, "info", 15)
+
+
+def _other_base(box):
+    osd.show(SECRET, "info", 15)
+    InfoBar.instance = ModalInfoBar(box.session, box.list)
+
+
+def _bare_entry(box):
+    osd.show(SECRET, "info", 15)
+    box.session.dialog_stack[-1] = InfoBar.instance
+
+
+REFUSALS = [
+    (_question, "the message box is of type 0, not information, warning or error"),
+    (_answers, "the message box offers 2 answers"),
+    (_unknown_type, "the message box is of type 4, not information, warning or error"),
+    (_no_type, "the message box is of type None, not information, warning or error"),
+    (_no_list, "the message box has no answer list"),
+    (_subclass, "the executing screen is InformationSubclass, not a message box"),
+    (_closing, "the message box is closing"),
+    (_two_deep, "the screen under the message box is not the info bar (stack: "),
+    (_other_base, "the screen under the message box is not the info bar (stack: "),
+    (_bare_entry, "the dialog stack could not be read"),
+]
+
+
+@pytest.mark.parametrize(
+    "build, phrase", REFUSALS, ids=[build.__name__.strip("_") for build, _p in REFUSALS]
+)
+def test_every_refusal_names_its_condition_and_never_the_popups_text(
+    box, plugin_log, build, phrase
+):
+    build(box)
+    assert service_module.info_popup_over_infobar(box.session) is False
+
+    send(box, "zap", {"sref": TVN})
+
+    assert box.list.zaps == 0
+    log = plugin_log()
+    assert "the channel list is not used for this zap: " + phrase in log
+    assert SECRET not in log
+    assert "4711" not in log
+
+
+def test_a_zap_recorded_under_a_popup_logs_no_refusal(box, plugin_log):
+    osd.show("Dinner is ready", "info", 15)
+    assert_popup_state(box)
+
+    send(box, "zap", {"sref": TVN})
+
+    assert_recorded(box, TVN)
+    log = plugin_log()
+    assert "not used for this zap" not in log
+    assert "without the channel list" not in log
+
+
+def test_a_zap_with_nothing_open_logs_no_refusal(box, plugin_log):
+    assert box.session.current_dialog is InfoBar.instance
+
+    send(box, "zap", {"sref": TVN})
+
+    assert_recorded(box, TVN)
+    assert "not used for this zap" not in plugin_log()

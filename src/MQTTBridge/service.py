@@ -440,7 +440,7 @@ def popup_refusal(session):
     `WHERE_SESSIONSTART` plugins before it opens the info bar, and one that
     opens a screen there leaves it at the bottom of the stack for the life
     of the interface - the Vu+ HbbTV plugin opens its zero-size `VBMain`
-    that way (`WebkitHbbTV/plugin.py` 348-349). A rule that wanted the info
+    that way (`WebkitHbbTV/plugin.pyc` 348-349). A rule that wanted the info
     bar to be the stack's only entry refused every popup on such a receiver.
 
     The second element of each tuple is a screen's visibility when something

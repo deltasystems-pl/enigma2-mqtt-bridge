@@ -136,9 +136,9 @@ not.
 **Amended 2026-09-26 (hardware acceptance).** "The info bar alone" on `dialog_stack` was wrong for
 a real receiver: `StartEnigma.Session` runs the `WHERE_SESSIONSTART` plugins before it opens the
 info bar, and one that opens a screen there leaves it under the info bar for the life of the
-interface - the Vu+ HbbTV plugin opens its zero-size `VBMain` that way. On such a receiver every
-popup sat on a two-entry stack and every zap under it was played directly; the acceptance run
-showed exactly that. The rule now looks only at the top of the stack - the screen directly under
+interface - the Vu+ HbbTV plugin opens its zero-size `VBMain` that way. On such a receiver a popup
+sits on a two-entry stack. The acceptance run played every zap under a popup directly; the
+two-entry stack behind that is read from the image's bytecode, not from the running receiver. The rule now looks only at the top of the stack - the screen directly under
 the popup must be the info bar - and ignores what lies under the info bar, which is not on the
 screen. When the rule says no, the plugin logs which condition failed, at the default level.
 
