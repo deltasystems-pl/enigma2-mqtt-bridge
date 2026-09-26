@@ -127,8 +127,8 @@ measured with a question on screen. `cmd/zap_history` is still refused during th
 recording, and `cmd/bouquet` still moves the channel list to its bouquet when the list is open.
 The Consequences below call the zap-timer and EPG paths unread; they have since been read from the
 bytecode of OpenViX 6.6: a zap timer is recorded only when the receiver is awake and not in
-timeshift, an EPG zap only once it is confirmed, and the awake zap timer's entry was measured.
-OpenWebif's own zap is still not read. `docs/TOPICS.md` ("What enters the receiver's zap history",
+timeshift, and never when it zaps the picture-in-picture; an EPG zap only once it is confirmed;
+and the awake zap timer's entry was measured. OpenWebif's own zap is still not read. `docs/TOPICS.md` ("What enters the receiver's zap history",
 "A zap from Home Assistant during timeshift") carries the full list, what is measured and what is
 not.
 

@@ -882,8 +882,8 @@ Retained.
 Published when a command fails or is refused by a guard, and **cleared** - an empty retained
 payload - when any command later succeeds, not only the same one: a successful zap clears a
 refusal `history_clear` left there. A check that runs after a command has returned, such as the
-5 s verification of a zap on `service`, can publish it again. A consumer that raises an error to the user reads
-this topic, not the absence of a state change.
+5 s verification of a zap on `service`, can publish a new refusal. A consumer that raises an error
+to the user reads this topic, not the absence of a state change.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -964,7 +964,8 @@ Ten exits play the service directly with the image's `playService`, as before 0.
 is **not recorded**. Earlier versions of this page listed six; the code has ten. They
 are checked in the order below, and the first that applies wins. None of them is an error: the
 channel is tuned and the command succeeds, so, like any successful command, it **clears** a
-pending `last_error`, whichever command set it; it never sets one. The 5 s verification on
+pending `last_error`, whichever command set it. It sets one only if the image's `playService`
+itself raises: the exception's text is then the refusal. The 5 s verification on
 `service` runs as for any zap and can still set `last_error` afterwards. Each exit is logged at
 `info` as
 
@@ -1098,11 +1099,13 @@ What happens, measured on OpenViX 6.6:
   40 s later, the receiver deleted them: the directory was empty afterwards, its time that of that
   zap. The mechanism, read from the bytecode: on every service start the image deletes the
   `timeshift.*` and `pts_livebuffer_*` files in its timeshift directory that are older than 3 s
-  (not in standby, and only when the directory is writable), and it runs the same clean-up on a
-  timer. The zap that ends timeshift cannot delete its own buffer, which is younger than that; the
-  next one does. The plugin deletes nothing.
+  (not in standby, and only when the directory is writable). On OpenViX 6.6 that is the only path
+  that deletes the buffer: the image also creates a clean-up timer, but nothing ever starts it.
+  The zap that ends timeshift cannot delete its own buffer, which is younger than that; the start
+  of the next channel does. The plugin deletes nothing.
 - `last_error`: the zap is a successful command, so it **clears** a pending one - on the drill,
-  the `history_clear` timeshift refusal was cleared about 20 ms after the zap. It sets none.
+  the `history_clear` timeshift refusal was cleared about 20 ms after the zap. It sets none unless
+  the image's `playService` raises (exits above).
 
 The plugin does this because the receiver's own zap would ask a question on the television with
 no timeout, and a zap from a phone must not leave a question on somebody's screen. It also plays
@@ -1130,8 +1133,9 @@ The other commands during timeshift:
   it".
 - `cmd/history_clear` is refused with reason `timeshift` (measured).
 
-**Not measured:** the buffer's removal was seen once, and whether the service start or the image's
-clean-up timer removed it was not told apart; what a direct play does to a timeshift already
+**Not measured:** more than one removal of the buffer - that only the start of a new channel
+deletes it is read from the bytecode, and the deletion itself was seen once, with the directory's
+change time matching the next zap; what a direct play does to a timeshift already
 marked for saving; and all of this on any image other than OpenViX 6.6.
 
 ### `cmd/history_clear` is the 0 key - since 0.3.0
