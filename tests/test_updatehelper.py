@@ -2926,3 +2926,22 @@ def test_a_process_name_that_cannot_be_read_is_unknown_unless_the_process_exited
     # Everything else keeps what it could read.
     assert receiver.enigma2_pids() == {100}
 
+
+def test_a_second_init_3_that_brings_the_interface_up_late_is_waited_for(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    real = scene.box.run
+    late = updatehelper.START_AGAIN_WAIT - 5
+
+    def the_first_start_is_lost_the_second_slow(argv, timeout):
+        if argv[0] == scene.box.init and argv[1] == "3":
+            scene.box.argv.append(list(argv))
+            if scene.init_calls().count("3") == 2:
+                scene.box.at(late, lambda: real(argv, timeout))
+            return 0
+        return real(argv, timeout)
+    scene.box.run = the_first_start_is_lost_the_second_slow
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    assert scene.status()["record"]["start"] == "again" and scene.box.pids == {300}
+    assert scene.box.lastservice_at_start == TVP1
