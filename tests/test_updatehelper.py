@@ -89,6 +89,8 @@ class Box(updatehelper.Receiver):
         self.lastservice_at_start = None
         self.fetched = []
         self.stops = True
+        self.zap_works = True
+        self.start_fails = False
 
     # time
     def clock(self):
@@ -133,6 +135,8 @@ class Box(updatehelper.Receiver):
                 self.webif_up = False
             elif argv[1] == "3":
                 self.lastservice_at_start = self.setting("config.tv.lastservice")
+                if self.start_fails:
+                    return 1
                 self.pids = {300}
                 self.webif_up = True
                 self.service = self.lastservice_at_start or TVN
@@ -183,7 +187,8 @@ class Box(updatehelper.Receiver):
             from urllib.parse import unquote
 
             self.zaps.append(unquote(path.split("=", 1)[1]))
-            self.service = self.zaps[-1]
+            if self.zap_works:
+                self.service = self.zaps[-1]
             return 200, b'{"result": true}'
         if path.startswith("/api/powerstate?newstate="):
             self.power.append(path.rsplit("=", 1)[1])
@@ -1050,8 +1055,9 @@ def shells():
 def test_a_real_sigterm_inside_r2_waits_for_the_restore(tmp_path, shell):
     """The receiver's way: a copy in its own directory, its own process, a real signal."""
     ipk = package(NEW)
-    scene = Scene(tmp_path, ipk=ipk, request={"relay": {"url": "http://127.0.0.1:9/x",
-                                                        "expires": 0}})
+    token = "/api/enigma2_mqtt/relay/" + "t" * 43
+    scene = Scene(tmp_path, ipk=ipk, request={"relay": {"url": "http://127.0.0.1:9" + token,
+                                                        "expires": int(time.time()) + 600}})
     root = Path(scene.box.root)
     proc = tmp_path / "proc"
     (proc / "100").mkdir(parents=True)
@@ -1075,7 +1081,7 @@ def test_a_real_sigterm_inside_r2_waits_for_the_restore(tmp_path, shell):
     server = http.server.HTTPServer(("127.0.0.1", 0), Serve)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     request = json.loads((scene.directory / "request.json").read_text())
-    request["relay"]["url"] = f"http://127.0.0.1:{server.server_port}/relay"
+    request["relay"]["url"] = f"http://127.0.0.1:{server.server_port}{token}"
     updatehelper.write_json(str(scene.directory / "request.json"), request)
     source = Path(updatehelper.__file__).parent
     shutil.copy(source / "updatehelper.py", scene.directory / "helper.py")
@@ -1203,3 +1209,656 @@ def test_without_the_integrations_word_a_needed_integration_is_met_in_discovery_
     scene = Scene(tmp_path, ipk=ipk, entries=[entry_for(NEW, ipk, min_integration="0.4.0")])
     scene.plugin_word()
     assert scene.run() == 0
+
+
+# ------------------------------------------------ which process is the restart --
+
+
+def tier_two(tmp_path, **kwargs):
+    ipk = package(NEW)
+    return Scene(tmp_path, ipk=ipk, entries=[entry_for(NEW, ipk, self_update=False)], **kwargs)
+
+
+@pytest.mark.parametrize("tier", [1, 2])
+def test_an_interface_restart_before_opkg_ends_it_with_nothing_changed(tmp_path, tier):
+    scene = tier_two(tmp_path) if tier == 2 else Scene(tmp_path)
+    log = scene.box.path(updatehelper.LOG_PATHS[0])
+
+    def household_restarts_the_interface():
+        # A crash and respawn, or a restart from the menu, while the package is downloaded:
+        # the new process loaded the old code and holds the old plugin's log open.
+        scene.box.pids = {150}
+        scene.box.fds[150] = {log}
+    scene.box.pauses["verifying"] = household_restarts_the_interface
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("interrupted", "interrupted")
+    assert "restarted" in scene.last()["error"]
+    assert scene.opkg_calls() == [] and scene.init_calls() == []
+    assert scene.plugin_py() == f"# plugin {OLD}\n" and not scene.locked()
+    assert not list((Path(scene.box.root) / updatehelper.BACKUPS).glob("self-update-*"))
+
+
+def test_an_interface_restart_during_opkg_is_rolled_back_not_proved(tmp_path):
+    scene = tier_two(tmp_path)
+    log = scene.box.path(updatehelper.LOG_PATHS[0])
+    asked = []
+
+    def restart_while_opkg_unpacks():
+        scene.box.pids = {150}
+        scene.box.fds[150] = {log}
+    scene.box.opkg_blocker = restart_while_opkg_unpacks
+    scene.box.pauses["restarting"] = lambda: asked.append(True)
+    assert scene.run() == 1
+    # The process that started meanwhile may hold either version, or a mix: it is stopped and
+    # the old files go back, and the plugin is never told to ask for a restart.
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "interrupted")
+    assert scene.init_calls() == ["4", "3"] and asked == []
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+
+
+def test_a_failure_after_an_unasked_restart_stops_the_interface_before_restoring(tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.opkg_mode = "partial"
+
+    def restart_while_opkg_unpacks():
+        scene.box.pids = {150}
+    scene.box.opkg_blocker = restart_while_opkg_unpacks
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "manifest")
+    # R2 straight away: the files go back only once the running process is stopped.
+    assert scene.box.init_log[0] == ("4", "# garbage\n")
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+
+
+def test_a_short_lived_enigma2_child_is_not_the_restart(tmp_path):
+    scene = Scene(tmp_path)
+
+    def plugin_asks_then_the_household_says_no():
+        updatehelper.write_json(str(scene.directory / "restart.json"), {"pid": 100})
+        # enigma2 forks for a console command; the child keeps the name until it execs.
+        scene.box.pids = {100, 101}
+        scene.box.at(0.5, lambda: setattr(scene.box, "pids", {100}))
+        scene.box.at(30, lambda: (scene.directory / "withdraw").write_text(""))
+    scene.box.pauses["restarting"] = plugin_asks_then_the_household_says_no
+    assert scene.run() == 0
+    assert scene.last()["result"] == "withdrawn_before_restart"
+    assert scene.init_calls() == []
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+
+
+def test_the_proof_ignores_a_process_that_ran_before_the_restart(tmp_path):
+    scene = tier_two(tmp_path)
+    log = scene.box.path(updatehelper.LOG_PATHS[0])
+
+    def a_child_holds_the_old_log():
+        # A child enigma2 forked before the restart inherited the old process's log descriptor.
+        scene.box.pids = {100, 101}
+        scene.box.fds[101] = {log}
+        updatehelper.write_json(str(scene.directory / "restart.json"), {"pid": 100})
+        scene.box.at(5, lambda: setattr(scene.box, "pids", {101, 200}))
+    scene.box.pauses["restarting"] = a_child_holds_the_old_log
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    assert scene.status()["record"]["proof"] == "none"
+
+
+def test_the_new_process_proves_itself_beside_a_child_of_the_old_one(tmp_path):
+    scene = tier_two(tmp_path)
+    log = scene.box.path(updatehelper.LOG_PATHS[0])
+
+    def restart_with_a_child_left():
+        scene.box.pids = {100, 101}
+        updatehelper.write_json(str(scene.directory / "restart.json"), {"pid": 100})
+        scene.box.at(5, lambda: setattr(scene.box, "pids", {101, 200}))
+        scene.box.at(9, lambda: scene.box.fds.update({200: {log}}))
+    scene.box.pauses["restarting"] = restart_with_a_child_left
+    assert scene.run() == 0
+    assert scene.status()["record"]["proof"] == "log_fd"
+
+
+# ------------------------------------------- nothing unproven is left behind --
+
+
+def fail_marker_at(monkeypatch, phase):
+    original = updatehelper.write_json
+
+    def failing(path, value, mode=0o600):
+        if path.endswith("mqttbridge-update.json") and value.get("phase") == phase:
+            raise OSError(28, "No space left on device")
+        return original(path, value, mode)
+    monkeypatch.setattr(updatehelper, "write_json", failing)
+
+
+@pytest.mark.parametrize("phase", ["restarting", "proving", "rolling_back"])
+def test_a_marker_that_cannot_be_written_after_opkg_never_leaves_new_code(
+        tmp_path, monkeypatch, phase):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    fail_marker_at(monkeypatch, phase)
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.box.pids and not scene.locked()
+    assert scene.init_calls() == ["4", "3"]
+
+
+@pytest.mark.parametrize("error", [RuntimeError("boom"), OSError(5, "Input/output error")])
+def test_an_unexpected_error_after_opkg_puts_the_old_files_back(tmp_path, monkeypatch, error):
+    scene = Scene(tmp_path)
+
+    def broken(_path):
+        raise error
+    monkeypatch.setattr(updatehelper, "sha256_file", broken)
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "internal_error")
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.status()["record"]["restore"] == "done"
+    assert scene.init_calls() == [] and not scene.locked()
+
+
+def test_an_unexpected_error_while_waiting_for_the_restart_withdraws(tmp_path):
+    scene = Scene(tmp_path)
+
+    def broken():
+        raise RuntimeError("boom")
+    scene.box.pauses["restarting"] = broken
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "internal_error")
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.init_calls() == [] and not scene.locked()
+
+
+def test_an_unexpected_error_after_the_restart_rolls_back(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+
+    def broken():
+        scene.box.pauses.pop("proving")
+        raise RuntimeError("boom")
+    scene.box.pauses["proving"] = broken
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "internal_error")
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.init_calls() == ["4", "3"] and not scene.locked()
+    # Nothing was put back under the new interface before it was stopped.
+    assert scene.box.init_log[0] == ("4", f"# plugin {NEW}\n")
+
+
+def test_an_error_inside_the_restore_of_r2_still_starts_the_interface(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+
+    def boom(*_args, **_kwargs):
+        raise MemoryError()
+    scene.box.pauses["rollback_stopped"] = lambda: monkeypatch.setattr(
+        updatehelper, "restore_snapshot", boom)
+    assert scene.run() == 1
+    assert scene.init_calls() == ["4", "3"] and scene.box.pids
+    assert scene.last()["result"] == "failed" and not scene.locked()
+    assert scene.status()["record"]["restore"].startswith("failed")
+
+
+class Escape(BaseException):
+    """Something no handler expects - not even `except Exception`."""
+
+
+def test_whatever_escapes_r2_after_init_4_still_runs_init_3(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+
+    def escapes():
+        raise Escape()
+    scene.box.pauses["rollback_stopped"] = escapes
+    with pytest.raises(Escape):
+        scene.run()
+    assert scene.init_calls() == ["4", "3"] and scene.box.pids
+    assert not scene.locked()
+
+
+# ----------------------------------------------------- the marker before opkg --
+
+
+def test_the_marker_is_written_before_opkg_runs(tmp_path):
+    scene = Scene(tmp_path)
+    seen = {}
+    scene.box.opkg_blocker = lambda: seen.update(marker=scene.marker())
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+    scene.run()
+    assert seen["marker"]["phase"] == "installing" and seen["marker"]["id"] == TID
+    assert seen["marker"]["to"] == {"version": NEW, "commit": "e" * 40}
+
+
+def test_no_marker_before_opkg_means_no_opkg(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    fail_marker_at(monkeypatch, "installing")
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "internal_error")
+    assert scene.opkg_calls() == [] and scene.plugin_py() == f"# plugin {OLD}\n"
+    assert not list((Path(scene.box.root) / updatehelper.BACKUPS).glob("self-update-*"))
+
+
+# ------------------------------------------------------ the index in memory --
+
+
+def hold_index(scene, serial, entries):
+    from MQTTBridge import trustfile
+
+    index_raw, signature = updatelab.signed(serial, entries)
+    trustfile.keep(scene.box.path(updatehelper.TRUST_FILE), updatelab.TEST_KEYS, True,
+                   index_raw, signature, "relay", 1)
+
+
+@pytest.mark.parametrize("storage", ["write_failed", "trust_busy"])
+def test_a_newer_index_that_cannot_be_stored_still_decides(tmp_path, monkeypatch, storage):
+    from MQTTBridge import trustfile
+
+    ipk = package(NEW)
+    entries = [entry_for(NEW, ipk)]
+    scene = Scene(tmp_path, ipk=ipk, entries=entries)
+    hold_index(scene, 7, entries)
+    index_raw, signature = updatelab.signed(8, [dict(entries[0], withdrawn="breaks the tuner")])
+    scene.box.urls[ORIGIN + trust.SIGNATURE_FILE] = (200, signature)
+    scene.box.urls[ORIGIN + trust.INDEX_FILE] = (200, index_raw)
+    if storage == "write_failed":
+        monkeypatch.setattr(trustfile, "write_state", lambda path, state: False)
+    else:
+        def busy(path, wait):
+            raise trustfile.TrustBusy("held")
+        monkeypatch.setattr(trustfile, "trust_lock", busy)
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+    assert scene.run() == 1
+    assert scene.last()["reason"] == "withdrawn"
+    assert scene.opkg_calls() == []
+    record = scene.status()["record"]
+    assert (record["index_verdict"], record["index_kept"]) == (storage, False)
+
+
+# ------------------------------------------------ a second helper, same id --
+
+
+def test_a_second_helper_with_the_same_id_writes_nothing_into_the_first(tmp_path):
+    scene = Scene(tmp_path)
+    seen = {}
+
+    def second():
+        scene.box.pauses.pop("snapshot")
+        other = updatehelper.Transaction(str(scene.directory), scene.box)
+        seen["rc"] = other.run()
+        seen["status"] = json.loads((scene.directory / "status.json").read_text())
+    scene.box.pauses["snapshot"] = second
+    scene.plugin_word()
+    assert scene.run() == 0
+    assert seen["rc"] == 1
+    assert (seen["status"]["phase"], seen["status"]["result"]) == ("snapshot", None)
+
+
+def test_a_lock_whose_owner_cannot_be_read_yet_gets_nothing_written(tmp_path):
+    scene = Scene(tmp_path)
+    # A claimer between its mkdir and its first write - perhaps this transaction's own helper.
+    (Path(scene.box.root) / updatehelper.BACKUPS / updatehelper.LOCK_NAME).mkdir(mode=0o700)
+    assert scene.run() == 1
+    assert not (scene.directory / "status.json").exists()
+
+
+def test_losing_the_race_for_a_freed_lock_is_busy(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    backups = Path(scene.box.root) / updatehelper.BACKUPS
+    lock = backups / updatehelper.LOCK_NAME
+    lock.mkdir(mode=0o700)
+    (lock / "owner.json").write_text(json.dumps({"boot_id": "boot-0", "id": "ffffffffffff"}))
+    calls = []
+
+    def stale(receiver, path):
+        calls.append(path)
+        if len(calls) == 2:
+            # Another claimer takes the name the moment the stale lock was moved aside.
+            lock.mkdir(mode=0o700)
+            (lock / "owner.json").write_text(json.dumps({"id": "eeeeeeeeeeee"}))
+        return "it was claimed before the receiver last rebooted"
+    monkeypatch.setattr(updatehelper, "lock_is_stale", stale)
+    assert scene.run() == 1
+    assert scene.status()["reason"] == "busy"
+    assert json.loads((lock / "owner.json").read_text())["id"] == "eeeeeeeeeeee"
+
+
+def test_a_helper_refused_by_another_transactions_lock_says_busy(tmp_path):
+    scene = Scene(tmp_path)
+    lock = Path(scene.box.root) / updatehelper.BACKUPS / updatehelper.LOCK_NAME
+    lock.mkdir(mode=0o700)
+    (lock / "owner.json").write_text(json.dumps(
+        {"pid": 1, "started": 5, "boot_id": "boot-1", "uptime": scene.box.t - 60,
+         "id": "ffffffffffff"}))
+    assert scene.run() == 1
+    status = json.loads((scene.directory / "status.json").read_text())
+    assert (status["phase"], status["result"], status["reason"]) == ("finished", "failed", "busy")
+
+
+# -------------------------------------------------- the last transaction's end --
+
+
+def test_the_last_record_carries_the_boot_and_its_uptime(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word()
+    scene.run()
+    last = scene.last()
+    assert last["boot_id"] == "boot-1"
+    assert last["uptime"] == scene.box.uptime()
+    assert last["finished"] == scene.box.now()
+
+
+# ----------------------------------------------------- forcing a downgrade --
+
+
+@pytest.mark.parametrize("started_by", ["mqtt", "home_assistant", "screen", "page"])
+def test_an_upgrade_never_forces_a_downgrade_whatever_the_request_says(tmp_path, started_by):
+    scene = Scene(tmp_path, started_by=started_by, downgrade=True)
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+    scene.run()
+    assert "--force-downgrade" not in scene.opkg_calls()[0]
+
+
+# ----------------------------------------------------------- the relay address --
+
+
+RELAY = "http://192.0.2.10:8123/api/enigma2_mqtt/relay/" + "a" * 43
+
+
+@pytest.mark.parametrize("relay", [
+    {"url": "http://198.51.100.9:22/anything?x=1", "expires": 1790999999},
+    {"url": RELAY + "?x=1", "expires": 1790999999},
+    {"url": RELAY[:-1], "expires": 1790999999},
+    {"url": RELAY + "/", "expires": 1790999999},
+    {"url": RELAY.replace("http://", "http://user@"), "expires": 1790999999},
+    {"url": RELAY.replace("http://", "ftp://"), "expires": 1790999999},
+    {"url": RELAY.replace(":8123", ":0"), "expires": 1790999999},
+    {"url": RELAY.replace(":8123", ":99999"), "expires": 1790999999},
+    {"url": RELAY.replace("192.0.2.10", "[2001:db8::1]"), "expires": 1790999999},
+    {"url": RELAY, "expires": 1790000000},
+    {"url": RELAY, "expires": True},
+    {"url": RELAY, "expires": "1790999999"},
+    {"url": RELAY},
+], ids=["another path", "a query", "a short token", "a trailing slash", "user info", "ftp",
+        "port 0", "port 99999", "ipv6", "expired", "expires bool", "expires text",
+        "no expiry"])
+def test_a_relay_address_of_another_shape_or_expired_is_refused(tmp_path, relay):
+    scene = Scene(tmp_path, relay=relay)
+    hold_index(scene, 7, scene.entries)
+    fetched = []
+    scene.box.fetch_relay = lambda url, cap, timeout: fetched.append(url) or (404, b"")
+    assert scene.run() == 1
+    assert scene.last()["reason"] == "relay"
+    assert "Home Assistant" in scene.last()["error"]
+    assert fetched == [] and scene.opkg_calls() == []
+
+
+@pytest.mark.parametrize("url", [
+    RELAY,
+    "https://192.0.2.10/api/enigma2_mqtt/relay/" + "-_" * 21 + "Z",
+    "http://homeassistant.local:8123/api/enigma2_mqtt/relay/" + "b" * 43,
+])
+def test_a_relay_address_of_the_right_shape_is_fetched(tmp_path, url):
+    scene = Scene(tmp_path, relay={"url": url, "expires": 1790999999})
+    hold_index(scene, 7, scene.entries)
+    scene.box.urls.clear()
+    scene.box.relayed[url] = (200, scene.ipk)
+    scene.plugin_word()
+    assert scene.run() == 0
+
+
+# ------------------------------------------------------------ the package --
+
+
+def payload_with(member):
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.GNU_FORMAT) as tar:
+        for name, body in (("./" + PLUGIN + "/plugin.py", b"# plugin 0.4.1\n"),
+                           ("./" + HOOK, b"# hook\n")):
+            info = tarfile.TarInfo(name)
+            info.size = len(body)
+            tar.addfile(info, io.BytesIO(body))
+        tar.addfile(member)
+    import gzip
+
+    return gzip.compress(buffer.getvalue(), mtime=0)
+
+
+def package_with(member):
+    control = f"Package: {updatehelper.PACKAGE}\nVersion: {NEW}\n".encode()
+    members = [("debian-binary", b"2.0\n"),
+               ("control.tar.gz", indexlab._tar({"./control": control})),
+               ("data.tar.gz", payload_with(member))]
+    out = b"!<arch>\n"
+    for name, content in members:
+        header = f"{name + '/':<16}{0:<12}{0:<6}{0:<6}{'100644':<8}{len(content):<10}`\n"
+        out += header.encode("ascii") + content + (b"\n" if len(content) % 2 else b"")
+    return out
+
+
+def tar_member(name, kind, target=""):
+    info = tarfile.TarInfo(name)
+    info.type = kind
+    info.linkname = target
+    return info
+
+
+@pytest.mark.parametrize("member, detail", [
+    (tar_member("./" + PLUGIN + "/link.py", tarfile.SYMTYPE, "/etc/passwd"), "other than files"),
+    (tar_member("./" + PLUGIN + "/hard.py", tarfile.LNKTYPE, "./" + PLUGIN + "/plugin.py"),
+     "other than files"),
+    (tar_member("./" + PLUGIN + "/tty", tarfile.CHRTYPE), "other than files"),
+    (tar_member("./" + PLUGIN + "/disk", tarfile.BLKTYPE), "other than files"),
+    (tar_member("./" + PLUGIN + "/pipe", tarfile.FIFOTYPE), "other than files"),
+    (tar_member("/" + PLUGIN + "/abs.py", tarfile.REGTYPE), "unsafe"),
+], ids=["symlink", "hardlink", "chardev", "blockdev", "fifo", "absolute"])
+def test_a_package_holding_links_devices_or_absolute_paths_is_refused(tmp_path, member, detail):
+    ipk = package_with(member)
+    scene = Scene(tmp_path, ipk=ipk)
+    scene.run()
+    assert scene.last()["reason"] == "bad_package"
+    assert detail in scene.last()["error"]
+    assert scene.opkg_calls() == []
+
+
+def test_a_request_whose_id_is_not_its_directorys_is_refused(tmp_path):
+    scene = Scene(tmp_path, request={"id": "ba9876543210"})
+    assert scene.run() == 2
+    assert scene.status()["reason"] == "bad_request"
+    assert scene.opkg_calls() == []
+
+
+def test_a_failed_package_write_leaves_no_rollback_point(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    real = updatehelper.atomic_write
+
+    def failing(path, data, mode=0o600):
+        if path.endswith(".ipk"):
+            raise OSError(28, "No space left on device")
+        return real(path, data, mode)
+    monkeypatch.setattr(updatehelper, "atomic_write", failing)
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "internal_error")
+    assert "could not be written" in scene.last()["error"]
+    assert not list((Path(scene.box.root) / updatehelper.BACKUPS).glob("self-update-*"))
+    assert scene.opkg_calls() == [] and not scene.locked()
+
+
+# ------------------------------------------------------- the lock, reclaimed --
+
+
+def test_a_lock_refreshed_between_the_two_judgements_is_left_to_its_owner(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    lock = Path(scene.box.root) / updatehelper.BACKUPS / updatehelper.LOCK_NAME
+    lock.mkdir(mode=0o700)
+    owner = {"pid": 1, "started": 5, "boot_id": "boot-0", "uptime": 1.0, "id": "ffffffffffff"}
+    (lock / "owner.json").write_text(json.dumps(owner))
+    verdicts = iter(["it was claimed before the receiver last rebooted", ""])
+    monkeypatch.setattr(updatehelper, "lock_is_stale", lambda receiver, path: next(verdicts))
+    assert scene.run() == 1
+    assert scene.status()["reason"] == "busy"
+    assert json.loads((lock / "owner.json").read_text()) == owner
+
+
+# ------------------------------------------------------- the withdraw, closely --
+
+
+def test_the_withdraw_waits_for_opkgs_lock_and_leaves_the_files_to_it(tmp_path):
+    scene = Scene(tmp_path)
+    lock = scene.box.path("run/opkg.lock")
+    holder = {}
+
+    def opkg_runs_again():
+        os.makedirs(os.path.dirname(lock), exist_ok=True)
+        holder["p"] = subprocess.Popen(
+            [sys.executable, "-c", "import fcntl, os, sys, time\n"
+             "fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT)\n"
+             "fcntl.lockf(fd, fcntl.LOCK_EX)\nprint('held', flush=True)\ntime.sleep(60)\n",
+             lock], stdout=subprocess.PIPE)
+        assert holder["p"].stdout.readline() == b"held\n"
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+    scene.box.pauses["withdrawing"] = opkg_runs_again
+    try:
+        scene.run()
+    finally:
+        holder["p"].kill()
+        holder["p"].wait()
+    assert scene.last()["result"] == "failed"
+    assert scene.status()["record"]["restore"].startswith("failed")
+    assert scene.plugin_py() == f"# plugin {NEW}\n"
+
+
+def test_the_plugins_ask_starts_the_180_s_again(tmp_path):
+    scene = Scene(tmp_path)
+
+    def the_plugin_asks_late():
+        scene.box.at(100, lambda: updatehelper.write_json(
+            str(scene.directory / "restart.json"), {"pid": 100}))
+        scene.box.at(250, scene.box.restart)
+        scene.box.at(253, lambda: updatehelper.write_json(
+            str(scene.directory / "started.json"), {"version": NEW, "commit": "e" * 40,
+                                                    "pid": 200}))
+    scene.box.pauses["restarting"] = the_plugin_asks_late
+    assert scene.run() == 0
+    assert scene.last()["result"] == "installed"
+
+
+def test_a_restart_during_a_completed_withdraw_is_rolled_back_even_if_the_new_plugin_speaks(
+        tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+
+    def restart_and_speak():
+        scene.box.restart()
+        updatehelper.write_json(str(scene.directory / "started.json"),
+                                {"version": NEW, "commit": "e" * 40, "pid": 200})
+    scene.box.pauses["withdrawn"] = restart_and_speak
+    assert scene.run() == 1
+    assert scene.last()["result"] == "rolled_back"
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.init_calls() == ["4", "3"]
+
+
+def test_the_withdraw_removes_what_only_the_new_version_brought(tmp_path):
+    scene = Scene(tmp_path)
+    _status, info = updatehelper.opkg_paths(scene.box.root)
+    extra_info = Path(info, updatehelper.PACKAGE + ".postinst")
+    cache = Path(scene.box.path(HOOK)).parent / "__pycache__"
+    bytecode = cache / "MQTTBridge.cpython-312.pyc"
+    original = scene.box.install
+
+    def install_with_more(ipk):
+        original(ipk)
+        extra_info.write_text("#!/bin/sh\n")
+        cache.mkdir(exist_ok=True)
+        bytecode.write_bytes(b"new bytecode")
+    scene.box.install = install_with_more
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+    assert scene.run() == 0
+    assert not extra_info.exists() and not bytecode.exists()
+
+
+# ---------------------------------------------------------------- R3, closely --
+
+
+def test_a_zap_back_that_does_not_take_is_reported_lost(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.service = TVP1
+    scene.box.zap_works = False
+    original = scene.box.run
+
+    def image_ignores_lastservice(argv, timeout):
+        code = original(argv, timeout)
+        if argv[0] == scene.box.init and argv[1] == "3":
+            scene.box.service = TVN
+        return code
+    scene.box.run = image_ignores_lastservice
+    scene.run()
+    assert scene.box.zaps == [TVP1]
+    assert scene.status()["record"]["channel"] == "lost"
+
+
+def test_an_interface_that_does_not_come_back_is_not_verified(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.start_fails = True
+    scene.run()
+    record = scene.status()["record"]
+    assert record["interface"] == "not started"
+    assert record["channel"] == "lost" and "standby" not in record
+    assert scene.box.zaps == []
+
+
+def test_a_rolled_back_transaction_keeps_its_directory(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.run()
+    assert scene.last()["result"] == "rolled_back"
+    assert json.loads((scene.directory / "status.json").read_text())["result"] == "rolled_back"
+
+
+# ------------------------------------------------ the acceptance drill's R2 --
+
+
+def drill_file(scene):
+    return Path(scene.box.root) / updatehelper.DRILL_R2
+
+
+def test_the_drill_file_sends_an_acceptance_build_straight_into_r2(tmp_path):
+    scene = Scene(tmp_path, acceptance=True)
+    asked = []
+    scene.box.pauses["restarting"] = lambda: asked.append(True)
+    scene.box.service = TVP1
+    drill_file(scene).write_text("")
+    assert scene.run() == 1
+    last = scene.last()
+    assert (last["result"], last["reason"]) == ("rolled_back", "drill")
+    # From installed, without a forward restart: never handed to the plugin, one stop and start.
+    assert asked == [] and scene.init_calls() == ["4", "3"]
+    assert scene.box.init_log[0] == ("4", f"# plugin {NEW}\n")
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    assert scene.box.lastservice_at_start == TVP1
+    record = scene.status()["record"]
+    assert (record["drill"], record["restart"], record["restore"]) == ("r2", "stopped", "done")
+    # One transaction's worth: the file is used up.
+    assert not drill_file(scene).exists() and not scene.locked()
+
+
+def test_a_release_or_development_build_ignores_the_drill_file(tmp_path):
+    # Release and development builds both write `acceptance: false` (trust.configured).
+    scene = Scene(tmp_path, acceptance=False)
+    scene.plugin_word()
+    drill_file(scene).write_text("")
+    assert scene.run() == 0
+    assert scene.last()["result"] == "installed"
+    assert scene.init_calls() == [] and "drill" not in scene.status()["record"]
+    assert drill_file(scene).exists()
+
+
+def test_a_drill_link_is_not_followed_or_used(tmp_path):
+    scene = Scene(tmp_path, acceptance=True)
+    scene.plugin_word()
+    target = tmp_path / "elsewhere"
+    target.write_text("")
+    drill_file(scene).symlink_to(target)
+    assert scene.run() == 0
+    assert scene.init_calls() == [] and target.exists()
