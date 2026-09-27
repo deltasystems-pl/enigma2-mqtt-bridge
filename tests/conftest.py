@@ -3272,6 +3272,36 @@ def no_package_manager(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_release_origin(tmp_path, monkeypatch):
+    """No test reaches the release origin, writes `/etc/enigma2` or waits for a worker thread.
+
+    Every bridge builds an update check, which keeps what it learns in a file of its own and,
+    asked to, fetches from the internet. Here the file is a temporary one, opkg's database is
+    absent, the worker runs inline - so what it publishes lands before the next line of a test,
+    never in the middle of another thread's assertions - and any request is recorded and fails
+    the test: a test that means to fetch hands its own origin to the checker it builds.
+    """
+    from MQTTBridge import updatecheck
+
+    requests = []
+
+    def refuse(url, cap, timeout):
+        requests.append(url)
+        raise updatecheck.Unreachable("the tests make no network requests")
+
+    monkeypatch.setattr(updatecheck.UpdateChecker, "path", str(tmp_path / "mqttbridge-index.json"))
+    monkeypatch.setattr(updatecheck.UpdateChecker, "check_path",
+                        str(tmp_path / "mqttbridge-check.json"))
+    monkeypatch.setattr(updatecheck.UpdateChecker, "opkg_root",
+                        str(tmp_path / "no-package-manager"))
+    monkeypatch.setattr(updatecheck.UpdateChecker, "fetch", staticmethod(refuse))
+    monkeypatch.setattr(updatecheck.UpdateChecker, "run_in_background",
+                        staticmethod(lambda job: job()))
+    yield requests
+    assert requests == [], "a test reached for the release origin: " + ", ".join(requests)
+
+
+@pytest.fixture(autouse=True)
 def fresh_settings():
     """Config elements are module-level singletons; put them back between tests."""
     from MQTTBridge import config as settings_module

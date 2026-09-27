@@ -98,6 +98,10 @@
       "payload": "json",
       "retained": false
     },
+    "update": {
+      "payload": "json",
+      "retained": true
+    },
     "last_error": {
       "payload": "json",
       "retained": true
@@ -136,7 +140,8 @@
     "reset": {},
     "uninstall": {
       "since": "0.3.0"
-    }
+    },
+    "update_check": {}
   },
   "info_members": {
     "image": "string",
@@ -218,6 +223,11 @@
       "type": "bool",
       "writable": false,
       "since": "0.3.0"
+    },
+    "update_check": {
+      "type": "bool",
+      "writable": false,
+      "since": "unreleased"
     }
   },
   "capabilities": [
@@ -248,6 +258,7 @@
   ],
   "other_topics": [
     "enigma2mqtt/discovery/<node>/config",
+    "enigma2mqtt/release_index",
     "homeassistant/device/<node>/config",
     "homeassistant/device_automation/<node>/<colour>_<press>/config"
   ],
@@ -272,23 +283,11 @@
   "planned": [
     {
       "kind": "setting",
-      "name": "update_check"
-    },
-    {
-      "kind": "setting",
       "name": "update_allowed"
     },
     {
       "kind": "capability",
       "name": "self_update"
-    },
-    {
-      "kind": "state topic",
-      "name": "update"
-    },
-    {
-      "kind": "command",
-      "name": "update_check"
     },
     {
       "kind": "command",
@@ -305,10 +304,6 @@
     {
       "kind": "consumer topic",
       "name": "enigma2mqtt/integration/<node>"
-    },
-    {
-      "kind": "consumer topic",
-      "name": "enigma2mqtt/release_index"
     }
   ]
 }

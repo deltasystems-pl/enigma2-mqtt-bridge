@@ -140,6 +140,7 @@ def test_config_persists_all_values_rebinds_hooks_and_publishes_info(
         "softcam_restart_allowed": False,
         "epg_import_allowed": False,
         "uninstall_allowed": False,
+        "update_check": False,
     }
 
 

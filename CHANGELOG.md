@@ -38,7 +38,7 @@ version that has no section here.
   package only with all three - the commit, `MQTTBRIDGE_BUILD_FLAVOUR=release` and the commit's time.
 - **The signed release index**, the one list of versions the plugin and the companion integration
   will install from ([docs/RELEASE-INDEX.md](docs/RELEASE-INDEX.md), ADR-0015 decisions 2 and 7).
-  Nothing reads it yet; this builds, signs and publishes it. `feed/releases.json` and
+  This builds, signs and publishes it; the update check below reads it. `feed/releases.json` and
   `feed/releases.json.sig` on the feed carry, per release, its size and sha256 - checked against
   the release asset's own digest and against the feed's copy - its commit and time, its contract
   major, the oldest integration it needs, its dependencies, whether it can update itself and
@@ -77,6 +77,32 @@ version that has no section here.
   tools:
   `make-index.py`, `sign-index.py`, `check-workflows.py`, `rehearse-signing.py`,
   `check-release-package.py` and `make-index-vectors.py`.
+- **The receiver checks which releases exist**, from the signed release index and nothing else
+  (ADR-0015; installing one comes later). A new retained topic, `update`, says what the receiver
+  holds: the index's serial, age and source, whether the release origin answered, when it last
+  checked and what went wrong, the newest compatible release and up to twenty releases at or above
+  the floor that are not withdrawn, each with the reason it is not compatible (another contract
+  major, a newer integration needed, a package missing). A new setting, `update_check` - off by
+  default, set on the receiver only, echoed read-only in `info.settings` and refused by
+  `cmd/config` - lets the receiver ask the origin once a day and on the new `cmd/update_check`;
+  with it off the receiver makes no connection but the broker's, and `cmd/update_check` over MQTT
+  is refused (`reason` `not_permitted`). The OpenWebif page's *Check for plugin updates now* asks
+  whatever the setting says. Manual checks share a ten-minute limit, inside which the last result
+  is the answer. A check fetches the signature file (the probe, five seconds, 1 KiB) and the index
+  (ten seconds, 64 KiB) over TLS that verifies even where another plugin switched verification off
+  for the whole process, follows no redirect, and reads one byte past each cap at most. The plugin
+  also subscribes to `enigma2mqtt/release_index`, which the companion integration publishes, and
+  judges a relayed index by the same rule - it needs no setting and makes no connection, so a
+  receiver without internet learns of releases this way. Everything runs on a worker thread; what
+  was accepted is kept in `/etc/enigma2/mqttbridge-index.json` (0600), written only when it
+  changes and verified again at every start; when the receiver last checked is kept apart, in
+  `/etc/enigma2/mqttbridge-check.json`. An index that could not be kept is reported as
+  `write_failed`, and the timeout bounds the whole answer, headers and a slow connection
+  included. Every write of the trust file takes its own short lock
+  (`/etc/enigma2/mqttbridge-index.lock`), reads the file again and judges the index against
+  that fresh read before writing, so a second writer is never rolled back; a lock held too
+  long is reported as `trust_busy`. Removing the trust file on purpose also forgets the check
+  that found the index.
 - **Only an acceptance build may carry a test origin or test index keys.** `tools/build-ipk.sh`
   takes `MQTTBRIDGE_BUILD_ORIGIN` and `MQTTBRIDGE_BUILD_INDEX_KEYS` for an `acceptance` build and
   refuses either for any other flavour; the plugin honours them in no other flavour; and the

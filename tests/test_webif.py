@@ -795,7 +795,7 @@ def test_the_permissions_and_kill_switches_are_one_group():
     groups = dict(webif.SETTING_GROUPS)
     assert set(groups["permissions"]) == {
         "deep_standby_allowed", "wol_arm", "softcam_restart_allowed", "epg_import_allowed",
-        "uninstall_allowed", "cec_standby_workaround", "osd_toast",
+        "uninstall_allowed", "update_check", "cec_standby_workaround", "osd_toast",
     }
 
 

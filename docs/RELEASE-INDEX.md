@@ -8,9 +8,11 @@ published next to the opkg feed at
 
 Why, and what it replaces, is [ADR-0015](adr/0015-signed-self-update.md). This file is the
 reference: the format, the rule every reader applies, where each value comes from, and how an index
-is built, signed and published. Nothing reads the index yet - the plugin's check and the
-integration's reader come in later changes - but the index, its keys and its rule are fixed here,
-and the first index is published before anything reads it.
+is built, signed and published. Two readers apply the rule: the companion integration, and the
+plugin's own update check (`src/MQTTBridge/updatecheck.py`), which reads the index from the
+origin - only when the receiver's `update_check` setting or a person at the OpenWebif page asks -
+or relayed by the integration on the retained topic `enigma2mqtt/release_index`, and publishes
+what it holds on the `update` topic ([TOPICS.md](TOPICS.md)). Nothing installs from the index yet.
 
 ## Format
 
@@ -132,7 +134,12 @@ receiver is ever read by the production build that follows it. Within its part, 
 largest serial for each key it holds and every silenced key from each entry whose key set shares a
 key with its own, and nothing from a set that shares none: a release that adds or drops a key keeps
 what was known, a downgrade to an older set cannot forget what a newer one learned, and a disjoint
-set is never consulted.
+set is never consulted. The receiver's file carries one more top-level member of its own, `held`:
+per part, the last accepted index and its signature file (base64) and where it came from; the
+check's own bookkeeping lives in another file, so this one is written only when what the
+receiver trusts changes. It is tolerated like any member a reader does not know,
+and the index in it is verified again whenever it is loaded - one this build's keys no longer sign
+is not shown, while the memory stays.
 
 **Loading it.** The format is **open for extension and closed for known members**, as the index
 is. A reader tolerates what it does not know - a member at the top, a member in an entry, a third

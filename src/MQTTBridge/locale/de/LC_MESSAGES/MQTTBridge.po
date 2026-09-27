@@ -664,6 +664,14 @@ msgstr "EPG-Importer lädt die Programmzeitschrift jetzt herunter. Am Ende stehe
 msgid "Allow removing the plugin remotely"
 msgstr "Entfernen des Plugins aus der Ferne erlauben"
 
+#: src/MQTTBridge/setup.py
+msgid "Check daily for plugin updates"
+msgstr "Täglich nach Plugin-Aktualisierungen suchen"
+
+#: src/MQTTBridge/webif.py
+msgid "Check for plugin updates now"
+msgstr "Jetzt nach Plugin-Aktualisierungen suchen"
+
 #: src/MQTTBridge/webif.py
 msgid "Remove the plugin from this receiver"
 msgstr "Plugin von diesem Receiver entfernen"

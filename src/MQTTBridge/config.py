@@ -55,9 +55,12 @@ REMOTE_SETTING_NAMES = (
 # provisioning file, or the OpenWebif page, which is exactly as open as the
 # receiver's web interface (ADR-0009). Echoing it lets a consumer hide a control
 # the box would always refuse instead of offering one that fails.
+# `update_check` is not a permission, and is on this side of the line for the same
+# reason: it is what lets the receiver reach the internet at all, which is the
+# receiver's to decide and not the broker's.
 READ_ONLY_SETTING_NAMES = (
     "deep_standby_allowed", "softcam_restart_allowed", "epg_import_allowed",
-    "uninstall_allowed",
+    "uninstall_allowed", "update_check",
 )
 SCREENSHOT_INTERVAL_LIMITS = (5, 3600)
 SCREENSHOT_DELAY_LIMITS = (1, 30)
@@ -103,6 +106,7 @@ SETTING_NAMES = (
     "softcam_autoheal_seconds",
     "epg_import_allowed",
     "uninstall_allowed",
+    "update_check",
     "log_level",
     "epg_grid_events",
 )
@@ -142,6 +146,7 @@ SETTING_KINDS = {
     "softcam_autoheal_seconds": "int",
     "epg_import_allowed": "bool",
     "uninstall_allowed": "bool",
+    "update_check": "bool",
     "log_level": "choice",
     "epg_grid_events": "int",
 }
@@ -260,6 +265,11 @@ def _build():
     # the plugin off the receiver, and after it has run nothing is left to take
     # a command that could undo it. Granted on the receiver, never over MQTT.
     section.uninstall_allowed = ConfigYesNo(default=False)
+    # Off by default, and never writable over MQTT: with it on the receiver asks the
+    # plugin's release origin, on the internet, once a day and when `cmd/update_check`
+    # asks. A receiver never looks for the internet on its own, so this is asked for on
+    # the receiver (`updatecheck.py`).
+    section.update_check = ConfigYesNo(default=False)
     section.log_level = ConfigSelection(
         default="info", choices=[(level, level) for level in LOG_LEVELS]
     )
