@@ -2179,3 +2179,14 @@ def test_an_error_in_r3_leaves_a_finished_rollback_rolled_back(tmp_path, monkeyp
     record = scene.status()["record"]
     assert (record["channel"], record["standby"]) == ("unconfirmed", "unconfirmed")
     assert record["internal_error"].startswith("RuntimeError")
+
+
+def test_r2_takes_the_channel_recorded_before_the_restart_when_openwebif_is_silent(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    # OpenWebif answered before the restart; by the time R2 starts, it says nothing.
+    scene.box.pauses["proving"] = lambda: setattr(scene.box, "webif_up", False)
+    assert scene.run() == 1
+    assert scene.last()["result"] == "rolled_back"
+    assert scene.box.lastservice_at_start == TVP1
+    assert scene.status()["record"]["channel"] == "kept"
