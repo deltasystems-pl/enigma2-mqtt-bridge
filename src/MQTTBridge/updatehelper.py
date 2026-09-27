@@ -92,8 +92,9 @@ once. A tree left half installed that cannot start the plugin at all is for the 
 integration's forced reinstall over SSH (TRANSACTION.md section 4).
 
 **Bounds.** The forward path gives up at 15 minutes and the rollback's waits add up to less than
-five, so the lock is held at most 20 minutes - under the released installer's 30-minute stale
-rule even if the heartbeat were never written.
+seven - that is with every `init 3` running into its timeout twice, and the interface given its
+second chance - so the lock is held at most 22 minutes: under the released installer's
+30-minute stale rule even if the heartbeat were never written.
 """
 
 import errno
@@ -173,6 +174,11 @@ POLL = 1
 PROOF_POLL = 2
 STOP_WAIT = 30
 START_WAIT = 120
+# `init 3` that did not answer 0 is sent once more after a short pause; nothing seen starting
+# after a stop within START_WAIT, it is sent again and given START_AGAIN_WAIT.
+INIT_3_TRIES = 2
+INIT_3_PAUSE = 2
+START_AGAIN_WAIT = 60
 SERVICE_WAIT = 60
 EFFECT_WAIT = 10
 INDEX_TIMEOUT = 10
@@ -338,9 +344,9 @@ class Receiver:
             return 127
         except Exception as error:
             # Anything else - a MemoryError while the child is set up, say - is a program that
-            # did not run, the same as one that could not be found. Its callers decide on the
-            # status: `init 3` in R2 above all, which must never be skipped because of how
-            # the start of a program failed.
+            # did not run, the same as one that could not be found: exit status 127, and the
+            # caller decides on it. R2 sends `init 3` again on any status but 0. Only what is
+            # not an Exception (KeyboardInterrupt, SystemExit) goes on up.
             self.last_output = type(error).__name__ + ": " + str(error)
             return 127
         self.last_output = completed.stdout.decode("utf-8", "replace")
@@ -349,12 +355,20 @@ class Receiver:
     last_output = ""
 
     def enigma2_pids(self):
-        """Every running process named `enigma2`, read from `/proc` - no `pidof` on the image."""
+        """Every running process named `enigma2`, read from `/proc` - no `pidof` on the image.
+
+        An empty set also when `/proc` cannot be listed; R2, which must tell "none" from "could
+        not look", asks `enigma2_look`.
+        """
+        return self.enigma2_look() or set()
+
+    def enigma2_look(self):
+        """`enigma2_pids`, or None when `/proc` itself cannot be listed (EMFILE, ENOMEM)."""
         pids = set()
         try:
             names = os.listdir(self.proc)
         except OSError:
-            return pids
+            return None
         for name in names:
             if not name.isdigit():
                 continue
@@ -1858,17 +1872,21 @@ class Transaction:
         failures are recorded and the unit carries on, and anything else still meets the
         `finally`, which first runs the steps the unit had not reached - the restore, the
         channel - each guarded, records `rollback: cut short`, and then starts the interface.
-        That includes an escape from the `init 3` call itself: the `finally` sends it again,
-        because starting a runlevel that is already running changes nothing. R3 comes after
-        the start and checks a rollback that is already done, so an error in it is noted
-        (`channel` / `standby` `unconfirmed`) and never changes the result.
+        `init 3` is safe to repeat - starting a runlevel that is already running changes
+        nothing - so it is repeated wherever a start is in doubt: once more after a pause when
+        the call does not answer 0 (127 when the program could not even be started, None when
+        it did not answer in time), again from the `finally` when the call itself raised, and
+        once more when nothing was seen starting after a stop. R3 comes after the start and
+        checks a rollback that is already done, so an error in it is noted (`channel` /
+        `standby` `unconfirmed`) and never changes the result.
 
         The result says what runs, not only what is on disk: `rolled_back` only when the old
         files are back and an enigma2 R2 had not seen before started on them. With the files
-        back and none, it is `failed`: `not_stopped` when the stop was never seen - `init 3`
-        then starts nothing, and the process R2 could not stop runs on with the code it had -
-        or `interface_not_started` when nothing came after a stop. The first reason stays as
-        `cause`. A restore that did not complete keeps its own reason before either.
+        back and none, it is `failed`: `not_stopped` when the stop was never seen and something
+        still runs - `init 3` then starts nothing, and the process R2 could not stop runs on
+        with the code it had; `unstopped` names it - or `interface_not_started` when nothing
+        runs even after `init 3` was sent once more. The first reason stays as `cause`. A
+        restore that did not complete keeps its own reason before either.
 
         Before `init 4` nothing has been stopped, so this is not yet the unit: the record is
         best effort (an error in it leaves the one taken before the restart), and only once the
@@ -1892,11 +1910,23 @@ class Transaction:
         # The enigma2 processes still running at the last look for the stop: none once it was
         # seen. After `init 3` only a process not among them is the interface starting again.
         survivors = set()
+        # Whether any look at `/proc` answered during the stop: without one, `survivors` says
+        # nothing, and no process can be told apart from one R2 could not stop.
+        looked = []
 
         def gone():
+            look = receiver.enigma2_look()
+            if look is None:  # `/proc` could not be read: unknown, never "stopped"
+                return False
+            looked.append(True)
             survivors.clear()
-            survivors.update(receiver.enigma2_pids())
-            return not survivors
+            survivors.update(look)
+            return not look
+
+        def came_back():
+            look = receiver.enigma2_look()
+            return (look is not None and (stopped or bool(looked))
+                    and bool(look - survivors))
         self.rolling_back = True
         try:
             receiver.run([receiver.init, "4"], STOP_WAIT)
@@ -1907,9 +1937,9 @@ class Transaction:
             receiver.pause("rollback_restored")
             self.put_lastservice(stopped, service)
             starting = True
-            receiver.run([receiver.init, "3"], STOP_WAIT)
-            # Only once it has returned: an escape from the call itself - the program could not
-            # even be started - must still meet the `init 3` below, which is safe to repeat.
+            self.start_interface()
+            # Only once it has returned: an escape from the call itself must still meet the
+            # `init 3` below.
             sent = True
         finally:
             if not sent:
@@ -1940,13 +1970,31 @@ class Transaction:
                             self.record["lastservice"] = "failed"
             self.record["stop"] = "seen" if stopped else "not seen"
             if not sent:
-                receiver.run([receiver.init, "3"], STOP_WAIT)
+                self.start_interface()
         receiver.pause("rollback_started")
         # Not stopped, `init 3` asks for a runlevel that never left and starts nothing: the
         # process R2 could not stop runs on, with whatever code it had, over the old files.
-        started = self.wait(lambda: bool(receiver.enigma2_pids() - survivors), START_WAIT)
+        started = self.wait(came_back, START_WAIT)
+        running = None  # the last look when nothing started: None when it could not be read
         if not started:
-            self.record["interface"] = "not started" if stopped else "not restarted"
+            running = receiver.enigma2_look()
+            if stopped or running == set():
+                # Nothing runs: an `init 3` that answered and took no effect, one that never got
+                # through, or a process R2 could not stop that has since quit. The interface
+                # is down either way, and asking again costs nothing.
+                self.record["start"] = "again"
+                self.start_interface()
+                started = self.wait(came_back, START_AGAIN_WAIT)
+                running = None if started else receiver.enigma2_look()
+        if not stopped and looked:
+            # The processes R2 could not stop, so that whoever reads this end - a plugin at its
+            # start - can tell by its own pid whether it is one of them.
+            self.record["unstopped"] = sorted(survivors)
+        # Nothing new started and the stop was never seen: what runs, as far as a look can
+        # tell, is what R2 could not stop, with the code it had.
+        still = not started and not stopped and running != set()
+        if not started:
+            self.record["interface"] = "not restarted" if still else "not started"
         if started and recorded and receiver.clock() < limit:
             try:
                 self.verify(recorded)
@@ -1959,7 +2007,7 @@ class Transaction:
             self.record["channel"] = "not recorded"
         else:
             # Not restarted, the channel was never touched; not started, there is none.
-            self.record["channel"] = "lost" if stopped else "unconfirmed"
+            self.record["channel"] = "unconfirmed" if still else "lost"
         end = self.restore_failure(failure)
         back = self.record.get("restore") == "done"
         if back and not started:
@@ -1967,10 +2015,28 @@ class Transaction:
             # says the old version runs: never `rolled_back`, which the plugin and Home
             # Assistant read as exactly that. The first reason stays, as `cause`.
             self.record["cause"] = failure.reason
-            end = Fail("interface_not_started" if stopped else "not_stopped",
+            end = Fail("not_stopped" if still else "interface_not_started",
                        previous=self.request["from"]["version"])
         self.finish("rolled_back" if back and started else "failed", end)
         return 1
+
+    def start_interface(self):
+        """`init 3`, and once more after a short pause when it does not answer 0.
+
+        127 is a program that could not even be started - `Receiver.run` turns any error in
+        starting it into that - and None one that did not answer in time; neither says the
+        runlevel was asked for. Every status but a first 0 goes on the record as `init_3`.
+        """
+        receiver = self.receiver
+        codes = []
+        for attempt in range(INIT_3_TRIES):
+            if attempt:
+                receiver.sleep(INIT_3_PAUSE)
+            codes.append(receiver.run([receiver.init, "3"], STOP_WAIT))
+            if codes[-1] == 0:
+                break
+        if codes != [0]:
+            self.record.setdefault("init_3", []).extend(codes)
 
     def put_lastservice(self, stopped, service):
         """The recorded channel as `config.tv.lastservice`, only while enigma2 is stopped."""
