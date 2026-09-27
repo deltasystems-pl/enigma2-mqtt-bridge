@@ -73,7 +73,8 @@ hook and its bytecode - and opkg's records and the settings block after it, so a
 an I/O error on opkg's status file cannot keep the old code from coming back. A restore that
 did not complete ends `failed` with a reason of its own - `restore_failed`, or
 `restore_incomplete` when the code is back and only the records are not - whose sentence names
-the forced reinstall that repairs both.
+the forced reinstall that repairs both. And the `finally` after `init 4` first puts back
+what R2 had not yet put back, before it starts the interface.
 
 **Signals.** `HUP`, `INT`, `TERM` and `PIPE` only set a flag, read at the next step. Before the
 package manager has run they end the transaction with nothing changed; from then until the
@@ -1825,7 +1826,8 @@ class Transaction:
 
         Once `init 4` has been sent, `init 3` follows whatever happens in between: the handled
         failures are recorded and the unit carries on, and anything else still meets the
-        `finally` that starts the interface before it goes further.
+        `finally`, which first runs the steps the unit had not reached - the restore, the
+        channel - each guarded, records `rollback: cut short`, and then starts the interface.
 
         Before `init 4` nothing has been stopped, so this is not yet the unit: the record is
         best effort (an error in it leaves the one taken before the restart), and only once the
@@ -1844,26 +1846,35 @@ class Transaction:
             self.record["internal_error"] = (type(error).__name__ + ": " + str(error))[:200]
         self.record.update(restart="stopped")
         receiver.pause("rollback_recorded")
-        starting = False
+        service = recorded.get("service") if recorded else None
+        starting = stopped = restored = False
         self.rolling_back = True
         try:
             receiver.run([receiver.init, "4"], STOP_WAIT)
             stopped = self.wait(lambda: not receiver.enigma2_pids(), STOP_WAIT)
             receiver.pause("rollback_stopped")
             self.put_back(settings=stopped)  # recorded, whatever it was: init 3 comes next
+            restored = True
             receiver.pause("rollback_restored")
-            service = recorded.get("service") if recorded else None
-            if stopped and service:
-                try:
-                    write_lastservice(receiver.root, service)
-                    self.record["lastservice"] = "written"
-                except Exception:  # a channel not kept, never a stopped GUI
-                    self.record["lastservice"] = "failed"
+            self.put_lastservice(stopped, service)
             starting = True
             receiver.run([receiver.init, "3"], STOP_WAIT)
         finally:
             if not starting:
-                self.record.setdefault("restore", "interrupted")
+                # Something no handler expects cut the unit short. Its remaining steps still
+                # run - each guarded, so none can keep the next from running - before the
+                # interface starts: never over a tree that could still have been put back.
+                self.record["rollback"] = "cut short"
+                if not restored:
+                    try:
+                        self.put_back(settings=stopped)
+                    except BaseException:
+                        self.record["restore"] = "interrupted"
+                if "lastservice" not in self.record:
+                    try:
+                        self.put_lastservice(stopped, service)
+                    except BaseException:
+                        self.record["lastservice"] = "failed"
                 receiver.run([receiver.init, "3"], STOP_WAIT)
         receiver.pause("rollback_started")
         started = self.wait(lambda: bool(receiver.enigma2_pids()), START_WAIT)
@@ -1876,6 +1887,15 @@ class Transaction:
         self.finish("rolled_back" if self.record.get("restore") == "done" else "failed",
                     self.restore_failure(failure))
         return 1
+
+    def put_lastservice(self, stopped, service):
+        """The recorded channel as `config.tv.lastservice`, only while enigma2 is stopped."""
+        if stopped and service:
+            try:
+                write_lastservice(self.receiver.root, service)
+                self.record["lastservice"] = "written"
+            except Exception:  # a channel not kept, never a stopped GUI
+                self.record["lastservice"] = "failed"
 
     def wait(self, condition, seconds):
         limit = self.receiver.clock() + seconds

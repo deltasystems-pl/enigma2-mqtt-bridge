@@ -2106,3 +2106,61 @@ def test_a_slow_restart_beside_a_remembered_child_still_gets_its_proof_window(tm
     scene.box.pauses["restarting"] = the_old_interface_quits
     assert scene.run() == 0
     assert scene.last()["result"] == "installed"
+
+
+# ------------------------------------------------ R2 cut short, and R3 failing --
+
+
+@pytest.mark.parametrize("where", ["rollback_stopped", "restore_once", "restore_always"])
+def test_whatever_cuts_r2_short_after_init_4_is_finished_before_the_interface_starts(
+        tmp_path, monkeypatch, where):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    if where == "rollback_stopped":
+        def escapes():
+            scene.box.pauses.pop("rollback_stopped")
+            raise Escape()
+        scene.box.pauses["rollback_stopped"] = escapes
+    else:
+        real = updatehelper.restore_snapshot
+        calls = []
+
+        def escapes_from_the_restore(*args, **kwargs):
+            calls.append(True)
+            if where == "restore_always" or len(calls) == 1:
+                raise Escape()
+            return real(*args, **kwargs)
+        monkeypatch.setattr(updatehelper, "restore_snapshot", escapes_from_the_restore)
+    with pytest.raises(Escape):
+        scene.run()
+    assert scene.init_calls() == ["4", "3"] and scene.box.pids and not scene.locked()
+    record = scene.status()["record"]
+    # Each remaining step ran on its own: a restore that cannot finish keeps no channel back.
+    assert (record["rollback"], record["lastservice"]) == ("cut short", "written")
+    assert scene.box.lastservice_at_start == TVP1
+    if where == "restore_always":
+        assert record["restore"] == "interrupted"
+        assert scene.box.init_log[-1] == ("3", f"# plugin {NEW}\n")
+    else:
+        # The restore that was cut short is made before the interface starts.
+        assert record["restore"] == "done"
+        assert scene.box.setting("config.plugins.mqttbridge.enabled") == "true"
+        assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+
+
+def test_a_channel_write_that_escapes_twice_still_lets_the_interface_start(
+        tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+
+    def escapes(_root, _reference):
+        raise Escape()
+    monkeypatch.setattr(updatehelper, "write_lastservice", escapes)
+    with pytest.raises(Escape):
+        scene.run()
+    assert scene.init_calls() == ["4", "3"] and scene.box.pids and not scene.locked()
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    record = scene.status()["record"]
+    assert (record["rollback"], record["restore"], record["lastservice"]) == (
+        "cut short", "done", "failed")
