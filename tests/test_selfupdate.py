@@ -2491,3 +2491,377 @@ def test_with_no_list_and_no_from_of_this_transaction_the_process_is_held(case, 
                 finished=NOW + 200, record=unstopped_record("no_list"), **{"from": status_from})
     tick()
     assert bridge.self_update.stuck
+
+
+# ------------------------------------------------------------ review round 5 --
+#
+# The pid list and the end's reason are the helper's account, and its look at /proc can be wrong.
+# Before a process that ran through a transaction opens its doors again - or reloads - it asks
+# the files themselves: is the build on disk the build this process loaded at its start? When it
+# is not, the process runs other code than the files underneath it and is held, whatever the end
+# says (TRANSACTION.md section 7).
+
+BUILDINFO = ("plugin", "MQTTBridge", "buildinfo.py")
+
+
+def disk_build(bridge, commit="ef" * 20, flavour="release", text=None):
+    """The build id on disk, as a rollback left it: another build's, or `text` as it is."""
+    path = bridge.root.joinpath(*BUILDINFO)
+    if text is None:
+        text = (f'COMMIT = "{commit}"\nCOMMIT_TIME = 1790300000\nDIRTY = False\n'
+                f'FLAVOUR = "{flavour}"\n')
+    path.write_text(text, encoding="utf-8")
+
+
+def assert_held_for_a_restart(bridge, factory, clients):
+    updater = bridge.self_update
+    assert updater._current is None
+    assert updater.closed and updater.stuck
+    assert updater.doors_refusal() == selfupdate.STUCK_UNSTOPPED
+    assert updater.repair() == "restart_gui"
+    assert bridge._publishers == []
+    # No fresh session: it would import the files on disk into a process running another build.
+    assert len(factory.clients) == clients
+
+
+@pytest.mark.parametrize("where", ["marker", "status_only"])
+def test_a_same_number_from_without_a_commit_does_not_open_the_to_process(where, starting,
+                                                                         factory, receiver):
+    """Review round 5 (PA, PA2): `from` is this very number, built without a commit.
+
+    With no list, the number alone said "this process runs `from`", and it opened - but this
+    process is `to`, exactly, and the rollback put `from`'s files back under it.
+    """
+    made = {}
+    bridge = starting(prepare=lambda root: made.update(dir=marker(
+        root, phase="rolling_back", to=("0.3.0", COMMIT), frm=("0.3.0", ""))),
+        session=receiver.session)
+    factory.client.fire_connect()
+    helper_process(bridge, made["dir"])
+    if where == "status_only":
+        os.remove(bridge.root / updatehelper.MARKER)
+        os.remove(made["dir"] / "request.json")
+    disk_build(bridge, commit="", flavour="development")
+    clients = len(factory.clients)
+    helper_says(made["dir"], phase="finished", result="failed", reason="not_stopped",
+                error=str(updatehelper.Fail("not_stopped", previous="0.3.0")), target="0.3.0",
+                finished=NOW + 200, record=unstopped_record("no_list"), **{"from": "0.3.0"})
+    tick()
+    assert_held_for_a_restart(bridge, factory, clients)
+
+
+@pytest.mark.parametrize("result, reason, record", [
+    ("failed", "interface_not_started",
+     {"restore": "done", "stop": "not seen", "unstopped": [os.getpid()], "interface": "not started",
+      "cause": "not_started"}),
+    ("rolled_back", "not_started",
+     {"restore": "done", "stop": "not seen", "unstopped": [os.getpid()]}),
+    # The look failed from the start: the stop was "seen", and there is no list at all (PRB2).
+    ("rolled_back", "not_started", {"restore": "done", "stop": "seen"}),
+])
+def test_a_follower_under_restored_files_is_held_whatever_the_end_says(result, reason, record,
+                                                                      starting, factory,
+                                                                      receiver):
+    """The helper said nothing runs, or a new interface started - and this process still runs."""
+    bridge, directory = following(starting, factory, receiver)
+    disk_build(bridge)
+    clients = len(factory.clients)
+    error = str(updatehelper.Fail(reason, previous="0.2.0"))
+    helper_says(directory, phase="finished", result=result, reason=reason, error=error,
+                finished=NOW + 200, record=record)
+    tick()
+    assert_held_for_a_restart(bridge, factory, clients)
+    # The helper's end is said as it is, and the restart is the repair it adds.
+    assert transaction(factory.client)["result"] == result
+    assert refusal(factory.client) == (reason, error + "; " + selfupdate.STUCK_UNSTOPPED)
+    assert bridge.run_command("reboot", "PRESS", PAGE) == selfupdate.STUCK_UNSTOPPED
+    assert bridge.run_command("restart_gui", "PRESS", PAGE) is None
+    assert len(restarts(receiver)) == 1
+
+
+def test_the_process_that_asked_is_held_when_the_files_are_another_build(box, factory,
+                                                                        receiver):
+    """A rollback the helper reports as clean, under files that are not this process's build."""
+    bridge, directory = asking(box, factory, receiver)
+    disk_build(bridge)
+    clients = len(factory.clients)
+    helper_says(directory, phase="finished", result="rolled_back", reason="not_started",
+                error=str(updatehelper.Fail("not_started", previous="0.3.0")),
+                finished=NOW + 200, record={"restore": "done", "stop": "seen"})
+    tick()
+    assert_held_for_a_restart(bridge, factory, clients)
+
+
+def test_a_restore_that_did_not_complete_under_another_build_says_to_reinstall(starting, factory,
+                                                                              receiver):
+    """The build check never softens the reinstall to a restart: a mix is not repaired by one."""
+    bridge, directory = following(starting, factory, receiver)
+    disk_build(bridge)
+    error = str(updatehelper.Fail("restore_incomplete", previous="0.2.0",
+                                  detail="the settings block"))
+    helper_says(directory, phase="finished", result="failed", reason="restore_incomplete",
+                error=error, finished=NOW + 200,
+                record={"restore": "partial: the settings block", "stop": "seen",
+                        "cause": "not_started"})
+    tick()
+    updater = bridge.self_update
+    assert updater.closed and updater.stuck
+    assert updater.doors_refusal() == selfupdate.STUCK_PARTIAL and updater.repair() is None
+
+
+@pytest.mark.parametrize("result, reason, record", [
+    ("rolled_back", "not_started", {"restore": "done", "stop": "seen"}),
+    ("failed", "opkg_failed", {"restore": "done", "stop": "seen"}),
+    ("failed", "not_stopped", unstopped_record("not_listed")),
+])
+@pytest.mark.parametrize("flavour", ["development", "release"])
+def test_the_process_that_asked_opens_on_its_own_build(flavour, result, reason, record, box,
+                                                      factory, receiver):
+    """The build on disk is the one this process loaded: the end reopens with a fresh session."""
+    bridge, directory = asking(box, factory, receiver)
+    loaded = dict(BUILD, flavour=flavour)
+    bridge._build = loaded
+    disk_build(bridge, text=f'COMMIT = "{COMMIT}"\nCOMMIT_TIME = {BUILD["time"]}\n'
+                            f'DIRTY = False\nFLAVOUR = "{flavour}"\n')
+    clients = len(factory.clients)
+    error = str(updatehelper.Fail(reason, previous="0.3.0"))
+    helper_says(directory, phase="finished", result=result, reason=reason, error=error,
+                finished=NOW + 200, record=record)
+    tick()
+    assert len(factory.clients) == clients + 1
+    updater = bridge.self_update
+    assert not updater.closed and not updater.stuck and updater.repair() is None
+    factory.client.fire_connect()
+    assert refusal(factory.client) == (reason, error)
+    assert transaction(factory.client)["result"] == result
+    assert bridge._publishers != []
+
+
+@pytest.mark.parametrize("on_disk, held", [
+    # Nobody built this copy and nothing on disk says a build either: nothing to compare, and
+    # the pid list and the version decide - this process runs `from` here.
+    (None, False),
+    # A copy nobody built, and a built release on disk now: another build.
+    ("built", True),
+])
+def test_a_copy_nobody_built_is_judged_by_what_is_on_disk(on_disk, held, box, factory, receiver):
+    bridge, directory = asking(box, factory, receiver)
+    bridge._build = None
+    path = bridge.root.joinpath(*BUILDINFO)
+    if on_disk is None:
+        path.unlink()
+    else:
+        disk_build(bridge)
+    clients = len(factory.clients)
+    error = str(updatehelper.Fail("not_started", previous="0.3.0"))
+    helper_says(directory, phase="finished", result="rolled_back", reason="not_started",
+                error=error, finished=NOW + 200, record={"restore": "done", "stop": "seen"})
+    tick()
+    if held:
+        assert_held_for_a_restart(bridge, factory, clients)
+    else:
+        assert len(factory.clients) == clients + 1
+        assert not bridge.self_update.closed and not bridge.self_update.stuck
+
+
+@pytest.mark.parametrize("damage", ["missing", "not literals", "oversized"])
+def test_a_build_id_that_can_no_longer_be_read_holds_the_process(damage, box, factory,
+                                                                 receiver):
+    """This process loaded a build id at its start; its file now says nothing: the files changed.
+
+    Held for the restart, the conservative side: a fresh start runs whatever is on disk.
+    """
+    bridge, directory = asking(box, factory, receiver)
+    path = bridge.root.joinpath(*BUILDINFO)
+    if damage == "missing":
+        path.unlink()
+    elif damage == "not literals":
+        path.write_text('COMMIT = "cd" * 20\n', encoding="utf-8")
+    else:
+        path.write_text("#" * 5000, encoding="utf-8")
+    clients = len(factory.clients)
+    helper_says(directory, phase="finished", result="rolled_back", reason="not_started",
+                error=str(updatehelper.Fail("not_started", previous="0.3.0")),
+                finished=NOW + 200, record={"restore": "done", "stop": "seen"})
+    tick()
+    assert_held_for_a_restart(bridge, factory, clients)
+
+
+def test_a_launch_that_failed_under_another_build_is_held(box, factory, mono):
+    """Every end the process follows is checked - even one that never reached the package."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    disk_build(bridge)
+    clients = len(factory.clients)
+    mono.now += selfupdate.LAUNCH_WAIT_SECONDS + 1
+    tick()
+    assert not directory.exists()
+    assert_held_for_a_restart(bridge, factory, clients)
+
+
+def test_a_fresh_start_on_another_build_is_not_held(starting, factory, receiver):
+    """A process that starts loads what is on disk: its own build id is the one to trust."""
+    error = str(updatehelper.Fail("not_stopped", previous="0.3.0"))
+
+    def prepare(root):
+        marker(root, phase="finished", result="failed", reason="not_stopped", error=error,
+               finished=NOW, to=("0.4.0", "ab" * 20), frm=("0.3.0", COMMIT),
+               record=unstopped_record("no_list"))
+        root.joinpath(*BUILDINFO).write_text('COMMIT = "' + "ab" * 20 + '"\n', encoding="utf-8")
+
+    bridge = starting(prepare=prepare, session=receiver.session)
+    assert_open(bridge, factory, "not_stopped", error)
+
+
+# The follower during `rolling_back` (review round 5, 3c): R2 is putting the previous version's
+# files back under it, for as long as three minutes when the interface does not stop.
+
+
+def test_a_follower_closes_its_doors_while_r2_puts_the_files_back(starting, factory, receiver):
+    bridge, directory = following(starting, factory, receiver)
+    helper_says(directory, phase="rolling_back")
+    tick()
+    updater = bridge.self_update
+    assert updater.closed and not updater.stuck
+    assert bridge._publishers == []
+    factory.client.fire_message(ROOT + "/cmd/power", b"standby")
+    assert refusal(factory.client) == (None, DOORS)
+    # Not the repair: the restart is R2's own, and the doors say only "wait".
+    assert bridge.run_command("restart_gui", "PRESS", PAGE) == DOORS
+    assert restarts(receiver) == []
+
+
+def test_a_follower_on_its_own_build_reopens_with_a_fresh_session_at_the_end(starting, factory,
+                                                                            receiver):
+    """The previous version started while R2 finished: it runs the files on disk, and opens."""
+    made = {}
+    bridge = starting(prepare=lambda root: made.update(dir=marker(
+        root, phase="rolling_back", to=("0.4.0", "ab" * 20), frm=("0.3.0", COMMIT))),
+        session=receiver.session)
+    factory.client.fire_connect()
+    helper_process(bridge, made["dir"])
+    helper_says(made["dir"], phase="rolling_back", target="0.4.0")
+    tick()
+    assert bridge.self_update.closed
+    clients = len(factory.clients)
+    error = str(updatehelper.Fail("not_stopped", previous="0.3.0"))
+    helper_says(made["dir"], phase="finished", result="failed", reason="not_stopped", error=error,
+                target="0.4.0", finished=NOW + 200, record=unstopped_record("not_listed"))
+    tick()
+    assert len(factory.clients) == clients + 1
+    assert_open(bridge, factory, "not_stopped", error)
+
+
+def test_a_follower_whose_helper_died_putting_the_files_back_is_held(starting, factory,
+                                                                     receiver):
+    """A mix, perhaps with the package manager still writing: the reinstall, as for `ours`."""
+    bridge, directory = following(starting, factory, receiver)
+    helper_says(directory, phase="rolling_back")
+    tick()
+    clients = len(factory.clients)
+    helper_process(bridge, directory, running=False)
+    tick()
+    updater = bridge.self_update
+    assert updater._current is None and updater.closed and updater.stuck
+    assert updater.doors_refusal() == selfupdate.STUCK_STOPPED and updater.repair() is None
+    assert len(factory.clients) == clients
+    assert (bridge.root / updatehelper.MARKER).exists()
+
+
+def test_a_follower_past_its_deadline_while_r2_puts_the_files_back_is_held(starting, factory,
+                                                                           receiver):
+    """Let go with the doors closed would leave them saying "wait" for ever."""
+    bridge, directory = following(starting, factory, receiver)
+    helper_says(directory, phase="rolling_back")
+    tick()
+    assert bridge.self_update.closed
+    (bridge.root / "proc" / "uptime").write_text(f"{UPTIME + 601:.2f} 1.00\n")
+    tick()
+    updater = bridge.self_update
+    assert updater._current is None and updater.closed and updater.stuck
+    assert updater.doors_refusal() == selfupdate.STUCK_STOPPED
+    assert "deadline" in refusal(factory.client)[1]
+
+
+# Test gaps the review's surviving mutants showed (M5, M16, M9).
+
+
+def test_with_no_list_the_status_files_bare_from_alone_can_open(starting, factory, receiver):
+    """Marker gone, a request without `from`: the status file's number is what is left (M5)."""
+    bridge, directory = following_from(starting, factory, receiver, ("0.2.0", "ef" * 20))
+    os.remove(bridge.root / updatehelper.MARKER)
+    error = str(updatehelper.Fail("not_stopped", previous="0.3.0"))
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped", error=error,
+                finished=NOW + 200, record=unstopped_record("no_list"), **{"from": "0.3.0"})
+    tick()
+    assert_open(bridge, factory, "not_stopped", error)
+
+
+def test_a_request_of_another_transaction_says_nothing_about_from(starting, factory, receiver):
+    """Only this transaction's request is read; another's `from` is this very build (M16)."""
+    bridge, directory = following_from(starting, factory, receiver, ("0.2.0", "ef" * 20))
+    os.remove(bridge.root / updatehelper.MARKER)
+    updatehelper.write_json(str(directory / "request.json"), {
+        "id": "0123456789ab", "enigma2_pid": 1, "from": {"version": "0.3.0", "commit": COMMIT}})
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped",
+                error=str(updatehelper.Fail("not_stopped", previous="0.2.0")),
+                finished=NOW + 200, record=unstopped_record("no_list"), **{"from": "0.2.0"})
+    tick()
+    assert bridge.self_update.stuck
+
+
+def test_the_rendered_repair_form_posts_with_its_own_token(starting, factory, receiver,
+                                                           monkeypatch):
+    """What the browser sends is what the page rendered: its token must be this session's (M9)."""
+    from test_webif import confirmation, get, new_session, post
+
+    bridge, directory = following(starting, factory, receiver)
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped",
+                error=str(updatehelper.Fail("not_stopped", previous="0.2.0")),
+                finished=NOW + 200, record=unstopped_record("listed"))
+    tick()
+    monkeypatch.setattr(webif, "_bridge", lambda: bridge)
+    resource = webif.MQTTBridgeWebResource()
+    session = new_session()
+    _request, body = get(resource, session)
+    form = body.decode("utf-8").split("<form method='post' class='action'>", 1)[1]
+    form = form.split("</form>", 1)[0]
+    fields = dict(re.findall(r"name='([^']+)' value='([^']*)'", form))
+    assert fields["action"] == "restart_gui" and fields["csrf"]
+    request, body = post(resource, session, fields, csrf=None)
+    assert request.response_code == 200
+    request, body = post(resource, session, confirmation(body), csrf=None)
+    assert request.response_code == 200
+    assert len(restarts(receiver)) == 1
+
+
+def test_an_installed_end_read_under_another_build_is_held(starting, factory, receiver):
+    """`installed` is the helper's word too: only a helper that misjudged writes it to a process
+    whose build is not on disk, and the files still decide. No softcam collapse follows."""
+    bridge, directory = following(starting, factory, receiver)
+    collapses = []
+    bridge.self_update._schedule_collapse = lambda: collapses.append(True)
+    disk_build(bridge)
+    clients = len(factory.clients)
+    helper_says(directory, phase="finished", result="installed", finished=NOW + 200,
+                record={"proof": "marker"})
+    tick()
+    assert_held_for_a_restart(bridge, factory, clients)
+    assert transaction(factory.client)["result"] == "installed"
+    assert collapses == []
+
+
+def test_a_helper_that_stopped_before_the_package_manager_under_another_build_holds(
+        box, factory, receiver):
+    """Nothing of this transaction touched the files, yet they are another build: a restart."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    helper_says(directory, phase="downloading")
+    tick()
+    disk_build(bridge)
+    clients = len(factory.clients)
+    helper_process(bridge, directory, running=False)
+    tick()
+    assert_held_for_a_restart(bridge, factory, clients)
+    assert refusal(factory.client)[0] == "interrupted"
