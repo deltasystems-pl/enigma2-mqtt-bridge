@@ -2684,3 +2684,19 @@ def test_an_unstopped_interface_that_quits_after_init_3_gets_init_3_again(tmp_pa
         assert (scene.last()["result"], scene.last()["reason"]) == (
             "failed", "interface_not_started")
         assert not scene.box.pids and record["interface"] == "not started"
+
+
+def test_a_restore_that_failed_keeps_its_reason_when_nothing_starts_either(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.start_fails = True
+
+    def no_space(*_args, **_kwargs):
+        raise OSError(errno.ENOSPC, "No space left on device")
+    monkeypatch.setattr(updatehelper, "restore_snapshot", no_space)
+    assert scene.run() == 1
+    # The repair the restore's reason names - a forced reinstall - covers the start as well.
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "restore_failed")
+    record = scene.status()["record"]
+    assert (record["interface"], record["cause"]) == ("not started", "not_started")
+    assert record["restore"].startswith("failed")
