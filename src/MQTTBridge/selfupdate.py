@@ -35,10 +35,15 @@ new code in an old process, so every module this path and the closed state use i
 when the plugin starts, the publishers are stopped, and every command - over MQTT, from the
 page, from the setup screen - answers "an update is being applied on the receiver". When the
 package manager fails, the helper puts the old files back and says `finished`, and the doors
-open again with a fresh session. The restart itself waits for the helper's `restarting`: for a
-downgrade chosen at the television or on the page, every retained topic the node owns except
-`availability` is first retracted at QoS 1, because the older release does not know the newer
-one's topics and would leave them on the broker for ever (section 11 v of the plan, B1). From
+open again with a fresh session. When nothing put them back - the restore failed, or the helper
+stopped once the package manager had started, perhaps leaving it running as an orphan - the
+doors stay closed for good and say to install the plugin again; that is judged from what the
+helper left behind, so a failure that fell between two polls closes them too.
+
+The restart itself waits for the helper's `restarting`: for a downgrade chosen at the television
+or on the page, every retained topic the node owns except `availability` is first retracted at
+QoS 1, because the older release does not know the newer one's topics and would leave them on
+the broker for ever (section 11 v of the plan, B1). From
 that retraction on nothing at all is published (S-a): refusals are logged, not put on
 `last_error`, and the `update` relay stops, so nothing the older release does not know is
 re-created behind the retraction.
@@ -162,6 +167,15 @@ UNINSTALLING = "the plugin is being removed from the receiver"
 # mix, under this process, and only a reinstall from outside it can repair them (spec ae.7a).
 STUCK = ("an update failed and the plugin's previous files could not be put back; install the "
          "plugin again (from Home Assistant: force plugin reinstall)")
+# The same end after a helper that stopped once the package manager had started: nothing put
+# the old files back, and an orphaned package manager may still be writing (review round 2).
+STUCK_STOPPED = ("an update stopped part-way, so the plugin's files may not be the running "
+                 "version's; install the plugin again (from Home Assistant: force plugin "
+                 "reinstall)")
+
+# The wall clock is believed only from here on: no update helper wrote an end before
+# 2026-01-01 (UTC), and a receiver that booted without a clock says a time in 1970.
+PLAUSIBLE_SINCE = 1767225600
 
 # From these phases on the package manager has touched the plugin's files (the doors close), and
 # a helper that stops leaves them in a state only the next start can judge (the marker stays).
@@ -258,8 +272,9 @@ class SelfUpdater:
         self.claimed = False
         self.closed = False
         self.silent = False
-        # The doors stay closed for good: see `STUCK`.
+        # The doors stay closed for good, saying `_stuck_sentence`: see `STUCK`.
         self.stuck = False
+        self._stuck_sentence = STUCK
         self.integration = None
         self._current = None
         self._transaction = None
@@ -352,7 +367,7 @@ class SelfUpdater:
         """The sentence every command gets while the doors are closed, or None."""
         if not self.closed:
             return None
-        return STUCK if self.stuck else DOORS
+        return self._stuck_sentence if self.stuck else DOORS
 
     def _publish(self):
         if not self.silent:
@@ -686,10 +701,14 @@ class SelfUpdater:
         """Ten minutes since the last transaction ended - measured on the boot (TRANSACTION.md 1).
 
         Many receivers boot with the clock in 1970 and jump when NTP answers, so the wall clock
-        is the last resort: within the boot that wrote the record the time since the end is
-        its uptime now minus the record's; a record of another boot ended before this boot,
-        so at least this boot's uptime has passed. Only a record, or a receiver, without a
-        boot id falls back to the wall clock, which then cannot go backwards into a refusal.
+        is never the only measure where the boot is known: within the boot that wrote the
+        record the time since the end is its uptime now minus the record's, whatever the clock
+        says. A record of another boot ended before this boot, so at least this boot's uptime
+        has passed - and when that is under ten minutes, the wall clock may say more, but only
+        where it can be believed both at the end and now (review round 2): otherwise every
+        update in the first ten minutes after any reboot would be refused as "less than ten
+        minutes ago", days after the last one. Only a record, or a receiver, without a boot id
+        falls back to the wall clock alone, which then cannot go backwards into a refusal.
         """
         last = updatehelper.read_json(self._path(updatehelper.LAST))
         if not last:
@@ -699,7 +718,7 @@ class SelfUpdater:
         ended_boot, ended = last.get("boot_id"), last.get("uptime")
         if boot and uptime is not None and isinstance(ended_boot, str) and ended_boot:
             if ended_boot != boot:
-                return uptime < RATE_LIMIT_SECONDS
+                return uptime < RATE_LIMIT_SECONDS and not self._long_ago(last)
             if isinstance(ended, (int, float)) and not isinstance(ended, bool):
                 return 0 <= uptime - ended < RATE_LIMIT_SECONDS
         finished = _whole(last.get("finished"))
@@ -707,6 +726,36 @@ class SelfUpdater:
             return False
         now = int(self.clock())
         return finished <= now < finished + RATE_LIMIT_SECONDS
+
+    def _long_ago(self, last):
+        """Whether a believable wall clock puts the record's end ten minutes or more back.
+
+        Believable at the end: not before `PLAUSIBLE_SINCE` - a receiver whose clock had not
+        been set wrote 1970, and the distance to a clock set since would be decades. Believable
+        now: not before this build was made nor before the release index it holds was issued,
+        which no correct clock can be. An end later than now is a clock that moved back, and
+        says nothing. Any doubt keeps the refusal: it lasts at most this boot's first ten
+        minutes.
+        """
+        finished = _whole(last.get("finished"))
+        if finished is None or finished < PLAUSIBLE_SINCE:
+            return False
+        now = int(self.clock())
+        if now < self._clock_floor():
+            return False
+        return now - finished >= RATE_LIMIT_SECONDS
+
+    def _clock_floor(self):
+        """The earliest time the wall clock can truly say now."""
+        floor = PLAUSIBLE_SINCE
+        made = (self.bridge.build or {}).get("time")
+        if _whole(made) is not None:
+            floor = max(floor, made)
+        index = self._index()
+        issued = index.get("issued") if isinstance(index, dict) else None
+        if _whole(issued) is not None:
+            floor = max(floor, issued)
+        return floor
 
     # ----------------------------------------------------------------- launch --
 
@@ -869,8 +918,15 @@ class SelfUpdater:
                 self._poll_ticker.stop()
                 details = record.get("record") if isinstance(record.get("record"), dict) else {}
                 restore = details.get("restore")
+                # Decided by the record alone (review round 2, DS1), not by whether a poll
+                # happened to see `installing`: the helper tries to put the old files back only
+                # once the package manager has run, so a restore that did not complete means
+                # the files under this process changed - even when the whole failure fell
+                # between two polls. A process that started on those files is not the one
+                # they changed under, so only our own transaction is stuck.
+                unrestored = isinstance(restore, str) and restore != "done"
                 self._end(payload, record.get("reason"), followed=not current["ours"],
-                          unrestored=isinstance(restore, str) and restore != "done")
+                          stuck=STUCK if unrestored and current["ours"] else None)
             return
         if current["ours"]:
             if phase in FILES_PHASES and not self.closed:
@@ -907,8 +963,16 @@ class SelfUpdater:
         self._current = None
         self._poll_ticker.stop()
         detail = "the update helper stopped"
-        touched = record.get("phase") in FILES_PHASES
-        if touched:
+        touched = self._files_may_have_changed(current, record.get("phase"))
+        stuck = None
+        if touched and current["ours"]:
+            # Review round 2 (DS2): the files changed under this process, and a helper killed
+            # outright (SIGKILL, the OOM killer) leaves its package manager running as an
+            # orphan that may still be writing them. A fresh session would import whatever it
+            # wrote, so the doors stay closed, as after a restore that failed.
+            detail += " after the package manager had started on the plugin's files"
+            stuck = STUCK_STOPPED
+        elif touched:
             detail += ("; the plugin's files may not be the running version's - restart the "
                        "receiver's interface, or install the plugin again")
         error = str(updatehelper.Fail("interrupted", detail=detail))
@@ -916,18 +980,34 @@ class SelfUpdater:
         payload = public(dict(record, phase="finished", result="interrupted",
                               finished=int(self.clock()), error=error))
         # With the files perhaps changed the marker stays (review S4): the next start - after
-        # the restart this sentence asks for, or after a reboot - judges it by the build that
-        # starts. The helper writes it before the package manager runs (`installing`).
-        self._end(payload, "interrupted", followed=not current["ours"], keep_marker=touched)
+        # a reinstall, a restart or a reboot - judges it by the build that starts.
+        self._end(payload, "interrupted", followed=not current["ours"], keep_marker=touched,
+                  stuck=stuck)
 
-    def _end(self, payload, reason, followed, keep_marker=False, unrestored=False):
+    def _files_may_have_changed(self, current, phase):
+        """Whether the package manager may have run, by what the helper left behind.
+
+        From `installing` on, unless the helper's own records prove it never started: it
+        writes the marker at `installing` before it runs the package manager, and runs nothing
+        without it - so `installing` with no marker of this transaction is a helper that
+        stopped before anything of the plugin changed.
+        """
+        if phase not in FILES_PHASES:
+            return False
+        if phase != "installing":
+            return True
+        marker = updatehelper.read_json(self._path(updatehelper.MARKER))
+        return isinstance(marker, dict) and marker.get("id") == current["id"]
+
+    def _end(self, payload, reason, followed, keep_marker=False, stuck=None):
         """Say how a transaction ended; reopen the doors with a fresh session when closed.
 
-        Not when the helper could not put the old files back (`unrestored`, TRANSACTION.md 7):
-        the files under this process may then be the new release's, or a mix, and the fresh
-        session a reopening starts would import them. The doors stay closed and say so, and the
-        repair is a reinstall from outside this process - Home Assistant's forced reinstall over
-        SSH (delta review D2).
+        Not when the files under this process changed and nothing put them back (`stuck`, the
+        sentence that says which: the helper could not restore them, TRANSACTION.md 7, or it
+        stopped once the package manager had started): they may then be the new release's, or
+        a mix, and the fresh session a reopening starts would import them. The doors close if
+        no poll had closed them yet, stay closed and say so, and the repair is a reinstall from
+        outside this process - Home Assistant's forced reinstall over SSH (delta review D2).
         """
         if payload is not None:
             self._transaction = payload
@@ -940,19 +1020,28 @@ class SelfUpdater:
         refusal = None
         if result != "installed" and error:
             refusal = Refusal(error, reason or result or "failed")
-        if self.closed and unrestored and result != "installed":
+        if stuck is not None and result != "installed":
+            if not self.closed:
+                # The whole change fell between two polls: the doors close now.
+                self.closed = True
+                self.bridge._stop_publishers()
             self.stuck = True
+            self._stuck_sentence = stuck
             self._retraction_ticker.stop()
             self._queue = []
             self._outstanding = []
-            LOG.error("update %s: the previous files could not be put back; the doors stay "
-                      "closed until the plugin is installed again", ident)
+            LOG.error("update %s: the plugin's files changed and were not put back; the doors "
+                      "stay closed until the plugin is installed again", ident)
             # Said on `update` and `last_error` - unless a downgrade's retraction made this
             # process silent, which it stays: the page and the setup screen still say it.
             self._publish()
+            said = Refusal((error or result or "failed") + "; " + stuck,
+                           reason or result or "failed")
             if self.bridge.connected:
-                self.bridge.publish_last_error(COMMAND, Refusal(
-                    (error or result or "failed") + "; " + STUCK, reason or result or "failed"))
+                self.bridge.publish_last_error(COMMAND, said)
+            else:
+                # The session's own connect says it: no reload comes to carry it.
+                self.bridge._pending_error = (COMMAND, said)
             return
         if self.closed:
             self.closed = False

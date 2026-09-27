@@ -1223,7 +1223,11 @@ page and the setup screen say only that. When the package manager fails, the old
 and the doors open again with a fresh session - unless the old files could not be put back:
 then the doors stay closed, and every command is refused with "an update failed and the
 plugin's previous files could not be put back; install the plugin again (from Home Assistant:
-force plugin reinstall)". At `restarting` the standby, recording and
+force plugin reinstall)" - also when that failure came and went between two readings of the
+helper's status. So do they when the update helper stops once the package manager has started
+(it may still be running): "an update stopped part-way, so the plugin's files may not be the
+running version's; install the plugin again (from Home Assistant: force plugin reinstall)". At
+`restarting` the standby, recording and
 EPG-import guards are asked again, and when one holds the update is withdrawn
 (`withdrawn_before_restart`, `reason` `standby`, `recording` or `epg_import`) rather than
 restarting a receiver that went into standby or started recording meanwhile. Otherwise the

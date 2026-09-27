@@ -32,7 +32,8 @@ version that has no section here.
   recording or an EPG import, before the restart is not restarted: the update is withdrawn with
   that reason. `cmd/uninstall` is refused (`busy`) while an update runs or its lock is held, and
   `cmd/update` while an uninstall runs. When the old files cannot be put back after a failed
-  update, the doors stay closed and say to install the plugin again. A helper that stops without an end is reported
+  update, or the helper stops once the package manager has started, the doors stay closed and say
+  to install the plugin again. A helper that stops without an end is reported
   `interrupted`; the next `cmd/update` says when its lock lets a new one start, and the start after
   a restart says how it ended, by the build that runs. Nothing of this has run on a receiver yet.
 

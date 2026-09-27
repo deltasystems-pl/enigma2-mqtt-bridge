@@ -611,28 +611,6 @@ def test_a_pid_used_again_by_another_program_is_not_the_helper(box, factory):
     assert refusal(factory.client)[0] == "interrupted"
 
 
-def test_a_helper_that_died_behind_closed_doors_reopens_them(box, factory, receiver):
-    bridge = box()
-    directory = accepted(bridge, factory)
-    helper_process(bridge, directory)
-    helper_says(directory, phase="restarting")
-    tick()
-    assert bridge.self_update.closed
-    marker_path = bridge.root / updatehelper.MARKER
-    updatehelper.write_json(str(marker_path), {"id": directory.name[len("update-"):],
-                                               "phase": "restarting"})
-    clients = len(factory.clients)
-    helper_process(bridge, directory, running=False)
-    tick()
-    assert not bridge.self_update.closed
-    assert len(factory.clients) == clients + 1
-    # Review S4: the files may be the new release's; the next start says how it ended.
-    assert marker_path.exists()
-    factory.client.fire_connect()
-    reason, error = refusal(factory.client)
-    assert reason == "interrupted" and "install the plugin again" in error
-
-
 def test_with_no_pid_file_there_is_no_verdict(box, factory):
     bridge = box()
     directory = accepted(bridge, factory)
@@ -1763,3 +1741,199 @@ def test_the_page_says_when_the_old_files_could_not_be_put_back(box, factory, mo
     body = webif._page(_Request()).decode("utf-8")
     assert selfupdate.household_doors(bridge.self_update) in body
     assert "<form" not in body
+
+
+# ------------------------------------------------------------ review round 2 --
+
+
+def assert_stuck(bridge, factory, clients, reason):
+    """The doors closed for good: no fresh session, every surface says to install again."""
+    assert len(factory.clients) == clients
+    assert bridge.self_update.closed and bridge.self_update.stuck
+    assert bridge.self_update._current is None
+    assert bridge._publishers == []
+    said, error = refusal(factory.client)
+    assert said == reason and "install the plugin again" in error
+    stuck = bridge.run_command("restart_gui", "PRESS", PAGE)
+    assert stuck != DOORS and "install the plugin again" in stuck
+    factory.client.fire_message(ROOT + "/cmd/power", b"standby")
+    assert refusal(factory.client) == (None, stuck)
+    assert selfupdate.household_doors(bridge.self_update) != selfupdate.household_doors()
+    return stuck
+
+
+def test_a_failed_restore_is_stuck_even_when_no_poll_saw_the_files_change(box, factory):
+    """DS1: from `downloading` to a failed restore within one poll - decided by the record."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    tick()
+    assert not bridge.self_update.closed
+    clients = len(factory.clients)
+    helper_says(directory, phase="finished", result="failed", reason="opkg_failed",
+                error="the package manager could not install version 0.4.0: exit 255",
+                finished=NOW + 5, record={"restore": "failed: [Errno 5] Input/output error"})
+    tick()
+    assert_stuck(bridge, factory, clients, "opkg_failed")
+    assert transaction(factory.client)["result"] == "failed"
+
+
+def test_a_stuck_end_while_disconnected_is_said_by_the_next_connect(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    tick()
+    factory.client.fire_disconnect()
+    assert not bridge.connected
+    helper_says(directory, phase="finished", result="failed", reason="opkg_failed",
+                error="the package manager could not install version 0.4.0: exit 255",
+                finished=NOW + 5, record={"restore": "failed: [Errno 5] Input/output error"})
+    tick()
+    assert bridge.self_update.stuck
+    factory.client.fire_connect()
+    reason, error = refusal(factory.client)
+    assert reason == "opkg_failed" and "install the plugin again" in error
+
+
+def test_a_failure_with_nothing_to_restore_is_not_stuck(box, factory):
+    """The helper tries a restore only after the package manager ran: none, nothing changed."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    helper_says(directory, phase="finished", result="failed", reason="opkg_busy",
+                error=updatehelper.SENTENCES["opkg_busy"], finished=NOW + 5, record={})
+    tick()
+    assert not bridge.self_update.closed and not bridge.self_update.stuck
+    assert refusal(factory.client)[0] == "opkg_busy"
+    assert bridge.run_command("restart_gui", "PRESS", PAGE) != DOORS
+
+
+def test_a_followed_transactions_failed_restore_does_not_close_this_process(starting, factory):
+    """Only the process the files changed under is stuck; one that started on them is not."""
+    made = {}
+    bridge = starting(prepare=lambda root: made.update(dir=marker(root)))
+    factory.client.fire_connect()
+    assert bridge.self_update._current is not None
+    helper_process(bridge, made["dir"])
+    helper_says(made["dir"], phase="finished", result="failed", reason="not_started",
+                error="x", finished=NOW + 5, record={"restore": "failed: x"})
+    tick()
+    assert bridge.self_update._current is None
+    assert not bridge.self_update.closed and not bridge.self_update.stuck
+
+
+@pytest.mark.parametrize("phase", ["installing", "restarting", "rolling_back"])
+def test_a_helper_that_died_after_the_package_manager_started_keeps_the_doors_closed(
+        phase, box, factory, receiver):
+    """DS2: an orphaned opkg may still be writing; a reload would import what it wrote."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    helper_says(directory, phase=phase)
+    tick()
+    assert bridge.self_update.closed
+    marker_path = bridge.root / updatehelper.MARKER
+    updatehelper.write_json(str(marker_path), {"id": directory.name[len("update-"):],
+                                               "phase": phase})
+    clients = len(factory.clients)
+    helper_process(bridge, directory, running=False)
+    tick()
+    stuck = assert_stuck(bridge, factory, clients, "interrupted")
+    assert "stopped" in stuck
+    ended = transaction(factory.client)
+    assert (ended["phase"], ended["result"]) == ("finished", "interrupted")
+    # The next start says how it ended, by the build that starts.
+    assert marker_path.exists()
+
+
+def test_a_helper_that_died_at_installing_before_its_marker_reopens_the_doors(box, factory):
+    """The helper writes the marker before the package manager and runs nothing without it."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    helper_says(directory, phase="installing")
+    tick()
+    assert bridge.self_update.closed
+    # A marker left by another transaction says nothing about this one.
+    updatehelper.write_json(str(bridge.root / updatehelper.MARKER),
+                            {"id": "0123456789ab", "phase": "installing"})
+    clients = len(factory.clients)
+    helper_process(bridge, directory, running=False)
+    tick()
+    assert not bridge.self_update.closed and not bridge.self_update.stuck
+    assert len(factory.clients) == clients + 1
+    factory.client.fire_connect()
+    reason, error = refusal(factory.client)
+    assert reason == "interrupted" and "install the plugin again" not in error
+
+
+def test_a_helper_that_died_at_installing_unseen_still_closes_the_doors(box, factory):
+    """DS1 and DS2 together: the first look at `installing` finds the helper already gone."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    tick()
+    assert not bridge.self_update.closed
+    helper_says(directory, phase="installing")
+    updatehelper.write_json(str(bridge.root / updatehelper.MARKER),
+                            {"id": directory.name[len("update-"):], "phase": "installing"})
+    clients = len(factory.clients)
+    helper_process(bridge, directory, running=False)
+    tick()
+    assert_stuck(bridge, factory, clients, "interrupted")
+
+
+def plausible_index(bridge, issued):
+    raw = index_bytes(1, [release("0.4.0"), release("0.3.0")], issued=issued)
+    bridge.updates._held = (trust.parse_index(raw), "relay")
+
+
+def test_after_a_reboot_an_update_days_ago_is_not_rate_limited(box):
+    """DS3: with a clock that can be believed, days ago is not less than ten minutes ago."""
+    bridge = box()
+    plausible_index(bridge, issued=NOW - 86400)
+    last = str(bridge.root / updatehelper.LAST)
+    updatehelper.write_json(last, {"id": "0123456789ab", "finished": NOW - 3 * 86400,
+                                   "boot_id": OTHER_BOOT, "uptime": 5000.0,
+                                   "phase": "finished", "result": "installed"})
+    (bridge.root / "proc" / "uptime").write_text("120.00 1.00\n")
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0"})) is None
+
+
+@pytest.mark.parametrize("case", ["1970_now", "1970_then", "before_the_build",
+                                  "before_the_index", "then_after_now", "nine_minutes"])
+def test_after_a_reboot_an_implausible_clock_keeps_the_limit(case, box, monkeypatch):
+    """DS3: the wall clock lifts the limit only when both ends of it can be believed."""
+    bridge = box()
+    now, finished, issued = NOW, NOW - 3 * 86400, NOW - 86400
+    if case == "1970_now":
+        now = 200
+    elif case == "1970_then":
+        finished = 100
+    elif case == "before_the_build":
+        now = BUILD["time"] - 1
+    elif case == "before_the_index":
+        issued = NOW + 60
+    elif case == "then_after_now":
+        finished = NOW + 3600
+    elif case == "nine_minutes":
+        finished = NOW - 540
+    monkeypatch.setattr(SelfUpdater, "clock", staticmethod(lambda: now))
+    plausible_index(bridge, issued=issued)
+    last = str(bridge.root / updatehelper.LAST)
+    updatehelper.write_json(last, {"id": "0123456789ab", "finished": finished,
+                                   "boot_id": OTHER_BOOT, "uptime": 5000.0,
+                                   "phase": "finished", "result": "installed"})
+    (bridge.root / "proc" / "uptime").write_text("120.00 1.00\n")
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0"})).reason == "rate_limited"
+
+
+def test_within_a_boot_the_wall_clock_never_lifts_the_limit(box):
+    """The boot-relative rule stands within a boot, whatever the wall clock says."""
+    bridge = box()
+    plausible_index(bridge, issued=NOW - 86400)
+    last = str(bridge.root / updatehelper.LAST)
+    updatehelper.write_json(last, {"id": "0123456789ab", "finished": NOW - 3 * 86400,
+                                   "boot_id": BOOT, "uptime": UPTIME - 60,
+                                   "phase": "finished", "result": "installed"})
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0"})).reason == "rate_limited"
