@@ -116,8 +116,20 @@ class Box(updatehelper.Receiver):
         return self.t
 
     # processes
+    unreadable = 0  # how many of the next looks at /proc fail to list it
+
     def enigma2_pids(self):
+        # As the receiver's own: a /proc that cannot be listed reads as no enigma2 at all.
+        if self.unreadable:
+            self.unreadable -= 1
+            return set()
         return set(self.pids)
+
+    def enigma2_look(self):
+        if self.unreadable:
+            self.unreadable -= 1
+            return None
+        return self.enigma2_pids()
 
     def open_files(self, pid):
         return set(self.fds.get(pid, ()))
@@ -2585,3 +2597,56 @@ def test_receiver_run_lets_what_is_not_an_exception_through(tmp_path, monkeypatc
     monkeypatch.setattr(updatehelper.subprocess, "run", interrupted)
     with pytest.raises(error):
         updatehelper.Receiver(root=str(tmp_path)).run(["/sbin/init", "3"], 5)
+
+
+
+# --------------------------------------- a /proc that cannot be read is unknown --
+
+
+@pytest.mark.parametrize("looks", [1, 10 ** 6], ids=["one_look", "every_look"])
+def test_a_proc_that_cannot_be_listed_is_never_a_stop(tmp_path, looks):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    scene.box.pauses["rollback_recorded"] = lambda: setattr(scene.box, "unreadable", looks)
+    assert scene.run() == 1
+    # init 4 did nothing: the process R2 could not stop runs on, and no look said otherwise.
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "not_stopped")
+    assert scene.status()["record"]["stop"] == "not seen" and scene.box.pids == {200}
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "false"
+    assert scene.box.setting("config.tv.lastservice") == TVN
+
+
+@pytest.mark.parametrize("how", ["unreadable", "raises"])
+def test_a_second_look_that_fails_writes_no_settings(tmp_path, how):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    real = scene.box.run
+
+    def init_4_then_escape_and_proc_fails(argv, timeout):
+        code = real(argv, timeout)
+        if argv[0] == scene.box.init and argv[1] == "4":
+            if how == "unreadable":
+                scene.box.unreadable = 1
+            else:
+                def broken():
+                    raise OSError(errno.EMFILE, "Too many open files")
+                scene.box.enigma2_pids = scene.box.enigma2_look = broken
+            raise Escape()
+        return code
+    scene.box.run = init_4_then_escape_and_proc_fails
+    with pytest.raises(Escape):
+        scene.run()
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "false"
+    assert scene.box.setting("config.tv.lastservice") == TVN
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.status()["record"]["stop"] == "not seen"
+
+
+def test_a_proc_that_cannot_be_listed_is_unknown_to_r2_and_empty_to_the_rest(tmp_path):
+    receiver = updatehelper.Receiver(root=str(tmp_path), proc=str(tmp_path / "no-proc"))
+    assert receiver.enigma2_look() is None
+    assert receiver.enigma2_pids() == set()

@@ -343,12 +343,20 @@ class Receiver:
     last_output = ""
 
     def enigma2_pids(self):
-        """Every running process named `enigma2`, read from `/proc` - no `pidof` on the image."""
+        """Every running process named `enigma2`, read from `/proc` - no `pidof` on the image.
+
+        An empty set also when `/proc` cannot be listed; R2, which must tell "none" from "could
+        not look", asks `enigma2_look`.
+        """
+        return self.enigma2_look() or set()
+
+    def enigma2_look(self):
+        """`enigma2_pids`, or None when `/proc` itself cannot be listed (EMFILE, ENOMEM)."""
         pids = set()
         try:
             names = os.listdir(self.proc)
         except OSError:
-            return pids
+            return None
         for name in names:
             if not name.isdigit():
                 continue
@@ -1886,11 +1894,23 @@ class Transaction:
         # The enigma2 processes still running at the last look for the stop: none once it was
         # seen. After `init 3` only a process not among them is the interface starting again.
         survivors = set()
+        # Whether any look at `/proc` answered during the stop: without one, `survivors` says
+        # nothing, and no process can be told apart from one R2 could not stop.
+        looked = []
 
         def gone():
+            look = receiver.enigma2_look()
+            if look is None:  # `/proc` could not be read: unknown, never "stopped"
+                return False
+            looked.append(True)
             survivors.clear()
-            survivors.update(receiver.enigma2_pids())
-            return not survivors
+            survivors.update(look)
+            return not look
+
+        def came_back():
+            look = receiver.enigma2_look()
+            return (look is not None and (stopped or bool(looked))
+                    and bool(look - survivors))
         self.rolling_back = True
         try:
             receiver.run([receiver.init, "4"], STOP_WAIT)
@@ -1938,14 +1958,13 @@ class Transaction:
         receiver.pause("rollback_started")
         # Not stopped, `init 3` asks for a runlevel that never left and starts nothing: the
         # process R2 could not stop runs on, with whatever code it had, over the old files.
-        started = self.wait(lambda: bool(receiver.enigma2_pids() - survivors), START_WAIT)
+        started = self.wait(came_back, START_WAIT)
         if not started and stopped:
             # Stopped, and nothing came: an `init 3` that answered and took no effect, or never
             # got through at all. The interface is down either way; asking again costs nothing.
             self.record["start"] = "again"
             self.start_interface()
-            started = self.wait(lambda: bool(receiver.enigma2_pids() - survivors),
-                                START_AGAIN_WAIT)
+            started = self.wait(came_back, START_AGAIN_WAIT)
         if not started:
             self.record["interface"] = "not started" if stopped else "not restarted"
         if started and recorded and receiver.clock() < limit:
