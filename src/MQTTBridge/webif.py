@@ -50,6 +50,14 @@ so no form another page could forge carries it. The versions offered are the
 ones the signed index offers (`updateview.py`, shared with the television's
 screen).
 
+**A GET can end an install's overdue wait.** An install on a receiver without internet may
+wait before it starts (the relay handshake, `selfupdate.py`), and a wait past its bound is
+ended by whoever looks at it, timer or not (`SelfUpdater.relay_wait`). Loading this page - or a
+refresh of the television's screen - can therefore be what ends it and puts its `no_relay` on
+`last_error`. That is not a GET changing the receiver: it completes an install already
+confirmed, with the end its own timer gives it, only noticed first. The "Plugin updates"
+section says how the last wait ended for an hour after it (`updateview.relay_outcome`).
+
 **How the page is opened.** OpenWebif's menu entry loads it into its own
 content panel with jQuery (`$("#content_container").load(url)`), which injects
 whatever comes back into OpenWebif's document and runs any script in it. So a

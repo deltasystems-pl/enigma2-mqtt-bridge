@@ -288,9 +288,12 @@ install asked for here may therefore wait before it starts, and the screen and t
 what: first "Checking whether the receiver can reach the internet to download version ...", then,
 when it cannot, that it has asked Home Assistant, with the seconds left of the two minutes. When
 Home Assistant does not answer, they say "The receiver has no access to the internet, and Home
-Assistant did not answer. The installation is not possible." (in Polish, spec ae.6's sentence);
-when the only answer carried a download address the receiver's clock calls expired, they say so
-and ask to set the clock if it is wrong. Nothing on the receiver has changed in either case.
+Assistant did not answer. The installation is not possible.", in the receiver's language; when
+the only answer carried a download address the receiver's clock calls expired, they say so and
+ask to set the clock if it is wrong. Nothing on the receiver has changed in either case. The
+screen that asked keeps saying how the wait ended until it is closed; the page says it for an
+hour after the wait ended, so an old answer is not read as news, and the Status section's last
+error keeps the refusal until a command next succeeds.
 
 ### What a screenshot costs
 
