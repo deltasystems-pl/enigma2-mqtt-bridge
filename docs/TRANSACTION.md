@@ -508,8 +508,11 @@ So:
   back at all. (The script below has to wait for its restore child for the same reason; the helper
   has no child to wait for, so it has no window between starting one and knowing it.) A failed
   restore or `lastservice` write is recorded and the unit carries on, and anything else that
-  escapes after `init 4` still meets a `finally` that runs `init 3`. A `SIGKILL` or power between
-  `init 4` and `init 3` is the residual stated below.
+  escapes after `init 4` still meets a `finally` that runs `init 3`. Before `init 4` nothing is
+  stopped yet, so the record step is best effort - an error there leaves the record taken before
+  the restart, noted as `internal_error` - and anything that escapes before the stop is sent
+  reaches the helper's last net, which runs R2 again rather than end over the new, unproven code.
+  A `SIGKILL` or power between `init 4` and `init 3` is the residual stated below.
 - **The trap is still there**, set **before** `init 4`: on `HUP INT TERM PIPE` it runs the finishing
   step and exits, and on `EXIT` it runs the finishing step. That step first ignores further `HUP`,
   `INT`, `TERM` and `PIPE`, so a second signal cannot cut the first short. It **waits for a restore

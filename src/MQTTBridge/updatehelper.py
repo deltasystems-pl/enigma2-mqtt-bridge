@@ -66,8 +66,9 @@ and is never proved.
 **Nothing unproven is left behind.** From the moment the package manager has run, every write
 of the marker and of `status.json` is best effort - a full flash changes how the end is
 recorded, never which end it is - and an error nothing expected still ends the way a planned
-failure would: the files go back under the interface that asked, or by R2 once it has gone.
-Once `init 4` has been sent, `init 3` follows in a `finally`.
+failure would: the files go back under the interface that asked, or by R2 once it has gone -
+also when it comes at the start of R2, before anything was stopped. Once `init 4` has been
+sent, `init 3` follows in a `finally`.
 
 **Signals.** `HUP`, `INT`, `TERM` and `PIPE` only set a flag, read at the next step. Before the
 package manager has run they end the transaction with nothing changed; from then until the
@@ -1751,16 +1752,26 @@ class Transaction:
         Once `init 4` has been sent, `init 3` follows whatever happens in between: the handled
         failures are recorded and the unit carries on, and anything else still meets the
         `finally` that starts the interface before it goes further.
+
+        Before `init 4` nothing has been stopped, so this is not yet the unit: the record is
+        best effort (an error in it leaves the one taken before the restart), and only once the
+        stop is sent does `rolling_back` tell the last net that R2 owns the end. Anything that
+        escapes before then meets the net as any other error after the package manager, and
+        the net runs R2 again - never a `failed` over the new, unproven code.
         """
         receiver = self.receiver
-        self.rolling_back = True
-        self.write_status(phase="rolling_back")
-        self.marker(phase="rolling_back")
         limit = receiver.clock() + ROLLBACK_LIMIT
-        recorded = self.statusinfo() or self.before
+        recorded = self.before
+        try:
+            self.write_status(phase="rolling_back")
+            self.marker(phase="rolling_back")
+            recorded = self.statusinfo() or self.before
+        except Exception as error:  # a channel not recorded, never a rollback not made
+            self.record["internal_error"] = (type(error).__name__ + ": " + str(error))[:200]
         self.record.update(restart="stopped")
         receiver.pause("rollback_recorded")
         starting = False
+        self.rolling_back = True
         try:
             receiver.run([receiver.init, "4"], STOP_WAIT)
             stopped = self.wait(lambda: not receiver.enigma2_pids(), STOP_WAIT)

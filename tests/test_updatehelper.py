@@ -1825,3 +1825,48 @@ def test_a_drill_link_is_not_followed_or_used(tmp_path):
     drill_file(scene).symlink_to(target)
     assert scene.run() == 0
     assert scene.init_calls() == [] and target.exists()
+
+
+# ----------------------------------------------- R2 before `init 4`, closely --
+
+
+def test_an_error_recording_the_channel_at_r2s_start_still_puts_the_old_version_back(
+        tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    real = updatehelper.Transaction.statusinfo
+
+    def statusinfo(self):
+        # Every look before the stop fails the same way, so a second R2 would meet it again.
+        if self.status.get("phase") == "rolling_back" and not scene.init_calls():
+            raise RecursionError("maximum recursion depth exceeded")
+        return real(self)
+    monkeypatch.setattr(updatehelper.Transaction, "statusinfo", statusinfo)
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.init_calls() == ["4", "3"] and scene.box.pids and not scene.locked()
+    record = scene.status()["record"]
+    assert record["internal_error"].startswith("RecursionError")
+    # The record taken before the restart stands in: the channel playing then comes back.
+    assert scene.box.lastservice_at_start == TVP1
+
+
+@pytest.mark.parametrize("error", [RuntimeError("boom"), Escape()], ids=["error", "escape"])
+def test_whatever_escapes_r2_before_init_4_still_ends_with_the_old_version(tmp_path, error):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+
+    def breaks_once():
+        scene.box.pauses.pop("rollback_recorded")
+        raise error
+    scene.box.pauses["rollback_recorded"] = breaks_once
+    if isinstance(error, Exception):
+        assert scene.run() == 1
+    else:
+        with pytest.raises(Escape):
+            scene.run()
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "internal_error")
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.init_calls() == ["4", "3"] and scene.box.pids and not scene.locked()
+    assert scene.box.init_log[0] == ("4", f"# plugin {NEW}\n")
