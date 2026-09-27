@@ -689,7 +689,11 @@ target is lower than the version installed and the television or the page starte
 because the request says `downgrade`. The relay address is judged again as well, before anything
 is fetched: `http` or `https`, a host name or IPv4 address without a user part, a port if any,
 exactly the path `/api/enigma2_mqtt/relay/` and a 43-character URL-safe token, nothing after it,
-and an integer `expires` that has not passed by the receiver's clock - otherwise `relay`. The
+and an integer `expires` that has not passed by the receiver's clock - otherwise `relay`. It is
+one function, `updatehelper.relay_ok`, which the plugin also asks before it writes the request -
+for a `cmd/update` that carries the address, and for Home Assistant's answer to the receiver's own
+`relay_request` (TOPICS.md, `cmd/update`), which is where the address of an install started at
+the television or on the page comes from when the receiver has no internet. The
 relay is **IPv4 only**, on both sides: the integration binds each relay address to the receiver's
 IPv4 address, offers one only to a receiver that reported such an address, and names its own IPv4
 address on the receiver's subnet, else its internal URL - so a host written as an IPv6 literal

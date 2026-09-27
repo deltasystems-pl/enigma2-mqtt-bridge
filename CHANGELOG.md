@@ -37,6 +37,19 @@ version that has no section here.
   `interrupted`; the next `cmd/update` says when its lock lets a new one start, and the start after
   a restart says how it ended, by the build that runs. Nothing of this has run on a receiver yet.
 
+- **A receiver without internet installs through Home Assistant: `relay_request` and `cmd/relay`**
+  ([TOPICS.md](docs/TOPICS.md) §1, §2). An install started at the television or on the OpenWebif
+  page, when the last probe found the release origin unreachable, asks the companion integration
+  for the package on the new event topic `relay_request` (QoS 1, never retained) and waits at most
+  120 s for its answer on the new command `relay`. Only the answer to the id asked with, for the
+  version asked for, with an unexpired address of Home Assistant's one shape, is taken; anything
+  else is logged and dropped without ending the wait. The refusals are asked once more before the
+  update helper starts, and the install stays the television's or the page's. No answer: refused
+  with `reason` `no_relay`, nothing changed. Nothing is probed to decide, and a request that carries
+  an address never contacts the origin. The address rule is now one function shared by the plugin
+  and the helper, and it no longer takes a bracketed IPv6 host or a port outside 1-65535 in
+  `cmd/update` - the relay is IPv4 only on both sides.
+
 - **Every package says which build it is.** `info` gains `build` - the commit the package was
   built from, the commit's time, whether the tracked files matched it, the flavour, and the commit
   of another build waiting on disk after the files were replaced and before the interface restarts
