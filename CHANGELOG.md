@@ -94,8 +94,10 @@ version that has no section here.
   also subscribes to `enigma2mqtt/release_index`, which the companion integration publishes, and
   judges a relayed index by the same rule - it needs no setting and makes no connection, so a
   receiver without internet learns of releases this way. Everything runs on a worker thread; what
-  was accepted is kept in `/etc/enigma2/mqttbridge-index.json` (0600) and verified again at every
-  start.
+  was accepted is kept in `/etc/enigma2/mqttbridge-index.json` (0600), written only when it
+  changes and verified again at every start; when the receiver last checked is kept apart, in
+  `/etc/enigma2/mqttbridge-check.json`. An index that could not be kept is reported as
+  `write_failed`, and the timeout bounds the whole answer, headers included.
 - **Only an acceptance build may carry a test origin or test index keys.** `tools/build-ipk.sh`
   takes `MQTTBRIDGE_BUILD_ORIGIN` and `MQTTBRIDGE_BUILD_INDEX_KEYS` for an `acceptance` build and
   refuses either for any other flavour; the plugin honours them in no other flavour; and the

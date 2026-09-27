@@ -40,13 +40,23 @@ day old, and only once the receiver's clock has been set: a receiver boots with 
 1970, and a check then would fail its TLS and record a stamp that means nothing. Every check is
 stamped before it asks, so one that fails has still spent its turn.
 
-**Where it is kept.** `/etc/enigma2/mqttbridge-index.json` (0600), written whole and renamed into
-place: the trust state in the shape `trust.store` writes, plus one member of this module's,
-`held`, keeping per lineage the last accepted index and its signature file (base64), where it came
-from, and the last check's stamp, error and probe result. Everything else in the file is kept as
-it was. A memory that cannot be read is never rewritten and judges nothing (`trust.BadMemory`); a
-held index is verified again whenever it is loaded, so a build whose keys no longer sign it does
-not show it - and its memory stays, because that is about keys, not about the file.
+**Where it is kept.** Two files, each 0600, written whole and renamed into place.
+`/etc/enigma2/mqttbridge-index.json` is the trust file: the trust state in the shape `trust.store`
+writes, plus one member of this module's, `held`, keeping per lineage the last accepted index, its
+signature file (base64) and where it came from. It is written only when what the receiver trusts
+changes - an index accepted, or one taken back - and everything else in it is kept as it was. A
+memory that cannot be read is never rewritten and judges nothing (`trust.BadMemory`); a held
+index is verified again whenever it is loaded, so a build whose keys no longer sign it does not
+show it - and its memory stays, because that is about keys, not about the file.
+`/etc/enigma2/mqttbridge-check.json` is the check's bookkeeping, per lineage: when it last asked,
+what went wrong, whether the origin answered. It is written after every check, and a damaged one
+is simply started again: nothing in it decides what is trusted.
+
+**A second writer.** Today this module is the only writer of the trust file, from one worker, one
+job at a time. The self-update's helper, a separate process, will be a second one; it must take
+the transaction lock, read the file again and write `trust.store` onto what it has just read -
+never a state read earlier - and the plugin's own acceptance write must take the same lock then
+(TRANSACTION.md, section 1). Writing the trust file only on acceptance keeps that window small.
 
 **Threads.** Verifying a signature costs about 40 ms on an armv7 receiver, and every fetch can take
 seconds, so none of it runs on enigma2's main loop: each job - loading the file, a check, a relayed
@@ -61,6 +71,7 @@ import binascii
 import http.client
 import json
 import os
+import socket
 import threading
 import time
 from urllib.parse import urlsplit
@@ -75,6 +86,9 @@ from .version import CONTRACT
 LOG = get_logger("updatecheck")
 
 STATE_PATH = "/etc/enigma2/mqttbridge-index.json"
+# The check's own bookkeeping - when it last asked, what the origin answered - kept apart from the
+# trust memory, so that the trust file is written only when what the receiver trusts changes.
+CHECK_PATH = "/etc/enigma2/mqttbridge-check.json"
 RELEASE_INDEX_TOPIC = "enigma2mqtt/release_index"
 SUFFIX = "update"
 # `checked` moves with every check; a check that found nothing new is not a change (ADR-0006).
@@ -142,17 +156,36 @@ def verified_context():
 def https_get(url, cap, timeout, connection_factory=None):
     """`(status, body)` of one GET of `url`, the body at most `cap + 1` bytes; or Unreachable.
 
-    Never follows a redirect: a 3xx is returned as the status it is. `timeout` bounds the
-    connection, every read, and the whole body.
+    Never follows a redirect: a 3xx is returned as the status it is. `timeout` bounds the whole
+    exchange - connection, request, response headers and body. A socket timeout alone bounds each
+    read, and a peer that sends one header line a second never trips it; so a watchdog shuts the
+    socket down at the deadline, whatever the exchange is waiting for, and the blocked read ends.
     """
     parts = urlsplit(url)
     if parts.scheme != "https" or not parts.hostname:
         raise ValueError("only an https address is fetched, not " + url)
     factory = connection_factory or http.client.HTTPSConnection
-    deadline = time.monotonic() + timeout
+    expired = threading.Event()
+    held = {}
+
+    def expire():
+        expired.set()
+        sock = getattr(held.get("connection"), "sock", None)
+        if sock is not None:
+            try:
+                # The plain socket's shutdown, under a TLS socket too: it wakes the blocked read
+                # without the TLS layer being torn down from a second thread.
+                socket.socket.shutdown(sock, socket.SHUT_RDWR)
+            except (OSError, TypeError, ValueError):
+                pass
+
+    watchdog = threading.Timer(timeout, expire)
+    watchdog.daemon = True
     try:
-        connection = factory(parts.hostname, parts.port or 443, timeout=timeout,
-                             context=verified_context())
+        connection = held["connection"] = factory(
+            parts.hostname, parts.port or 443, timeout=timeout, context=verified_context()
+        )
+        watchdog.start()
         try:
             connection.request("GET", parts.path or "/", headers={
                 "User-Agent": "enigma2-mqtt-bridge",
@@ -161,16 +194,21 @@ def https_get(url, cap, timeout, connection_factory=None):
             response = connection.getresponse()
             body = b""
             while len(body) <= cap:
-                if time.monotonic() > deadline:
-                    raise Unreachable(f"no whole answer within {timeout} s")
                 chunk = response.read(min(8192, cap + 1 - len(body)))
                 if not chunk:
                     break
                 body += chunk
+            if expired.is_set():
+                raise Unreachable(f"no whole answer within {timeout} s")
             return response.status, body
         finally:
+            watchdog.cancel()
             connection.close()
-    except (OSError, http.client.HTTPException) as error:
+    except Unreachable:
+        raise
+    except (OSError, ValueError, http.client.HTTPException) as error:
+        if expired.is_set():
+            raise Unreachable(f"no whole answer within {timeout} s") from error
         raise Unreachable(str(error)) from error
 
 
@@ -282,11 +320,20 @@ def read_state(path):
         state = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError, RecursionError) as error:
         raise trust.BadMemory(f"the file is not JSON: {error}") from error
+    # `trust.check_state` reads None as "never stored anything". A file that says `null` is not
+    # a file that is missing: read as nothing remembered, it would put this reader back at first
+    # sight, which is the one thing a damaged file must never do.
+    if not isinstance(state, dict):
+        raise trust.BadMemory("the file does not hold an object")
     return trust.check_state(state)
 
 
 def write_state(path, state):
-    """Write `state` whole, 0600, renamed into place. False, logged, when it could not be."""
+    """Write `state` whole, 0600, renamed into place. False, logged, when it could not be.
+
+    The old file stays as it was until the new one is complete on disk: a write that fails -
+    a full flash - leaves either the old state or the new one, never half of either.
+    """
     temporary = path + ".tmp"
     try:
         descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -298,8 +345,25 @@ def write_state(path, state):
         os.replace(temporary, path)
     except OSError:
         LOG.exception("could not write %s", path)
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
         return False
     return True
+
+
+def read_checks(path):
+    """The check file's content - bookkeeping, never trust - or {} when it cannot be used."""
+    try:
+        with open(path, "rb") as handle:
+            data = json.loads(handle.read(MAX_STATE_BYTES).decode("utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, UnicodeDecodeError, ValueError, RecursionError) as error:
+        LOG.warning("%s cannot be read (%s); the last check is forgotten", path, error)
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _held_part(state, lineage):
@@ -343,15 +407,18 @@ class UpdateChecker:
     # Class attributes, so that the tests can point every checker at a temporary file, a fake
     # opkg, a fake origin and an inline worker before a bridge builds one.
     path = STATE_PATH
+    check_path = CHECK_PATH
     opkg_root = "/"
     fetch = staticmethod(https_get)
     run_in_background = staticmethod(in_thread)
 
     def __init__(self, bridge, path=None, keys=None, acceptance=None, origin=None, clock=None,
-                 build=None, overrides=None):
+                 build=None, overrides=None, check_path=None):
         self.bridge = bridge
         if path is not None:
             self.path = path
+        if check_path is not None:
+            self.check_path = check_path
         self.clock = clock or time.time
         build = buildid.LOADED if build is None else build
         try:
@@ -579,6 +646,15 @@ class UpdateChecker:
 
     def _load(self):
         result = {"kind": "load", "installed": installed_packages(self.opkg_root), "held": None}
+        checks = read_checks(self.check_path).get(self.lineage)
+        checks = checks if isinstance(checks, dict) else {}
+        origin = checks.get("origin")
+        error = checks.get("check_error")
+        result.update(
+            checked=_whole_or_none(checks.get("checked")),
+            check_error=error if isinstance(error, str) else None,
+            origin=origin if origin in (REACHABLE, UNREACHABLE) else UNKNOWN,
+        )
         try:
             state = read_state(self.path)
         except trust.BadMemory as error:
@@ -586,15 +662,7 @@ class UpdateChecker:
                         "%s", self.path, error)
             result["check_error"] = ERROR_BAD_MEMORY
             return result
-        part = _held_part(state, self.lineage)
-        origin = part.get("origin")
-        error = part.get("check_error")
-        result.update(
-            checked=_whole_or_none(part.get("checked")),
-            check_error=error if isinstance(error, str) else None,
-            origin=origin if origin in (REACHABLE, UNREACHABLE) else UNKNOWN,
-            held=self._authentic(part),
-        )
+        result["held"] = self._authentic(_held_part(state, self.lineage))
         if self.keys is None:
             result["check_error"] = ERROR_BAD_KEYS
         return result
@@ -657,7 +725,6 @@ class UpdateChecker:
         if self.keys is None:
             result["check_error"] = ERROR_BAD_KEYS
             return result
-        state = None
         for attempt in (1, 2):
             try:
                 status, signature_raw = self.fetch(
@@ -688,28 +755,34 @@ class UpdateChecker:
                          "in case a publication landed between the two requests")
                 continue
             if verdict in (ACCEPT, TAKEN_BACK):
-                result["held"] = held
+                # The trust file is written here and nowhere else in a check: only when what the
+                # receiver trusts has changed. An index that could not be kept is not held, and
+                # the check says why - the next check would otherwise accept it again, fail the
+                # same way, and look like success every time.
+                if write_state(self.path, state):
+                    result["held"] = held
+                else:
+                    result["check_error"] = WRITE_FAILED
             elif verdict != UNCHANGED:
                 result["check_error"] = verdict
             break
-        self._record(result, state)
+        result["installed"] = installed_packages(self.opkg_root)
+        self._record(result)
         return result
 
-    def _record(self, result, state):
-        """Keep the check's stamp, error and probe result with the state the judgement left."""
-        if result.get("check_error") in (ERROR_BAD_MEMORY, ERROR_BAD_KEYS):
-            return
-        if state is None:
-            try:
-                state = read_state(self.path)
-            except trust.BadMemory:
-                return
-        part = dict(_held_part(state, self.lineage))
+    def _record(self, result):
+        """Keep the check's stamp, error and probe result - in the check file, never the trust file.
+
+        Bookkeeping, not trust: a check file that cannot be read is started again, and one that
+        cannot be written costs only the limit's memory across a restart.
+        """
+        checks = read_checks(self.check_path)
+        part = checks.get(self.lineage)
+        part = dict(part) if isinstance(part, dict) else {}
         part.update(checked=result["checked"], check_error=result["check_error"])
         if "origin" in result:
             part["origin"] = result["origin"]
-        if not write_state(self.path, _with_held(state, self.lineage, part)):
-            result.pop("held", None)
+        write_state(self.check_path, dict(checks, **{self.lineage: part}))
 
     def _relay(self, payload):
         result = {"kind": "relay"}
@@ -730,6 +803,7 @@ class UpdateChecker:
                 result["held"] = held
             else:
                 verdict = WRITE_FAILED
+        result["installed"] = installed_packages(self.opkg_root)
         # The rule's own word for the bytes already held: `replay`, and not a failure.
         result["verdict"] = "replay" if verdict == UNCHANGED else verdict
         return result

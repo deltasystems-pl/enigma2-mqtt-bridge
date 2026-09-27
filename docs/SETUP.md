@@ -216,7 +216,7 @@ What stays on the receiver, on purpose:
 | `/home/root/mqttbridge.log*` | The only record of what the removal did |
 | `/home/root/mqttbridge-backups/` | Snapshots made by the guided installer or by you. 🔴 They hold copies of the settings, so of the broker password too |
 | `/etc/opkg/enigma2-mqtt-bridge.conf` | The feed. It is what lets the receiver's own plugin menu install the plugin again |
-| `/etc/enigma2/mqttbridge-index.json` | What the receiver has learned from the signed release index (below). Removing it would let an index the receiver already refused for good be accepted again after a reinstall |
+| `/etc/enigma2/mqttbridge-index.json`, `/etc/enigma2/mqttbridge-check.json` | What the receiver has learned from the signed release index, and when it last checked (below). Removing it would let an index the receiver already refused for good be accepted again after a reinstall |
 
 Reinstalling from the receiver's own menu (*Plugins -> Download plugins -> Extensions*) with the feed
 still configured brings the plugin back on its kept broker, node id and Home Assistant mode, and an
@@ -244,7 +244,8 @@ It learns of an index in two ways:
 
 With `update_check` off and nobody pressing the page's button, the receiver makes no connection
 other than the broker's. Checking installs nothing: installing an update from the index is not part
-of this release. What the receiver has learned is kept in `/etc/enigma2/mqttbridge-index.json`
+of this release. What the receiver has learned is kept in `/etc/enigma2/mqttbridge-index.json`, when it last
+checked in `/etc/enigma2/mqttbridge-check.json`, both
 (0600), which a removal leaves in place on purpose.
 
 ### What a screenshot costs

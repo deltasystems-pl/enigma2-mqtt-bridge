@@ -3290,6 +3290,8 @@ def no_release_origin(tmp_path, monkeypatch):
         raise updatecheck.Unreachable("the tests make no network requests")
 
     monkeypatch.setattr(updatecheck.UpdateChecker, "path", str(tmp_path / "mqttbridge-index.json"))
+    monkeypatch.setattr(updatecheck.UpdateChecker, "check_path",
+                        str(tmp_path / "mqttbridge-check.json"))
     monkeypatch.setattr(updatecheck.UpdateChecker, "opkg_root",
                         str(tmp_path / "no-package-manager"))
     monkeypatch.setattr(updatecheck.UpdateChecker, "fetch", staticmethod(refuse))
