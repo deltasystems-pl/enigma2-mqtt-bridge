@@ -687,6 +687,10 @@ msgstr "Aktualizacja wtyczki nie zakończyła się poprawnie. Zainstaluj wtyczk�
 msgid "The update of the plugin was undone, but the receiver's user interface did not restart. Please restart the user interface."
 msgstr "Aktualizacja wtyczki została wycofana, ale interfejs dekodera nie został ponownie uruchomiony. Uruchom ponownie interfejs."
 
+#: src/MQTTBridge/selfupdate.py
+msgid "The receiver's user interface is running a different version of the plugin than the one now installed. Please restart the user interface."
+msgstr "Interfejs dekodera korzysta z innej wersji wtyczki niż obecnie zainstalowana. Uruchom ponownie interfejs."
+
 #: src/MQTTBridge/webif.py
 msgid "Check for plugin updates now"
 msgstr "Sprawdź teraz aktualizacje wtyczki"

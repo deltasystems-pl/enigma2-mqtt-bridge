@@ -265,9 +265,15 @@ STUCK_UNSTOPPED = ("an update was rolled back while the receiver's interface kep
                    "the plugin's files are no longer the ones it runs; restart the receiver's "
                    "interface")
 UNSTOPPED = "not_stopped"
+# ... and after any end read by a process whose build is not the one on disk (TRANSACTION.md
+# section 7, the build rule, review round 5) when nothing says a rollback is why: a failed
+# launch, a withdrawn update, an `installed` end. Nothing was undone there - the files changed
+# by other means - so this one says only what is true: a process and files of two builds.
+STUCK_OTHER_BUILD = ("the receiver's interface runs a different build of the plugin than the one "
+                     "now installed; restart the receiver's interface")
 # The one command doors closed for good let through, by the sentence they say: the repair
 # itself. It keeps its own guards - a recording, an EPG import, a job that holds the quit.
-REPAIRS = {STUCK_UNSTOPPED: "restart_gui"}
+REPAIRS = {STUCK_UNSTOPPED: "restart_gui", STUCK_OTHER_BUILD: "restart_gui"}
 # The ends whose own sentence names the repair already: `last_error` carries it alone.
 SAID_BY_THE_HELPER = RESTORE_REASONS + (UNSTOPPED,)
 
@@ -302,6 +308,9 @@ def household_doors(updater=None):
             # The files are the previous version's and whole; only the process is not.
             return _("The update of the plugin was undone, but the receiver's user interface "
                      "did not restart. Please restart the user interface.")
+        if sentence == STUCK_OTHER_BUILD:
+            return _("The receiver's user interface is running a different version of the "
+                     "plugin than the one now installed. Please restart the user interface.")
         if sentence == STUCK:
             return _("The update of the plugin failed and its previous version could not be "
                      "put back. Please install the plugin again, for example from Home "
@@ -584,9 +593,11 @@ class SelfUpdater:
             return
         if marker.get("phase") in ("restarting", "proving"):
             self._confirm_start(directory, ident)
+        # `began`: a process that starts while the marker says `rolling_back` was started by
+        # R2 itself, after the files went back, so it runs them (review round 6).
         self._current = {"id": ident, "directory": directory, "ours": False, "downgrade": False,
                          "launched": self.monotonic(), "finished_seen": None, "asked": True,
-                         "deadline": marker.get("deadline")}
+                         "deadline": marker.get("deadline"), "began": marker.get("phase")}
         self._transaction = public(marker)
         self._poll_ticker.start(POLL_MILLISECONDS)
 
@@ -1261,7 +1272,7 @@ class SelfUpdater:
         # closed open again (review S10) - unless the files are not this process's build
         # (review round 5): nothing of this transaction changed them, but a reload would load
         # them all the same.
-        stuck = None if self._runs_the_files_on_disk() else STUCK_UNSTOPPED
+        stuck = None if self._runs_the_files_on_disk() else STUCK_OTHER_BUILD
         self._end(public(record), "internal_error", followed=False, stuck=stuck)
 
     # ------------------------------------------------------------ following --
@@ -1290,6 +1301,15 @@ class SelfUpdater:
             elif current["ours"] and self.monotonic() - current["launched"] > LAUNCH_WAIT_SECONDS:
                 self._launch_failed("the helper wrote nothing within "
                                     + str(LAUNCH_WAIT_SECONDS) + " s")
+            elif not current["ours"] and self.closed and (
+                    not os.path.isdir(directory)
+                    or self._past_deadline(current, self._receiver())):
+                # Review round 6: the doors closed at `rolling_back`, and nothing of the
+                # transaction can be read any more. Let go, they would say "wait" for ever:
+                # judged as a helper that stopped in the phase it was last seen in.
+                self._helper_died(current, dict(self._transaction or {}, id=current["id"],
+                                                phase=current.get("seen")),
+                                  "the update's records disappeared")
             elif not current["ours"] and not os.path.isdir(directory):
                 LOG.info("update %s left nothing to follow", current["id"])
                 self._current = None
@@ -1303,6 +1323,7 @@ class SelfUpdater:
                 self._helper_died(current, again or record)
                 return
             record = again
+        current["seen"] = record.get("phase")
         payload = public(record)
         if payload is not None and payload != self._transaction:
             self._transaction = payload
@@ -1345,8 +1366,10 @@ class SelfUpdater:
                 stuck = None
                 if unrestored and (current["ours"] or unstopped or other):
                     stuck = STUCK_PARTIAL if restore.startswith("partial") else STUCK
-                elif unstopped or other:
+                elif unstopped:
                     stuck = STUCK_UNSTOPPED
+                elif other:
+                    stuck = STUCK_OTHER_BUILD
                 self._end(payload, record.get("reason"), followed=not current["ours"],
                           stuck=stuck)
             return
@@ -1461,11 +1484,15 @@ class SelfUpdater:
         self._poll_ticker.stop()
         touched = self._files_may_have_changed(current, record.get("phase"))
         other = not self._runs_the_files_on_disk()
-        stuck = None
         # A follower is under the changed files only once R2 puts the previous ones back
-        # (review round 5); before that it runs the files it started on. And whatever the
-        # phase, a build on disk that is not this process's holds it.
-        if touched and (current["ours"] or record.get("phase") == "rolling_back" or other):
+        # (review round 5); before that it runs the files it started on. One that R2 itself
+        # started - it began at `rolling_back` - started on the files put back: the build rule
+        # alone judges it (review round 6). And whatever the phase, a build on disk that is not
+        # this process's holds it.
+        started_by_r2 = not current["ours"] and current.get("began") == "rolling_back"
+        under = current["ours"] or (record.get("phase") == "rolling_back" and not started_by_r2)
+        stuck = None
+        if touched and (under or other):
             # Review round 2 (DS2): the files changed under this process, and a helper killed
             # outright (SIGKILL, the OOM killer) leaves its package manager running as an
             # orphan that may still be writing them. A fresh session would import whatever it
@@ -1475,8 +1502,8 @@ class SelfUpdater:
         elif other:
             # The helper stopped before the package manager ran, yet the files are another
             # build: something else changed them, and the restart is what runs them.
-            stuck = STUCK_UNSTOPPED
-        elif touched:
+            stuck = STUCK_OTHER_BUILD
+        elif touched and not started_by_r2:
             detail += ("; the plugin's files may not be the running version's - restart the "
                        "receiver's interface, or install the plugin again")
         error = str(updatehelper.Fail("interrupted", detail=detail))
@@ -1540,7 +1567,7 @@ class SelfUpdater:
             self._retraction_ticker.stop()
             self._queue = []
             self._outstanding = []
-            if stuck == STUCK_UNSTOPPED:
+            if stuck in REPAIRS:
                 LOG.error("update %s: the plugin's files on disk are not the build this "
                           "process runs; the doors stay closed until the interface restarts",
                           ident)
