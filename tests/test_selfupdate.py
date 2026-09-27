@@ -1367,7 +1367,8 @@ def test_after_a_dead_helper_the_next_update_is_told_why_it_must_wait(box, facto
     bridge = box()
     directory = accepted(bridge, factory)
     ident = directory.name[len("update-"):]
-    lock(bridge.root, ident, alive=False)
+    # Its last beat 130 s ago: 1670 s of the thirty minutes are left.
+    lock(bridge.root, ident, alive=False, uptime=UPTIME - 130)
     helper_says(directory, phase="snapshot")
     helper_process(bridge, directory, running=False)
     tick()
@@ -1375,7 +1376,7 @@ def test_after_a_dead_helper_the_next_update_is_told_why_it_must_wait(box, facto
     refused = bridge.self_update.request(json.dumps({"version": "0.4.0"}))
     assert refused.reason == "busy"
     assert str(refused) == ("the previous update stopped without finishing; a new one is "
-                            "possible in about 30 minutes, when its lock on the receiver expires")
+                            "possible in about 28 minutes, when its lock on the receiver expires")
 
 
 @pytest.mark.parametrize("owner", ["running", "ssh"])
@@ -1628,3 +1629,26 @@ def test_after_a_reboot_the_rate_limit_counts_this_boots_uptime(box, monkeypatch
     assert bridge.self_update.request(json.dumps({"version": "0.4.0"})).reason == "rate_limited"
     (bridge.root / "proc" / "uptime").write_text("601.00 1.00\n")
     assert bridge.self_update.request(json.dumps({"version": "0.4.0"})) is None
+
+
+def test_after_the_retraction_nothing_stale_is_retracted_either(box, factory):
+    """R24: a stale-topic sweep while silent would publish behind the retraction."""
+    bridge = box()
+    restarting(bridge, factory, {"version": "0.2.5"}, downgrade=True)
+    factory.client.acknowledge()
+    MainLoop.advance(selfupdate.RETRACTION_POLL_MILLISECONDS)
+    assert bridge.self_update.silent
+    bridge.state.remember("enigma2/an_older_node/info")
+    quiet = len(factory.client.published)
+    assert bridge.retract_stale() == 0
+    assert factory.client.published[quiet:] == []
+
+
+def test_a_connection_lost_during_the_retraction_withdraws_at_once(box, factory, receiver):
+    """R27: not after the fifteen-second bound - a session that is gone acknowledges nothing."""
+    bridge = box()
+    directory = restarting(bridge, factory, {"version": "0.2.5"}, downgrade=True)
+    factory.client.fire_disconnect(7)
+    MainLoop.advance(selfupdate.RETRACTION_POLL_MILLISECONDS)
+    assert json.loads((directory / "withdraw").read_text()) == {"reason": "retraction"}
+    assert receiver.session.callbacks == []
