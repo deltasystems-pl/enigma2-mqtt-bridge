@@ -54,10 +54,11 @@ and is never proved.
   one `rename`), the enigma2 pid is read again, and only a receiver that did not restart is
   reported `withdrawn_before_restart`; one that did goes to R2, because the new process may have
   read either version;
-- a new enigma2: the proof, for 120 s - tier 1, `started.json` naming the target and its commit,
-  for a target whose index entry says it can (`self_update`); tier 2 for 0.2.0 and 0.3.x, the new
-  process holding the plugin's log file open, polled every two seconds, or the OpenWebif hook
-  answering when neither log path was writable. Proved: commit. Not proved: R2;
+- a new enigma2: the proof, for 120 s or what is left of the forward path's 15 minutes - tier
+  1, `started.json` naming the target and its commit, for a target whose index entry says it can
+  (`self_update`); tier 2 for 0.2.0 and 0.3.x, the new process holding the plugin's log file
+  open, polled every two seconds, or the OpenWebif hook answering when neither log path was
+  writable. Proved: commit. Not proved: R2;
 - R2 - stop, restore, start: the playing channel and the standby state are recorded, `init 4`,
   the snapshot goes back (with the plugin's settings block, once enigma2 is seen stopped), the
   recorded channel is written as `config.tv.lastservice`, `init 3`, and R3 compares what the
@@ -90,10 +91,15 @@ and `init 3`; the marker then tells the next plugin that starts, and a reboot fr
 once. A tree left half installed that cannot start the plugin at all is for the companion
 integration's forced reinstall over SSH (TRANSACTION.md section 4).
 
-**Bounds.** The forward path gives up at 15 minutes and the rollback's waits add up to less than
-seven - that is with every `init 3` running into its timeout twice, and the interface given its
-second chance - so the lock is held at most 22 minutes: under the released installer's
-30-minute stale rule even if the heartbeat were never written.
+**Bounds** (TRANSACTION.md section 2.4 has the measurement). The forward path ends at its
+15-minute deadline - the wait for the restart and the proof window included, so a restart that
+lands late gets what is left of the 15 minutes, not 120 s more - and a withdraw or an undo that
+lands on the deadline adds at most 45 s: one OpenWebif call and the restore's wait for opkg's
+lock. R2 then takes at most 409 s, with every `init` call running into its timeout, every
+OpenWebif call into its own, the restore waiting the whole 40 s for opkg's lock and the
+interface given its second chance. So the lock is held at most 1353 s, under 23 minutes plus
+the time the restores take to copy files: under the released installer's 30-minute stale rule
+even if the heartbeat were never written.
 """
 
 import errno
@@ -1810,7 +1816,9 @@ class Transaction:
         self.marker(phase="proving")
         receiver.pause("proving")
         tier = 1 if self.entry["self_update"] else 2
-        window = receiver.clock() + PROOF_WINDOW
+        # The proof is part of the forward path and ends with it: a restart that lands late gets
+        # what is left of the 15 minutes, never 120 s past them, so the bounds below hold.
+        window = min(receiver.clock() + PROOF_WINDOW, self.deadline)
         wanted = {os.path.realpath(receiver.path(p)) for p in LOG_PATHS} | \
             {receiver.path(p) for p in LOG_PATHS}
         # Only a process that was not running beside the one that asked: a child of the old

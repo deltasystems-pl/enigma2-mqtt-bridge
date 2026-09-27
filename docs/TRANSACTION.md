@@ -142,18 +142,42 @@ helper keeps the lock visibly alive:
 - **It writes only a lock it still holds.** Before each rewrite the helper reads `owner.json`; if
   the `id` there is not its own, the lock was taken from it, it writes nothing, and the transaction
   stops touching the receiver and ends with `result: interrupted`.
-- **It is the second line, not the first.** The helper bounds itself: the forward path aborts at
-  **15 minutes** and then rolls back, and the rollback's waits end within **7 minutes** even with
-  every `init 3` running into its timeout and the interface given its second chance (§5.2), so the
-  lock is held at most **22 minutes** - under the released 30-minute rule even with no heartbeat
-  at all. The
-  expected worst case is shorter: forward 617 s (index and download 70, verify 1, release digest
-  check 10, free space 1, snapshot 30, opkg 120, manifest 10, downgrade retraction 15, the
+- **It is the second line, not the first.** The helper bounds itself, so that the lock is held
+  at most **1353 s (22.6 minutes)** - under the released 30-minute rule even with no heartbeat at
+  all:
+  - **The forward path ends at its 15-minute deadline**, measured from the helper's start. The
+    wait for the restart ends there, and so does the proof window: a restart that lands late gets
+    what is left of the 15 minutes, never 120 s past them (§6). A withdraw or an undo that begins
+    on the deadline adds at most **45 s** - one OpenWebif call (5 s) and the restore's wait for
+    opkg's lock (40 s, §2.6) - so R2, when it follows, begins at most **945 s** after the start.
+  - **R2 takes at most 409 s (6.8 minutes)**, with every wait at its worst: each `init` call
+    running into its 30 s timeout, each OpenWebif call into its 5 s, the restore waiting the whole
+    40 s for opkg's lock, the interface given its second chance (§5.2), and R3's zap back and
+    standby never taking.
+  - These are measured, not added up: `tests/test_updatehelper.py` runs the whole transaction on
+    a clock that moves only when the helper waits, entering R2 every way the forward path can
+    reach it at its deadline (a restart just before it; a withdraw on it; a withdraw after an
+    `opkg` that ran up to it; an undo after one that ran past it), with the interface stopping
+    at once, late, not at all or quitting after `init 3`, and the new interface appearing early,
+    late or never - and fails when any of the three numbers is exceeded. Not included: the time
+    the restores take to copy the plugin's files, which was not measured on a receiver.
+
+  The expected worst case is shorter: forward 617 s (index and download 70, verify 1, release
+  digest check 10, free space 1, snapshot 30, opkg 120, manifest 10, downgrade retraction 15, the
   television's question 60, waiting for the new interface 180, proof 120), rollback 246 s (record 5,
   stop 30, restore 60, settings write 1, start and wait 120, verify and zap 20, standby 10) - **863 s
-  (14.4 min)** in all; an interface that does not come back after the stop adds a second `init 3`
-  and 60 s. The companion integration waits 21 minutes for a transaction it follows, which only
-  a rollback whose every `init 3` times out can outlast.
+  (14.4 min)** in all. Even entered at the latest point, 945 s after the start, that rollback
+  ends by about 1191 s (19.9 minutes).
+
+  **What a follower needs.** The companion integration's 21 minutes is enough for every expected
+  end, but not for an R2 whose waits run to their bounds after a late restart, which can end at
+  22.6 minutes. So a follower that judges a transaction by its `started` stamp - the integration
+  following one it asked for, or deciding when a receiver-started transaction is stale - keeps
+  following for at least **1353 s plus the clock skew it allows** (60 s: 1413 s, 23.6 minutes),
+  and should use **25 minutes**, which leaves room for the copying the measurement leaves out.
+  Until then a transaction that has not `finished` may still be running; one still not
+  `finished` after that has lost its helper (a `SIGKILL`, or power), and its lock goes stale 30
+  minutes after the last heartbeat (§2.3).
 
 ### 2.5 The two implementations meeting
 
@@ -614,6 +638,8 @@ the receiver" until the restart or the withdrawal.
 | Self-update, a target that does not (0.2.0, 0.3.x - helper written) | The **new** enigma2 pid holds the plugin's log file open (`/proc/<pid>/fd`), polled every 2 s through the whole window, because a log rotation closes the file for a moment. Both released plugins configure logging before anything else at start, whether or not they are switched on and whether or not the broker answers. When neither log path was writable before the restart, those plugins hold no file, and the proof is the OpenWebif hook answering anything but 404 after the pid change. The transaction's record says which proof it used. The helper does not read the log's lines at all: a line is something a broker client can put there, and a timestamp it can forge |
 
 No proof within the window: R2 (§5.1), and the restored plugin puts the reason on `last_error`.
+For the self-update the window is 120 s from the restart, and ends earlier when the forward
+path's 15-minute deadline comes first (§2.4): a restart that lands late is given what is left.
 
 ---
 

@@ -2716,3 +2716,149 @@ def test_without_one_answered_look_during_the_stop_nothing_counts_as_a_start(tmp
     assert record["interface"] == "not restarted" and scene.box.pids == {200}
     # Which processes R2 could not stop is unknown, so none are named.
     assert "unstopped" not in record
+
+
+# ------------------------------ the bounds TRANSACTION.md section 2.4 states --
+
+
+@pytest.mark.parametrize("tier", [1, 2])
+def test_a_restart_that_lands_late_is_given_only_what_is_left_of_the_forward_path(tmp_path, tier):
+    scene = tier_two(tmp_path) if tier == 2 else Scene(tmp_path)
+    log = scene.box.path(updatehelper.LOG_PATHS[0])
+    marks = {}
+
+    def asked_ten_seconds_before_the_deadline():
+        scene.box.t = scene.transaction.deadline - 10
+        updatehelper.write_json(str(scene.directory / "restart.json"), {"pid": 100})
+        scene.box.at(1, scene.box.restart)
+        # The new plugin would prove itself 30 s after the restart - past the deadline.
+        if tier == 1:
+            scene.box.at(31, lambda: updatehelper.write_json(
+                str(scene.directory / "started.json"),
+                {"version": NEW, "commit": "e" * 40, "pid": 200}))
+        else:
+            scene.box.at(31, lambda: scene.box.fds.update({200: {log}}))
+    scene.box.pauses["restarting"] = asked_ten_seconds_before_the_deadline
+    scene.box.pauses["rollback_recorded"] = lambda: marks.setdefault("r2", scene.box.t)
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    assert scene.status()["record"]["proof"] == "none"
+    # The proof window ended with the forward path, not 120 s after the restart.
+    assert marks["r2"] <= scene.transaction.deadline + updatehelper.PROOF_POLL
+
+
+# What TRANSACTION.md section 2.4 states, in seconds from the helper's start.
+FORWARD_BOUND = updatehelper.FORWARD_LIMIT + 45
+R2_BOUND = 409
+LOCK_BOUND = 1353
+WEBIF_TIMEOUT = 5
+
+
+def every_wait_at_its_bound(scene, monkeypatch, entry, stop, start):
+    """R2 entered at the forward deadline, and then every wait as long as it can be.
+
+    Each `init` call runs into its 30 s timeout and answers nothing, each OpenWebif call costs
+    its 5 s timeout, each restore waits the whole 40 s for opkg's lock, and R3's zap back and
+    standby never take. `entry` is how the forward path reaches R2 at its deadline: a restart
+    just before it, a withdraw on it, a withdraw after an opkg that ran up to it, or an undo
+    after an opkg that ran past it; the three last see the interface restart while the files go
+    back. `stop` is what `init 4` does; `start` is when the new interface appears after the
+    first `init 3`, or never.
+    """
+    box, transaction = scene.box, scene.transaction
+    box.standby = True
+    box.zap_works = False
+    box.stops = stop in ("at_once", "late")
+    marks = {"r2": None, "claim": None, "release": None}
+    busy = {"until": -1.0}
+    real_lockf = updatehelper.fcntl.lockf
+
+    def lockf(descriptor, operation, *rest):
+        if box.t < busy["until"]:
+            raise OSError(errno.EAGAIN, "Resource temporarily unavailable")
+        return real_lockf(descriptor, operation, *rest)
+    monkeypatch.setattr(updatehelper.fcntl, "lockf", lockf)
+    real_restore = updatehelper.restore_snapshot
+    restores = []
+
+    def restore(receiver, backup, settings):
+        busy["until"] = box.t + updatehelper.OPKG_LOCK_WAIT_RESTORE - updatehelper.OPKG_LOCK_POLL
+        real_restore(receiver, backup, settings)
+        restores.append(settings)
+        if entry != "restart" and len(restores) == 1:
+            box.restart()
+    monkeypatch.setattr(updatehelper, "restore_snapshot", restore)
+    real_webif = box.webif
+
+    def webif(path):
+        box.t += WEBIF_TIMEOUT
+        if path.startswith("/api/powerstate"):
+            return None
+        return real_webif(path)
+    box.webif = webif
+    starts = []
+
+    def run(argv, timeout):
+        if argv[0] != box.init:
+            return Box.run(box, argv, timeout)
+        box.argv.append(list(argv))
+        if argv[1] == "4" and stop == "at_once":
+            box.at(0, lambda: setattr(box, "pids", set()))
+        elif argv[1] == "4" and stop == "late":
+            box.at(updatehelper.STOP_WAIT - 1, lambda: setattr(box, "pids", set()))
+        elif argv[1] == "3" and not starts:
+            starts.append(box.t)
+            if stop == "quits":
+                box.at(10, lambda: setattr(box, "pids", box.pids - {200}))
+            if start is not None:
+                box.at(start, lambda: (setattr(box, "pids", {300}),
+                                       setattr(box, "webif_up", True),
+                                       setattr(box, "service", TVN),
+                                       setattr(box, "standby", False)))
+        box.t += timeout
+        return None
+    box.run = run
+    if entry == "restart":
+        def restart_just_before_the_deadline():
+            box.t = transaction.deadline - 1.5
+            updatehelper.write_json(str(scene.directory / "restart.json"), {"pid": 100})
+            box.at(0.5, box.restart)
+        box.pauses["restarting"] = restart_just_before_the_deadline
+    elif entry == "withdraw":
+        def asked_and_nothing_came():
+            box.t = transaction.deadline - updatehelper.PLUGIN_WAIT + 1
+            updatehelper.write_json(str(scene.directory / "restart.json"), {"pid": 100})
+        box.pauses["restarting"] = asked_and_nothing_came
+    else:
+        late = -0.5 if entry == "opkg_to_the_deadline" else 1
+        box.opkg_blocker = lambda: setattr(box, "t", transaction.deadline + late)
+    for name in ("claim", "release", "rollback"):
+        real = getattr(transaction, name)
+
+        def marked(*args, name=name, real=real):
+            if name == "rollback" and marks["r2"] is None:
+                marks["r2"] = box.t
+            if name == "release" and transaction.holding and marks["release"] is None:
+                marks["release"] = box.t
+            result = real(*args)
+            if name == "claim":
+                marks["claim"] = box.t
+            return result
+        setattr(transaction, name, marked)
+    return marks
+
+
+@pytest.mark.parametrize("start", [None, 0, 90, 185], ids=lambda s: f"start_{s}")
+@pytest.mark.parametrize("stop", ["at_once", "late", "quits", "never"])
+@pytest.mark.parametrize("entry", ["restart", "withdraw", "opkg_to_the_deadline", "undo"])
+def test_the_lock_is_held_no_longer_than_transaction_md_says(
+        tmp_path, monkeypatch, entry, stop, start):
+    scene = Scene(tmp_path)
+    marks = every_wait_at_its_bound(scene, monkeypatch, entry, stop, start)
+    begun = scene.box.t
+    assert scene.run() == 1
+    assert scene.last()["result"] in ("rolled_back", "failed")
+    assert marks["r2"] is not None and marks["r2"] - begun <= FORWARD_BOUND
+    assert scene.box.t - marks["r2"] <= R2_BOUND
+    assert marks["release"] - marks["claim"] <= LOCK_BOUND
+    assert scene.box.t - begun <= LOCK_BOUND
