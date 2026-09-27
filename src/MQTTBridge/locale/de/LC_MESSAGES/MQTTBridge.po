@@ -668,6 +668,14 @@ msgstr "Entfernen des Plugins aus der Ferne erlauben"
 msgid "Check daily for plugin updates"
 msgstr "Täglich nach Plugin-Aktualisierungen suchen"
 
+#: src/MQTTBridge/setup.py
+msgid "Allow plugin updates over MQTT"
+msgstr "Plugin-Aktualisierungen über MQTT erlauben"
+
+#: src/MQTTBridge/selfupdate.py
+msgid "An update of the plugin is being applied on this receiver. Please wait."
+msgstr "Auf diesem Receiver wird gerade eine Aktualisierung des Plugins installiert. Bitte warten."
+
 #: src/MQTTBridge/webif.py
 msgid "Check for plugin updates now"
 msgstr "Jetzt nach Plugin-Aktualisierungen suchen"

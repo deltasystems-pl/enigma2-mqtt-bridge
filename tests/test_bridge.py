@@ -56,6 +56,7 @@ def test_info_carries_every_documented_field(connected_bridge, factory):
         "epg_import_allowed": False,
         "uninstall_allowed": False,
         "update_check": False,
+        "update_allowed": False,
     }
 
 

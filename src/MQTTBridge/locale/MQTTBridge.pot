@@ -667,6 +667,14 @@ msgstr ""
 msgid "Check daily for plugin updates"
 msgstr ""
 
+#: src/MQTTBridge/setup.py
+msgid "Allow plugin updates over MQTT"
+msgstr ""
+
+#: src/MQTTBridge/selfupdate.py
+msgid "An update of the plugin is being applied on this receiver. Please wait."
+msgstr ""
+
 #: src/MQTTBridge/webif.py
 msgid "Check for plugin updates now"
 msgstr ""

@@ -84,6 +84,7 @@ from . import config as settings_module
 from . import log as log_module
 from .i18n import _
 from .origin import PAGE
+from .selfupdate import household_doors
 from .version import __version__
 
 LOG = log_module.get_logger("webif")
@@ -155,6 +156,7 @@ SETTING_GROUPS = (
             "epg_import_allowed",
             "uninstall_allowed",
             "update_check",
+            "update_allowed",
             "cec_standby_workaround",
             "osd_toast",
         ),
@@ -1371,8 +1373,20 @@ def _document(request, body, head=""):
     return document.encode("utf-8")
 
 
+def _updating(bridge):
+    """Whether an update has closed the plugin's doors. Anything unreadable is "no"."""
+    try:
+        return bool(bridge.self_update.closed)
+    except Exception:
+        return False
+
+
 def _page(request, message=""):
     bridge = _bridge()
+    if bridge is not None and _updating(bridge):
+        # The new release is on disk under this process: nothing but the sentence, and no
+        # form that could post a change into it (`selfupdate.py`).
+        return _document(request, f"<p class='notice'>{_e(household_doors())}</p>")
     section = _section(bridge)
     token = _csrf_token(request)
     notice = f"<p class='notice'>{_e(message)}</p>" if message else ""

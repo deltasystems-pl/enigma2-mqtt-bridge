@@ -179,6 +179,8 @@ SENTENCES = {
     "interrupted": "the update was interrupted: {detail}",
     "question": "the receiver did not restart its interface (the question on the television was "
                 "answered no, or nobody answered); the update was withdrawn",
+    "retraction": "the downgrade was withdrawn before the restart: the broker did not confirm "
+                  "that this receiver's topics were retracted",
     "internal_error": "the update helper failed: {detail}",
 }
 
@@ -1468,7 +1470,9 @@ class Transaction:
             failure = Fail("time_limit")
             result = "failed"
         else:
-            failure = Fail("question")
+            # The plugin may say why it withdrew; anything it does not say is the question.
+            said = read_json(self.path("withdraw")) or {}
+            failure = Fail("retraction" if said.get("reason") == "retraction" else "question")
             result = "withdrawn_before_restart"
         if not restored:
             result = "failed"

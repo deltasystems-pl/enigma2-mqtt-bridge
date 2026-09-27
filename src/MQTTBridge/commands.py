@@ -119,6 +119,7 @@ class CommandDispatcher:
             "reset": self.reset,
             "uninstall": self.uninstall,
             "update_check": self.update_check,
+            "update": self.update,
         }
         # Command topics of this node that somebody left a retained message on,
         # this session. Discarding one is not clearing it: the broker hands it
@@ -178,6 +179,14 @@ class CommandDispatcher:
             LOG.info("cmd/%s from the OpenWebif page", name)
         else:
             LOG.info("cmd/%s", name)
+        doors = self._doors()
+        if doors:
+            # The new release is on disk under this process (`selfupdate.py`): nothing runs.
+            if self.bridge.self_update.silent:
+                LOG.info("cmd/%s refused, not published: %s", name, doors)
+            else:
+                self.bridge.publish_last_error(name, doors)
+            return doors
         try:
             error = handler(text, origin=origin)
         except Exception as exception:
@@ -198,6 +207,10 @@ class CommandDispatcher:
     @property
     def session(self):
         return self.bridge.session
+
+    def _doors(self):
+        updater = getattr(self.bridge, "self_update", None)
+        return updater.doors_refusal() if updater is not None else None
 
     def publisher(self, name):
         return self.bridge.publisher(name)
@@ -644,3 +657,12 @@ class CommandDispatcher:
         `update` topic, published when the worker has finished.
         """
         return self.bridge.updates.request_check(origin=origin)
+
+    def update(self, text, origin=MQTT):
+        """Install one signed release: every guard here, the rest in the update helper.
+
+        `{"version": "0.4.1" | "latest", "sha256": ..., "relay": {"url", "expires"}}`.
+        Upgrades and repairs only - a lower version is refused over MQTT whatever the
+        payload says. The answer is the `update` topic moving (`selfupdate.py`).
+        """
+        return self.bridge.self_update.request(text, origin=origin)

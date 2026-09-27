@@ -72,7 +72,7 @@ def test_the_parse_is_not_empty(checker, topics_text):
     }
     assert parsed["settings"]["screenshot"]["type"] == "enum(off|on_zap|interval)"
     assert "uninstall" in parsed["capabilities"]
-    assert {"kind": "command", "name": "update"} in parsed["planned"]
+    assert {"kind": "command", "name": "relay"} in parsed["planned"]
 
 
 # ------------------------------------------------------------- and the code --
@@ -242,10 +242,10 @@ def test_a_contract_major_that_differs_is_named(checker, topics_text, contract):
 
 def test_a_planned_row_missing_from_the_data_is_named(checker, topics_text, contract):
     contract["planned"] = [
-        row for row in contract["planned"] if row != {"kind": "command", "name": "update"}
+        row for row in contract["planned"] if row != {"kind": "command", "name": "relay"}
     ]
     problems = checker.check_consistency(topics_text, contract)
-    assert _mentions(problems, "planned", "update")
+    assert _mentions(problems, "planned", "relay")
 
 
 def test_a_command_added_to_the_prose_only_is_named(checker, topics_text, contract):
@@ -261,7 +261,7 @@ def test_a_planned_item_that_is_already_implemented_is_refused(checker, topics_t
     # or a promise pretending to be a feature: either way a consumer cannot tell which.
     contract["planned"].append({"kind": "command", "name": "zap"})
     broken_text = topics_text.replace(
-        "| Command | `update` |", "| Command | `zap` |\n| Command | `update` |", 1
+        "| Command | `relay` |", "| Command | `zap` |\n| Command | `relay` |", 1
     )
     problems = checker.check_consistency(broken_text, contract)
     assert _mentions(problems, "planned", "zap", "already")
@@ -411,13 +411,22 @@ def test_the_update_check_is_in_the_contract_and_out_of_the_plan(checker, topics
     assert "update_check" in parsed["commands"]
     assert "enigma2mqtt/release_index" in parsed["other_topics"]
     planned = {(row["kind"], row["name"]) for row in parsed["planned"]}
-    assert ("setting", "update_allowed") in planned
-    assert ("command", "update") in planned
-    assert ("consumer topic", "enigma2mqtt/integration/<node>") in planned
     assert not planned & {
         ("setting", "update_check"), ("state topic", "update"), ("command", "update_check"),
         ("consumer topic", "enigma2mqtt/release_index"),
     }
+
+
+def test_the_install_is_in_the_contract_and_only_the_relay_is_planned(checker, topics_text):
+    parsed = checker.parse_topics(topics_text)
+    assert parsed["settings"]["update_allowed"] == {
+        "type": "bool", "writable": False, "since": "unreleased",
+    }
+    assert "self_update" in parsed["capabilities"]
+    assert "update" in parsed["commands"]
+    assert "enigma2mqtt/integration/<node>" in parsed["other_topics"]
+    planned = {(row["kind"], row["name"]) for row in parsed["planned"]}
+    assert planned == {("command", "relay"), ("event topic", "relay_request")}
 
 
 def test_a_topic_the_plugin_reads_missing_from_the_data_is_named(checker, topics_text,

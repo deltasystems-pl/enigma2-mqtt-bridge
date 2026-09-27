@@ -667,6 +667,14 @@ msgstr "Zezwalaj na zdalne usunięcie wtyczki"
 msgid "Check daily for plugin updates"
 msgstr "Codziennie sprawdzaj aktualizacje wtyczki"
 
+#: src/MQTTBridge/setup.py
+msgid "Allow plugin updates over MQTT"
+msgstr "Zezwalaj na aktualizacje wtyczki przez MQTT"
+
+#: src/MQTTBridge/selfupdate.py
+msgid "An update of the plugin is being applied on this receiver. Please wait."
+msgstr "Na tym dekoderze trwa aktualizacja wtyczki. Proszę czekać."
+
 #: src/MQTTBridge/webif.py
 msgid "Check for plugin updates now"
 msgstr "Sprawdź teraz aktualizacje wtyczki"

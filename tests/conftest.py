@@ -3005,6 +3005,7 @@ class Session:
         # once `with_channel_list` has built one.
         self.current_dialog = None
         self.opened = []
+        self.callbacks = []
         self.desktop = getDesktop(0)
         self.instantiated = []
         self.deleted = []
@@ -3013,8 +3014,11 @@ class Session:
         self.opened.append((screen, arguments))
         return screen
 
-    def openWithCallback(self, callback, screen, *arguments):
+    def openWithCallback(self, callback, screen, *arguments, **kwargs):
+        # `StartEnigma.Session.openWithCallback` passes keyword arguments on to the screen,
+        # as `TryQuitMainloop(session, 3, timeout=60, default_yes=False)` needs.
         self.opened.append((screen, arguments))
+        self.callbacks.append((callback, screen, arguments, kwargs))
         return screen
 
     def instantiateDialog(self, screen, *arguments, **kwargs):
@@ -3266,9 +3270,12 @@ def no_package_manager(tmp_path, monkeypatch):
     a developer's box with an `/usr/bin/opkg` would claim it and every
     capability list asserted anywhere would change.
     """
+    from MQTTBridge.selfupdate import SelfUpdater
     from MQTTBridge.uninstall import Uninstaller
 
     monkeypatch.setattr(Uninstaller, "root", str(tmp_path / "no-package-manager"))
+    # `self_update` reads the same files, and the update's own ones under the same root.
+    monkeypatch.setattr(SelfUpdater, "root", str(tmp_path / "no-package-manager"))
 
 
 @pytest.fixture(autouse=True)

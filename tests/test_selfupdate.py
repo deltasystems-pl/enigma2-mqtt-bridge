@@ -1,0 +1,1142 @@
+"""`cmd/update`: the guards in their order, the launch, the doors, the question and the marker.
+
+The helper itself - the lock, the package, the proof, the rollback - is `test_updatehelper.py`'s.
+This is the main loop's half: everything the running plugin decides and says before the helper
+takes over, while it runs, and when the plugin that starts afterwards reads what it left.
+
+The receiver's files live under a temporary root: opkg's records, `start-stop-daemon`, the
+plugin's own directory with the real helper files in it, `/proc`'s boot id and uptime, and the
+backups directory. `eConsoleAppContainer` runs nothing and remembers the command line, so the
+helper never starts; a test writes the files the helper would write.
+"""
+
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+from conftest import (
+    ConsoleAppContainer,
+    MainLoop,
+    MessageBox,
+    Receiver,
+    settle,
+)
+from Screens import Standby as standby_module
+from updatelab import index_bytes, release
+
+from MQTTBridge import epgimport, power, recording, selfupdate, trust, updatehelper, webif
+from MQTTBridge.origin import MQTT, PAGE, SCREEN
+from MQTTBridge.selfupdate import SelfUpdater
+from MQTTBridge.version import __version__
+
+NODE = "vuuno4kse_005301"
+ROOT = "enigma2/" + NODE
+COMMAND = ROOT + "/cmd/update"
+LAST_ERROR = ROOT + "/last_error"
+UPDATE = ROOT + "/update"
+AVAILABILITY = ROOT + "/availability"
+INTEGRATION = "enigma2mqtt/integration/" + NODE
+PACKAGE_DIR = Path(selfupdate.__file__).resolve().parent
+NOW = 1790410000
+COMMIT = "cd" * 20
+BUILD = {"commit": COMMIT, "time": 1790400000, "dirty": False, "flavour": "development"}
+BOOT = "3f1c2a50-0000-4000-8000-000000000001"
+OTHER_BOOT = "3f1c2a50-0000-4000-8000-000000000002"
+UPTIME = 1000.0
+DOORS = "an update is being applied on the receiver"
+
+assert __version__ == "0.3.0", "the scenarios below place releases around the running 0.3.0"
+
+
+# ---------------------------------------------------------------------- helpers --
+
+
+class Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.fixture
+def mono(monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(SelfUpdater, "monotonic", staticmethod(clock))
+    monkeypatch.setattr(SelfUpdater, "clock", staticmethod(lambda: NOW))
+    return clock
+
+
+@pytest.fixture
+def tree(tmp_path, monkeypatch):
+    """A receiver's files under a root of the test's own, the way opkg left them."""
+
+    def build(packaged=True, daemon=True, python=True, helper=True, build_commit=COMMIT):
+        root = tmp_path / "box"
+        (root / "usr" / "bin").mkdir(parents=True, exist_ok=True)
+        (root / "sbin").mkdir(parents=True, exist_ok=True)
+        opkg = root / "usr" / "bin" / "opkg"
+        opkg.write_text("#!/bin/sh\n", encoding="utf-8")
+        opkg.chmod(0o755)
+        for program, present in ((selfupdate.START_STOP_DAEMON, daemon),
+                                 (selfupdate.PYTHON, python)):
+            path = root / program.lstrip("/")
+            if present:
+                path.write_text("#!/bin/sh\n", encoding="utf-8")
+                path.chmod(0o755)
+        conf = root / "etc" / "opkg"
+        conf.mkdir(parents=True, exist_ok=True)
+        (conf / "opkg.conf").write_text(
+            "option info_dir /var/lib/opkg/info\noption status_file /var/lib/opkg/status\n",
+            encoding="utf-8")
+        info = root / "var" / "lib" / "opkg" / "info"
+        info.mkdir(parents=True, exist_ok=True)
+        (root / "var" / "lib" / "opkg" / "status").write_text(
+            "Package: python3-core\nVersion: 3.12\nStatus: install ok installed\n\n"
+            f"Package: {updatehelper.PACKAGE}\nVersion: 0.3.0\nStatus: install ok installed\n",
+            encoding="utf-8")
+        (info / (updatehelper.PACKAGE + ".control")).write_text(
+            "Package: " + updatehelper.PACKAGE + "\n", encoding="utf-8")
+        plugin = root / "plugin" / "MQTTBridge"
+        plugin.mkdir(parents=True, exist_ok=True)
+        (plugin / "plugin.py").write_text("# the installed plugin\n", encoding="utf-8")
+        if helper:
+            for name in (selfupdate.HELPER_SOURCE,) + updatehelper.COPIED_MODULES:
+                shutil.copyfile(PACKAGE_DIR / name, plugin / name)
+        (plugin / "buildinfo.py").write_text(
+            f'COMMIT = "{build_commit}"\nCOMMIT_TIME = 1790400000\nDIRTY = False\n'
+            'FLAVOUR = "development"\n', encoding="utf-8")
+        listed = str(plugin / ("plugin.py" if packaged else "bridge.py"))
+        (info / (updatehelper.PACKAGE + ".list")).write_text(listed + "\t0100644\n",
+                                                            encoding="utf-8")
+        (root / "proc" / "sys" / "kernel" / "random").mkdir(parents=True, exist_ok=True)
+        (root / "proc" / "sys" / "kernel" / "random" / "boot_id").write_text(BOOT + "\n")
+        (root / "proc" / "uptime").write_text(f"{UPTIME:.2f} 1.00\n")
+        (root / "home" / "root").mkdir(parents=True, exist_ok=True)
+        (root / "etc" / "enigma2").mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(SelfUpdater, "root", str(root))
+        monkeypatch.setattr(SelfUpdater, "plugin_directory", str(plugin))
+        return root
+
+    return build
+
+
+def hold(bridge, releases=None, floor="0.2.0"):
+    """The signed index the receiver holds, as the update check would have kept it."""
+    raw = index_bytes(1, releases if releases is not None else [
+        release("0.4.0"), release("0.3.0"), release("0.2.5"), release("0.2.0")], floor=floor)
+    bridge.updates._held = (trust.parse_index(raw), "relay")
+
+
+@pytest.fixture
+def box(make_bridge, factory, settings, receiver, tree, mono):
+    def build(allowed=True, releases=None, floor="0.2.0", session=None, **tree_options):
+        root = tree(**tree_options)
+        settings.host.value = "10.0.0.5"
+        settings.node_id.value = NODE
+        settings.friendly_name.value = "Living room receiver"
+        settings.update_allowed.value = allowed
+        bridge = make_bridge(session=session or receiver.session, build=BUILD,
+                             build_path=str(root / "plugin" / "MQTTBridge" / "buildinfo.py"))
+        bridge.start()
+        factory.client.fire_connect()
+        hold(bridge, releases, floor)
+        bridge.root = root
+        return settle(bridge)
+
+    return build
+
+
+def send(factory, payload, retain=False):
+    data = payload if isinstance(payload, bytes) else json.dumps(payload).encode("utf-8")
+    factory.client.fire_message(COMMAND, data, retain=retain)
+
+
+def refusal(client):
+    entry = client.last(LAST_ERROR)
+    if entry is None or entry.text == "":
+        return None
+    payload = entry.json()
+    return payload.get("reason"), payload["error"]
+
+
+def transaction(client):
+    entry = client.last(UPDATE)
+    return entry.json()["transaction"] if entry is not None else None
+
+
+def directories(root):
+    backups = root / "home" / "root" / "mqttbridge-backups"
+    if not backups.is_dir():
+        return []
+    return sorted(p for p in backups.iterdir() if p.name.startswith("update-"))
+
+
+def accepted(bridge, factory, payload=None):
+    """Send an accepted `cmd/update`; the transaction directory it made."""
+    send(factory, payload or {"version": "0.4.0"})
+    assert refusal(factory.client) is None, refusal(factory.client)
+    made = directories(bridge.root)
+    assert len(made) == 1
+    return made[0]
+
+
+def helper_says(directory, **status):
+    record = {"id": directory.name[len("update-"):], "started_by": "mqtt", "target": "0.4.0",
+              "from": "0.3.0", "phase": "downloading", "started": NOW, "finished": None,
+              "result": None, "reason": None, "error": None}
+    record.update(status)
+    updatehelper.write_json(str(directory / "status.json"), record)
+    return record
+
+
+def tick(count=1):
+    for _ in range(count):
+        MainLoop.advance(selfupdate.POLL_MILLISECONDS)
+
+
+def lock(root, ident, boot=BOOT, uptime=UPTIME - 10):
+    directory = root / "home" / "root" / "mqttbridge-backups" / updatehelper.LOCK_NAME
+    directory.mkdir(parents=True, exist_ok=True)
+    updatehelper.write_json(str(directory / "owner.json"), {
+        "pid": 1, "started": NOW, "boot_id": boot, "uptime": uptime, "origin": "mqtt",
+        "id": ident, "target": "0.4.0"})
+    return directory
+
+
+# ------------------------------------------------------------ the permission --
+
+
+def test_update_allowed_is_off_read_only_and_refused_by_cmd_config(box, factory, settings):
+    bridge = box(allowed=False)
+    assert settings.update_allowed.default is False
+    assert bridge.build_info()["settings"]["update_allowed"] is False
+    factory.client.fire_message(ROOT + "/cmd/config", json.dumps({
+        "publish_keys": True, "screenshot": "on_zap", "screenshot_interval": 60,
+        "update_allowed": True}).encode())
+    assert refusal(factory.client)[1] == "the config object contains unknown settings"
+    assert settings.update_allowed.value is False
+
+
+def test_update_allowed_is_on_the_setup_screen_the_page_and_in_provisioning():
+    from MQTTBridge import config as settings_module
+    from MQTTBridge import setup as setup_screen
+
+    assert "update_allowed" in settings_module.SETTING_NAMES
+    assert settings_module.SETTING_KINDS["update_allowed"] == "bool"
+    assert "update_allowed" in dict(setup_screen.setting_labels())
+    assert "update_allowed" in dict(webif.SETTING_GROUPS)["permissions"]
+    assert "update_allowed" not in settings_module.REMOTE_SETTING_NAMES
+
+
+@pytest.mark.parametrize("origin", [PAGE, SCREEN])
+def test_the_page_and_the_screen_need_no_permission(origin, box, factory):
+    bridge = box(allowed=False)
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0"}), origin=MQTT) \
+        .reason == "not_permitted"
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0"}), origin=origin) is None
+    request = json.loads((directories(bridge.root)[0] / "request.json").read_text())
+    assert request["started_by"] == origin
+
+
+# ------------------------------------------------------------ the capability --
+
+
+@pytest.mark.parametrize("missing", ["packaged", "daemon", "python", "helper"])
+def test_the_capability_needs_every_piece(box, missing):
+    bridge = box(**{missing: False})
+    assert "self_update" not in bridge.capabilities()
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0"})).reason == "no_capability"
+
+
+def test_the_capability_is_claimed_and_announced(box, factory):
+    bridge = box()
+    assert "self_update" in bridge.capabilities()
+    assert "self_update" in factory.client.last(ROOT + "/info").json()["capabilities"]
+
+
+# -------------------------------------------------------- the refusal table --
+
+ROWS = [
+    "not_permitted", "no_capability", "busy", "opkg_busy", "standby", "recording",
+    "epg_import", "cannot_restart", "bad_request", "unknown_version", "withdrawn", "below_floor",
+    "incompatible", "depends", "downgrade", "current", "checksum", "relay", "no_space",
+    "rate_limited",
+]
+VERSION_ROWS = ("withdrawn", "below_floor", "incompatible", "depends", "downgrade")
+
+
+def arrange(first, box, receiver, monkeypatch):
+    """A receiver on which the guard `first` and every guard after it would refuse."""
+    active = set(ROWS[ROWS.index(first):])
+    target = "0.2.5" if first in VERSION_ROWS else "0.3.0" if first == "current" else "0.4.0"
+    changes = {}
+    if "withdrawn" in active:
+        changes["withdrawn"] = "a broken build"
+    if "incompatible" in active:
+        changes["contract"] = 2
+    changes["depends"] = ("nope",) if "depends" in active else ("python3-core",)
+    releases = [release(target, **changes)] + [release(v) for v in ("0.4.0", "0.3.0", "0.2.0")
+                                               if v != target]
+    floor = "0.2.9" if "below_floor" in active and target == "0.2.5" else "0.2.0"
+    bridge = box(allowed="not_permitted" not in active, releases=releases, floor=floor)
+    if "no_capability" in active:
+        bridge.self_update.claimed = False
+    if "busy" in active:
+        lock(bridge.root, "0123456789ab")
+    if "opkg_busy" in active:
+        monkeypatch.setattr(updatehelper, "opkg_busy", lambda receiver: True)
+    if "standby" in active:
+        receiver.enter_standby()
+    if "recording" in active:
+        monkeypatch.setattr(recording, "is_recording", lambda session: True)
+    if "epg_import" in active:
+        monkeypatch.setattr(epgimport, "running", lambda: True)
+    if "cannot_restart" in active:
+        monkeypatch.setattr(power, "can_quit", lambda session: "this image has no TryQuitMainloop")
+    payload = {"version": "0.9.0" if first == "unknown_version" else target}
+    if "checksum" in active:
+        payload["sha256"] = "00" * 32
+    if "relay" in active:
+        payload["relay"] = {"url": "http://192.0.2.5:8123/elsewhere", "expires": NOW + 60}
+    if "no_space" in active:
+        monkeypatch.setattr(updatehelper.Receiver, "free_bytes", lambda self, path: 0)
+    if "rate_limited" in active:
+        updatehelper.write_json(str(bridge.root / updatehelper.LAST),
+                                {"id": "0123456789ab", "finished": NOW - 60, "result": "failed"})
+    if "bad_request" in active:
+        payload = "please update"
+    return bridge, payload
+
+
+@pytest.mark.parametrize("first", ROWS)
+def test_the_first_guard_that_holds_is_the_refusal(first, box, receiver, factory, monkeypatch):
+    bridge, payload = arrange(first, box, receiver, monkeypatch)
+    before = len(factory.client.published)
+    send(factory, payload if isinstance(payload, dict) else payload.encode())
+    assert refusal(factory.client)[0] == first
+    # Before anything changes: nothing but `last_error`, and no transaction directory.
+    assert {entry.topic for entry in factory.client.published[before:]} == {LAST_ERROR}
+    assert directories(bridge.root) == []
+    assert ConsoleAppContainer.instances == []
+
+
+def test_with_no_guard_holding_the_update_is_accepted(box, factory):
+    bridge = box()
+    accepted(bridge, factory)
+    assert transaction(factory.client)["phase"] == "downloading"
+
+
+@pytest.mark.parametrize("first, sentence", [
+    ("not_permitted", "updates over MQTT are switched off in the plugin's settings"),
+    ("no_capability",
+     "this plugin was not installed by the package manager, so it cannot update itself"),
+    ("busy", "an update is already running on the receiver"),
+    ("opkg_busy", "the receiver's package manager is busy"),
+    ("standby", "the receiver is in standby; an update restarts the interface, which wakes the "
+                "receiver and may switch the television on"),
+    ("recording", "the receiver is recording"),
+    ("epg_import", "an EPG import is running"),
+    ("cannot_restart", "this image has no TryQuitMainloop"),
+    ("unknown_version", "version 0.9.0 is not in the plugin's signed release index"),
+    ("withdrawn", "version 0.2.5 has been withdrawn: a broken build"),
+    ("below_floor", "version 0.2.5 is below the lowest version this plugin can install"),
+    ("incompatible", "version 0.2.5 is not compatible with this plugin's contract"),
+    ("depends", "version 0.2.5 needs nope, which is not installed on this receiver"),
+    ("downgrade", "a downgrade can only be started on the receiver or from Home Assistant's "
+                  "options"),
+    ("current", "version 0.3.0 is already installed and running"),
+    ("checksum", "the requested checksum does not match the signed release index"),
+    ("relay", "the download address from Home Assistant is not valid"),
+    ("no_space", "there is not enough free space on the receiver"),
+    ("rate_limited", "an update ran less than ten minutes ago"),
+])
+def test_each_refusal_says_the_contracts_sentence(first, sentence, box, receiver, factory,
+                                                  monkeypatch):
+    _bridge, payload = arrange(first, box, receiver, monkeypatch)
+    send(factory, payload)
+    assert refusal(factory.client) == (first, sentence)
+
+
+@pytest.mark.parametrize("state, reason", [
+    (None, "recording_unknown"), (True, "recording"), (False, "recording_due")])
+def test_the_recording_guard_says_which_of_its_refusals(state, reason, box, factory,
+                                                        monkeypatch):
+    box()
+    monkeypatch.setattr(recording, "is_recording", lambda session: state)
+    monkeypatch.setattr(recording, "next_recording_time", lambda session: int(
+        recording.time.time()) + 300)
+    send(factory, {"version": "0.4.0"})
+    assert refusal(factory.client)[0] == reason
+
+
+def test_a_downgrade_over_mqtt_is_refused_even_when_the_call_says_downgrade(box):
+    bridge = box()
+    text = json.dumps({"version": "0.2.5"})
+    assert bridge.self_update.request(text, origin=MQTT, downgrade=True).reason == "downgrade"
+    assert bridge.self_update.request(text, origin=SCREEN).reason == "downgrade"
+    assert bridge.self_update.request(text, origin=SCREEN, downgrade=True) is None
+
+
+def test_a_repair_of_the_running_release_is_allowed_when_the_disk_holds_another_build(box):
+    bridge = box(build_commit="ef" * 20)
+    assert bridge.self_update.request(json.dumps({"version": "0.3.0"})) is None
+
+
+def test_latest_is_the_newest_compatible_release(box, factory):
+    bridge = box(releases=[release("0.5.0", contract=2), release("0.4.0"), release("0.3.0")])
+    directory = accepted(bridge, factory, {"version": "latest"})
+    assert json.loads((directory / "request.json").read_text())["target"] == "0.4.0"
+
+
+def test_a_relay_address_must_be_home_assistants_and_unexpired(box):
+    bridge = box()
+    token = "A" * 43
+    good = {"url": "http://192.0.2.5:8123/api/enigma2_mqtt/relay/" + token, "expires": NOW + 60}
+    for bad in (dict(good, expires=NOW), dict(good, expires=True),
+                dict(good, url=good["url"] + "x"), dict(good, url="ftp://h/api/enigma2_mqtt/"
+                                                                   "relay/" + token),
+                "not an object"):
+        answer = bridge.self_update.request(json.dumps({"version": "0.4.0", "relay": bad}))
+        assert answer.reason == "relay", bad
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0", "relay": good})) is None
+
+
+def test_the_rate_limit_ends_ten_minutes_after_the_last_update(box):
+    bridge = box()
+    updatehelper.write_json(str(bridge.root / updatehelper.LAST),
+                            {"id": "0123456789ab", "finished": NOW - 601})
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0"})) is None
+
+
+def test_a_stale_lock_is_not_busy(box):
+    bridge = box()
+    lock(bridge.root, "0123456789ab", boot=OTHER_BOOT)
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0"})) is None
+
+
+def test_a_second_update_while_one_runs_is_busy(box, factory):
+    bridge = box()
+    accepted(bridge, factory)
+    send(factory, {"version": "0.4.0"})
+    assert refusal(factory.client)[0] == "busy"
+
+
+def test_a_retained_update_is_discarded(box, factory):
+    bridge = box()
+    send(factory, {"version": "0.4.0"}, retain=True)
+    assert directories(bridge.root) == []
+
+
+# ------------------------------------------------------------------ the launch --
+
+
+def test_the_request_the_copies_and_the_command_line(box, factory):
+    bridge = box()
+    relay = {"url": "http://192.0.2.5:8123/api/enigma2_mqtt/relay/" + "b" * 43,
+             "expires": NOW + 60}
+    directory = accepted(bridge, factory, {"version": "0.4.0", "sha256": "ab" * 32,
+                                           "relay": relay})
+    ident = directory.name[len("update-"):]
+    assert updatehelper.TRANSACTION_ID.fullmatch(ident)
+    assert directory.stat().st_mode & 0o777 == 0o700
+    request = directory / "request.json"
+    assert request.stat().st_mode & 0o777 == 0o600
+    data = json.loads(request.read_text())
+    assert data == {
+        "id": ident, "target": "0.4.0", "sha256": "ab" * 32, "relay": relay,
+        "started_by": "home_assistant", "downgrade": False,
+        "from": {"version": "0.3.0", "commit": COMMIT}, "enigma2_pid": os.getpid(),
+        "keys": trust.keys_to_data(bridge.updates.keys), "acceptance": bridge.updates.acceptance,
+        "origin": bridge.updates.origin, "contract": 1, "integration": None,
+        "integration_mode": False,
+    }
+    plugin = bridge.root / "plugin" / "MQTTBridge"
+    assert (directory / "helper.py").read_bytes() == (plugin / "updatehelper.py").read_bytes()
+    for name in updatehelper.COPIED_MODULES:
+        assert (directory / name).read_bytes() == (plugin / name).read_bytes()
+    assert ConsoleAppContainer.instances[-1].commands == [
+        f"/sbin/start-stop-daemon -S -b -m -p {directory}/helper.pid -x /usr/bin/python3 -- "
+        f"{directory}/helper.py {ident}"]
+    # The helper the request is written for reads it.
+    transaction = updatehelper.Transaction(str(directory))
+    transaction.load_request()
+    assert transaction.request["target"] == "0.4.0"
+
+
+def test_without_a_relay_it_is_an_mqtt_update(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    assert json.loads((directory / "request.json").read_text())["started_by"] == "mqtt"
+
+
+def test_a_launch_that_exits_non_zero_before_the_helper_wrote_anything_fails(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    ConsoleAppContainer.instances[-1].finish(1)
+    assert not directory.exists()
+    assert refusal(factory.client)[0] == "internal_error"
+    assert transaction(factory.client)["result"] == "failed"
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0"})) is None
+
+
+def test_a_rejected_launch_is_refused_and_leaves_nothing(box, factory, monkeypatch):
+    bridge = box()
+    monkeypatch.setattr(ConsoleAppContainer, "execute", lambda self, command: 1)
+    send(factory, {"version": "0.4.0"})
+    assert refusal(factory.client)[0] == "internal_error"
+    assert directories(bridge.root) == []
+
+
+def test_a_helper_that_writes_nothing_within_a_minute_is_given_up(box, factory, mono):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    mono.now = selfupdate.LAUNCH_WAIT_SECONDS - 1
+    tick()
+    assert directory.exists()
+    mono.now = selfupdate.LAUNCH_WAIT_SECONDS + 1
+    tick()
+    assert not directory.exists()
+    assert refusal(factory.client)[0] == "internal_error"
+
+
+# --------------------------------------------------------- following the helper --
+
+
+def test_the_helpers_phases_reach_the_update_topic(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    for phase in ("verifying", "snapshot", "installing"):
+        helper_says(directory, phase=phase)
+        tick()
+        assert transaction(factory.client)["phase"] == phase
+    assert not bridge.self_update.closed
+
+
+def test_a_failure_before_the_restart_is_said_without_a_reload(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    clients = len(factory.clients)
+    helper_says(directory, phase="finished", result="failed", reason="download",
+                error="version 0.4.0 could not be downloaded: timed out", finished=NOW + 5)
+    tick()
+    assert refusal(factory.client) == ("download",
+                                       "version 0.4.0 could not be downloaded: timed out")
+    assert transaction(factory.client)["result"] == "failed"
+    assert len(factory.clients) == clients
+    # The transaction is over: the next one is not refused as busy.
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0"})) is None
+
+
+def test_the_end_waits_for_the_lock_to_be_let_go(box, factory, mono):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    ident = directory.name[len("update-"):]
+    lock(bridge.root, ident)
+    helper_says(directory, phase="finished", result="failed", reason="download", error="x")
+    tick()
+    assert bridge.self_update._current is not None
+    mono.now = selfupdate.RELEASE_WAIT_SECONDS + 1
+    tick()
+    assert bridge.self_update._current is None
+
+
+def helper_process(bridge, directory, running=True, pid=4321, command=b"/usr/bin/python3\0"):
+    """`start-stop-daemon -m`'s pid file, and the process it names in the receiver's /proc."""
+    (directory / "helper.pid").write_text(f"{pid}\n")
+    proc = bridge.root / "proc" / str(pid)
+    if running:
+        proc.mkdir(parents=True, exist_ok=True)
+        (proc / "cmdline").write_bytes(command + str(directory / "helper.py").encode() + b"\0")
+    else:
+        shutil.rmtree(proc, ignore_errors=True)
+
+
+def test_a_running_helper_is_followed(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    helper_says(directory, phase="installing")
+    tick(3)
+    assert bridge.self_update._current is not None
+    assert transaction(factory.client)["phase"] == "installing"
+
+
+def test_a_helper_that_died_before_the_restart_is_reported_interrupted(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_says(directory, phase="snapshot")
+    helper_process(bridge, directory, running=False)
+    tick()
+    assert refusal(factory.client)[0] == "interrupted"
+    ended = transaction(factory.client)
+    assert (ended["phase"], ended["result"]) == ("finished", "interrupted")
+    assert "may not be" not in ended["error"]
+    assert bridge.self_update._current is None
+
+
+def test_a_pid_used_again_by_another_program_is_not_the_helper(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_says(directory, phase="snapshot")
+    (directory / "helper.pid").write_text("4321\n")
+    other = bridge.root / "proc" / "4321"
+    other.mkdir(parents=True)
+    (other / "cmdline").write_bytes(b"/usr/sbin/dropbear\0-R\0")
+    tick()
+    assert refusal(factory.client)[0] == "interrupted"
+
+
+def test_a_helper_that_died_behind_closed_doors_reopens_them(box, factory, receiver):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    helper_says(directory, phase="restarting")
+    tick()
+    assert bridge.self_update.closed
+    marker_path = bridge.root / updatehelper.MARKER
+    updatehelper.write_json(str(marker_path), {"id": directory.name[len("update-"):],
+                                               "phase": "restarting"})
+    clients = len(factory.clients)
+    helper_process(bridge, directory, running=False)
+    tick()
+    assert not bridge.self_update.closed
+    assert len(factory.clients) == clients + 1
+    assert not marker_path.exists()
+    factory.client.fire_connect()
+    reason, error = refusal(factory.client)
+    assert reason == "interrupted" and "install the plugin again" in error
+
+
+def test_with_no_pid_file_there_is_no_verdict(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_says(directory, phase="snapshot")
+    tick(5)
+    assert bridge.self_update._current is not None
+
+
+def test_a_launch_whose_helper_died_before_writing_fails_at_once(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory, running=False)
+    tick()
+    assert not directory.exists()
+    assert refusal(factory.client)[0] == "internal_error"
+
+
+@pytest.mark.skipif(shutil.which("busybox") is None, reason="busybox is not installed")
+def test_busybox_starts_the_helper_while_another_python3_runs(tmp_path):
+    """Review H1: `-x /usr/bin/python3` alone matches any running python3 and starts nothing."""
+    import subprocess
+    import time
+
+    directory = tmp_path / "update-a1b2c3d4e5f6"
+    directory.mkdir()
+    out = tmp_path / "helper.out"
+    (directory / "helper.py").write_text(
+        "import os, sys\n"
+        f"open({str(out)!r}, 'w').write('%d %d %d' % (os.getpid(), os.getsid(0), os.getpgid(0)))\n")
+    other = subprocess.Popen(["/usr/bin/python3", "-c", "import time; time.sleep(20)"])
+    try:
+        line = SelfUpdater.command_line(str(directory), "a1b2c3d4e5f6").replace(
+            selfupdate.START_STOP_DAEMON, "busybox start-stop-daemon", 1)
+        # eConsoleAppContainer runs a command line through /bin/sh -c.
+        assert subprocess.run(["/bin/sh", "-c", line], timeout=10).returncode == 0
+        deadline = time.time() + 10
+        while not out.exists() and time.time() < deadline:
+            time.sleep(0.05)
+        pid, sid, pgid = (int(value) for value in out.read_text().split())
+        # A session of its own - busybox forks twice, so the helper is not its leader - and
+        # not the launcher's: the interface's restart does not take it along.
+        assert sid == pgid != os.getsid(0)
+        assert int((directory / "helper.pid").read_text()) == pid
+    finally:
+        other.kill()
+        other.wait()
+
+
+def test_the_rate_limit_counts_uptime_within_one_boot(box, monkeypatch):
+    bridge = box()
+    # A receiver that booted in 1970: the wall clock says nothing useful.
+    monkeypatch.setattr(SelfUpdater, "clock", staticmethod(lambda: 200))
+    last = str(bridge.root / updatehelper.LAST)
+    updatehelper.write_json(last, {"id": "0123456789ab", "finished": 100, "boot_id": BOOT,
+                                   "uptime": UPTIME - 60})
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0"})).reason == "rate_limited"
+    updatehelper.write_json(last, {"id": "0123456789ab", "finished": 150, "boot_id": BOOT,
+                                   "uptime": UPTIME - 601})
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0"})) is None
+
+
+def test_across_a_boot_the_rate_limit_falls_back_to_the_clock(box):
+    bridge = box()
+    last = str(bridge.root / updatehelper.LAST)
+    updatehelper.write_json(last, {"id": "0123456789ab", "finished": NOW + 3600,
+                                   "boot_id": OTHER_BOOT, "uptime": UPTIME - 60})
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0"})) is None
+
+
+# ----------------------------------------------------------------- the doors --
+
+
+def restarting(bridge, factory, payload=None, downgrade=False):
+    if downgrade:
+        assert bridge.self_update.request(json.dumps(payload), origin=SCREEN,
+                                          downgrade=True) is None
+        directory = directories(bridge.root)[0]
+    else:
+        directory = accepted(bridge, factory, payload)
+    helper_says(directory, phase="restarting")
+    tick()
+    return directory
+
+
+def test_from_restarting_the_doors_close_and_the_image_is_asked_to_restart(box, factory,
+                                                                          receiver):
+    bridge = box()
+    assert bridge.publisher("power") is not None
+    directory = restarting(bridge, factory)
+    assert bridge.self_update.closed and not bridge.self_update.silent
+    assert bridge.publisher("power") is None
+    assert json.loads((directory / "restart.json").read_text()) == {"pid": os.getpid()}
+    callback, screen, arguments, kwargs = receiver.session.callbacks[-1]
+    assert screen is standby_module.TryQuitMainloop
+    assert arguments == (3,)
+    assert kwargs == {"timeout": 60, "default_yes": False}
+
+
+def test_behind_closed_doors_every_command_gets_the_sentence(box, factory):
+    bridge = box()
+    restarting(bridge, factory)
+    factory.client.fire_message(ROOT + "/cmd/power", b"standby")
+    assert refusal(factory.client) == (None, DOORS)
+    assert bridge.run_command("restart_gui", "PRESS", PAGE) == DOORS
+    send(factory, {"version": "0.4.0"})
+    assert refusal(factory.client)[1] == DOORS
+    assert bridge.apply_settings({"log_level": "debug"}) == DOORS
+
+
+def test_behind_closed_doors_the_page_and_the_setup_screen_say_only_that(box, factory,
+                                                                         monkeypatch, settings):
+    from test_setup_screen import FakeSession
+    from test_webif import _Request
+
+    from MQTTBridge import setup as setup_screen
+
+    bridge = box()
+    restarting(bridge, factory)
+    monkeypatch.setattr(webif, "_bridge", lambda: bridge)
+    body = webif._page(_Request()).decode("utf-8")
+    assert selfupdate.household_doors() in body
+    assert "<form" not in body
+    clients = len(factory.clients)
+    screen = setup_screen.MQTTBridgeSetup(FakeSession(), settings=settings, bridge=bridge)
+    screen.keySave()
+    assert len(factory.clients) == clients
+    assert screen.session.opened == [MessageBox]
+
+
+def test_a_withdrawn_update_reopens_the_doors_with_a_fresh_session(box, factory, receiver):
+    bridge = box()
+    directory = restarting(bridge, factory)
+    callback = receiver.session.callbacks[-1][0]
+    # The image's TryQuitMainloop answers True even for "no": any call back is "no restart".
+    callback(True)
+    assert json.loads((directory / "withdraw").read_text()) == {"reason": "question"}
+    clients = len(factory.clients)
+    helper_says(directory, phase="finished", result="withdrawn_before_restart",
+                reason="question", error=updatehelper.SENTENCES["question"], finished=NOW + 70)
+    tick()
+    assert not bridge.self_update.closed
+    assert len(factory.clients) == clients + 1
+    factory.client.fire_connect()
+    assert refusal(factory.client)[0] == "question"
+    assert transaction(factory.client)["result"] == "withdrawn_before_restart"
+    assert bridge.publisher("power") is not None
+
+
+# ------------------------------------------------- the downgrade and S-a --
+
+
+def test_a_downgrade_from_the_television_retracts_all_but_availability_first(box, factory,
+                                                                             receiver):
+    bridge = box()
+    retained = set(bridge.state.retained_topics)
+    assert UPDATE in retained and AVAILABILITY in retained
+    before = len(factory.client.published)
+    directory = restarting(bridge, factory, {"version": "0.2.5"}, downgrade=True)
+    assert json.loads((directory / "request.json").read_text())["downgrade"] is True
+    assert json.loads((directory / "request.json").read_text())["started_by"] == "screen"
+    out = factory.client.published[before:]
+    retracted = {entry.topic for entry in out if entry.qos == 1 and entry.retain
+                 and entry.payload in (b"", "")}
+    assert retracted == retained - {AVAILABILITY}
+    # Not yet asked: the acknowledgements come first.
+    assert not (directory / "restart.json").exists()
+    assert receiver.session.callbacks == []
+    factory.client.acknowledge()
+    MainLoop.advance(selfupdate.RETRACTION_POLL_MILLISECONDS)
+    assert (directory / "restart.json").exists()
+    assert receiver.session.callbacks[-1][1] is standby_module.TryQuitMainloop
+
+
+def test_after_the_retraction_nothing_is_published_until_the_reload(box, factory, receiver):
+    bridge = box()
+    directory = restarting(bridge, factory, {"version": "0.2.5"}, downgrade=True)
+    factory.client.acknowledge()
+    MainLoop.advance(selfupdate.RETRACTION_POLL_MILLISECONDS)
+    assert bridge.self_update.silent
+    quiet = len(factory.client.published)
+    factory.client.fire_message(ROOT + "/cmd/power", b"standby")
+    helper_says(directory, phase="restarting", restart="requested")
+    tick(3)
+    bridge.check_build_on_disk()
+    bridge.updates.publish()
+    factory.client.fire_connect()
+    assert factory.client.published[quiet:] == []
+    helper_says(directory, phase="finished", result="withdrawn_before_restart",
+                reason="question", error=updatehelper.SENTENCES["question"], finished=NOW + 70)
+    tick()
+    factory.client.fire_connect()
+    assert factory.client.last(ROOT + "/info") is not None
+    assert factory.client.last(UPDATE).json()["transaction"]["result"] == \
+        "withdrawn_before_restart"
+
+
+def test_after_the_retraction_the_shutdown_publishes_no_offline(box, factory):
+    bridge = box()
+    restarting(bridge, factory, {"version": "0.2.5"}, downgrade=True)
+    factory.client.acknowledge()
+    MainLoop.advance(selfupdate.RETRACTION_POLL_MILLISECONDS)
+    quiet = len(factory.client.published)
+    bridge.stop()
+    assert factory.client.published[quiet:] == []
+
+
+def test_an_unacknowledged_retraction_withdraws_the_downgrade(box, factory, mono, receiver):
+    bridge = box()
+    directory = restarting(bridge, factory, {"version": "0.2.5"}, downgrade=True)
+    mono.now = selfupdate.RETRACTION_TIMEOUT_SECONDS + 1
+    MainLoop.advance(selfupdate.RETRACTION_POLL_MILLISECONDS)
+    assert json.loads((directory / "withdraw").read_text()) == {"reason": "retraction"}
+    assert not (directory / "restart.json").exists()
+    assert receiver.session.callbacks == []
+
+
+def test_an_upgrade_retracts_nothing(box, factory):
+    bridge = box()
+    before = len(factory.client.published)
+    restarting(bridge, factory)
+    assert [e for e in factory.client.published[before:] if e.qos == 1] == []
+    assert not bridge.self_update.silent
+
+
+# ----------------------------------------------------- the session-start screen --
+
+
+class ImageQuestion(MessageBox):
+    """`Screens.Standby.TryQuitMainloop` when something holds: a question whose "no" closes True.
+
+    As the image has it: `close(False)` ends in `MessageBox.close(self, True)`, and a quit
+    never calls back at all.
+    """
+
+    def __init__(self, session, retvalue=1, timeout=-1, default_yes=False, check_reset=False):
+        MessageBox.__init__(self, session, "Restart?", timeout=timeout, default=default_yes)
+        self.retval = retvalue
+
+    def close(self, value):
+        MessageBox.close(self, True)
+
+
+@pytest.mark.parametrize("start_screen", [False, True])
+def test_the_question_works_with_and_without_a_session_start_screen(start_screen, box, factory,
+                                                                   monkeypatch):
+    receiver = Receiver(modal=True, session_start_screen=start_screen)
+    receiver.with_channel_list()
+    monkeypatch.setattr(standby_module, "TryQuitMainloop", ImageQuestion)
+    bridge = box(session=receiver.session)
+    directory = restarting(bridge, factory)
+    question = receiver.session.current_dialog
+    assert isinstance(question, ImageQuestion) and question.timeout == 60
+    question.close(False)
+    MainLoop.advance(0)
+    assert json.loads((directory / "withdraw").read_text()) == {"reason": "question"}
+
+
+def test_no_code_on_the_update_path_reads_the_dialog_stack(box, factory, monkeypatch):
+    receiver = Receiver(modal=True, session_start_screen=True)
+    receiver.with_channel_list()
+    monkeypatch.setattr(standby_module, "TryQuitMainloop", ImageQuestion)
+    session = receiver.session
+    reads = []
+    watched = ("dialog_stack", "current_dialog")
+
+    class Watched(type(session)):
+        def __getattribute__(self, name):
+            if name in watched:
+                frame = sys._getframe(1)
+                if os.path.samefile(frame.f_code.co_filename, selfupdate.__file__):
+                    reads.append(name)
+            return object.__getattribute__(self, name)
+
+    session.__class__ = Watched
+    bridge = box(session=session)
+    restarting(bridge, factory)
+    session.current_dialog.close(False)
+    MainLoop.advance(0)
+    assert reads == []
+
+
+# ------------------------------------------------------------------ the marker --
+
+
+def marker(root, ident="a1b2c3d4e5f6", phase="proving", boot=BOOT, deadline=UPTIME + 600,
+           to=("0.3.0", COMMIT), frm=("0.2.0", "ef" * 20), **extra):
+    value = {"id": ident, "from": {"version": frm[0], "commit": frm[1]},
+             "to": {"version": to[0], "commit": to[1]}, "boot_id": boot, "deadline": deadline,
+             "phase": phase, "started_by": "home_assistant", "started": NOW - 100}
+    value.update(extra)
+    updatehelper.write_json(str(root / updatehelper.MARKER), value)
+    directory = root / "home" / "root" / "mqttbridge-backups" / ("update-" + ident)
+    directory.mkdir(parents=True, exist_ok=True)
+    updatehelper.write_json(str(directory / "request.json"), {"id": ident, "enigma2_pid": 1})
+    return directory
+
+
+@pytest.fixture
+def starting(make_bridge, factory, settings, tree, mono):
+    """A plugin that starts on a receiver the test prepared first."""
+
+    def build(enabled=True, prepare=None):
+        root = tree()
+        if prepare is not None:
+            prepare(root)
+        settings.host.value = "10.0.0.5"
+        settings.node_id.value = NODE
+        settings.enabled.value = enabled
+        bridge = make_bridge(build=BUILD, build_path=str(
+            root / "plugin" / "MQTTBridge" / "buildinfo.py"))
+        bridge.root = root
+        bridge.start()
+        return bridge
+
+    return build
+
+
+def test_a_switched_off_new_release_still_confirms_that_it_started(starting):
+    made = {}
+    bridge = starting(enabled=False, prepare=lambda root: made.update(dir=marker(root)))
+    assert bridge.idle_reason
+    started = json.loads((made["dir"] / "started.json").read_text())
+    assert started == {"version": "0.3.0", "commit": COMMIT, "pid": os.getpid()}
+
+
+def test_the_marker_is_read_before_the_provisioning_file(starting, monkeypatch):
+    from MQTTBridge import config as settings_module
+
+    order = []
+    real_import = settings_module.import_provisioning
+    real_start = SelfUpdater.on_start
+    monkeypatch.setattr(settings_module, "import_provisioning",
+                        lambda *a, **k: (order.append("provisioning"), real_import(*a, **k))[1])
+    monkeypatch.setattr(SelfUpdater, "on_start",
+                        lambda self: (order.append("marker"), real_start(self))[1])
+    starting()
+    assert order[:2] == ["marker", "provisioning"]
+
+
+def test_the_process_that_asked_never_confirms_for_the_new_one(starting):
+    made = {}
+
+    def prepare(root):
+        made["dir"] = marker(root, phase="restarting")
+        updatehelper.write_json(str(made["dir"] / "request.json"),
+                                {"id": "a1b2c3d4e5f6", "enigma2_pid": os.getpid()})
+
+    starting(prepare=prepare)
+    assert not (made["dir"] / "started.json").exists()
+
+
+@pytest.mark.parametrize("case", ["another_boot_no_lock", "past_deadline", "no_id"])
+def test_a_stale_marker_is_discarded(case, starting):
+    made = {}
+
+    def prepare(root):
+        if case == "another_boot_no_lock":
+            made["dir"] = marker(root, boot=OTHER_BOOT)
+        elif case == "past_deadline":
+            made["dir"] = marker(root, deadline=UPTIME - 1)
+        else:
+            made["dir"] = marker(root)
+            updatehelper.write_json(str(root / updatehelper.MARKER), {"phase": "proving"})
+
+    bridge = starting(prepare=prepare)
+    assert not (bridge.root / updatehelper.MARKER).exists()
+    assert not (made["dir"] / "started.json").exists()
+    assert bridge.self_update.transaction_payload() is None
+
+
+@pytest.mark.parametrize("to, frm, result", [
+    (("0.3.0", COMMIT), ("0.2.0", "ef" * 20), "installed"),
+    (("0.4.0", "ab" * 20), ("0.3.0", COMMIT), "rolled_back"),
+    (("0.4.0", "ab" * 20), ("0.2.0", "ef" * 20), "interrupted"),
+])
+def test_after_a_power_loss_the_running_version_says_how_it_ended(to, frm, result, starting,
+                                                                  factory):
+    def prepare(root):
+        marker(root, boot=OTHER_BOOT, to=to, frm=frm)
+        lock(root, "a1b2c3d4e5f6", boot=OTHER_BOOT)
+
+    bridge = starting(prepare=prepare)
+    assert not (bridge.root / updatehelper.MARKER).exists()
+    factory.client.fire_connect()
+    ended = transaction(factory.client)
+    assert (ended["id"], ended["phase"], ended["result"]) == ("a1b2c3d4e5f6", "finished", result)
+    if result != "installed":
+        assert refusal(factory.client)[0] == "interrupted"
+
+
+def test_the_new_plugin_follows_the_proof_to_the_end_and_clears_the_marker(starting, factory):
+    made = {}
+    bridge = starting(prepare=lambda root: made.update(dir=marker(root)))
+    factory.client.fire_connect()
+    assert transaction(factory.client)["phase"] == "proving"
+    # The helper commits: the transaction directory goes, the marker says the end.
+    shutil.rmtree(made["dir"])
+    marker(bridge.root, phase="finished", result="installed", finished=NOW)
+    shutil.rmtree(made["dir"])
+    tick()
+    assert transaction(factory.client)["result"] == "installed"
+    assert refusal(factory.client) is None
+    assert not (bridge.root / updatehelper.MARKER).exists()
+
+
+def test_a_finished_marker_is_reported_once_and_removed(starting, factory):
+    bridge = starting(prepare=lambda root: marker(
+        root, phase="finished", result="rolled_back", reason="not_started",
+        error="the new plugin did not start; the previous version 0.2.0 is back",
+        finished=NOW))
+    factory.client.fire_connect()
+    assert transaction(factory.client)["result"] == "rolled_back"
+    assert refusal(factory.client)[0] == "not_started"
+    assert not (bridge.root / updatehelper.MARKER).exists()
+
+
+def test_the_last_update_is_reported_after_a_restart(starting, factory):
+    starting(prepare=lambda root: updatehelper.write_json(str(root / updatehelper.LAST), {
+        "id": "a1b2c3d4e5f6", "started_by": "mqtt", "target": "0.3.0", "from": "0.2.0",
+        "phase": "finished", "started": NOW - 900, "finished": NOW - 600,
+        "result": "installed", "reason": None, "error": None}))
+    factory.client.fire_connect()
+    assert transaction(factory.client)["result"] == "installed"
+
+
+# ---------------------------------------------------------- the integration --
+
+
+def test_the_integrations_topic_is_read_and_narrows_the_offer(box, factory):
+    bridge = box(releases=[release("0.4.0", min_integration="0.5.0"), release("0.3.1"),
+                           release("0.3.0")])
+    assert (INTEGRATION, 1) in [(t, q) for t, q in factory.client.subscriptions]
+    factory.client.fire_message(INTEGRATION, json.dumps(
+        {"integration": "0.4.0", "contract": 1, "plugin_min": "0.3.1"}).encode(), retain=True)
+    available = factory.client.last(UPDATE).json()["available"]
+    assert [a["version"] for a in available] == ["0.4.0", "0.3.1"]
+    assert available[0]["reason"] == "incompatible"
+    send(factory, {"version": "0.4.0"})
+    assert refusal(factory.client)[0] == "incompatible"
+    directory = accepted(bridge, factory, {"version": "0.3.1"})
+    assert json.loads((directory / "request.json").read_text())["integration"] == {
+        "integration": "0.4.0", "contract": 1, "plugin_min": "0.3.1"}
+
+
+def test_the_integrations_contract_and_floor_are_judged(box, factory):
+    box()
+    factory.client.fire_message(INTEGRATION, json.dumps(
+        {"integration": "0.4.0", "contract": 2, "plugin_min": None}).encode(), retain=True)
+    send(factory, {"version": "0.4.0"})
+    assert refusal(factory.client) == (
+        "incompatible",
+        "version 0.4.0 is not compatible with the Home Assistant integration on this broker")
+    factory.client.fire_message(INTEGRATION, json.dumps(
+        {"integration": "0.4.0", "contract": 1, "plugin_min": "0.4.1"}).encode(), retain=True)
+    send(factory, {"version": "0.4.0"})
+    assert refusal(factory.client)[0] == "below_floor"
+
+
+def test_an_empty_integration_topic_forgets_and_a_bad_one_is_ignored(box, factory):
+    bridge = box()
+    good = {"integration": "0.4.0", "contract": 1, "plugin_min": "0.2.0"}
+    factory.client.fire_message(INTEGRATION, json.dumps(good).encode(), retain=True)
+    factory.client.fire_message(INTEGRATION, b"{not json", retain=True)
+    assert bridge.self_update.integration == good
+    factory.client.fire_message(INTEGRATION, b"", retain=True)
+    assert bridge.self_update.integration is None
+
+
+# ---------------------------------------------------------- the softcam collapse --
+
+
+def test_a_proved_install_asks_for_one_softcam_collapse_where_it_may(box, factory, settings):
+    bridge = box()
+    calls = []
+
+    class Softcam:
+        name = "softcam"
+
+        def restart(self, reason, origin):
+            calls.append((reason, origin))
+
+    bridge._publishers.append(Softcam())
+    settings.softcam_restart_allowed.value = True
+    bridge.self_update._end({"id": "a1b2c3d4e5f6", "result": "installed", "error": None,
+                             "phase": "finished"}, None, followed=True)
+    MainLoop.advance(selfupdate.COLLAPSE_DELAY_MILLISECONDS)
+    assert calls == [("autoheal", MQTT)]
+    settings.softcam_restart_allowed.value = False
+    bridge.self_update._end({"id": "a1b2c3d4e5f6", "result": "installed", "error": None,
+                             "phase": "finished"}, None, followed=True)
+    MainLoop.advance(selfupdate.COLLAPSE_DELAY_MILLISECONDS)
+    assert calls == [("autoheal", MQTT)]
+
+
+# ------------------------------------------------------ no first import --
+
+
+def test_the_closed_path_imports_nothing_new(box, factory, receiver, monkeypatch):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    attempts = []
+
+    class Refuse:
+        def find_spec(self, name, path=None, target=None):
+            if name.startswith("MQTTBridge") and name not in sys.modules:
+                attempts.append(name)
+                raise ImportError("the plugin's files are being replaced: " + name)
+            return None
+
+    monkeypatch.setattr(sys, "meta_path", [Refuse()] + sys.meta_path)
+    helper_says(directory, phase="restarting")
+    tick()
+    factory.client.fire_message(ROOT + "/cmd/zap", b"1:0:19:283D:3FB:1:C00000:0:0:0:")
+    receiver.session.callbacks[-1][0](False)
+    helper_says(directory, phase="finished", result="withdrawn_before_restart",
+                reason="question", error=updatehelper.SENTENCES["question"], finished=NOW)
+    tick()
+    factory.client.fire_connect()
+    assert attempts == []
+    assert transaction(factory.client)["result"] == "withdrawn_before_restart"
+
+
+def test_every_module_the_update_path_uses_is_imported_with_the_bridge():
+    import importlib
+
+    importlib.import_module("MQTTBridge.bridge")
+    for name in ("selfupdate", "updatehelper", "trust", "trustfile", "netfetch", "power",
+                 "recording", "epgimport", "softcam", "updatecheck"):
+        assert "MQTTBridge." + name in sys.modules

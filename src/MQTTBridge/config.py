@@ -60,7 +60,7 @@ REMOTE_SETTING_NAMES = (
 # receiver's to decide and not the broker's.
 READ_ONLY_SETTING_NAMES = (
     "deep_standby_allowed", "softcam_restart_allowed", "epg_import_allowed",
-    "uninstall_allowed", "update_check",
+    "uninstall_allowed", "update_check", "update_allowed",
 )
 SCREENSHOT_INTERVAL_LIMITS = (5, 3600)
 SCREENSHOT_DELAY_LIMITS = (1, 30)
@@ -107,6 +107,7 @@ SETTING_NAMES = (
     "epg_import_allowed",
     "uninstall_allowed",
     "update_check",
+    "update_allowed",
     "log_level",
     "epg_grid_events",
 )
@@ -147,6 +148,7 @@ SETTING_KINDS = {
     "epg_import_allowed": "bool",
     "uninstall_allowed": "bool",
     "update_check": "bool",
+    "update_allowed": "bool",
     "log_level": "choice",
     "epg_grid_events": "int",
 }
@@ -270,6 +272,11 @@ def _build():
     # asks. A receiver never looks for the internet on its own, so this is asked for on
     # the receiver (`updatecheck.py`).
     section.update_check = ConfigYesNo(default=False)
+    # Permissions default off. `cmd/update` installs a signed release and restarts the
+    # interface to run it (`selfupdate.py`): the one command that replaces the code taking
+    # the commands, so it is granted on the receiver and never over MQTT. The television
+    # and the OpenWebif page need it for nothing - whoever stands there could set it.
+    section.update_allowed = ConfigYesNo(default=False)
     section.log_level = ConfigSelection(
         default="info", choices=[(level, level) for level in LOG_LEVELS]
     )

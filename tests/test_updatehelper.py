@@ -388,6 +388,18 @@ def test_the_question_answered_no_withdraws_without_a_restart(tmp_path):
     assert scene.box.setting("config.tv.lastservice") == TVN
 
 
+def test_a_withdraw_for_an_unacknowledged_retraction_says_so(tmp_path):
+    scene = Scene(tmp_path)
+
+    def plugin_withdraws():
+        updatehelper.write_json(str(scene.directory / "withdraw"), {"reason": "retraction"})
+    scene.box.pauses["restarting"] = plugin_withdraws
+    assert scene.run() == 0
+    assert (scene.last()["result"], scene.last()["reason"]) == (
+        "withdrawn_before_restart", "retraction")
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+
+
 def test_no_word_from_the_plugin_withdraws_after_180_s(tmp_path):
     scene = Scene(tmp_path)
     started = {}

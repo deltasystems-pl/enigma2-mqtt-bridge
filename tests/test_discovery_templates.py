@@ -77,6 +77,7 @@ def every_capability():
     names.update(publisher.name for publisher in PUBLISHER_CLASSES if publisher.name)
     names.add(bridge_module.MESSAGE_CAPABILITY)
     names.add(bridge_module.UNINSTALL_CAPABILITY)
+    names.add(bridge_module.SELF_UPDATE_CAPABILITY)
     names.add(zaphistory.CLEAR_CAPABILITY)
     return sorted(names)
 
