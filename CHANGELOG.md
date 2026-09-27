@@ -39,16 +39,28 @@ version that has no section here.
 
 - **A receiver without internet installs through Home Assistant: `relay_request` and `cmd/relay`**
   ([TOPICS.md](docs/TOPICS.md) §1, §2). An install started at the television or on the OpenWebif
-  page, when the last probe found the release origin unreachable, asks the companion integration
-  for the package on the new event topic `relay_request` (QoS 1, never retained) and waits at most
-  120 s for its answer on the new command `relay`. Only the answer to the id asked with, for the
-  version asked for, with an unexpired address of Home Assistant's one shape, is taken; anything
-  else is logged and dropped without ending the wait. The refusals are asked once more before the
-  update helper starts, and the install stays the television's or the page's. No answer: refused
-  with `reason` `no_relay`, nothing changed. Nothing is probed to decide, and a request that carries
-  an address never contacts the origin. The address rule is now one function shared by the plugin
-  and the helper, and it no longer takes a bracketed IPv6 host or a port outside 1-65535 in
-  `cmd/update` - the relay is IPv4 only on both sides.
+  page decides who fetches the package on a fresh word about the release origin: a probe of the
+  last ten minutes, or - on a receiver that has never checked, which is the default, or whose word
+  is older - the check's own five-second probe, run once first because starting the install is the
+  consent to it (nothing else probes, and a command over MQTT never does). Origin reachable: the
+  update helper fetches it. Unreachable: the plugin asks the companion integration on the new event
+  topic `relay_request` (QoS 1, never retained) and waits at most 120 s for its answer on the new
+  command `relay` - at once refused `no_relay` instead when no integration has said on
+  `enigma2mqtt/integration/<node>` that it is there. A helper whose own download got no answer from
+  the origin marks it unreachable, so the next install asks Home Assistant straight away. Only an
+  answer to the id asked with, for the version asked for, with an unexpired address of Home
+  Assistant's one shape, is taken; anything else is logged and dropped, and the wait goes on. The
+  first answer that passes is taken, whoever sent it: a broker client that answers first with an
+  address of its own can deny and delay the install - the helper refuses what that address serves
+  (size and sha256 against the signed entry) with nothing changed, and the ten-minute limit between
+  updates starts - but cannot install anything. The refusals are asked once more before the update
+  helper starts, and the install stays the television's or the page's. No answer: refused with
+  `reason` `no_relay`, nothing changed; only answers that this receiver's clock calls expired:
+  `clock_skew`. A wait whose timer could not start still ends by its age. A request that carries an
+  address never contacts the origin. The address rule is now one function shared by the plugin and
+  the helper, and it no longer takes a bracketed IPv6 host or a port outside 1-65535 in
+  `cmd/update`. That is a rule about how the address is written: a host name may resolve to any
+  address, IPv6 included, and the bytes are verified whatever answers.
 
 - **Every package says which build it is.** `info` gains `build` - the commit the package was
   built from, the commit's time, whether the tracked files matched it, the flavour, and the commit

@@ -1062,7 +1062,7 @@ receiver, whatever its settings, and again when an index is accepted, when a che
 
 | Field | Type | Meaning |
 |---|---|---|
-| `origin` | string | `reachable`, `unreachable` or `unknown`: whether the receiver's last probe of the release origin - a verified HTTPS request for the index's signature file, five seconds - got an answer. `unknown` until the receiver has probed, which it does only when it checks (below) |
+| `origin` | string | `reachable`, `unreachable` or `unknown`: whether the receiver's last probe of the release origin - a verified HTTPS request for the index's signature file, five seconds - got an answer. `unknown` until the receiver has probed, which it does only when it checks (below) or when an install is started at the television or on the OpenWebif page (§2, "A receiver without internet"); an update helper whose download got no answer from the origin makes it `unreachable` too |
 | `checked` | int or `null` | When the receiver last checked, epoch seconds. Stamped when the check starts, so a check that failed has a time too. Volatile in the sense of [ADR-0006](adr/0006-volatile-fields-and-publish-on-change.md): a check that changed nothing else does not publish the topic again |
 | `check_error` | string or `null` | Why the last check brought no index, `null` when it did or found the one already held: `unreachable`, `redirect` (the origin answered with a redirect, which is never followed), `http_error`, `too_large`, `trust_busy` (the index verified, but another writer held the trust file's lock for longer than two seconds, so it was not kept), `write_failed` (the index verified but could not be kept - a full flash - so it is not held, and the next check will say the same until there is room), `bad_memory` (what the receiver keeps about the index cannot be read, and nothing is judged until it is removed - [RELEASE-INDEX.md](RELEASE-INDEX.md), "Loading it"), `internal_error`, or a reason code of the rule for accepting an index (`bad_signature`, `replay`, `rank`, `jump` and the others RELEASE-INDEX.md lists). An open enumeration |
 | `index` | object or `null` | The index this receiver holds: `serial`, `issued` (epoch seconds; when it was built - its age, never an expiry) and `source`, `origin` (fetched by the receiver) or `relay` (relayed on `enigma2mqtt/release_index`, §3). `null` while it holds none |
@@ -1074,8 +1074,8 @@ receiver, whatever its settings, and again when an index is accepted, when a che
 above), once a day - after its clock has been set - and on `cmd/update_check`; from the plugin's
 OpenWebif page ("Check for plugin updates now") whatever the setting says, because whoever the page
 admits could switch it on anyway. Manual checks share one ten-minute limit, inside which the last
-result is the answer and nothing is fetched. With `update_check` off and nobody at the page, the
-receiver makes no connection but the broker's. A check fetches the signature file first (the
+result is the answer and nothing is fetched. With `update_check` off and nobody at the page or
+the television, the receiver makes no connection but the broker's. A check fetches the signature file first (the
 probe, 1 KiB), then the index (ten seconds, 64 KiB), from the origin built into the plugin, over
 TLS that verifies the certificate and the host name, and never follows a redirect. An index relayed
 on `enigma2mqtt/release_index` (§3) is judged by the same rule, needs no setting and causes no
@@ -1108,9 +1108,10 @@ until the older release connects.
 ### `<base>/<node>/relay_request` - added after 0.3.0 (unreleased)
 
 **Not retained** - QoS 1. A receiver without internet asks the companion integration for a
-package: an install started at the television or on the OpenWebif page, when the last probe of the
-release origin found it `unreachable` (`update.origin` above - nothing is probed to decide), and
-once every refusal of `cmd/update` (§2) has been passed.
+package: an install started at the television or on the OpenWebif page, when the release origin is
+`unreachable` (`update.origin` above - a probe of the last ten minutes, or the one the install
+asks for first, §2), once every refusal of `cmd/update` (§2) has been passed, and only while the
+integration's word is on `enigma2mqtt/integration/<node>` (§3).
 
 ```json
 {"id": "a1b2c3d4e5f6", "version": "0.4.1", "serial": 7}
@@ -1234,6 +1235,8 @@ changes and in this order:
 | `relay` is not `http(s)://<host>[:port]/api/enigma2_mqtt/relay/<43 url-safe characters>` - the host a name of letters, digits, dots and hyphens or an IPv4 address, never a bracketed IPv6 literal and never a user part; the port, if any, 1 to 65535; nothing after the token - with a whole-number `expires` still ahead | "the download address from Home Assistant is not valid" | `relay` |
 | free space under `/home/root` below twice the package plus the plugin's size plus 2.25 MiB | "there is not enough free space on the receiver" | `no_space` |
 | an update ended less than ten minutes ago | "an update ran less than ten minutes ago" | `rate_limited` |
+| started at the television or on the page, the release origin `unreachable`, and nobody to ask for the package - no broker connection, no integration's word on `enigma2mqtt/integration/<node>` (§3) - or no answer within 120 s (below) | "the receiver cannot reach the plugin's release origin and Home Assistant did not answer, so the update cannot be installed" | `no_relay` |
+| started there, and Home Assistant's answer carried an address of its shape that only this receiver's clock calls expired (below) | "Home Assistant answered, but the receiver's clock differs from Home Assistant's, so the download address had already expired; set the receiver's clock and try again" | `clock_skew` |
 
 Accepted, the plugin starts its update helper outside enigma2 and follows it on `update`. The
 helper judges the index again, downloads and verifies the package, keeps a rollback point and runs
@@ -1265,23 +1268,48 @@ back (`rolled_back`, `reason` `not_started`), and the channel and standby state 
 
 **A receiver without internet - `relay_request` and `cmd/relay`.** An install started at the
 television or on the OpenWebif page carries no download address, and the receiver fetches the
-release itself. When its last probe found the release origin `unreachable` (`update.origin`, §1;
-nothing is probed to decide), it asks Home Assistant instead, once the request has passed every
-refusal above: it publishes `relay_request` (§1) and waits at most **120 s** for `cmd/relay`. The
-answer is taken only when its `id` is the one asked with, its `version` the one asked for, its
-`url` of the shape the `relay` refusal describes and its `expires` still ahead; anything else - a
-retained message, another id, an id nobody is waiting for any more, another version, another
-address - is a line in the plugin's log, changes nothing, and **does not end the wait**. The
-answer is transport, not an instruction: the refusals above are asked once more (up to two minutes
-have passed - the receiver may have gone into standby), and the install is still the one asked for
-at the television or on the page (`started_by` `screen` or `page`; a downgrade chosen there stays
-one), with the relay address instead of the origin. A refusal then goes on `last_error` as for
-`cmd/update`. Without an answer in 120 s - or without a broker connection to ask on - the install
-is refused with "the receiver cannot reach the plugin's release origin and Home Assistant did not
-answer, so the update cannot be installed" (`reason` `no_relay`), and nothing has changed. While a
-receiver waits, `cmd/update` and `cmd/uninstall` are refused `busy`. A `cmd/update` over MQTT never
-asks back: Home Assistant sends its address with it, and a command without one asks the receiver to
-fetch. A request that carries a relay address never makes the receiver contact the origin at all.
+release itself - unless it cannot reach the release origin. Once the request has passed every
+refusal above, the receiver looks at `update.origin` (§1). A probe's word of the last ten minutes
+is taken as it is; otherwise - `unknown`, the default on a receiver that has never checked, a word
+read back after a restart, or an older one - it probes once first: the check's own request for the
+signature file, five seconds, while the install waits (at most 60 s, for a check that may already
+be running). Starting the install is the consent to that probe (spec: "an explicit TV/page
+action"); nothing else probes, and a `cmd/update` over MQTT never does. `reachable`: the update
+helper fetches the release itself. `unreachable`: the receiver asks Home Assistant for the
+package. An update helper whose download from the origin got no answer at all makes
+`update.origin` `unreachable` as well, so the next install at the television asks Home Assistant
+straight away.
+
+To ask, the receiver publishes `relay_request` (§1) and waits at most **120 s** for `cmd/relay` -
+but only while the integration's word is on `enigma2mqtt/integration/<node>` (§3), which only an
+integration that relays publishes; without it the install is refused `no_relay` at once rather than
+after two minutes. The answer is taken only when its `id` is the one asked with, its `version` the
+one asked for, its `url` of the shape the `relay` refusal describes and its `expires` still ahead;
+anything else - a retained message, another id, an id nobody is waiting for any more, another
+version, another address - is a line in the plugin's log, changes nothing, and the wait goes on.
+**The first answer that passes is taken, whoever sent it.** Nothing on the broker proves that an
+answer comes from Home Assistant, and the id is readable by every client that can read
+`relay_request`, so a broker client that answers first with a well-formed address of its own is
+taken, and Home Assistant's answer after it is dropped. That client can deny and delay, not
+install: the update helper verifies whatever the address serves against the signed entry (size and
+sha256) before the package manager sees it, refuses anything else with nothing changed
+(`bad_package`, or `download` when the address does not answer), and the failed update starts the
+ten-minute limit between updates. The answer is transport, not an instruction: the refusals above
+are asked once more (up to two minutes have passed - the receiver may have gone into standby), and
+the install is still the one asked for at the television or on the page (`started_by` `screen` or
+`page`; a downgrade chosen there stays one), with the relay address instead of the origin. A
+refusal then goes on `last_error` as for `cmd/update`. Without an answer in 120 s - or without a
+broker connection or the integration's word to ask on - the install is refused with "the receiver
+cannot reach the plugin's release origin and Home Assistant did not answer, so the update cannot be
+installed" (`reason` `no_relay`), and nothing has changed. When the only answers of Home
+Assistant's shape carried an address that this receiver's clock already calls expired - its clock
+ahead of Home Assistant's by more than the address lives - the refusal is `clock_skew` instead
+(the row above). While a receiver probes or waits, `cmd/update` and `cmd/uninstall` are refused
+`busy`; a wait whose timer did not run ends by its age the next time anything asks. A `cmd/update`
+over MQTT never asks back: Home Assistant sends its address with it, and a command without one asks
+the receiver to fetch. A request that carries a relay address never makes the receiver contact the
+origin at all. "No IPv6 literal" in the `relay` refusal is a rule about the address as written:
+a host name may resolve to any address, and whatever answers there, the bytes are verified.
 
 ### `cmd/zap` goes through the channel list - since 0.3.0
 
