@@ -19,7 +19,9 @@ disagree.
 starts when the receiver first looks at the release origin, or asks Home Assistant for the
 package because the origin does not answer (`selfupdate.py`, the relay handshake). Both places
 then say what it waits for (`relay_line`) and, once it ended without an update, why
-(`relay_outcome`) - never that an update started.
+(`relay_outcome`) - never that an update started. The page reads that outcome whenever it is
+loaded, so it says it only for an hour after the wait ended (`RELAY_OUTCOME_SECONDS`); the
+screen that asked reads it once, when its wait ends, and keeps it while it is open.
 
 **One line per version on the television.** A list row does not wrap, so a version that cannot
 be installed says only that (`row_label`); the reason is `row_detail`, shown when the row is
@@ -52,6 +54,13 @@ INSTALLED = "installed"
 SAME_NUMBER = "same_number"
 NEWER = "newer"
 OLDER = "older"
+
+# How long after a wait ended without an update `relay_outcome` still says how. The outcome is
+# kept until the next install is asked for, which may be days later, and "Home Assistant did
+# not answer" read then would be taken for news about now. An hour covers a person who asked
+# and comes back to look; after it the page says nothing about that wait, and `last_error`
+# still carries the refusal until a command next succeeds (the page's Status shows it).
+RELAY_OUTCOME_SECONDS = 60 * 60
 
 # `check_error` codes (`updatecheck.py`, TOPICS.md) by what they mean to the household. The
 # rule's own verdicts - `trust.REASONS`, and a relayed payload that is not an index - all say
@@ -282,14 +291,21 @@ def relay_line(bridge):
 def relay_outcome(bridge):
     """How the last such wait ended when it did not start an update, in the household's words.
 
-    None when it started one, or when nothing waited. The refusal is the dispatcher's own
-    (`SelfUpdater.relay_refusal`): no answer, an answer this clock calls expired, or a refusal
-    of the table asked again when the wait ended.
+    None when it started one, when nothing waited, or when it ended `RELAY_OUTCOME_SECONDS` ago
+    or more. The refusal is the dispatcher's own (`SelfUpdater.relay_refusal`): no answer, an
+    answer this clock calls expired, or a refusal of the table asked again when the wait ended.
     """
     updater = getattr(bridge, "self_update", None)
     refusal = getattr(updater, "relay_refusal", None) if updater is not None else None
     if not refusal:
         return None
+    ended = getattr(updater, "relay_ended", None)
+    try:
+        if ended is not None and updater.monotonic() - ended >= RELAY_OUTCOME_SECONDS:
+            return None
+    except Exception:
+        # Its age unreadable, the outcome is said: it is still the last wait's, and true.
+        LOG.exception("the age of the install's last wait could not be read")
     return household_refusal(refusal, getattr(updater, "relay_version", None))
 
 

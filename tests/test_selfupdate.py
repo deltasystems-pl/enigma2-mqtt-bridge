@@ -2175,6 +2175,35 @@ def test_behind_the_doors_only_the_repairs_own_confirmation_is_answered(starting
     assert len(restarts(receiver)) == 1
 
 
+@pytest.mark.parametrize("csrf", [None, "A" * 43])
+def test_the_repair_through_closed_doors_still_needs_its_token(csrf, starting, factory,
+                                                                receiver, monkeypatch):
+    """The doors let the repair's form on to the page's own checks, not past them: without the
+    session's token it is refused like any other form, and nothing is asked or restarted."""
+    from test_webif import action_fields, new_session, post, token
+
+    bridge, directory = following(starting, factory, receiver)
+    monkeypatch.setattr(webif, "_bridge", lambda: bridge)
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped",
+                error=str(updatehelper.Fail("not_stopped", previous="0.2.0")),
+                finished=NOW + 200, record={"restore": "done", "interface": "not restarted"})
+    tick()
+    assert bridge.self_update.repair() == "restart_gui"
+    resource = webif.MQTTBridgeWebResource()
+    session = new_session()
+    # The session has a token; the form does not carry it, or carries another.
+    token(session)
+    request, _body = post(resource, session, action_fields("restart_gui"), csrf=csrf)
+    assert request.response_code == 403
+    assert webif.CONFIRM_KEY not in session.sessionNamespaces
+    assert restarts(receiver) == [] and receiver.session.opened == []
+    # With its token the same form asks its question: the refusal above was the token's.
+    request, body = post(resource, session, action_fields("restart_gui"))
+    assert request.response_code == 200
+    assert "name='form' value='confirm'" in body.decode("utf-8")
+    assert restarts(receiver) == []
+
+
 def test_a_followed_failed_restore_under_a_process_r2_could_not_stop_is_stuck(starting,
                                                                               factory, receiver):
     """The restore reasons win over `not_stopped`, and this process is the one they changed under.

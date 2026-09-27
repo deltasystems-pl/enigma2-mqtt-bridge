@@ -1285,3 +1285,65 @@ def test_a_wait_that_ends_in_a_refusal_names_its_version_on_the_page(box, page, 
     text = html.unescape(get_page(resource)[1].decode("utf-8"))
     assert ("Version 0.4.0 is not on the plugin's signed list of versions. Check for updates "
             "and try again.") in text
+
+
+# ------------------------------------------------------------ review round 3 --
+
+
+def updates_section(body):
+    """The page's "Plugin updates" section, unescaped."""
+    text = html.unescape(body.decode("utf-8"))
+    return text.split("<h2>Plugin updates</h2>", 1)[1].split("</section>", 1)[0]
+
+
+@pytest.mark.parametrize("answered", [False, True])
+def test_how_the_screens_wait_ended_stays_said_while_the_screen_is_open(answered, box, factory,
+                                                                        mono):
+    """Said once and kept (`_waited`): every refresh after the end still says it, an hour later
+    too. It is this screen's answer to the person who asked; only the page's later reading of
+    the outcome ages (`updateview.RELAY_OUTCOME_SECONDS`)."""
+    bridge = test_selfupdate_relay.offline(box())
+    screen = install_at_the_television(bridge)
+    if answered:
+        test_selfupdate_relay.reply(factory, test_selfupdate_relay.answer_for(factory))
+        said = STARTED
+    else:
+        MainLoop.advance(test_selfupdate_relay.WAIT_MS)
+        said = NO_RELAY_SAID
+    for _refresh in range(3):
+        screen.refresh()
+        assert said in screen["status"].text
+    mono.now += 60 * 60 + 1
+    screen.refresh()
+    assert said in screen["status"].text
+
+
+@pytest.mark.parametrize(("age", "shown"), [(0, True), (3599, True), (3600, False),
+                                            (86400, False)])
+def test_the_page_says_how_a_wait_ended_for_an_hour(age, shown, box, page, factory, mono):
+    """A day-old "Home Assistant did not answer" is not said as news: the section says how the
+    last wait ended for an hour after it ended. `last_error` is not the page's to age - it keeps
+    the refusal until a command next succeeds, and the Status section shows it there."""
+    bridge = test_selfupdate_relay.offline(box())
+    resource = page(bridge)
+    session = new_session()
+    _request, body = post(resource, session, install_fields("0.4.0"))
+    post(resource, session, confirmation(body), csrf=None)
+    MainLoop.advance(test_selfupdate_relay.WAIT_MS)
+    mono.now += age
+    assert (NO_RELAY_SAID in updates_section(get_page(resource)[1])) is shown
+    assert "Waiting for the answer" not in updates_section(get_page(resource)[1])
+    assert refusal(factory.client)[0] == "no_relay"
+
+
+def test_an_outcome_whose_age_cannot_be_read_is_still_said():
+    """Only a known age hides the outcome: an updater that does not say when the wait ended, or
+    whose clock fails, still has it said - it is the last wait's, and true."""
+    def broken():
+        raise OSError("no clock")
+
+    ended = Refusal(selfupdate.NO_RELAY, "no_relay")
+    for updater in (SimpleNamespace(relay_refusal=ended, relay_version="0.4.0"),
+                    SimpleNamespace(relay_refusal=ended, relay_version="0.4.0", relay_ended=5.0,
+                                    monotonic=broken)):
+        assert updateview.relay_outcome(SimpleNamespace(self_update=updater)) == NO_RELAY_SAID

@@ -45,7 +45,7 @@ version that has no section here.
   ones that cannot be installed marked so, with the reason on OK (the page lists it) - and the
   update in progress with who started it. An install on a receiver without internet says what it
   waits for - the look at the internet, then Home Assistant's answer, counted down - and how the
-  wait ended, never "started" before it has.
+  wait ended (the page for an hour after it), never "started" before it has.
   Yellow checks for updates, OK or green installs; the OpenWebif page gains the same section and an
   *Install a plugin version* action. Neither needs `update_check` or `update_allowed` - pressing is
   the consent - and every household guard still applies. Every install is asked first, and only
