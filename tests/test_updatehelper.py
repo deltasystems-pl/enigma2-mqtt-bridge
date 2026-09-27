@@ -2227,3 +2227,55 @@ def test_r2_takes_the_channel_recorded_before_the_restart_when_openwebif_is_sile
     assert scene.last()["result"] == "rolled_back"
     assert scene.box.lastservice_at_start == TVP1
     assert scene.status()["record"]["channel"] == "kept"
+
+
+@pytest.mark.parametrize(("answer", "word"), [
+    (None, "unreachable"),
+    ((500, b"gone"), "reachable"),
+    ((404, b""), "reachable"),
+])
+def test_the_record_says_whether_the_origin_answered_the_download(tmp_path, answer, word):
+    """The plugin keeps "unreachable" as the origin's word (review round 1, MF1); an origin that
+    answered, even with an error, was reachable."""
+    scene = Scene(tmp_path)
+    url = ORIGIN + scene.entries[0]["filename"]
+    if answer is None:
+        del scene.box.urls[url]
+    else:
+        scene.box.urls[url] = answer
+    scene.run()
+    assert scene.last()["reason"] == "download"
+    assert scene.status()["record"]["origin"] == word
+    assert scene.opkg_calls() == []
+
+
+def test_an_index_the_origin_did_not_answer_for_says_so_too(tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.urls.clear()
+    scene.run()
+    assert scene.last()["reason"] == "unreachable"
+    assert scene.status()["record"]["origin"] == "unreachable"
+
+
+def test_a_package_that_is_not_the_release_says_the_origin_answered(tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.urls[ORIGIN + scene.entries[0]["filename"]] = (200, scene.ipk + b"x")
+    scene.run()
+    assert scene.last()["reason"] == "bad_package"
+    assert scene.status()["record"]["origin"] == "reachable"
+
+
+def test_a_relay_that_does_not_answer_says_nothing_of_the_origin(tmp_path):
+    relay = {"url": "http://192.0.2.10:8123/api/enigma2_mqtt/relay/" + "a" * 43,
+             "expires": 1790999999}
+    scene = Scene(tmp_path, relay=relay)
+    index_raw, signature = updatelab.signed(7, scene.entries)
+    from MQTTBridge import trustfile
+
+    trustfile.keep(scene.box.path(updatehelper.TRUST_FILE), updatelab.TEST_KEYS, True,
+                   index_raw, signature, "relay", 1)
+    scene.box.urls.clear()
+    scene.run()
+    assert scene.last()["reason"] == "download"
+    assert "origin" not in scene.status()["record"]
+    assert scene.box.fetched == []

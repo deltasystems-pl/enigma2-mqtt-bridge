@@ -33,6 +33,17 @@ byte too many is `too_large` - before the signature is looked at. A pair whose s
 verify is read once more: the two files are two requests, and a publication can land between
 them. A pair that fails twice is judged.
 
+**The probe on its own.** An install asked for at the television or on the page carries no
+download address, and whether the receiver fetches the package itself or asks the companion
+integration for it depends on whether the origin answers (`selfupdate.py`, the relay handshake).
+The asking is the consent (spec ae.4), so when the last word on the origin is `unknown`, or older
+than `ORIGIN_FRESH_SECONDS`, the install asks for the probe alone: the check's own first request,
+the signature file with five seconds and a 1 KiB cap, on the same worker, its body discarded.
+Nothing else ever asks for it - not a timer, not a command over MQTT - so a receiver nobody asks
+still makes no connection but the broker's. An update helper that could not reach the origin
+says so in its record, and that is kept as the origin's word too (`note_unreachable`): the next
+install at the television asks Home Assistant straight away.
+
 **Limits.** Manual checks - `cmd/update_check`, from the broker or the page - share one
 ten-minute limit (the origin's own cache lifetime); inside it the answer is the stored result and
 no request is made. The daily check runs only with `update_check` on, when the last check is a
@@ -114,6 +125,10 @@ DAILY_SLACK = 5 * 60
 TICK_MILLISECONDS = 60 * 60 * 1000
 PROBE_TIMEOUT = 5
 FETCH_TIMEOUT = 10
+# How long what a probe found about the origin is taken as its word, measured on the monotonic
+# clock of this process: a word read back from the check file after a restart has no age, and is
+# never fresh. The same ten minutes as the manual checks' limit.
+ORIGIN_FRESH_SECONDS = 10 * 60
 # 2026-09-01T00:00:00Z. A clock before this - or before the build's own commit - has not been set.
 CLOCK_FLOOR = 1788220800
 MAX_AVAILABLE = 20
@@ -259,6 +274,7 @@ class UpdateChecker:
     opkg_root = "/"
     fetch = staticmethod(https_get)
     run_in_background = staticmethod(in_thread)
+    monotonic = staticmethod(time.monotonic)
 
     def __init__(self, bridge, path=None, keys=None, acceptance=None, origin=None, clock=None,
                  build=None, overrides=None, check_path=None):
@@ -293,6 +309,11 @@ class UpdateChecker:
         self._checked = None
         self._check_error = None
         self._origin = UNKNOWN
+        # When this process last learned `_origin` (the monotonic clock), or None: never, or
+        # only from the check file.
+        self._origin_seen = None
+        # Callbacks of installs waiting for the probe they asked for (`probe`). Main loop only.
+        self._probe_waiters = []
         self._held = None
         self._installed = None
         self.last_relay_verdict = None
@@ -301,6 +322,43 @@ class UpdateChecker:
     def reachability(self):
         """`update.origin`: what the last probe of the release origin found, never a new probe."""
         return self._origin
+
+    def origin_fresh(self):
+        """Whether `reachability` is a probe's word of the last `ORIGIN_FRESH_SECONDS`."""
+        if self._origin == UNKNOWN or self._origin_seen is None:
+            return False
+        return 0 <= self.monotonic() - self._origin_seen < ORIGIN_FRESH_SECONDS
+
+    def probe(self, callback):
+        """Probe the origin now, for an install asked for at the television or on the page.
+
+        Only that asks (spec ae.4: the act is the consent). The probe runs on the worker, after
+        any job already there, and `callback()` is called on the main loop once `reachability`
+        holds its answer - or holds nothing new, when the probe could not be run. Never raises.
+        """
+        self._probe_waiters.append(callback)
+        self._enqueue(("probe",))
+
+    def note_unreachable(self):
+        """An update helper could not reach the origin: that is the origin's word now.
+
+        Kept in the check file too, by the worker, like a probe's.
+        """
+        self._set_origin(UNREACHABLE)
+        self.publish()
+        self._enqueue(("note", UNREACHABLE))
+
+    def _set_origin(self, origin):
+        self._origin = origin
+        self._origin_seen = self.monotonic()
+
+    def _call_probe_waiters(self):
+        waiters, self._probe_waiters = self._probe_waiters, []
+        for callback in waiters:
+            try:
+                callback()
+            except Exception:
+                LOG.exception("an install waiting for the origin probe raised")
 
     @property
     def lineage(self):
@@ -418,6 +476,10 @@ class UpdateChecker:
                     result = self._load()
                 elif kind == "check":
                     result = self._check(job[1])
+                elif kind == "probe":
+                    result = self._probe()
+                elif kind == "note":
+                    result = self._note(job[1])
                 else:
                     result = self._relay(job[1])
             except Exception:
@@ -433,6 +495,9 @@ class UpdateChecker:
             LOG.exception("could not start the update check's worker")
             with self._lock:
                 self._busy = False
+            if kind == "probe":
+                # No probe comes: the install that asked decides on what is known.
+                self._call_probe_waiters()
 
     def _hand_back(self, result):
         if self.bridge is None:
@@ -460,6 +525,8 @@ class UpdateChecker:
         except Exception:
             LOG.exception("could not apply the update check's result")
         self.publish()
+        if result.get("kind") == "probe":
+            self._call_probe_waiters()
         if following is not None:
             self._enqueue(following)
 
@@ -473,14 +540,18 @@ class UpdateChecker:
             self._checked = result["checked"]
             self._check_error = result.get("check_error")
             if "origin" in result:
-                self._origin = result["origin"]
+                self._set_origin(result["origin"])
         elif kind == "load":
-            # A check started since has newer news than the file.
+            # A check started since has newer news than the file, and so has a probe.
             if self._checked is None:
                 self._checked = result.get("checked")
                 self._check_error = result.get("check_error")
-                self._origin = result.get("origin", UNKNOWN)
-        else:
+                if self._origin_seen is None:
+                    self._origin = result.get("origin", UNKNOWN)
+        elif kind == "probe":
+            if "origin" in result:
+                self._set_origin(result["origin"])
+        elif kind == "relay":
             self.last_relay_verdict = result.get("verdict")
 
     # ---------------------------------------------------------- jobs, on the worker --
@@ -534,9 +605,7 @@ class UpdateChecker:
             return result
         for attempt in (1, 2):
             try:
-                status, signature_raw = self.fetch(
-                    self.origin + trust.SIGNATURE_FILE, trust.MAX_SIGNATURE_BYTES, PROBE_TIMEOUT
-                )
+                status, signature_raw = self._fetch_signature()
             except Unreachable as error:
                 LOG.info("the release origin cannot be reached: %s", error)
                 result.update(origin=UNREACHABLE, check_error=ERROR_UNREACHABLE)
@@ -573,6 +642,41 @@ class UpdateChecker:
         result["installed"] = installed_packages(self.opkg_root)
         self._record(result)
         return result
+
+    def _fetch_signature(self):
+        """The probe: the signature file, `PROBE_TIMEOUT`, 1 KiB. `(status, body)`, or Unreachable.
+
+        Any answer at all - a 404, a redirect - is an origin that can be reached; only no answer
+        is `unreachable`.
+        """
+        return self.fetch(self.origin + trust.SIGNATURE_FILE, trust.MAX_SIGNATURE_BYTES,
+                          PROBE_TIMEOUT)
+
+    def _probe(self):
+        """The probe alone, for an install that asked (`probe`); kept in the check file."""
+        try:
+            self._fetch_signature()
+            origin = REACHABLE
+        except Unreachable as error:
+            LOG.info("the release origin cannot be reached: %s", error)
+            origin = UNREACHABLE
+        self._record_origin(origin)
+        return {"kind": "probe", "origin": origin}
+
+    def _note(self, origin):
+        self._record_origin(origin)
+        return {"kind": "note"}
+
+    def _record_origin(self, origin):
+        """Bookkeeping only: a file that cannot be written costs the word across a restart."""
+        checks = read_checks(self.check_path)
+        part = checks.get(self.lineage)
+        part = dict(part) if isinstance(part, dict) else {}
+        part["origin"] = origin
+        try:
+            write_state(self.check_path, dict(checks, **{self.lineage: part}))
+        except OSError as error:
+            LOG.warning("could not keep the origin's word in %s: %s", self.check_path, error)
 
     def _record(self, result):
         """Keep the check's stamp, error and probe result - in the check file, never the trust file.

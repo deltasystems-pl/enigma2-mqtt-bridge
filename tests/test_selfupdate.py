@@ -149,6 +149,10 @@ def box(make_bridge, factory, settings, receiver, tree, mono):
         bridge.start()
         factory.client.fire_connect()
         hold(bridge, releases, floor)
+        # The origin answered a probe a moment ago, so an install at the television or on the
+        # page does not look again (`test_selfupdate_relay.py` takes this away where it matters).
+        bridge.updates._origin = "reachable"
+        bridge.updates._origin_seen = bridge.updates.monotonic()
         bridge.root = root
         return settle(bridge)
 

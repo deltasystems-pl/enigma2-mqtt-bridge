@@ -3,7 +3,9 @@
 Spec ae.6 "Relay handshake": when the origin is unreachable, the plugin asks Home Assistant on
 `relay_request` and takes `cmd/relay` only for the id it is waiting for, within 120 s; anything
 else is logged and dropped. Spec ae.4: a request that carries a relay never fetches from the
-origin, and nothing is probed to decide - the last check's `update.origin` is the answer.
+origin; an install at the television or on the page decides on a fresh word about the origin
+(`update.origin`, ten minutes), and asks for the check's probe first when it has none - the
+explicit action is the consent - while a command over MQTT never probes (review round 1, MF1).
 
 The receiver is `test_selfupdate.py`'s; its fixtures and helpers are reused as they are.
 `test_relay_contract.py` feeds the plugin what the companion integration really sends.
@@ -16,10 +18,11 @@ import pytest
 import test_selfupdate
 from conftest import ConsoleAppContainer, MainLoop
 from test_selfupdate import BUSY, LAST_ERROR, NODE, NOW, ROOT, directories, refusal, send
+from updatelab import index_bytes, release
 
-from MQTTBridge import selfupdate, updatehelper
+from MQTTBridge import selfupdate, trust, updatecheck, updatehelper
 from MQTTBridge.origin import MQTT, PAGE, SCREEN
-from MQTTBridge.updatecheck import REACHABLE, UNKNOWN, UNREACHABLE, UpdateChecker
+from MQTTBridge.updatecheck import REACHABLE, UNKNOWN, UNREACHABLE, Unreachable, UpdateChecker
 
 # `test_selfupdate.py`'s receiver, by the names its fixtures are asked for.
 box = test_selfupdate.box
@@ -33,10 +36,57 @@ URL = "http://192.0.2.5:8123/api/enigma2_mqtt/relay/" + TOKEN
 WAIT_MS = selfupdate.RELAY_WAIT_SECONDS * 1000
 
 
-def offline(bridge, origin=UNREACHABLE):
-    """What the last check found when it probed the release origin."""
+INTEGRATION_WORD = {"integration": "0.4.0", "contract": 1, "plugin_min": "0.2.0"}
+
+
+def offline(bridge, origin=UNREACHABLE, integration=True):
+    """What a probe of the release origin found a moment ago, and an integration that relays."""
     bridge.updates._origin = origin
+    bridge.updates._origin_seen = bridge.updates.monotonic()
+    if integration:
+        announce(bridge)
     return bridge
+
+
+def announce(bridge):
+    """The integration's retained word on `enigma2mqtt/integration/<node>`, as the bridge
+    hands it over (`test_selfupdate.py` sends it through the broker)."""
+    bridge.self_update.on_integration(json.dumps(INTEGRATION_WORD).encode())
+
+
+def unprobed(bridge, origin=UNKNOWN, age=None):
+    """A word about the origin with no age (read back from the file), or one `age` s old."""
+    bridge.updates._origin = origin
+    bridge.updates._origin_seen = (None if age is None
+                                   else bridge.updates.monotonic() - age)
+    return bridge
+
+
+class Origin:
+    """The release origin as the probe meets it: answering, or not at all. Records each ask."""
+
+    def __init__(self, answers=True):
+        self.answers = answers
+        self.asked = []
+
+    def __call__(self, url, cap, timeout):
+        self.asked.append((url, cap, timeout))
+        if not self.answers:
+            raise Unreachable("no route to host")
+        return 200, b"a signature file"
+
+
+@pytest.fixture
+def still(monkeypatch):
+    """The checker's monotonic clock, standing still, so an age is exactly what a test says."""
+    monkeypatch.setattr(UpdateChecker, "monotonic", staticmethod(lambda: 10000.0))
+
+
+@pytest.fixture
+def origin(monkeypatch):
+    fake = Origin()
+    monkeypatch.setattr(UpdateChecker, "fetch", staticmethod(fake))
+    return fake
 
 
 def ask(bridge, version="0.4.0", origin=SCREEN, downgrade=False, **fields):
@@ -175,7 +225,8 @@ def test_an_install_at_the_receiver_without_internet_asks_home_assistant(origin,
     # Nothing starts before the answer, and nothing about it goes on `last_error`.
     assert directories(bridge.root) == [] and ConsoleAppContainer.instances == []
     assert refusal(factory.client) is None
-    assert bridge.self_update.relay_wait() == {"version": "0.4.0", "seconds_left": 120}
+    assert bridge.self_update.relay_wait() == {"version": "0.4.0", "seconds_left": 120,
+                                               "phase": "relay"}
     # Not remembered as a retained topic of the node: nothing to retract later.
     assert not bridge.state.knows(RELAY_REQUEST)
 
@@ -207,9 +258,8 @@ def test_even_the_last_refusals_come_before_the_question(last, box, factory, mon
     assert factory.client.all_for(RELAY_REQUEST) == []
 
 
-@pytest.mark.parametrize("probe", [REACHABLE, UNKNOWN])
-def test_an_origin_not_known_to_be_unreachable_is_tried_by_the_helper(probe, box, factory):
-    bridge = offline(box(), probe)
+def test_an_origin_that_answered_is_tried_by_the_helper(box, factory):
+    bridge = offline(box(), REACHABLE)
     assert ask(bridge) is None
     assert factory.client.all_for(RELAY_REQUEST) == []
     assert request_file(directories(bridge.root)[0])["relay"] is None
@@ -366,9 +416,14 @@ def test_a_second_answer_after_the_first_was_taken_is_stale(box, factory):
 def test_the_page_cannot_hand_in_an_answer(box, factory):
     bridge = offline(box())
     assert ask(bridge) is None
-    bridge.run_command("relay", json.dumps(answer_for(factory)), PAGE)
+    bridge.publish_last_error("update", "an earlier refusal")
+    before = len(factory.client.published)
+    assert bridge.run_command("relay", json.dumps(answer_for(factory)), PAGE) is None
     assert directories(bridge.root) == []
     assert bridge.self_update.relay_wait() is not None
+    # Nothing at all: not even the clear of `last_error` that a command which ran would send.
+    assert last_errors(factory, before) == []
+    assert refusal(factory.client) is not None
 
 
 # ---------------------------------------------------------------- the 120 s bound --
@@ -493,3 +548,382 @@ def test_ids_are_not_predictable_from_the_clock(monkeypatch, box, factory):
     bridge = offline(box())
     assert ask(bridge) is None
     assert drawn == [6]
+
+
+# ------------------------------------------ review round 1: looking at the origin (MF1) --
+
+PROBE_MS = selfupdate.PROBE_WAIT_SECONDS * 1000
+
+
+def latest_question(factory):
+    return factory.client.all_for(RELAY_REQUEST)[-1]
+
+
+class Jobs(list):
+    """The worker's jobs, waiting until a test runs them; `run()` runs them all, in order."""
+
+    def run(self):
+        while self:
+            self.pop(0)()
+
+
+def held_back(monkeypatch):
+    """A worker that has not had its turn yet: the jobs wait in a list until a test runs them.
+
+    Asked for once the receiver is built, so its own first job - loading the files - has run.
+    """
+    jobs = Jobs()
+    monkeypatch.setattr(UpdateChecker, "run_in_background", staticmethod(jobs.append))
+    return jobs
+
+
+@pytest.mark.parametrize("where", [SCREEN, PAGE])
+def test_a_fresh_box_looks_at_the_origin_and_then_asks_home_assistant(where, box, factory,
+                                                                      origin):
+    """Scenario A of the review: defaults, no internet, an index Home Assistant relayed."""
+    origin.answers = False
+    bridge = unprobed(offline(box()))
+    assert not bridge.value("update_check")
+    assert bridge.updates._held[1] == "relay"
+    if where == PAGE:
+        assert bridge.run_command("update", json.dumps({"version": "0.4.0"}), PAGE) is None
+    else:
+        assert ask(bridge) is None
+    # The check's own probe, once: the signature file, five seconds, 1 KiB.
+    assert origin.asked == [(bridge.updates.origin + trust.SIGNATURE_FILE,
+                             trust.MAX_SIGNATURE_BYTES, updatecheck.PROBE_TIMEOUT)]
+    assert bridge.updates.reachability == UNREACHABLE and bridge.updates.origin_fresh()
+    assert question(factory).json()["version"] == "0.4.0"
+    assert directories(bridge.root) == []
+    assert bridge.self_update.relay_wait()["phase"] == "relay"
+    reply(factory, answer_for(factory))
+    request = request_file(directories(bridge.root)[0])
+    assert request["relay"]["url"] == URL and request["started_by"] == where
+
+
+@pytest.mark.parametrize("age", [None, updatecheck.ORIGIN_FRESH_SECONDS])
+def test_an_old_unreachable_is_looked_at_again_and_the_helper_fetches(age, box, factory, origin,
+                                                                       still):
+    """Scenario B of the review: the internet came back since the word was written."""
+    bridge = unprobed(offline(box()), UNREACHABLE, age)
+    assert ask(bridge) is None
+    assert len(origin.asked) == 1
+    assert bridge.updates.reachability == REACHABLE
+    # No 120 s wait for an answer nobody needs: the helper fetches from the origin itself.
+    assert factory.client.all_for(RELAY_REQUEST) == []
+    assert bridge.self_update.relay_wait() is None
+    assert request_file(directories(bridge.root)[0])["relay"] is None
+
+
+@pytest.mark.parametrize("age", [0, updatecheck.ORIGIN_FRESH_SECONDS - 1])
+def test_a_fresh_word_is_not_looked_at_again(age, box, factory, origin, still):
+    bridge = unprobed(offline(box()), UNREACHABLE, age)
+    assert ask(bridge) is None
+    assert origin.asked == []
+    assert question(factory).json()["version"] == "0.4.0"
+
+
+def test_a_check_just_run_is_a_fresh_word(box, factory, origin):
+    """The check probes first too: an install right after it does not look again."""
+    origin.answers = False
+    bridge = unprobed(offline(box()))
+    assert bridge.updates.keys
+    assert bridge.updates.request_check(PAGE) is None
+    assert len(origin.asked) == 1
+    assert bridge.updates.reachability == UNREACHABLE and bridge.updates.origin_fresh()
+    assert ask(bridge) is None
+    assert len(origin.asked) == 1
+    assert question(factory).json()["version"] == "0.4.0"
+
+
+def test_the_probe_goes_to_disk_like_a_checks(box, factory, origin):
+    origin.answers = False
+    bridge = unprobed(offline(box()))
+    assert ask(bridge) is None
+    checks = updatecheck.read_checks(bridge.updates.check_path)
+    assert checks[bridge.updates.lineage]["origin"] == UNREACHABLE
+    # The `update` topic says it too.
+    assert factory.client.last(test_selfupdate.UPDATE).json()["origin"] == UNREACHABLE
+
+
+@pytest.mark.parametrize("where", [SCREEN, PAGE])
+def test_a_fresh_box_without_an_integration_is_told_at_once(where, box, factory, origin):
+    origin.answers = False
+    bridge = unprobed(offline(box(), integration=False))
+    if where == PAGE:
+        said = bridge.run_command("update", json.dumps({"version": "0.4.0"}), PAGE)
+        assert said == selfupdate.NO_RELAY
+    else:
+        answer = ask(bridge)
+        assert (answer.reason, str(answer)) == ("no_relay", selfupdate.NO_RELAY)
+    assert len(origin.asked) == 1
+    assert factory.client.all_for(RELAY_REQUEST) == []
+    assert bridge.self_update.relay_wait() is None
+
+
+def test_a_command_over_mqtt_never_looks_at_the_origin(box, factory, origin):
+    bridge = unprobed(offline(box()))
+    send(factory, {"version": "0.4.0"})
+    assert refusal(factory.client) is None
+    assert origin.asked == []
+    assert factory.client.all_for(RELAY_REQUEST) == []
+    assert request_file(directories(bridge.root)[0])["started_by"] == "mqtt"
+
+
+def test_a_refused_install_never_looks_at_the_origin(box, factory, origin, receiver):
+    bridge = unprobed(offline(box()))
+    receiver.enter_standby()
+    assert ask(bridge).reason == "standby"
+    assert origin.asked == []
+
+
+def test_while_the_origin_is_looked_at_the_install_waits_and_is_busy(box, factory, origin,
+                                                                     monkeypatch):
+    origin.answers = False
+    bridge = unprobed(offline(box()))
+    jobs = held_back(monkeypatch)
+    assert ask(bridge) is None
+    assert origin.asked == []
+    assert bridge.self_update.relay_wait() == {"version": "0.4.0", "seconds_left": 60,
+                                               "phase": "probe"}
+    assert ask(bridge).reason == "busy"
+    assert bridge.uninstaller.request(NODE, origin=PAGE).reason == "busy"
+    assert refusal(factory.client) is None and directories(bridge.root) == []
+    jobs.run()
+    assert len(origin.asked) == 1
+    assert question(factory).json()["version"] == "0.4.0"
+    assert bridge.self_update.relay_wait()["phase"] == "relay"
+
+
+def test_a_probe_that_answers_later_starts_the_helper_and_clears_last_error(box, factory,
+                                                                            origin, monkeypatch):
+    bridge = unprobed(offline(box()))
+    jobs = held_back(monkeypatch)
+    bridge.publish_last_error("update", "an earlier refusal")
+    assert refusal(factory.client) is not None
+    assert ask(bridge) is None
+    jobs.run()
+    assert request_file(directories(bridge.root)[0])["relay"] is None
+    assert factory.client.last(LAST_ERROR).text == ""
+    assert bridge.self_update.relay_refusal is None
+
+
+def test_the_table_is_asked_again_when_the_probe_answers(box, factory, origin, monkeypatch,
+                                                         receiver):
+    bridge = unprobed(offline(box()))
+    jobs = held_back(monkeypatch)
+    assert ask(bridge) is None
+    receiver.enter_standby()
+    jobs.run()
+    assert directories(bridge.root) == []
+    assert refusal(factory.client)[0] == "standby"
+    assert factory.client.last(LAST_ERROR).json()["cmd"] == "update"
+    assert bridge.self_update.relay_refusal.reason == "standby"
+
+
+def test_a_probe_that_does_not_answer_in_time_is_decided_without_it(box, factory, origin,
+                                                                   monkeypatch):
+    bridge = unprobed(offline(box()))
+    jobs = held_back(monkeypatch)
+    assert ask(bridge) is None
+    MainLoop.advance(PROBE_MS - 1)
+    assert directories(bridge.root) == [] and bridge.self_update.relay_wait() is not None
+    MainLoop.advance(1)
+    # Nothing new is known: the helper fetches itself - the install asked for is the consent.
+    assert request_file(directories(bridge.root)[0])["relay"] is None
+    assert factory.client.all_for(RELAY_REQUEST) == []
+    # The probe that answers after that changes nothing, and says nothing.
+    jobs.run()
+    assert len(directories(bridge.root)) == 1
+    assert factory.client.all_for(RELAY_REQUEST) == []
+    assert refusal(factory.client) is None
+
+
+def test_a_worker_that_cannot_start_does_not_leave_the_install_waiting(box, factory, origin,
+                                                                      monkeypatch):
+    def refuse(job):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(UpdateChecker, "run_in_background", staticmethod(refuse))
+    bridge = unprobed(offline(box()), UNREACHABLE)
+    assert ask(bridge) is None
+    # The word it has is all it has: unreachable, so Home Assistant is asked.
+    assert question(factory).json()["version"] == "0.4.0"
+
+
+def test_a_plugin_that_stops_while_the_origin_is_looked_at_starts_nothing(box, factory, origin,
+                                                                         monkeypatch):
+    bridge = unprobed(offline(box()))
+    jobs = held_back(monkeypatch)
+    assert ask(bridge) is None
+    bridge.self_update.abandon()
+    jobs.run()
+    MainLoop.advance(PROBE_MS)
+    assert directories(bridge.root) == []
+    assert factory.client.all_for(RELAY_REQUEST) == []
+
+
+@pytest.mark.parametrize(("reason", "record", "noted"), [
+    ("download", {"origin": "unreachable"}, True),
+    ("unreachable", {"origin": "unreachable"}, True),
+    ("download", {"origin": "reachable"}, False),
+    ("bad_package", {"origin": "reachable"}, False),
+    ("download", {}, False),
+])
+def test_a_helper_that_could_not_reach_the_origin_makes_the_next_install_ask(
+        reason, record, noted, box, factory, origin):
+    bridge = offline(box(), REACHABLE)
+    assert ask(bridge) is None
+    (directory,) = directories(bridge.root)
+    test_selfupdate.helper_says(directory, started_by="screen", phase="finished",
+                                result="failed", reason=reason, error="it failed",
+                                finished=NOW, record=record)
+    test_selfupdate.tick()
+    assert bridge.self_update.busy() is None
+    assert bridge.updates.reachability == (UNREACHABLE if noted else REACHABLE)
+    assert bridge.updates.origin_fresh()
+    checks = updatecheck.read_checks(bridge.updates.check_path).get(bridge.updates.lineage, {})
+    assert (checks.get("origin") == UNREACHABLE) is noted
+    assert ask(bridge) is None
+    assert origin.asked == []
+    if noted:
+        assert question(factory).json()["version"] == "0.4.0"
+        assert len(directories(bridge.root)) == 1
+    else:
+        assert factory.client.all_for(RELAY_REQUEST) == []
+        assert len(directories(bridge.root)) == 2
+
+
+# ----------------------------------------------- review round 1: S1, S2, S3, S4 --
+
+
+@pytest.mark.parametrize("look", ["busy", "relay_wait"])
+def test_a_relay_wait_whose_timer_did_not_start_ends_by_its_age(look, box, factory, mono,
+                                                                monkeypatch):
+    bridge = offline(box())
+    monkeypatch.setattr(bridge.self_update._relay_ticker, "start", lambda *a, **k: False)
+    assert ask(bridge) is None
+    MainLoop.advance(WAIT_MS * 2)
+    assert refusal(factory.client) is None
+    mono.now += selfupdate.RELAY_WAIT_SECONDS - 1
+    assert bridge.self_update.relay_wait() is not None
+    mono.now += 1
+    if look == "busy":
+        assert bridge.self_update.busy() is None
+    else:
+        assert bridge.self_update.relay_wait() is None
+    assert refusal(factory.client) == ("no_relay", selfupdate.NO_RELAY)
+    # Not busy for ever: the next install asks again.
+    assert ask(bridge) is None
+    assert len(factory.client.all_for(RELAY_REQUEST)) == 2
+
+
+def test_a_probe_wait_whose_timer_did_not_start_ends_by_its_age(box, factory, origin, mono,
+                                                                monkeypatch):
+    bridge = unprobed(offline(box()))
+    held_back(monkeypatch)
+    monkeypatch.setattr(bridge.self_update._probe_ticker, "start", lambda *a, **k: False)
+    assert ask(bridge) is None
+    MainLoop.advance(PROBE_MS * 2)
+    assert directories(bridge.root) == []
+    mono.now += selfupdate.PROBE_WAIT_SECONDS
+    assert bridge.self_update.relay_wait() is None
+    assert len(directories(bridge.root)) == 1
+
+
+def test_without_the_integrations_word_nobody_is_asked_and_nobody_waits(box, factory):
+    bridge = offline(box(), integration=False)
+    answer = ask(bridge)
+    assert (answer.reason, str(answer)) == ("no_relay", selfupdate.NO_RELAY)
+    assert factory.client.all_for(RELAY_REQUEST) == []
+    assert bridge.self_update.relay_wait() is None and directories(bridge.root) == []
+    # Once the integration has said it is there, the same install asks it...
+    announce(bridge)
+    assert ask(bridge) is None
+    assert question(factory).json()["version"] == "0.4.0"
+    # ... and once it has taken its word back, nobody is asked again.
+    MainLoop.advance(WAIT_MS)
+    bridge.self_update.on_integration(b"")
+    assert ask(bridge).reason == "no_relay"
+    assert len(factory.client.all_for(RELAY_REQUEST)) == 1
+
+
+def test_an_answer_only_a_clock_ahead_calls_expired_says_so(box, factory, monkeypatch):
+    bridge = offline(box())
+    monkeypatch.setattr(selfupdate.SelfUpdater, "clock", staticmethod(lambda: NOW + 700))
+    assert ask(bridge) is None
+    # Home Assistant's address, valid for ten minutes by Home Assistant's clock.
+    reply(factory, answer_for(factory, expires=NOW + 600))
+    assert directories(bridge.root) == []
+    assert bridge.self_update.relay_wait() is not None
+    MainLoop.advance(WAIT_MS)
+    assert refusal(factory.client) == ("clock_skew", selfupdate.CLOCK_SKEW)
+    assert bridge.self_update.relay_refusal.reason == "clock_skew"
+
+
+def test_a_clock_ahead_does_not_hide_a_good_answer_after_it(box, factory, monkeypatch):
+    bridge = offline(box())
+    monkeypatch.setattr(selfupdate.SelfUpdater, "clock", staticmethod(lambda: NOW + 700))
+    assert ask(bridge) is None
+    reply(factory, answer_for(factory, expires=NOW + 600))
+    reply(factory, answer_for(factory, expires=NOW + 1300))
+    assert len(directories(bridge.root)) == 1
+
+
+@pytest.mark.parametrize("spoil", [
+    lambda body: dict(body, url=URL.replace("http://", "http://u:p@"), expires=NOW - 1),
+    lambda body: dict(body, expires=0),
+    lambda body: dict(body, expires=True),
+    lambda body: dict(body, version="0.2.5", expires=NOW - 1),
+    lambda body: dict(body, id="0123456789ab", expires=NOW - 1),
+], ids=["a user part", "zero", "a bool", "another version", "another id"])
+def test_only_home_assistants_shape_counts_as_a_clock_that_differs(spoil, box, factory):
+    bridge = offline(box())
+    assert ask(bridge) is None
+    reply(factory, spoil(answer_for(factory)))
+    MainLoop.advance(WAIT_MS)
+    assert refusal(factory.client) == ("no_relay", selfupdate.NO_RELAY)
+
+
+def test_a_taken_answer_clears_what_the_last_wait_left_on_last_error(box, factory, mono):
+    bridge = offline(box())
+    assert ask(bridge) is None
+    MainLoop.advance(WAIT_MS)
+    assert refusal(factory.client)[0] == "no_relay"
+    assert ask(bridge) is None
+    reply(factory, {"id": latest_question(factory).json()["id"], "version": "0.4.0",
+                    "url": URL, "expires": NOW + 600})
+    assert len(directories(bridge.root)) == 1
+    assert factory.client.last(LAST_ERROR).text == ""
+
+
+def test_an_oversized_answer_is_discarded_before_it_is_read(box, factory):
+    bridge = offline(box())
+    assert ask(bridge) is None
+    body = dict(answer_for(factory), padding="x" * 4096)
+    assert len(json.dumps(body)) > 4096
+    reply(factory, body)
+    assert directories(bridge.root) == []
+    assert bridge.self_update.relay_wait() is not None
+    reply(factory, answer_for(factory))
+    assert len(directories(bridge.root)) == 1
+
+
+def test_the_question_names_the_serial_of_the_index_held(box, factory):
+    bridge = offline(box())
+    raw = index_bytes(7, [release("0.4.0"), release("0.3.0"), release("0.2.0")])
+    bridge.updates._held = (trust.parse_index(raw), "relay")
+    assert ask(bridge) is None
+    assert question(factory).json()["serial"] == 7
+
+
+@pytest.mark.parametrize("text", [b"[]", b"[1, 2]", b"5", b'"text"', b"null", b"true"])
+def test_an_answer_that_is_not_an_object_is_dropped_by_a_decision(text, box, factory,
+                                                                  monkeypatch):
+    raised = []
+    monkeypatch.setattr(selfupdate.LOG, "exception", lambda *args, **kwargs: raised.append(args))
+    bridge = offline(box())
+    assert ask(bridge) is None
+    reply(factory, text)
+    assert raised == []
+    assert bridge.self_update.relay_wait() is not None

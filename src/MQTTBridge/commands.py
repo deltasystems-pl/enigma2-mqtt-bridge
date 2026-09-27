@@ -175,6 +175,11 @@ class CommandDispatcher:
         if len(text.encode("utf-8")) > MAX_PAYLOAD_BYTES:
             LOG.warning("refusing cmd/%s: over the %d byte limit", name, MAX_PAYLOAD_BYTES)
             return "the command is over the " + str(MAX_PAYLOAD_BYTES) + " byte limit"
+        if name == "relay":
+            # An answer to the receiver's own question, taken from the broker only; from
+            # anywhere else it is nothing, and says nothing on `last_error` either.
+            LOG.info("cmd/relay is taken from the broker only; ignored from %s", origin)
+            return None
         handler = self.handlers.get(name)
         if handler is None:
             self.bridge.publish_last_error(name, "unknown command")

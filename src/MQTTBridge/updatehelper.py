@@ -1330,7 +1330,11 @@ class Transaction:
                 origin + trust.INDEX_FILE, trust.MAX_INDEX_BYTES, INDEX_TIMEOUT)
             if status != 200:
                 return None
-        except (netfetch.Unreachable, ValueError):
+        except netfetch.Unreachable:
+            # Said in the record for the plugin: the origin's word for the next install.
+            self.record["origin"] = "unreachable"
+            return None
+        except ValueError:
             return None
         self.record["index_fetched"] = True
         verdict, held = trustfile.keep(self.receiver.path(TRUST_FILE), self.keys,
@@ -1412,9 +1416,17 @@ class Transaction:
                 status, body = self.receiver.fetch_relay(relay["url"], trust.MAX_PACKAGE_BYTES,
                                                          PACKAGE_TIMEOUT)
             else:
-                status, body = self.receiver.fetch_origin(
-                    self.request["origin"] + entry["filename"], trust.MAX_PACKAGE_BYTES,
-                    PACKAGE_TIMEOUT)
+                try:
+                    status, body = self.receiver.fetch_origin(
+                        self.request["origin"] + entry["filename"], trust.MAX_PACKAGE_BYTES,
+                        PACKAGE_TIMEOUT)
+                except netfetch.Unreachable:
+                    # No answer at all - not a refused or a wrong one: the plugin keeps it as
+                    # the origin's word, so the next install at the television asks Home
+                    # Assistant for the package instead (`selfupdate.py`).
+                    self.record["origin"] = "unreachable"
+                    raise
+                self.record["origin"] = "reachable"
         except (netfetch.Unreachable, ValueError) as error:
             raise Fail("download", version=version, detail=str(error)) from None
         if status != 200:
