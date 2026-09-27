@@ -11,10 +11,10 @@ version that has no section here.
 
 ### Added
 
-- **The plugin installs its own releases: `cmd/update`** (ADR-0015, [TOPICS.md](docs/TOPICS.md)
-  §2). `{"version": "0.4.1" | "latest", "sha256": ..., "relay": {"url", "expires"}}` installs one
-  release of the signed index - upgrades and repairs only, never a downgrade over MQTT - and restarts
-  the interface the image's own clean way, so the receiver comes back on the channel it was showing.
+- **The plugin installs its own releases: `cmd/update`** (ADR-0015, [TOPICS.md](docs/TOPICS.md) §2).
+  `{"version": "0.4.1" | "latest", "sha256": ..., "relay": {"url", "expires"}}` installs one release
+  of the signed index - upgrades and repairs only, never a downgrade over MQTT - and restarts the
+  interface the image's own clean way, so the receiver comes back on the channel it was showing.
   Every refusal comes before anything changes, in a fixed order and with a `reason` on `last_error`:
   the new box-only permission **`update_allowed`** (off by default, echoed read-only, never writable
   by `cmd/config`), the new capability **`self_update`**, a transaction or opkg already busy,
@@ -22,22 +22,26 @@ version that has no section here.
   rules, the running release, the checksum, Home Assistant's relay address, free space and ten
   minutes since the last update. The work is done by the update helper outside enigma2; the plugin
   follows it on `update.transaction`. From the moment the package manager starts until the restart
-  the plugin's doors are closed: every command, the OpenWebif page and the setup screen say "an update is being
-  applied". A question on the television that nobody answers within 60 s withdraws the update. A
-  downgrade chosen on the receiver first retracts every retained topic but `availability`, and
-  publishes nothing after that. The plugin that starts afterwards confirms itself to the helper - even
-  when it is switched off - and reports how the update ended, including after a power cut. It reads
-  **`enigma2mqtt/integration/<node>`**, the companion integration's version, contract and floor, and
-  judges `update.available` and `cmd/update` by it. A receiver that went into standby, or started
-  recording or an EPG import, before the restart is not restarted: the update is withdrawn with
-  that reason. `cmd/uninstall` is refused (`busy`) while an update runs or its lock is held, and
-  `cmd/update` while an uninstall runs. When the old files cannot be put back after a failed
-  update, or only the code and not all of its package records, or the helper stops once the package manager has started, the doors stay closed and say
-  to install the plugin again. When a rollback puts the previous version back under an interface
-  that did not stop, that interface's doors stay closed and say to restart it - the one command
-  they still let through; a plugin started since opens as usual. A helper that stops without an end is reported
-  `interrupted`; the next `cmd/update` says when its lock lets a new one start, and the start after
-  a restart says how it ended, by the build that runs. Nothing of this has run on a receiver yet.
+  the plugin's doors are closed: every command, the OpenWebif page and the setup screen say "an
+  update is being applied". A question on the television that nobody answers within 60 s withdraws
+  the update. A downgrade chosen on the receiver first retracts every retained topic but
+  `availability`, and publishes nothing after that. The plugin that starts afterwards confirms
+  itself to the helper - even when it is switched off - and reports how the update ended, including
+  after a power cut. It reads **`enigma2mqtt/integration/<node>`**, the companion integration's
+  version, contract and floor, and judges `update.available` and `cmd/update` by it. A receiver that
+  went into standby, or started recording or an EPG import, before the restart is not restarted: the
+  update is withdrawn with that reason. `cmd/uninstall` is refused (`busy`) while an update runs or
+  its lock is held, and `cmd/update` while an uninstall runs. When the old files cannot be put back
+  after a failed update, or only the code and not all of its package records, or the helper stops
+  once the package manager has started, the doors stay closed and say to install the plugin again.
+  When a rollback puts the previous version back under an interface that did not stop, that
+  interface's doors stay closed and say to restart it - the one command they still let through; a
+  plugin started since opens as usual. Whatever the end, a plugin that ran through the update
+  compares its own build with the build on disk before it opens again, and one that runs another
+  build stays closed the same way; a plugin started by the update's restart also closes its doors
+  while the old files go back. A helper that stops without an end is reported `interrupted`; the
+  next `cmd/update` says when its lock lets a new one start, and the start after a restart says how
+  it ended, by the build that runs. Nothing of this has run on a receiver yet.
 
 - **Every package says which build it is.** `info` gains `build` - the commit the package was
   built from, the commit's time, whether the tracked files matched it, the flavour, and the commit

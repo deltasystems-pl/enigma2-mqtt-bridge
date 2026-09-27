@@ -716,8 +716,9 @@ stay closed and every command, the page and the setup screen say to install the 
 sentence as it is, since it names that repair already. That is decided from the end's record alone - the
 helper tries a restore only once the package manager has run - so an end the plugin reads
 without having seen `installing` (the whole failure between two reads) closes the doors then.
-A `not_stopped` end keeps them closed too, whichever process reads it - see "What the plugin
-does with these ends" below. The request's `acceptance`, `keys` and `origin` are
+After `not_stopped` they stay closed in the process R2 could not stop, and after any end in a
+process whose build is not the one on disk - see "What the plugin does with these ends" below.
+The request's `acceptance`, `keys` and `origin` are
 the running build's own, never anything a command, the page or the integration's topic says. At `restarting` it asks the standby, recording and EPG-import guards again and,
 when one holds, writes `withdraw` with that reason instead of asking; otherwise it retracts first
 for a downgrade, writes `restart.json` and asks the image to restart. When the helper stops
@@ -729,12 +730,19 @@ like a restore that failed: a helper killed outright leaves its package manager 
 orphan that may still be writing the files, so the doors stay closed (or close) and say to
 install the plugin again. The one exception is `installing` with no marker of this transaction:
 the helper writes the marker before it runs the package manager and runs nothing without it, so
-nothing changed, and the doors reopen with a fresh session. Until the lock is stale `cmd/update` is refused `busy` with "the previous
+nothing changed, and the doors reopen with a fresh session. A plugin that only follows the
+transaction - the one its restart started - closes its doors at `rolling_back`: R2 is putting the
+previous version's files back under it, for as long as three minutes when the interface does not
+stop. The end opens them again on the same conditions as for the process that asked; a helper that
+stops during `rolling_back`, or a followed transaction that passes the marker's deadline while
+they are closed, leaves them closed with the same reinstall sentence.
+Until the lock is stale `cmd/update` is refused `busy` with "the previous
 update stopped without finishing; a new one is possible in about <n> minutes, when its lock on
 the receiver expires" - said only for a self-update's record of this boot whose helper is
 provably gone; the lock is not taken back. While a transaction runs or the lock is held,
 `cmd/uninstall` is refused `busy`, and `cmd/update` while an uninstall runs. A followed
-transaction past the marker's deadline is let go. The plugin that starts after a restart writes
+transaction past the marker's deadline is let go - with its doors closed, as a helper that
+stopped. The plugin that starts after a restart writes
 `started.json` - never the process whose pid is the request's `enigma2_pid` - and follows the
 marker to the end.
 
@@ -756,11 +764,18 @@ running":
     and the setup screen answer the sentence. The image's own restart from the television was
     never the plugin's to refuse. `last_error` carries the helper's sentence as it is. After the
     restart the previous version starts and reads the end from the last-transaction record like
-    any other.
-  - **Not listed** (a process started since, after the repair or a reboot, or `unstopped`
-    missing because no look answered - then judged by the version it runs, as for a marker that
-    outlived its helper): it started on the files on disk, which agree with opkg's records, so it
-    reports the end on `last_error` and opens as after any end.
+    any other. The process that asked is held too when it is listed, although it runs `from`
+    over `from`'s files again: it survived the quit R1 asked for and R2's `init 4`, so its quit
+    hung somewhere, and a process in that state is not one to open a fresh session in. The
+    restart the sentence asks for ends it, and costs nothing that is not already lost.
+  - **Not listed** (a process started since, after the repair or a reboot): it started on the
+    files on disk, which agree with opkg's records, so it reports the end on `last_error` and
+    opens as after any end - when the build rule below agrees.
+  - **No list** (no look at `/proc` answered): the pid proves nothing either way, and the version
+    decides, as for a marker that outlived its helper. A process that runs the transaction's
+    `from` - from the marker, else this transaction's `request.json`, else the status file's
+    bare number - runs the files that were put back and opens, when the build rule agrees; any
+    other, and one nothing shows to run `from`, is held as if it were listed.
 - After `interface_not_started`, no plugin is running to read it. Whatever starts the interface
   next starts the previous version, which reads the finished marker at its start, reports the end
   on `last_error` and opens as after any end: its files and its process agree, so nothing stays
@@ -768,8 +783,33 @@ running":
 - So "`record.restore` is `done`" alone does not mean nothing is stuck: a plugin that opens its
   doors on every such end reopens them over changed files after `not_stopped`. The check is the
   reason, or `record.interface` `not restarted`, together with the plugin's own pid in
-  `record.unstopped` - in the process that asked and in one that follows alike. With a restore
-  that did not complete as well, the reinstall stays the repair and the doors say so.
+  `record.unstopped` - in the process that asked and in one that follows alike - and, after
+  every end, the build rule below. With a restore that did not complete as well, the reinstall
+  stays the repair and the doors say so.
+
+**The build rule: the files decide last.** The pid list, the reason and `from` are the helper's and
+the request's account, and a look at `/proc` that went wrong - one that could not open a process's
+files and took that for no process - or a `from` built without a commit, which matches any build of
+its number, can make them say "this process runs the files" when it does not. So before a process
+that ran through a transaction - the one that asked, or one that followed it - opens its doors again
+or reloads, after **any** end and whatever the reason, the result or `record.unstopped` say, it
+compares the build it loaded at its start (`info.build`: the commit, its time, `dirty` and the
+flavour) with the build id on disk (`buildinfo.py`, read as literals, never imported). When they
+differ, it runs other code than the files underneath it, and it is held exactly as a listed process
+is: the doors closed, no reload, the restart sentence, `restart_gui` let through. When the old files
+were not all put back as well (`restore_failed`, `restore_incomplete`, or a helper that stopped
+during `rolling_back`), the reinstall sentence stays, and a restart is not let through: it would
+start a mix. The pid and the version remain the cheaper first signal and still hold a process by
+themselves; they can no longer open one whose build is not the one on disk.
+
+A build id on disk that cannot be read is not the running build. A process that loaded one at
+its start and finds none now - the file missing, unreadable, or not what the builder writes - had
+its files changed under it, or damaged, and is held with the restart sentence: the conservative
+side, since the restart runs whatever is on disk, and a process that starts is never held. Only a
+copy nobody built, which never had a build id, finding none either cannot tell, and the pid list
+and the version decide alone. A process that starts loads its build id from the files it started
+on, so at a start there is nothing to compare: the rule is for a process that was already running
+when the files changed.
 
 **What it re-judges**: the index is read again - fetched from the origin only when the request
 carries no relay address (an install Home Assistant drives needs no internet on the receiver and

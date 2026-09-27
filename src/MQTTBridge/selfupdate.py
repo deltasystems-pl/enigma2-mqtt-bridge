@@ -43,7 +43,11 @@ helper left behind, so a failure that fell between two polls closes them too. Af
 that put the old files back under an interface it could not stop (`not_stopped`), a process
 whose pid the helper lists as left running (`record.unstopped`) is that interface: its files are
 the previous version's now, so its doors stay closed as well - the repair is a restart of the
-interface, and `restart_gui` is the one command they let through.
+interface, and `restart_gui` is the one command they let through. Those are the helper's account,
+and its look at `/proc` can be wrong; so before a process that ran through a transaction opens
+again, after any end, it compares the build it loaded at its start with the build on disk, and a
+process whose build is not the one on disk is held the same way. A process that only follows a
+transaction closes its doors too while R2 puts the previous files back (`rolling_back`).
 
 The restart itself waits for the helper's `restarting`: for a downgrade chosen at the television
 or on the page, every retained topic the node owns except `availability` is first retracted at
@@ -908,8 +912,11 @@ class SelfUpdater:
         record = dict(self._transaction or {}, phase="finished", result="failed",
                       finished=int(self.clock()), error=error)
         # Through the one end every transaction takes, so doors a vanished transaction had
-        # closed open again (review S10).
-        self._end(public(record), "internal_error", followed=False)
+        # closed open again (review S10) - unless the files are not this process's build
+        # (review round 5): nothing of this transaction changed them, but a reload would load
+        # them all the same.
+        stuck = None if self._runs_the_files_on_disk() else STUCK_UNSTOPPED
+        self._end(public(record), "internal_error", followed=False, stuck=stuck)
 
     # ------------------------------------------------------------ following --
 
@@ -984,10 +991,14 @@ class SelfUpdater:
                 unstopped = (record.get("reason") == UNSTOPPED
                              or details.get("interface") == "not restarted") \
                     and self._left_running(current, record, details)
+                # Review round 5: the pid list and the reason are the helper's account, and its
+                # look at /proc can be wrong. The files themselves are asked last, whatever the
+                # end says: a process whose build is not the one on disk is held.
+                other = not self._runs_the_files_on_disk()
                 stuck = None
-                if unrestored and (current["ours"] or unstopped):
+                if unrestored and (current["ours"] or unstopped or other):
                     stuck = STUCK_PARTIAL if restore.startswith("partial") else STUCK
-                elif unstopped:
+                elif unstopped or other:
                     stuck = STUCK_UNSTOPPED
                 self._end(payload, record.get("reason"), followed=not current["ours"],
                           stuck=stuck)
@@ -999,8 +1010,19 @@ class SelfUpdater:
                 current["asked"] = True
                 self._restart()
             return
+        if phase == "rolling_back" and not self.closed:
+            # Review round 5: R2 is putting the previous version's files back under this
+            # process too - for up to three minutes when the interface does not stop - and a
+            # first import meanwhile would load them. The end reopens the doors when it may.
+            self._close_doors()
         # The marker's deadline, read when the following began: `status.json` has none (S5).
         if self._past_deadline(current, self._receiver()):
+            if self.closed:
+                # Let go with the doors closed, they would say "wait" for ever: judged as a
+                # helper that stopped, with the files perhaps half put back.
+                self._helper_died(current, record, "the update helper did not finish before "
+                                                   "its deadline")
+                return
             LOG.warning("update %s is past its deadline; no longer following it", current["id"])
             self._current = None
             self._poll_ticker.stop()
@@ -1048,6 +1070,28 @@ class SelfUpdater:
         return running["version"] == before.get("version") and \
             running["commit"] == (before.get("commit") or running["commit"])
 
+    def _runs_the_files_on_disk(self):
+        """Whether the build on disk is the one this process loaded at its start (review round 5).
+
+        Asked before a process that ran through a transaction opens its doors again, after any
+        end: the pid list, the reason and `from` are what the helper and the request say, and a
+        look at /proc that went wrong, or a `from` built without a commit, can make them say
+        "this process runs the files" when it does not. The build id is what the files say.
+        It names the commit, so a release built again under the same number is another build,
+        and a version bump is another commit.
+
+        Conservative where the file says nothing: a process that loaded a build id at its start
+        and now finds none - the file missing, unreadable or not what the builder writes - has
+        had its files changed under it, or damaged, and is not taken to run them. Only a copy
+        nobody built, which never had a build id, finding none either cannot tell; there the
+        pid list and `from` decide alone, as before this check.
+        """
+        loaded = self.bridge.build
+        on_disk = buildid.read(self.bridge._build_path)
+        if on_disk is None:
+            return loaded is None
+        return on_disk == loaded
+
     def _helper_gone(self, current):
         """Whether the helper that `start-stop-daemon` recorded has stopped running.
 
@@ -1064,20 +1108,27 @@ class SelfUpdater:
             return False
         return not self._runs(pid, os.path.join(current["directory"], HELPER_NAME))
 
-    def _helper_died(self, current, record):
+    def _helper_died(self, current, record, detail="the update helper stopped"):
         """The helper is gone mid-way: say so, and never wait for an end it cannot write."""
         self._current = None
         self._poll_ticker.stop()
-        detail = "the update helper stopped"
         touched = self._files_may_have_changed(current, record.get("phase"))
+        other = not self._runs_the_files_on_disk()
         stuck = None
-        if touched and current["ours"]:
+        # A follower is under the changed files only once R2 puts the previous ones back
+        # (review round 5); before that it runs the files it started on. And whatever the
+        # phase, a build on disk that is not this process's holds it.
+        if touched and (current["ours"] or record.get("phase") == "rolling_back" or other):
             # Review round 2 (DS2): the files changed under this process, and a helper killed
             # outright (SIGKILL, the OOM killer) leaves its package manager running as an
             # orphan that may still be writing them. A fresh session would import whatever it
             # wrote, so the doors stay closed, as after a restore that failed.
             detail += " after the package manager had started on the plugin's files"
             stuck = STUCK_STOPPED
+        elif other:
+            # The helper stopped before the package manager ran, yet the files are another
+            # build: something else changed them, and the restart is what runs them.
+            stuck = STUCK_UNSTOPPED
         elif touched:
             detail += ("; the plugin's files may not be the running version's - restart the "
                        "receiver's interface, or install the plugin again")
@@ -1116,7 +1167,10 @@ class SelfUpdater:
         outside this process - Home Assistant's forced reinstall over SSH (delta review D2).
         Nor after `not_stopped`: the files are the previous version's, whole, under a process
         that holds the other one's code, so the doors stay closed the same way, and the repair
-        is the restart that ends this process (`STUCK_UNSTOPPED`, review round 3).
+        is the restart that ends this process (`STUCK_UNSTOPPED`, review round 3). Nor when the
+        build on disk is not the one this process loaded, whatever the end - `installed`
+        included, which only a helper that misjudged could write to such a process: the same
+        sentence, the same repair (review round 5).
         """
         if payload is not None:
             self._transaction = payload
@@ -1129,7 +1183,7 @@ class SelfUpdater:
         refusal = None
         if result != "installed" and error:
             refusal = Refusal(error, reason or result or "failed")
-        if stuck is not None and result != "installed":
+        if stuck is not None:
             if not self.closed:
                 # The whole change fell between two polls: the doors close now.
                 self.closed = True
@@ -1140,9 +1194,9 @@ class SelfUpdater:
             self._queue = []
             self._outstanding = []
             if stuck == STUCK_UNSTOPPED:
-                LOG.error("update %s: the previous version's files are back under this process, "
-                          "which still runs the other one; the doors stay closed until the "
-                          "interface restarts", ident)
+                LOG.error("update %s: the plugin's files on disk are not the build this "
+                          "process runs; the doors stay closed until the interface restarts",
+                          ident)
             else:
                 LOG.error("update %s: the plugin's files changed and were not put back; the "
                           "doors stay closed until the plugin is installed again", ident)
