@@ -1828,6 +1828,8 @@ class Transaction:
         failures are recorded and the unit carries on, and anything else still meets the
         `finally`, which first runs the steps the unit had not reached - the restore, the
         channel - each guarded, records `rollback: cut short`, and then starts the interface.
+        R3 comes after the start and checks a rollback that is already done, so an error in it
+        is noted (`channel` / `standby` `unconfirmed`) and never changes the result.
 
         Before `init 4` nothing has been stopped, so this is not yet the unit: the record is
         best effort (an error in it leaves the one taken before the restart), and only once the
@@ -1881,7 +1883,13 @@ class Transaction:
         if not started:
             self.record["interface"] = "not started"
         if started and recorded and receiver.clock() < limit:
-            self.verify(recorded)
+            try:
+                self.verify(recorded)
+            except Exception as error:  # R3 checks a rollback that is done; it cannot undo it
+                self.record.setdefault(
+                    "internal_error", (type(error).__name__ + ": " + str(error))[:200])
+                self.record.setdefault("channel", "unconfirmed")
+                self.record.setdefault("standby", "unconfirmed")
         else:
             self.record.update(channel="not recorded" if not recorded else "lost")
         self.finish("rolled_back" if self.record.get("restore") == "done" else "failed",

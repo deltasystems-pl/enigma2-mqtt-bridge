@@ -2164,3 +2164,18 @@ def test_a_channel_write_that_escapes_twice_still_lets_the_interface_start(
     record = scene.status()["record"]
     assert (record["rollback"], record["restore"], record["lastservice"]) == (
         "cut short", "done", "failed")
+
+
+def test_an_error_in_r3_leaves_a_finished_rollback_rolled_back(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+
+    def broken(self, recorded):
+        raise RuntimeError("the channel check broke")
+    monkeypatch.setattr(updatehelper.Transaction, "verify", broken)
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    assert scene.plugin_py() == f"# plugin {OLD}\n" and scene.init_calls() == ["4", "3"]
+    record = scene.status()["record"]
+    assert (record["channel"], record["standby"]) == ("unconfirmed", "unconfirmed")
+    assert record["internal_error"].startswith("RuntimeError")
