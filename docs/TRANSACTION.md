@@ -520,8 +520,13 @@ So:
   step below: it first runs the steps the unit had not reached, the restore and the `lastservice`
   write, each guarded so that none can keep the next from running, records `rollback: cut short`,
   and then runs `init 3` - so the interface is never started over a tree that could still have
-  been put back. That covers an escape from the `init 3` call itself: the unit counts `init 3`
-  as sent only once the call has returned, and the `finally` sends it again otherwise, which is
+  been put back. Cut short before it had seen enigma2 stop - in `init 4` or in the wait for the
+  stop - the `finally` does not take "not seen stopped yet" for "running": it looks at `/proc`
+  once more, by process name as the wait does, and with no enigma2 running it puts the settings
+  block back and writes the channel as the unit would have; only an interface still running, or
+  a look that fails, goes without them. The `finally` also covers an escape from the `init 3`
+  call itself: the unit counts `init 3` as sent only once the call has returned, and the
+  `finally` sends it again otherwise, which is
   safe because starting a runlevel that is already running changes nothing. The helper's own
   way of running a program also turns any error in starting it (a `MemoryError` while the child
   is set up, say) into an exit status, as it already did for a program it could not find, so

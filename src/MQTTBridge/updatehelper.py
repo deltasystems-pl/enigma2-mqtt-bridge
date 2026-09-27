@@ -1881,6 +1881,15 @@ class Transaction:
                 # over a tree that could still have been put back.
                 self.record["rollback"] = "cut short"
                 if not starting:
+                    if not stopped:
+                        # "Not seen stopped yet" is not "running": cut short in `init 4` or in
+                        # the wait, enigma2 may well be down. Asked once more, from `/proc`,
+                        # so that a stopped interface still gets its settings block and its
+                        # channel back; only a running one - or no answer - goes without.
+                        try:
+                            stopped = not receiver.enigma2_pids()
+                        except BaseException:
+                            stopped = False
                     if not restored:
                         try:
                             self.put_back(settings=stopped)

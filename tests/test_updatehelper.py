@@ -2235,3 +2235,60 @@ def test_a_program_that_cannot_be_started_is_an_exit_status_never_an_escape(
     receiver = updatehelper.Receiver(root=str(tmp_path))
     assert receiver.run(["/sbin/init", "3"], 5) == 127
     assert receiver.last_output.startswith(type(error).__name__)
+
+
+def escape_after_init_4(scene):
+    """`init 4` takes effect - or not, as the box does - and then something escapes."""
+    real = scene.box.run
+
+    def init_4_then_escape(argv, timeout):
+        code = real(argv, timeout)
+        if argv[0] == scene.box.init and argv[1] == "4":
+            raise Escape()
+        return code
+    scene.box.run = init_4_then_escape
+
+
+@pytest.mark.parametrize("where", ["init_4", "stop_wait"])
+def test_r2_cut_short_before_it_saw_the_stop_still_restores_a_stopped_interfaces_settings(
+        tmp_path, where):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    if where == "init_4":
+        escape_after_init_4(scene)
+    else:
+        real = scene.box.enigma2_pids
+        looks = []
+
+        def the_first_look_after_init_4_escapes():
+            if scene.init_calls() and not looks:
+                looks.append(True)
+                raise Escape()
+            return real()
+        scene.box.enigma2_pids = the_first_look_after_init_4_escapes
+    with pytest.raises(Escape):
+        scene.run()
+    # enigma2 was down, only not yet seen down: the settings block and the channel go back.
+    assert scene.init_calls() == ["4", "3"] and scene.box.pids and not scene.locked()
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "true"
+    assert scene.box.lastservice_at_start == TVP1
+    record = scene.status()["record"]
+    assert (record["rollback"], record["restore"], record["lastservice"]) == (
+        "cut short", "done", "written")
+
+
+def test_r2_cut_short_in_an_init_4_that_stopped_nothing_writes_no_settings(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    escape_after_init_4(scene)
+    with pytest.raises(Escape):
+        scene.run()
+    # The running interface writes its own settings over any on its next clean quit.
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "false"
+    assert scene.box.setting("config.tv.lastservice") == TVN
+    assert scene.plugin_py() == f"# plugin {OLD}\n" and scene.init_calls() == ["4", "3"]
+    assert scene.status()["record"]["restore"] == "done"
