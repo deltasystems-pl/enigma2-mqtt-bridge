@@ -55,9 +55,10 @@ wait before it starts (the relay handshake, `selfupdate.py`), and a wait past it
 ended by whoever looks at it, timer or not (`SelfUpdater.relay_wait`). Loading this page - or a
 refresh of the television's screen - can therefore be what ends it and puts its refusal on
 `last_error`: `no_relay` when no answer came, `clock_skew` when every answer that came had
-already expired by this receiver's clock. That is not a GET changing the receiver: it completes an install already
-confirmed, with the end its own timer gives it, only noticed first. The "Plugin updates"
-section says how the last wait ended for an hour after it (`updateview.relay_outcome`).
+already expired by this receiver's clock. That is not a GET changing the receiver: it
+completes an install already confirmed, with the end its own timer gives it, only noticed
+first. The "Plugin updates" section says how the last wait ended for an hour after it
+(`updateview.relay_outcome`).
 
 **How the page is opened.** OpenWebif's menu entry loads it into its own
 content panel with jQuery (`$("#content_container").load(url)`), which injects
