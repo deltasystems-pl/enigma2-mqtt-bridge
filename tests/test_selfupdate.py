@@ -694,7 +694,7 @@ def test_the_rate_limit_counts_uptime_within_one_boot(box, monkeypatch):
     assert bridge.self_update.request(json.dumps({"version": "0.4.0"})) is None
 
 
-def test_across_a_boot_the_rate_limit_falls_back_to_the_clock(box):
+def test_across_a_boot_the_wall_clock_is_not_trusted(box):
     bridge = box()
     last = str(bridge.root / updatehelper.LAST)
     updatehelper.write_json(last, {"id": "0123456789ab", "finished": NOW + 3600,
@@ -1595,3 +1595,36 @@ def test_a_relayed_index_is_not_judged_behind_closed_doors(box, factory, monkeyp
                         lambda payload, retain: calls.append(payload))
     factory.client.fire_message(RELEASE_INDEX_TOPIC, b'{"index": "", "sig": ""}', retain=True)
     assert calls == []
+
+
+# ------------------------------------------- the helper's review round (merged) --
+
+
+@pytest.mark.parametrize("boot", [OTHER_BOOT, BOOT])
+def test_a_marker_still_at_installing_is_interrupted_whatever_version_runs(boot, starting,
+                                                                          factory):
+    """The helper writes the marker before the package manager: the files may be a mix."""
+    def prepare(root):
+        directory = marker(root, phase="installing", boot=boot, to=("0.3.0", COMMIT))
+        lock(root, "a1b2c3d4e5f6", boot=boot, alive=False)
+        (directory / "helper.pid").write_text("4321\n")
+
+    bridge = starting(prepare=prepare)
+    factory.client.fire_connect()
+    ended = transaction(factory.client)
+    assert (ended["phase"], ended["result"]) == ("finished", "interrupted")
+    assert refusal(factory.client)[0] == "interrupted"
+    assert not (bridge.root / updatehelper.MARKER).exists()
+
+
+def test_after_a_reboot_the_rate_limit_counts_this_boots_uptime(box, monkeypatch):
+    """TRANSACTION.md section 1: an end of another boot is at least this boot's uptime ago."""
+    bridge = box()
+    last = str(bridge.root / updatehelper.LAST)
+    # By the wall clock a day ago - a clock that is not to be trusted after a reboot.
+    updatehelper.write_json(last, {"id": "0123456789ab", "finished": NOW - 86400,
+                                   "boot_id": OTHER_BOOT, "uptime": 5000})
+    (bridge.root / "proc" / "uptime").write_text("120.00 1.00\n")
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0"})).reason == "rate_limited"
+    (bridge.root / "proc" / "uptime").write_text("601.00 1.00\n")
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0"})) is None

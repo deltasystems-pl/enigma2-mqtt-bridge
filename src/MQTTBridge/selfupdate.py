@@ -425,11 +425,15 @@ class SelfUpdater:
         By version and build commit: a release built again under the same number (spike S1)
         is another build, so the number alone would call the old one `installed`. `from`
         without a commit - the build before could not read its own - is judged by the number.
+        A marker still at `installing` is `interrupted` whatever runs: the package manager may
+        have stopped part-way, and a mix of both versions answers to either (TRANSACTION.md 4).
         """
         running = self._running()
         target = marker.get("to") if isinstance(marker.get("to"), dict) else {}
         before = marker.get("from") if isinstance(marker.get("from"), dict) else {}
-        if running["version"] == target.get("version") and \
+        if marker.get("phase") == "installing":
+            result, reason = "interrupted", "interrupted"
+        elif running["version"] == target.get("version") and \
                 running["commit"] == target.get("commit"):
             result, reason = "installed", None
         elif running["version"] == before.get("version") and \
@@ -668,21 +672,25 @@ class SelfUpdater:
             return True
 
     def _rate_limited(self):
-        """Ten minutes since the last transaction ended - by uptime within one boot.
+        """Ten minutes since the last transaction ended - measured on the boot (TRANSACTION.md 1).
 
-        Many receivers boot with the clock in 1970 and jump when NTP answers, so within the
-        boot that wrote the record its uptime is the measure; across a boot, or with a record
-        that has no uptime, the wall clock, which then cannot go backwards into a refusal.
+        Many receivers boot with the clock in 1970 and jump when NTP answers, so the wall clock
+        is the last resort: within the boot that wrote the record the time since the end is
+        its uptime now minus the record's; a record of another boot ended before this boot,
+        so at least this boot's uptime has passed. Only a record, or a receiver, without a
+        boot id falls back to the wall clock, which then cannot go backwards into a refusal.
         """
         last = updatehelper.read_json(self._path(updatehelper.LAST))
         if not last:
             return False
         receiver = self._receiver()
         boot, uptime = receiver.boot_id(), receiver.uptime()
-        ended = last.get("uptime")
-        if (boot and last.get("boot_id") == boot and uptime is not None
-                and isinstance(ended, (int, float)) and not isinstance(ended, bool)):
-            return 0 <= uptime - ended < RATE_LIMIT_SECONDS
+        ended_boot, ended = last.get("boot_id"), last.get("uptime")
+        if boot and uptime is not None and isinstance(ended_boot, str) and ended_boot:
+            if ended_boot != boot:
+                return uptime < RATE_LIMIT_SECONDS
+            if isinstance(ended, (int, float)) and not isinstance(ended, bool):
+                return 0 <= uptime - ended < RATE_LIMIT_SECONDS
         finished = _whole(last.get("finished"))
         if finished is None:
             return False
@@ -895,7 +903,7 @@ class SelfUpdater:
                               finished=int(self.clock()), error=error))
         # With the files perhaps changed the marker stays (review S4): the next start - after
         # the restart this sentence asks for, or after a reboot - judges it by the build that
-        # starts. The helper writes it from `restarting` on; before that there is none.
+        # starts. The helper writes it before the package manager runs (`installing`).
         self._end(payload, "interrupted", followed=not current["ours"], keep_marker=touched)
 
     def _end(self, payload, reason, followed, keep_marker=False):

@@ -33,9 +33,10 @@ schema-2 snapshot `self-update-<id>`; the marker, phase `installing`, so that a 
 `SIGKILL` while the package manager unpacks is known at the next start; `opkg install
 --force-reinstall` (with `--force-downgrade` only for a version that is lower, and only when the
 television or the page started it); the installed files against the package's manifest; then the
-phase `restarting`, which is the plugin's cue to close its doors and ask the image for a clean
-restart (rule R1). The plugin answers through the transaction directory: `restart.json` when it
-has asked, `withdraw` when the question on the television was answered "no" or timed out, and -
+phase `restarting`, which is the plugin's cue - its doors closed since `installing` - to ask the
+image for a clean restart (rule R1). The plugin answers through the transaction directory:
+`restart.json` when it has asked, `withdraw` when the question on the television was answered
+"no" or timed out, or a guard of the household holds again right before the restart, and -
 from the new plugin, once it has started - `started.json` with its version and build commit.
 
 **Which process is the restart.** The request names the enigma2 that asked (`enigma2_pid`). A
