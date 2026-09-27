@@ -2741,10 +2741,41 @@ def test_a_restart_that_lands_late_is_given_only_what_is_left_of_the_forward_pat
     scene.box.pauses["restarting"] = asked_ten_seconds_before_the_deadline
     scene.box.pauses["rollback_recorded"] = lambda: marks.setdefault("r2", scene.box.t)
     assert scene.run() == 1
-    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    # The forward path's time ran out, not the new plugin: `not_started` would report a broken
+    # release for a restart that only came late.
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "time_limit")
+    assert scene.last()["error"] == str(updatehelper.Fail("time_limit"))
     assert scene.status()["record"]["proof"] == "none"
     # The proof window ended with the forward path, not 120 s after the restart.
     assert marks["r2"] <= scene.transaction.deadline + updatehelper.PROOF_POLL
+
+
+@pytest.mark.parametrize("left, reason", [
+    (updatehelper.PROOF_WINDOW + 30, "not_started"),
+    (updatehelper.PROOF_WINDOW, "not_started"),
+    (updatehelper.PROOF_WINDOW - 1, "time_limit"),
+    (0, "time_limit"),
+], ids=["room_to_spare", "exactly_the_window", "one_second_short", "none_left"])
+def test_a_proof_window_is_time_limit_only_when_the_deadline_cut_it(tmp_path, left, reason):
+    # A new plugin that never proves itself: the reason says whether it had its whole 120 s.
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.pauses["proving"] = lambda: setattr(scene.transaction, "deadline",
+                                                  scene.box.t + left)
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", reason)
+    assert scene.status()["record"]["proof"] == "none"
+
+
+def test_a_late_restart_that_r2_cannot_stop_keeps_time_limit_as_its_cause(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    scene.box.pauses["proving"] = lambda: setattr(scene.transaction, "deadline",
+                                                  scene.box.t + 30)
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "not_stopped")
+    assert scene.status()["record"]["cause"] == "time_limit"
 
 
 # What TRANSACTION.md section 2.4 states, in seconds from the helper's start.

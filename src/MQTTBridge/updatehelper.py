@@ -58,7 +58,8 @@ and is never proved.
   1, `started.json` naming the target and its commit, for a target whose index entry says it can
   (`self_update`); tier 2 for 0.2.0 and 0.3.x, the new process holding the plugin's log file
   open, polled every two seconds, or the OpenWebif hook answering when neither log path was
-  writable. Proved: commit. Not proved: R2;
+  writable. Proved: commit. Not proved: R2, with `not_started` - or `time_limit` when the
+  deadline cut the window short;
 - R2 - stop, restore, start: the playing channel and the standby state are recorded, `init 4`,
   the snapshot goes back (with the plugin's settings block, once enigma2 is seen stopped), the
   recorded channel is written as `config.tv.lastservice`, `init 3`, and R3 compares what the
@@ -1827,7 +1828,12 @@ class Transaction:
         tier = 1 if self.entry["self_update"] else 2
         # The proof is part of the forward path and ends with it: a restart that lands late gets
         # what is left of the 15 minutes, never 120 s past them, so the bounds below hold.
-        window = min(receiver.clock() + PROOF_WINDOW, self.deadline)
+        opened = receiver.clock()
+        window = min(opened + PROOF_WINDOW, self.deadline)
+        # A window the deadline cut short ends as `time_limit`: the forward path's time ran
+        # out, and "the new plugin did not start" would report a broken release for a restart
+        # that only came late.
+        cut = window < opened + PROOF_WINDOW
         wanted = {os.path.realpath(receiver.path(p)) for p in LOG_PATHS} | \
             {receiver.path(p) for p in LOG_PATHS}
         # Only a process that was not running beside the one that asked: a child of the old
@@ -1854,6 +1860,8 @@ class Transaction:
                 break
             receiver.sleep(PROOF_POLL)
         self.record["proof"] = "none"
+        if cut:
+            return self.rollback(Fail("time_limit"))
         return self.rollback(Fail("not_started", previous=self.request["from"]["version"]))
 
     def commit(self, proof, fd_seen):

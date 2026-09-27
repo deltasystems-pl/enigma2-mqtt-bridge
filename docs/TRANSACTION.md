@@ -641,6 +641,8 @@ the receiver" until the restart or the withdrawal.
 No proof within the window: R2 (§5.1), and the restored plugin puts the reason on `last_error`.
 For the self-update the window is 120 s from the restart, and ends earlier when the forward
 path's 15-minute deadline comes first (§2.4): a restart that lands late is given what is left.
+The reason then says which it was: `not_started` after a whole window, `time_limit` when the
+deadline cut it short - the forward path's time ran out, which says nothing against the release.
 
 ---
 
@@ -668,7 +670,8 @@ renamed into place.
 payload other than a directory or a regular file - a link, a device, a pipe - a path outside the
 plugin, or the release page's digest), `no_space`, `opkg_busy`, `snapshot_failed`, `opkg_failed`,
 `manifest`, `time_limit`; `question` with `withdrawn_before_restart`; `not_started` with
-`rolled_back`; `interrupted` (a signal, the lock taken, or the interface that asked restarting
+`rolled_back`, and `time_limit` with `rolled_back` when the forward deadline cut the proof window
+short (§6); `interrupted` (a signal, the lock taken, or the interface that asked restarting
 before the package manager ran) with `interrupted`, and with `rolled_back` when the interface
 restarted after the package manager started and before `restarting`; `internal_error` (an error nothing expected, the package
 or the first marker not written) with `failed`, or with `rolled_back` when it came after the
