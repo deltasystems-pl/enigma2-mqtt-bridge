@@ -2398,6 +2398,29 @@ def test_a_partial_withdraw_then_an_r2_cut_short_still_restores_in_r2(tmp_path, 
     assert scene.init_calls() == ["4", "3"] and not scene.locked()
 
 
+
+def test_r2_waits_for_a_stop_that_takes_a_few_seconds(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    real = scene.box.run
+
+    def enigma2_takes_five_seconds_to_quit(argv, timeout):
+        if argv[0] == scene.box.init and argv[1] == "4":
+            scene.box.at(5, lambda: setattr(scene.box, "pids", set()))
+        return real(argv, timeout)
+    scene.box.run = enigma2_takes_five_seconds_to_quit
+    assert scene.run() == 1
+    # Seen running at first, then seen gone: a stop, with everything that follows one.
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    record = scene.status()["record"]
+    assert (record["stop"], record["restore"], record["lastservice"]) == (
+        "seen", "done", "written")
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "true"
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n") and scene.box.pids == {300}
+
+
 # ------------------------------------------- an interruption at every step of R2 --
 
 
