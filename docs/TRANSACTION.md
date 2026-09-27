@@ -741,29 +741,35 @@ marker to the end.
 **What the plugin does with these ends.** Neither end may be read as "the previous version is
 running":
 
-- After `not_stopped`, the process reading the end is the one R2 could not stop, and its files
-  changed under it: they are the previous version's now. That is the case the plugin's doors
-  exist for: a fresh session would import the previous version's modules into a process
-  holding the new one's. So the plugin keeps the doors closed - it closes them if no poll had,
-  which is the case for a process that only followed the transaction - never reloads, and never
-  reports itself as the previous version. The repair is a restart of the interface, not a
-  reinstall: the files and opkg's records agree on the previous version, so the sentence says to
-  restart the receiver's interface, and `restart_gui` stays possible through the closed doors,
-  since it is exactly that repair: over MQTT and from the page - which offers it under the
-  sentence - with its own guards (a recording, an EPG import, a job that holds the quit), while
-  every other command, the settings and the setup screen answer the sentence. The image's own
-  restart from the television was never the plugin's to refuse. `last_error` carries the
-  helper's sentence as it is. After the restart the previous version starts and reads the end
-  from the last-transaction record like any other.
+- After `not_stopped`, a plugin first compares its own pid - the enigma2 process it runs in,
+  `os.getpid()` - with `record.unstopped`.
+  - **Listed**: it is the process R2 could not stop, and its files changed under it: they are the
+    previous version's now. That is the case the plugin's doors exist for: a fresh session would
+    import the previous version's modules into a process holding the new one's. So it keeps the
+    doors closed - closing them if no poll had, which is the case for a process that only
+    followed the transaction - never reloads, and never reports itself as the previous version.
+    The repair is a restart of the interface, not a reinstall: the files and opkg's records agree
+    on the previous version, so the sentence says to restart the receiver's interface, and
+    `restart_gui` stays possible through the closed doors, since it is exactly that repair: over
+    MQTT and from the page - which offers it under the sentence - with its own guards (a
+    recording, an EPG import, a job that holds the quit), while every other command, the settings
+    and the setup screen answer the sentence. The image's own restart from the television was
+    never the plugin's to refuse. `last_error` carries the helper's sentence as it is. After the
+    restart the previous version starts and reads the end from the last-transaction record like
+    any other.
+  - **Not listed** (a process started since, after the repair or a reboot, or `unstopped`
+    missing because no look answered - then judged by the version it runs, as for a marker that
+    outlived its helper): it started on the files on disk, which agree with opkg's records, so it
+    reports the end on `last_error` and opens as after any end.
 - After `interface_not_started`, no plugin is running to read it. Whatever starts the interface
   next starts the previous version, which reads the finished marker at its start, reports the end
   on `last_error` and opens as after any end: its files and its process agree, so nothing stays
   closed. Home Assistant says the sentence and does not announce a rollback that runs.
 - So "`record.restore` is `done`" alone does not mean nothing is stuck: a plugin that opens its
   doors on every such end reopens them over changed files after `not_stopped`. The check is the
-  reason, or `record.interface` `not restarted` - the plugin takes either, in the process that
-  asked and in one that follows alike. With a restore that did not complete as well, the
-  reinstall stays the repair and the doors say so.
+  reason, or `record.interface` `not restarted`, together with the plugin's own pid in
+  `record.unstopped` - in the process that asked and in one that follows alike. With a restore
+  that did not complete as well, the reinstall stays the repair and the doors say so.
 
 **What it re-judges**: the index is read again - fetched from the origin only when the request
 carries no relay address (an install Home Assistant drives needs no internet on the receiver and

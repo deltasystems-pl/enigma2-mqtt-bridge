@@ -2040,6 +2040,8 @@ def test_an_interface_r2_could_not_stop_keeps_the_doors_closed_and_says_to_resta
         previous = "0.3.0"
     clients = len(factory.clients)
     error = str(updatehelper.Fail("not_stopped", previous=previous))
+    # This process is among those R2 could not stop (review round 4).
+    record = dict(record, unstopped=[os.getpid()])
     helper_says(directory, phase="finished", result="failed", reason="not_stopped", error=error,
                 finished=NOW + 200, record=record)
     tick()
@@ -2315,3 +2317,212 @@ def test_the_repair_path_alone(starting, factory, receiver, monkeypatch):
     factory.client.fire_message(ROOT + "/cmd/restart_gui", b"PRESS")
     assert attempts == []
     assert len(restarts(receiver)) == 2
+
+
+# ------------------------------------------------------------ review round 4 --
+#
+# `not_stopped` alone cannot tell a reader whether it is the process R2 could not stop: the helper
+# now lists those pids as `record.unstopped`, from its last look at /proc that answered, and leaves
+# the list out when no look answered (TRANSACTION.md section 7).
+
+OTHER_PID = os.getpid() + 1
+
+
+def unstopped_record(listed):
+    record = {"restore": "done", "stop": "not seen", "interface": "not restarted",
+              "cause": "not_started", "channel": "unconfirmed"}
+    if listed == "listed":
+        record["unstopped"] = [OTHER_PID, os.getpid()]
+    elif listed == "not_listed":
+        record["unstopped"] = [OTHER_PID]
+    return record
+
+
+def assert_open(bridge, factory, reason, error):
+    updater = bridge.self_update
+    assert not updater.closed and not updater.stuck and updater._current is None
+    assert updater.doors_refusal() is None and updater.repair() is None
+    factory.client.fire_connect()
+    assert refusal(factory.client) == (reason, error)
+    assert transaction(factory.client)["result"] == "failed"
+    assert bridge._publishers != []
+
+
+# Asking: this process runs 0.3.0, the transaction's `from`. Following: it runs 0.3.0, the
+# marker's `to`, over the restored 0.2.0 - so with no list, judged by its version, it is held.
+@pytest.mark.parametrize("who, listed, held", [
+    ("asking", "listed", True),
+    ("asking", "not_listed", False),
+    ("asking", "no_list", False),
+    ("following", "listed", True),
+    ("following", "not_listed", False),
+    ("following", "no_list", True),
+])
+def test_not_stopped_holds_only_the_process_r2_left_running(who, listed, held, starting, box,
+                                                           factory, receiver):
+    if who == "following":
+        bridge, directory = following(starting, factory, receiver)
+        previous = "0.2.0"
+    else:
+        bridge, directory = asking(box, factory, receiver)
+        previous = "0.3.0"
+    clients = len(factory.clients)
+    error = str(updatehelper.Fail("not_stopped", previous=previous))
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped", error=error,
+                finished=NOW + 200, record=unstopped_record(listed))
+    tick()
+    updater = bridge.self_update
+    if held:
+        assert len(factory.clients) == clients
+        assert updater.closed and updater.stuck and updater.repair() == "restart_gui"
+        assert refusal(factory.client) == ("not_stopped", error)
+        assert bridge.run_command("reboot", "PRESS", PAGE) == unstopped_sentence()
+        return
+    # A process R2 did not leave running started on the files on disk, or never saw them change.
+    assert len(factory.clients) == clients + (1 if who == "asking" else 0)
+    assert_open(bridge, factory, "not_stopped", error)
+
+
+@pytest.mark.parametrize("listed", ["listed", "not_listed", "no_list"])
+def test_a_fresh_start_after_not_stopped_opens_whatever_the_list_says(listed, starting, factory,
+                                                                     receiver):
+    """A process that starts after the end is never the one R2 left: even a pid used again."""
+    error = str(updatehelper.Fail("not_stopped", previous="0.3.0"))
+    bridge = starting(prepare=lambda root: marker(
+        root, phase="finished", result="failed", reason="not_stopped", error=error, finished=NOW,
+        to=("0.4.0", "ab" * 20), frm=("0.3.0", COMMIT), record=unstopped_record(listed)),
+        session=receiver.session)
+    assert not (bridge.root / updatehelper.MARKER).exists()
+    assert_open(bridge, factory, "not_stopped", error)
+
+
+@pytest.mark.parametrize("listed", ["not_listed", "no_list"])
+def test_a_previous_version_started_while_r2_finishes_is_not_held(listed, starting, factory,
+                                                                  receiver):
+    """The process R2 could not stop died; the previous version started and follows the end.
+
+    It runs the files on disk: not listed, it opens; with no list, its version - the
+    transaction's `from` - says the same.
+    """
+    made = {}
+    bridge = starting(prepare=lambda root: made.update(dir=marker(
+        root, phase="rolling_back", to=("0.4.0", "ab" * 20), frm=("0.3.0", COMMIT))),
+        session=receiver.session)
+    factory.client.fire_connect()
+    assert bridge.self_update._current is not None
+    helper_process(bridge, made["dir"])
+    error = str(updatehelper.Fail("not_stopped", previous="0.3.0"))
+    helper_says(made["dir"], phase="finished", result="failed", reason="not_stopped", error=error,
+                target="0.4.0", finished=NOW + 200, record=unstopped_record(listed))
+    marker(bridge.root, phase="finished", result="failed", reason="not_stopped", error=error,
+           finished=NOW + 200, to=("0.4.0", "ab" * 20), frm=("0.3.0", COMMIT))
+    tick()
+    assert_open(bridge, factory, "not_stopped", error)
+
+
+def test_with_no_list_a_follower_is_judged_by_the_request_when_the_marker_is_gone(
+        starting, factory, receiver):
+    """No marker left to say `from`: the transaction directory's request says it."""
+    made = {}
+    bridge = starting(prepare=lambda root: made.update(dir=marker(
+        root, phase="rolling_back", to=("0.4.0", "ab" * 20), frm=("0.3.0", COMMIT))),
+        session=receiver.session)
+    factory.client.fire_connect()
+    updatehelper.write_json(str(made["dir"] / "request.json"), {
+        "id": "a1b2c3d4e5f6", "enigma2_pid": 1, "from": {"version": "0.3.0", "commit": COMMIT}})
+    os.remove(bridge.root / updatehelper.MARKER)
+    helper_process(bridge, made["dir"])
+    error = str(updatehelper.Fail("not_stopped", previous="0.3.0"))
+    # The status file's `from` is a bare number, and a wrong one here: the request decides.
+    helper_says(made["dir"], phase="finished", result="failed", reason="not_stopped", error=error,
+                target="0.4.0", finished=NOW + 200, record=unstopped_record("no_list"),
+                **{"from": "0.2.0"})
+    tick()
+    assert_open(bridge, factory, "not_stopped", error)
+
+
+@pytest.mark.parametrize("bad", ["one", [str(os.getpid())], [float(os.getpid())], None])
+def test_an_unreadable_list_holds_no_process_by_its_pid(bad, box, factory, receiver):
+    """Only whole numbers are pids: a string or a float that looks like this pid is not it."""
+    bridge, directory = asking(box, factory, receiver)
+    record = unstopped_record("no_list")
+    record["unstopped"] = bad
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped",
+                error=str(updatehelper.Fail("not_stopped", previous="0.3.0")),
+                finished=NOW + 200, record=record)
+    tick()
+    # Not a list - judged by the version, which is `from` here; a list without this pid - open.
+    assert not bridge.self_update.stuck
+
+
+@pytest.mark.parametrize("result, reason, record", [
+    ("rolled_back", "not_started",
+     {"restore": "done", "stop": "not seen", "init_3": [127, None], "start": "again"}),
+    ("failed", "interface_not_started",
+     {"restore": "done", "stop": "not seen", "unstopped": [OTHER_PID], "init_3": [1],
+      "start": "again", "interface": "not started", "cause": "not_started"}),
+])
+def test_the_helpers_new_record_fields_change_nothing_here(result, reason, record, starting,
+                                                          factory, receiver):
+    """`init_3` and `start: again` are the helper's account; the end is read as before."""
+    bridge, directory = following(starting, factory, receiver)
+    error = str(updatehelper.Fail(reason, previous="0.2.0"))
+    helper_says(directory, phase="finished", result=result, reason=reason, error=error,
+                finished=NOW + 200, record=record)
+    tick()
+    updater = bridge.self_update
+    assert not updater.closed and not updater.stuck and updater._current is None
+    assert refusal(factory.client) == (reason, error)
+    assert transaction(factory.client)["result"] == result
+
+
+def following_from(starting, factory, receiver, frm):
+    """A follower of a transaction whose `from` is `frm`; it runs 0.3.0 at `COMMIT`."""
+    made = {}
+    bridge = starting(prepare=lambda root: made.update(dir=marker(
+        root, phase="rolling_back", to=("0.4.0", "ab" * 20), frm=frm)),
+        session=receiver.session)
+    factory.client.fire_connect()
+    helper_process(bridge, made["dir"])
+    return bridge, made["dir"]
+
+
+@pytest.mark.parametrize("frm, held", [
+    (("0.3.0", COMMIT), False),
+    # A release built again under the same number is another build (spike S1).
+    (("0.3.0", "ef" * 20), True),
+    (("0.2.0", COMMIT), True),
+    # A `from` without a commit is judged by its number, as after a power loss.
+    (("0.3.0", None), False),
+])
+def test_with_no_list_the_version_and_the_commit_decide(frm, held, starting, factory, receiver):
+    bridge, directory = following_from(starting, factory, receiver, frm)
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped",
+                error=str(updatehelper.Fail("not_stopped", previous=frm[0])),
+                finished=NOW + 200, record=unstopped_record("no_list"), **{"from": frm[0]})
+    tick()
+    assert bridge.self_update.stuck is held
+
+
+@pytest.mark.parametrize("case", ["another_transactions_marker", "nothing_says_from"])
+def test_with_no_list_and_no_from_of_this_transaction_the_process_is_held(case, starting,
+                                                                          factory, receiver):
+    """What cannot be shown to run the files put back is not opened over them."""
+    bridge, directory = following_from(starting, factory, receiver, ("0.2.0", "ef" * 20))
+    marker_path = bridge.root / updatehelper.MARKER
+    if case == "another_transactions_marker":
+        # Another transaction's `from` is this very build: it says nothing about this one.
+        updatehelper.write_json(str(marker_path), {
+            "id": "0123456789ab", "phase": "finished",
+            "from": {"version": "0.3.0", "commit": COMMIT}})
+        status_from = "0.2.0"
+    else:
+        os.remove(marker_path)
+        status_from = None
+    updatehelper.write_json(str(directory / "request.json"),
+                            {"id": "a1b2c3d4e5f6", "enigma2_pid": 1})
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped",
+                error=str(updatehelper.Fail("not_stopped", previous="0.2.0")),
+                finished=NOW + 200, record=unstopped_record("no_list"), **{"from": status_from})
+    tick()
+    assert bridge.self_update.stuck
