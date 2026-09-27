@@ -1236,7 +1236,7 @@ changes and in this order:
 | free space under `/home/root` below twice the package plus the plugin's size plus 2.25 MiB | "there is not enough free space on the receiver" | `no_space` |
 | an update ended less than ten minutes ago | "an update ran less than ten minutes ago" | `rate_limited` |
 | started at the television or on the page, the release origin `unreachable`, and nobody to ask for the package - no broker connection, no integration's word on `enigma2mqtt/integration/<node>` (§3) - or no answer within 120 s (below) | "the receiver cannot reach the plugin's release origin and Home Assistant did not answer, so the update cannot be installed" | `no_relay` |
-| started there, and Home Assistant's answer carried an address of its shape that only this receiver's clock calls expired (below) | "Home Assistant answered, but the receiver's clock differs from Home Assistant's, so the download address had already expired; set the receiver's clock and try again" | `clock_skew` |
+| started there, and the only answers carried an address of Home Assistant's shape that this receiver's clock calls expired (below) | "an answer arrived whose download address had already expired by the receiver's clock; if the receiver's clock is wrong, set it and try again" | `clock_skew` |
 
 Accepted, the plugin starts its update helper outside enigma2 and follows it on `update`. The
 helper judges the index again, downloads and verifies the package, keeps a rollback point and runs
@@ -1285,8 +1285,10 @@ be running). Starting the install is the consent to that probe (spec: "an explic
 action"); nothing else probes, and a `cmd/update` over MQTT never does. `reachable`: the update
 helper fetches the release itself. `unreachable`: the receiver asks Home Assistant for the
 package. An update helper whose download from the origin got no answer at all makes
-`update.origin` `unreachable` as well, so the next install at the television asks Home Assistant
-straight away.
+`update.origin` `unreachable` as well. Its failed end starts the ten-minute limit between updates,
+so that word is taken for the limit and ten minutes more: the next install at the television that
+the limit lets through asks Home Assistant without probing. After that, or after a restart, the
+origin is probed again.
 
 To ask, the receiver publishes `relay_request` (§1) and waits at most **120 s** for `cmd/relay` -
 but only while the integration's word is on `enigma2mqtt/integration/<node>` (§3), which only an
@@ -1310,10 +1312,11 @@ refusal then goes on `last_error` as for `cmd/update`. Without an answer in 120 
 broker connection or the integration's word to ask on - the install is refused with "the receiver
 cannot reach the plugin's release origin and Home Assistant did not answer, so the update cannot be
 installed" (`reason` `no_relay`), and nothing has changed. When the only answers of Home
-Assistant's shape carried an address that this receiver's clock already calls expired - its clock
+Assistant's shape carried an address that this receiver's clock already calls expired - a clock
 ahead of Home Assistant's by more than the address lives - the refusal is `clock_skew` instead
-(the row above). While a receiver probes or waits, `cmd/update` and `cmd/uninstall` are refused
-`busy`; a wait whose timer did not run ends by its age the next time anything asks. A `cmd/update`
+(the row above). Its sentence says only what the receiver can know: such an answer may come from
+any broker client, so it does not claim that Home Assistant answered. While a receiver probes or
+waits, `cmd/update` and `cmd/uninstall` are refused `busy`; a wait whose timer did not run ends by its age the next time anything asks. A `cmd/update`
 over MQTT never asks back: Home Assistant sends its address with it, and a command without one asks
 the receiver to fetch. A request that carries a relay address never makes the receiver contact the
 origin at all. "No IPv6 literal" in the `relay` refusal is a rule about the address as written:

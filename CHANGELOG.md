@@ -49,7 +49,8 @@ version that has no section here.
   topic `relay_request` (QoS 1, never retained) and waits at most 120 s for its answer on the new
   command `relay` - at once refused `no_relay` instead when no integration has said on
   `enigma2mqtt/integration/<node>` that it is there. A helper whose own download got no answer from
-  the origin marks it unreachable, so the next install asks Home Assistant straight away. Only an
+  the origin marks it unreachable for the ten-minute limit its failed end starts and ten minutes
+  more, so the next install the limit lets through asks Home Assistant without probing. Only an
   answer to the id asked with, for the version asked for, with an unexpired address of Home
   Assistant's one shape, is taken; anything else is logged and dropped, and the wait goes on. The
   first answer that passes is taken, whoever sent it: a broker client that answers first with an
@@ -58,7 +59,8 @@ version that has no section here.
   updates starts - but cannot install anything. The refusals are asked once more before the update
   helper starts, and the install stays the television's or the page's. No answer: refused with
   `reason` `no_relay`, nothing changed; only answers that this receiver's clock calls expired:
-  `clock_skew`. A wait whose timer could not start still ends by its age. A request that carries an
+  `clock_skew`, with a sentence that says an answer came and asks to check the receiver's clock -
+  not that Home Assistant answered, since any broker client may have. A wait whose timer could not start still ends by its age. A request that carries an
   address never contacts the origin. The address rule is now one function shared by the plugin and
   the helper, and it no longer takes a bracketed IPv6 host or a port outside 1-65535 in
   `cmd/update`. That is a rule about how the address is written: a host name may resolve to any
