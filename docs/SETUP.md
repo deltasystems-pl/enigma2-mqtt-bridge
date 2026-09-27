@@ -254,8 +254,9 @@ checked in `/etc/enigma2/mqttbridge-check.json`, both
 
 The setup screen's **blue** key opens *Plugin updates*: the running version and build, which
 signed list of versions the receiver holds and how old it is, the versions that list offers - the
-running one marked, older and newer ones named, and for the ones that cannot be installed the
-reason - and an update in progress, with who started it and how far it is. The same number as the
+running one marked, older and newer ones named, the ones that cannot be installed marked so (**OK**
+on such a row says why; the page lists the reason with it) - and an update in progress, with who
+started it and how far it is. The same number as the
 running one is marked *installed* only when the running build is that release; a development build
 of it is never shown as the release. **Yellow** checks for updates, and a failed check says why in
 words; **OK** or **green** installs the chosen version. The
@@ -278,9 +279,18 @@ and a confirmation on the page expires after ten minutes.
 From the moment the package manager starts until the restart, the screen - which may stay open
 under the image's restart question - and the page show only "An update of the plugin is being
 applied on this receiver. Please wait." A form sent from a page opened earlier gets the same
-sentence and nothing else: no question, and nothing saved or kept for later. If the update fails and the plugin's previous files cannot
-be put back, they say to install the plugin again instead. A receiver without internet cannot yet
-download a release this way; installing through Home Assistant relays it.
+sentence and nothing else: no question, and nothing saved or kept for later - all but the interface
+restart, when the sentence names it as the repair. If the update fails and the plugin's previous
+files cannot be put back, they say to install the plugin again instead.
+
+**A receiver without internet** installs through Home Assistant (TOPICS.md, `relay_request`). An
+install asked for here may therefore wait before it starts, and the screen and the page say for
+what: first "Checking whether the receiver can reach the internet to download version ...", then,
+when it cannot, that it has asked Home Assistant, with the seconds left of the two minutes. When
+Home Assistant does not answer, they say "The receiver has no access to the internet, and Home
+Assistant did not answer. The installation is not possible." (in Polish, spec ae.6's sentence);
+when the only answer carried a download address the receiver's clock calls expired, they say so
+and ask to set the clock if it is wrong. Nothing on the receiver has changed in either case.
 
 ### What a screenshot costs
 
