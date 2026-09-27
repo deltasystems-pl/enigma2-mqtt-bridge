@@ -145,18 +145,42 @@ helper keeps the lock visibly alive:
 - **It writes only a lock it still holds.** Before each rewrite the helper reads `owner.json`; if
   the `id` there is not its own, the lock was taken from it, it writes nothing, and the transaction
   stops touching the receiver and ends with `result: interrupted`.
-- **It is the second line, not the first.** The helper bounds itself: the forward path aborts at
-  **15 minutes** and then rolls back, and the rollback's waits end within **7 minutes** even with
-  every `init 3` running into its timeout and the interface given its second chance (§5.2), so the
-  lock is held at most **22 minutes** - under the released 30-minute rule even with no heartbeat
-  at all. The
-  expected worst case is shorter: forward 617 s (index and download 70, verify 1, release digest
-  check 10, free space 1, snapshot 30, opkg 120, manifest 10, downgrade retraction 15, the
+- **It is the second line, not the first.** The helper bounds itself, so that the lock is held
+  at most **1353 s (22.6 minutes)** - under the released 30-minute rule even with no heartbeat at
+  all:
+  - **The forward path ends at its 15-minute deadline**, measured from the helper's start. The
+    wait for the restart ends there, and so does the proof window: a restart that lands late gets
+    what is left of the 15 minutes, never 120 s past them (§6). A withdraw or an undo that begins
+    on the deadline adds at most **45 s** - one OpenWebif call (5 s) and the restore's wait for
+    opkg's lock (40 s, §2.6) - so R2, when it follows, begins at most **945 s** after the start.
+  - **R2 takes at most 409 s (6.8 minutes)**, with every wait at its worst: each `init` call
+    running into its 30 s timeout, each OpenWebif call into its 5 s, the restore waiting the whole
+    40 s for opkg's lock, the interface given its second chance (§5.2), and R3's zap back and
+    standby never taking.
+  - These are measured, not added up: `tests/test_updatehelper.py` runs the whole transaction on
+    a clock that moves only when the helper waits, entering R2 every way the forward path can
+    reach it at its deadline (a restart just before it; a withdraw on it; a withdraw after an
+    `opkg` that ran up to it; an undo after one that ran past it), with the interface stopping
+    at once, late, not at all or quitting after `init 3`, and the new interface appearing early,
+    late or never - and fails when any of the three numbers is exceeded. Not included: the time
+    the restores take to copy the plugin's files, which was not measured on a receiver.
+
+  The expected worst case is shorter: forward 617 s (index and download 70, verify 1, release
+  digest check 10, free space 1, snapshot 30, opkg 120, manifest 10, downgrade retraction 15, the
   television's question 60, waiting for the new interface 180, proof 120), rollback 246 s (record 5,
   stop 30, restore 60, settings write 1, start and wait 120, verify and zap 20, standby 10) - **863 s
-  (14.4 min)** in all; an interface that does not come back after the stop adds a second `init 3`
-  and 60 s. The companion integration waits 21 minutes for a transaction it follows, which only
-  a rollback whose every `init 3` times out can outlast.
+  (14.4 min)** in all. Even entered at the latest point, 945 s after the start, that rollback
+  ends by about 1191 s (19.9 minutes).
+
+  **What a follower needs.** The companion integration's 21 minutes is enough for every expected
+  end, but not for an R2 whose waits run to their bounds after a late restart, which can end at
+  22.6 minutes. So a follower that judges a transaction by its `started` stamp - the integration
+  following one it asked for, or deciding when a receiver-started transaction is stale - keeps
+  following for at least **1353 s plus the clock skew it allows** (60 s: 1413 s, 23.6 minutes),
+  and should use **25 minutes**, which leaves room for the copying the measurement leaves out.
+  Until then a transaction that has not `finished` may still be running; one still not
+  `finished` after that has lost its helper (a `SIGKILL`, or power), and its lock goes stale 30
+  minutes after the last heartbeat (§2.3).
 
 ### 2.5 The two implementations meeting
 
@@ -540,9 +564,10 @@ So:
   once more, by process name as the wait does, and with no enigma2 running it puts the settings
   block back and writes the channel as the unit would have; only an interface still running, or
   a look that fails, goes without them. A `/proc` that cannot be listed at all (`EMFILE`,
-  `ENOMEM`) is such a look: R2 reads it as unknown, never as "no enigma2", so it is never taken
-  for the stop, and a process is counted as the interface starting again only when a look that
-  did answer during the stop says it was not among those still running then.
+  `ENOMEM`), or a process whose name cannot be read for any reason but its exit, is such a look:
+  R2 reads it as unknown, never as "no enigma2", so it is never taken for the stop, and a
+  process is counted as the interface starting again only when a look that did answer during the
+  stop says it was not among those still running then, and none of those still runs beside it.
   `init 3` is safe to repeat - starting a runlevel that is already running changes nothing - so
   the helper repeats it wherever the start is in doubt. The helper's own way of running a
   program turns any error in starting it (a `MemoryError` or a failed fork while the child is
@@ -625,6 +650,10 @@ applied on the receiver" until the restart, the withdrawal, or the package manag
 | Self-update, a target that does not (0.2.0, 0.3.x - helper written) | The **new** enigma2 pid holds the plugin's log file open (`/proc/<pid>/fd`), polled every 2 s through the whole window, because a log rotation closes the file for a moment. Both released plugins configure logging before anything else at start, whether or not they are switched on and whether or not the broker answers. When neither log path was writable before the restart, those plugins hold no file, and the proof is the OpenWebif hook answering anything but 404 after the pid change. The transaction's record says which proof it used. The helper does not read the log's lines at all: a line is something a broker client can put there, and a timestamp it can forge |
 
 No proof within the window: R2 (§5.1), and the restored plugin puts the reason on `last_error`.
+For the self-update the window is 120 s from the restart, and ends earlier when the forward
+path's 15-minute deadline comes first (§2.4): a restart that lands late is given what is left.
+The reason then says which it was: `not_started` after a whole window, `time_limit` when the
+deadline cut it short - the forward path's time ran out, which says nothing against the release.
 
 ---
 
@@ -639,7 +668,7 @@ renamed into place.
 |---|---|---|
 | `request.json` (0600) | the plugin, before it starts the helper | `id`; `target` (a release number - `latest` is resolved by the plugin); `sha256` or `null`; `relay` `{"url", "expires"}` or `null`; `started_by`; `downgrade` (true only for a lower version chosen at the television or on the page); `from` `{"version", "commit"}`; `enigma2_pid` (the plugin's own process - the one whose end §5's restart rule waits for); `keys`, `acceptance` and `origin` - the index keys, lineage and origin of the build that asks, so the helper judges by what the running build trusts; `contract`; `integration` (`enigma2mqtt/integration/<node>` as read, or `null`) and `integration_mode`. A request the helper cannot read ends as `failed`, reason `bad_request` |
 | `helper.py`, `trust.py`, `ed25519.py`, `trustfile.py`, `netfetch.py` | the plugin | The helper and the four standard-library modules it imports, copied from the plugin directory, so the package manager replacing that directory takes nothing from under it |
-| `status.json` (0600) | the helper that holds the lock | `id`, `started_by`, `target`, `from`, `phase`, `started`, `finished`, `result`, `reason`, `error` - the shape of `update.transaction` plus `reason` - a `heartbeat` stamp, `restart` once the plugin asked, and at the end `record`: which proof passed (`marker`, `log_fd`, `webif_hook` or `none`), `restart` (`clean` or `stopped`), `rollback: cut short` when something no handler expects cut R2 short after `init 4` and its `finally` finished the steps, `init_3` (every status of R2's `init 3` calls when one did not answer 0: 127 for a program that could not be started, `null` for one that did not answer in time), `start: again` when `init 3` was sent once more because nothing started after the stop, `stop` (`seen` when R2 saw no enigma2 running after its `init 4`, else `not seen`), `unstopped` (when the stop was not seen: the pids R2 could not stop, from its last look at `/proc` that answered - a plugin compares its own pid with them), `channel` and `standby` (`unconfirmed` when R3 itself failed, and `channel` `unconfirmed` when the interface was not restarted and R3 did not run), `bouquet`, `restore` (`done`; `partial: <what is missing>` when the code is back and opkg's records or the settings block are not; `failed: <error>` when the code is not back; `interrupted`), `cause` (the reason the end had before `restore_failed`, `restore_incomplete`, `not_stopped` or `interface_not_started` replaced it), `lastservice`, `digest` (`matched`, `unavailable` or `not_checked`), `index_verdict` and `index_kept` when the helper fetched the index, `interface` - `not started` when no enigma2 came back after R2's stop and `init 3`, `not restarted` when the stop was never seen, no enigma2 other than the ones still running appeared after `init 3`, and something still runs (or `/proc` could not say) - `marker` when a marker write after the package manager failed, and `internal_error` for an error nothing expected. A second helper started for the same `id` that finds the lock held by its own `id` - or cannot read the owner yet - writes nothing here; one refused by another transaction's lock writes its `busy` |
+| `status.json` (0600) | the helper that holds the lock | `id`, `started_by`, `target`, `from`, `phase`, `started`, `finished`, `result`, `reason`, `error` - the shape of `update.transaction` plus `reason` - a `heartbeat` stamp, `restart` once the plugin asked, and at the end `record`: which proof passed (`marker`, `log_fd`, `webif_hook` or `none`), `restart` (`clean` or `stopped`), `rollback: cut short` when something no handler expects cut R2 short after `init 4` and its `finally` finished the steps, `init_3` (every status of R2's `init 3` calls when one did not answer 0: 127 for a program that could not be started, `null` for one that did not answer in time), `start: again` when `init 3` was sent once more because nothing started after the stop, `stop` (`seen` when R2 saw no enigma2 running after its `init 4`, else `not seen`), `unstopped` (when the stop was not seen: the pids R2 could not stop, from its last look at `/proc` that answered - a plugin compares its own pid with them), `channel` and `standby` (`unconfirmed` when R3 itself failed, and `channel` `unconfirmed` when the interface was not restarted and R3 did not run), `bouquet`, `restore` (`done`; `partial: <what is missing>` when the code is back and opkg's records or the settings block are not; `failed: <error>` when the code is not back; `interrupted`), `cause` (the reason the end had before `restore_failed`, `restore_incomplete`, `not_stopped` or `interface_not_started` replaced it), `lastservice`, `digest` (`matched`, `unavailable` or `not_checked`), `index_verdict` and `index_kept` when the helper fetched the index, `interface` - `not started` when no enigma2 came back after R2's stop and `init 3`, `not restarted` when the stop was never seen, no start was counted after `init 3` - no enigma2 other than the ones still running appeared, or one appeared while one of them still ran - and something still runs (or `/proc` could not say) - `marker` when a marker write after the package manager failed, and `internal_error` for an error nothing expected. A second helper started for the same `id` that finds the lock held by its own `id` - or cannot read the owner yet - writes nothing here; one refused by another transaction's lock writes its `busy` |
 | `<filename>.ipk` | the helper | The package, after its size and sha256 matched the signed entry |
 | `helper.pid` | `start-stop-daemon -m` | The helper's pid, written for the process that became the helper. 🔴 `-p` is what makes the launch work at all: without a pid file busybox's `start-stop-daemon -S -x /usr/bin/python3` matches **any** running python3 and starts nothing. The plugin also reads it to tell a helper that stopped (`/proc/<pid>` gone, or its command line no longer holding this directory's `helper.py` as one
 whole argument - the integration's `installer_helper.py`, or another transaction's helper, on a
@@ -655,9 +684,10 @@ pid used again is not it) from one that is still at work: a helper killed outrig
 payload other than a directory or a regular file - a link, a device, a pipe - a path outside the
 plugin, or the release page's digest), `no_space`, `opkg_busy`, `snapshot_failed`, `opkg_failed`,
 `manifest`, `time_limit`; `question`, `retraction`, `standby`, `recording` and `epg_import`
-with `withdrawn_before_restart`; `not_started` with
-`rolled_back`; `interrupted` (a signal, the lock taken, or the interface that asked restarting
-before the package manager ran) with `interrupted`, and with `rolled_back` when the interface
+with `withdrawn_before_restart`; `not_started` with `rolled_back`, and `time_limit` with
+`rolled_back` when the forward deadline cut the proof window short (§6); `interrupted` (a
+signal, the lock taken, or the interface that asked restarting before the package manager ran)
+with `interrupted`, and with `rolled_back` when the interface
 restarted after the package manager started and before `restarting`; `internal_error` (an error nothing expected, the package
 or the first marker not written) with `failed`, or with `rolled_back` when it came after the
 restart and R2 put the old version back; `drill` with `rolled_back`, only for an acceptance
@@ -676,18 +706,19 @@ undo still goes to R2 when the interface restarted meanwhile. The second is `int
 the lock was taken, after which the helper touches nothing of the receiver.
 
 **R2's end says what runs, not only what is on disk.** `rolled_back` means the old files are back
-**and** an enigma2 that R2 had not seen before started on them. With the files back
-(`record.restore` `done`) and no such process, R2 ends `failed`, the reason it had kept as
-`record.cause`:
+**and** an enigma2 that R2 had not seen before started on them, **with every process R2 could not
+stop gone**. With the files back (`record.restore` `done`) and no such start, R2 ends `failed`, the
+reason it had kept as `record.cause`:
 
 - `not_stopped` (`record.stop` `not seen`, `record.interface` `not restarted`): `init 4` had no
-  effect that R2 could see within its 30 s, `init 3` then started nothing, because the runlevel
-  never left, and at the end something still runs - or `/proc` could not be read to say it does
-  not. `record.unstopped` lists the pids R2 could not stop, from its last look that answered.
-  That process - the one started by the forward restart, holding the new code, or a mix - runs
-  on over the previous version's files until the interface restarts. The settings block and the
-  channel were left alone, because a running interface writes its own settings over them when it
-  quits.
+  effect that R2 could see within its 30 s, and at the end something still runs - or `/proc` could
+  not be read to say it does not. Either `init 3` started nothing, because the runlevel never left,
+  or it started a second enigma2 beside the one R2 could not stop; that second process is never
+  counted as the start while one of those still runs. `record.unstopped` lists the pids R2 could
+  not stop, from its last look that answered. That process - the one started by the forward
+  restart, holding the new code, or a mix - runs on over the previous version's files until the
+  interface restarts. The settings block and the channel were left alone, because a running
+  interface writes its own settings over them when it quits.
 - `interface_not_started` (`record.interface` `not started`): the old files went back and no
   enigma2 runs at the end - after the stop was seen (`record.stop` `seen`), or after the process
   R2 could not stop quit by itself (`record.stop` `not seen`, `record.unstopped` set) - although
@@ -695,10 +726,10 @@ the lock was taken, after which the helper touches nothing of the receiver.
   the helper ends.
 
 A restore that did not complete keeps its own reason (`restore_failed`, `restore_incomplete`)
-over both. When the stop was not seen but an enigma2 other than the ones still running appeared
-after `init 3` - the old process quit late and the start took, at once or after the second
-`init 3` - the end is `rolled_back`, with `record.stop` `not seen` saying that the settings block
-and the channel were not put back.
+over both. When the stop was not seen but the processes R2 could not stop had all gone and an
+enigma2 other than them appeared after `init 3` - the old process quit late and the start took, at
+once or after the second `init 3` - the end is `rolled_back`, with `record.stop` `not seen` saying
+that the settings block and the channel were not put back.
 
 **The plugin's side.** `cmd/update` runs every refusal of TOPICS.md §2 before anything changes, makes
 this directory, writes `request.json`, copies the files and runs
@@ -772,9 +803,10 @@ running":
     over `from`'s files again: it survived the quit R1 asked for and R2's `init 4`, so its quit
     hung somewhere, and a process in that state is not one to open a fresh session in. The
     restart the sentence asks for ends it, and costs nothing that is not already lost.
-  - **Not listed** (a process started since, after the repair or a reboot): it started on the
-    files on disk, which agree with opkg's records, so it reports the end on `last_error` and
-    opens as after any end - when the build rule below agrees.
+  - **Not listed** (a process started since - by R2's own `init 3` beside the one it could not
+    stop, after the repair or a reboot): it started on the files on disk, which agree with opkg's
+    records, so it reports the end on `last_error` and opens as after any end - when the build
+    rule below agrees.
   - **No list** (no look at `/proc` answered): the pid proves nothing either way, and the version
     decides, as for a marker that outlived its helper. A process that runs the transaction's
     `from` - from the marker, else this transaction's `request.json`, else the status file's

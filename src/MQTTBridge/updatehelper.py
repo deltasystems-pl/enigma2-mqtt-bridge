@@ -55,10 +55,12 @@ and is never proved.
   one `rename`), the enigma2 pid is read again, and only a receiver that did not restart is
   reported `withdrawn_before_restart`; one that did goes to R2, because the new process may have
   read either version;
-- a new enigma2: the proof, for 120 s - tier 1, `started.json` naming the target and its commit,
-  for a target whose index entry says it can (`self_update`); tier 2 for 0.2.0 and 0.3.x, the new
-  process holding the plugin's log file open, polled every two seconds, or the OpenWebif hook
-  answering when neither log path was writable. Proved: commit. Not proved: R2;
+- a new enigma2: the proof, for 120 s or what is left of the forward path's 15 minutes - tier
+  1, `started.json` naming the target and its commit, for a target whose index entry says it can
+  (`self_update`); tier 2 for 0.2.0 and 0.3.x, the new process holding the plugin's log file
+  open, polled every two seconds, or the OpenWebif hook answering when neither log path was
+  writable. Proved: commit. Not proved: R2, with `not_started` - or `time_limit` when the
+  deadline cut the window short;
 - R2 - stop, restore, start: the playing channel and the standby state are recorded, `init 4`,
   the snapshot goes back (with the plugin's settings block, once enigma2 is seen stopped), the
   recorded channel is written as `config.tv.lastservice`, `init 3`, and R3 compares what the
@@ -91,10 +93,15 @@ and `init 3`; the marker then tells the next plugin that starts, and a reboot fr
 once. A tree left half installed that cannot start the plugin at all is for the companion
 integration's forced reinstall over SSH (TRANSACTION.md section 4).
 
-**Bounds.** The forward path gives up at 15 minutes and the rollback's waits add up to less than
-seven - that is with every `init 3` running into its timeout twice, and the interface given its
-second chance - so the lock is held at most 22 minutes: under the released installer's
-30-minute stale rule even if the heartbeat were never written.
+**Bounds** (TRANSACTION.md section 2.4 has the measurement). The forward path ends at its
+15-minute deadline - the wait for the restart and the proof window included, so a restart that
+lands late gets what is left of the 15 minutes, not 120 s more - and a withdraw or an undo that
+lands on the deadline adds at most 45 s: one OpenWebif call and the restore's wait for opkg's
+lock. R2 then takes at most 409 s, with every `init` call running into its timeout, every
+OpenWebif call into its own, the restore waiting the whole 40 s for opkg's lock and the
+interface given its second chance. So the lock is held at most 1353 s, under 23 minutes plus
+the time the restores take to copy files: under the released installer's 30-minute stale rule
+even if the heartbeat were never written.
 """
 
 import errno
@@ -357,13 +364,17 @@ class Receiver:
     def enigma2_pids(self):
         """Every running process named `enigma2`, read from `/proc` - no `pidof` on the image.
 
-        An empty set also when `/proc` cannot be listed; R2, which must tell "none" from "could
-        not look", asks `enigma2_look`.
+        An empty set also when `/proc` cannot be listed, and a process whose name cannot be read
+        is left out; R2, which must tell "none" from "could not look", asks `enigma2_look`.
         """
-        return self.enigma2_look() or set()
+        return self._enigma2(strict=False) or set()
 
     def enigma2_look(self):
-        """`enigma2_pids`, or None when `/proc` itself cannot be listed (EMFILE, ENOMEM)."""
+        """`enigma2_pids`, or None when a look cannot say: `/proc` itself cannot be listed
+        (EMFILE, ENOMEM), or a process's name cannot be read for any reason but its exit."""
+        return self._enigma2(strict=True)
+
+    def _enigma2(self, strict):
         pids = set()
         try:
             names = os.listdir(self.proc)
@@ -377,7 +388,12 @@ class Receiver:
                           errors="replace") as handle:
                     if handle.read().strip() == "enigma2":
                         pids.add(int(name))
-            except OSError:
+            except OSError as error:
+                # A process that exited between the listing and the read is simply gone. Any
+                # other error - out of memory, out of descriptors - may hide an enigma2 still
+                # running, so R2's look is unknown rather than "none".
+                if strict and error.errno not in (errno.ENOENT, errno.ESRCH):
+                    return None
                 continue
         return pids
 
@@ -1825,7 +1841,14 @@ class Transaction:
         self.marker(phase="proving")
         receiver.pause("proving")
         tier = 1 if self.entry["self_update"] else 2
-        window = receiver.clock() + PROOF_WINDOW
+        # The proof is part of the forward path and ends with it: a restart that lands late gets
+        # what is left of the 15 minutes, never 120 s past them, so the bounds below hold.
+        opened = receiver.clock()
+        window = min(opened + PROOF_WINDOW, self.deadline)
+        # A window the deadline cut short ends as `time_limit`: the forward path's time ran
+        # out, and "the new plugin did not start" would report a broken release for a restart
+        # that only came late.
+        cut = window < opened + PROOF_WINDOW
         wanted = {os.path.realpath(receiver.path(p)) for p in LOG_PATHS} | \
             {receiver.path(p) for p in LOG_PATHS}
         # Only a process that was not running beside the one that asked: a child of the old
@@ -1852,6 +1875,8 @@ class Transaction:
                 break
             receiver.sleep(PROOF_POLL)
         self.record["proof"] = "none"
+        if cut:
+            return self.rollback(Fail("time_limit"))
         return self.rollback(Fail("not_started", previous=self.request["from"]["version"]))
 
     def commit(self, proof, fd_seen):
@@ -1881,12 +1906,13 @@ class Transaction:
         `standby` `unconfirmed`) and never changes the result.
 
         The result says what runs, not only what is on disk: `rolled_back` only when the old
-        files are back and an enigma2 R2 had not seen before started on them. With the files
-        back and none, it is `failed`: `not_stopped` when the stop was never seen and something
-        still runs - `init 3` then starts nothing, and the process R2 could not stop runs on
-        with the code it had; `unstopped` names it - or `interface_not_started` when nothing
-        runs even after `init 3` was sent once more. The first reason stays as `cause`. A
-        restore that did not complete keeps its own reason before either.
+        files are back and an enigma2 R2 had not seen before started on them, with every
+        process R2 could not stop gone. With the files back and no such start, it is `failed`:
+        `not_stopped` when the stop was never seen and something still runs - `init 3` then
+        starts nothing, or starts a second interface beside the process R2 could not stop,
+        which runs on with the code it had; `unstopped` names it - or `interface_not_started`
+        when nothing runs even after `init 3` was sent once more. The first reason stays as
+        `cause`. A restore that did not complete keeps its own reason before either.
 
         Before `init 4` nothing has been stopped, so this is not yet the unit: the record is
         best effort (an error in it leaves the one taken before the restart), and only once the
@@ -1924,9 +1950,12 @@ class Transaction:
             return not look
 
         def came_back():
+            # A start is a new enigma2 with none of the survivors left beside it: a second
+            # interface started next to one R2 could not stop is not the old version running,
+            # because the one R2 could not stop still runs with the code it had.
             look = receiver.enigma2_look()
             return (look is not None and (stopped or bool(looked))
-                    and bool(look - survivors))
+                    and not look & survivors and bool(look - survivors))
         self.rolling_back = True
         try:
             receiver.run([receiver.init, "4"], STOP_WAIT)
