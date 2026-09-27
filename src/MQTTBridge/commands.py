@@ -192,9 +192,10 @@ class CommandDispatcher:
             LOG.info("cmd/%s from the OpenWebif page", name)
         else:
             LOG.info("cmd/%s", name)
-        doors = self._doors()
+        doors = self._doors(name)
         if doors:
-            # The new release is on disk under this process (`selfupdate.py`): nothing runs.
+            # The new release is on disk under this process (`selfupdate.py`): nothing runs -
+            # but the one command that is the repair the closed doors name.
             if self.bridge.self_update.silent:
                 LOG.info("cmd/%s refused, not published: %s", name, doors)
             else:
@@ -221,9 +222,9 @@ class CommandDispatcher:
     def session(self):
         return self.bridge.session
 
-    def _doors(self):
+    def _doors(self, name=None):
         updater = getattr(self.bridge, "self_update", None)
-        return updater.doors_refusal() if updater is not None else None
+        return updater.doors_refusal(name) if updater is not None else None
 
     def publisher(self, name):
         return self.bridge.publisher(name)

@@ -33,7 +33,9 @@ version that has no section here.
   that reason. `cmd/uninstall` is refused (`busy`) while an update runs or its lock is held, and
   `cmd/update` while an uninstall runs. When the old files cannot be put back after a failed
   update, or only the code and not all of its package records, or the helper stops once the package manager has started, the doors stay closed and say
-  to install the plugin again. A helper that stops without an end is reported
+  to install the plugin again. When a rollback puts the previous version back under an interface
+  that did not stop, they stay closed and say to restart the interface - the one command they
+  still let through. A helper that stops without an end is reported
   `interrupted`; the next `cmd/update` says when its lock lets a new one start, and the start after
   a restart says how it ended, by the build that runs. Nothing of this has run on a receiver yet.
 
