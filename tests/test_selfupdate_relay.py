@@ -65,15 +65,16 @@ def unprobed(bridge, origin=UNKNOWN, age=None):
 class Origin:
     """The release origin as the probe meets it: answering, or not at all. Records each ask."""
 
-    def __init__(self, answers=True):
+    def __init__(self, answers=True, status=200):
         self.answers = answers
+        self.status = status
         self.asked = []
 
     def __call__(self, url, cap, timeout):
         self.asked.append((url, cap, timeout))
         if not self.answers:
             raise Unreachable("no route to host")
-        return 200, b"a signature file"
+        return self.status, b"a signature file"
 
 
 @pytest.fixture
@@ -670,11 +671,20 @@ def test_a_command_over_mqtt_never_looks_at_the_origin(box, factory, origin):
     assert request_file(directories(bridge.root)[0])["started_by"] == "mqtt"
 
 
-def test_a_refused_install_never_looks_at_the_origin(box, factory, origin, receiver):
+@pytest.mark.parametrize("refused", ["standby", "no_space", "rate_limited"])
+def test_a_refused_install_never_looks_at_the_origin(refused, box, factory, origin, receiver,
+                                                     monkeypatch):
+    """The last refusals of the table too: the probe comes after all of them (review round 2)."""
     bridge = unprobed(offline(box()))
-    receiver.enter_standby()
-    assert ask(bridge).reason == "standby"
+    if refused == "standby":
+        receiver.enter_standby()
+    elif refused == "no_space":
+        monkeypatch.setattr(updatehelper.Receiver, "free_bytes", lambda self, path: 0)
+    else:
+        ended_as_the_helper_writes_it(bridge, uptime=test_selfupdate.UPTIME - 60)
+    assert ask(bridge).reason == refused
     assert origin.asked == []
+    assert factory.client.all_for(RELAY_REQUEST) == []
 
 
 def test_while_the_origin_is_looked_at_the_install_waits_and_is_busy(box, factory, origin,
@@ -927,3 +937,151 @@ def test_an_answer_that_is_not_an_object_is_dropped_by_a_decision(text, box, fac
     reply(factory, text)
     assert raised == []
     assert bridge.self_update.relay_wait() is not None
+
+
+# ------------------------------------------------------------------- review round 2 --
+
+
+def ended_as_the_helper_writes_it(bridge, uptime, reason="download", ident="0123456789ab"):
+    """The last-transaction record in the shape `updatehelper.Helper.finish` writes it.
+
+    The real helper writes it at every end it owns, and it is what starts the ten-minute limit
+    between updates - measured on this boot's uptime, which is why `boot_id` and `uptime` are in.
+    """
+    updatehelper.write_json(str(bridge.root / updatehelper.LAST), {
+        "id": ident, "started_by": "screen", "target": "0.4.0", "from": "0.3.0",
+        "started": NOW - 30, "finished": NOW, "result": "failed", "reason": reason,
+        "error": "it failed", "phase": "finished", "boot_id": test_selfupdate.BOOT,
+        "uptime": uptime})
+
+
+class Clocks:
+    """Every clock the receiver has, moved together: the boot's uptime (`/proc/uptime` under
+    the test's root), the plugin's monotonic clock and the update check's."""
+
+    def __init__(self, bridge, mono, checker):
+        self.bridge, self.mono, self.checker = bridge, mono, checker
+        self.uptime = test_selfupdate.UPTIME
+
+    def advance(self, seconds):
+        self.uptime += seconds
+        (self.bridge.root / "proc" / "uptime").write_text(f"{self.uptime:.2f} 1.00\n")
+        self.mono.now += seconds
+        self.checker.now += seconds
+
+
+@pytest.fixture
+def checker_clock(monkeypatch):
+    clock = test_selfupdate.Clock()
+    clock.now = 10000.0
+    monkeypatch.setattr(UpdateChecker, "monotonic", staticmethod(clock))
+    return clock
+
+
+def a_download_that_got_no_answer(bridge, factory, reason="download"):
+    """An install at the television whose helper could not reach the origin, ended as the real
+    helper ends it: the finished status with `record.origin`, then the last-transaction record."""
+    assert ask(bridge) is None
+    (directory,) = directories(bridge.root)
+    test_selfupdate.helper_says(directory, started_by="screen", phase="finished",
+                                result="failed", reason=reason, error="it failed",
+                                finished=NOW, record={"origin": "unreachable"})
+    ended_as_the_helper_writes_it(bridge, uptime=test_selfupdate.UPTIME, reason=reason,
+                                  ident=directory.name[len("update-"):])
+    test_selfupdate.tick()
+    assert bridge.self_update.busy() is None
+    return directory
+
+
+@pytest.mark.parametrize("reason", ["download", "unreachable"])
+def test_the_helpers_word_outlives_the_limit_its_own_end_starts(reason, box, factory, origin,
+                                                                mono, checker_clock):
+    """D-S1: the next install the limit lets through asks Home Assistant without probing."""
+    bridge = offline(box(), REACHABLE)
+    clocks = Clocks(bridge, mono, checker_clock)
+    a_download_that_got_no_answer(bridge, factory, reason)
+    assert bridge.updates.reachability == UNREACHABLE
+    # At once: the ten-minute limit, and no look at the origin.
+    assert ask(bridge).reason == "rate_limited"
+    clocks.advance(599)
+    assert ask(bridge).reason == "rate_limited"
+    assert origin.asked == [] and factory.client.all_for(RELAY_REQUEST) == []
+    # The limit lifts; the helper's word still stands, so Home Assistant is asked at once.
+    clocks.advance(1)
+    assert ask(bridge) is None
+    assert origin.asked == []
+    assert question(factory).json()["version"] == "0.4.0"
+    assert len(directories(bridge.root)) == 1
+
+
+@pytest.mark.parametrize(("age", "looks"), [(1199, False), (1200, True)])
+def test_the_helpers_word_lasts_the_limit_and_ten_minutes_more(age, looks, box, factory, origin,
+                                                               mono, checker_clock):
+    bridge = offline(box(), REACHABLE)
+    clocks = Clocks(bridge, mono, checker_clock)
+    a_download_that_got_no_answer(bridge, factory)
+    clocks.advance(age)
+    assert bridge.updates.origin_fresh() is not looks
+    assert ask(bridge) is None
+    assert len(origin.asked) == (1 if looks else 0)
+    # A probe's own word is the usual ten minutes again: the origin answered this time.
+    if looks:
+        assert bridge.updates.reachability == REACHABLE
+        clocks.advance(599)
+        assert bridge.updates.origin_fresh()
+        clocks.advance(1)
+        assert not bridge.updates.origin_fresh()
+
+
+@pytest.mark.parametrize(("age", "looks"), [(599, False), (600, True)])
+def test_a_probes_word_lasts_ten_minutes(age, looks, box, factory, origin, still):
+    """D-S4 (D7): the window is ten minutes, written out here rather than read from the code."""
+    bridge = unprobed(offline(box()), UNREACHABLE, age)
+    assert ask(bridge) is None
+    assert len(origin.asked) == (1 if looks else 0)
+
+
+@pytest.mark.parametrize("status", [500, 404, 301])
+def test_any_answer_at_all_from_the_origin_is_reachable(status, box, factory, origin):
+    """D-S4 (D8): only no answer is `unreachable` - an error page is an origin that answers."""
+    origin.status = status
+    bridge = unprobed(offline(box()))
+    assert ask(bridge) is None
+    assert len(origin.asked) == 1
+    assert bridge.updates.reachability == REACHABLE
+    assert factory.client.all_for(RELAY_REQUEST) == []
+    assert request_file(directories(bridge.root)[0])["relay"] is None
+
+
+def test_the_helpers_word_is_on_the_update_topic_at_once(box, factory, origin, monkeypatch):
+    """D-S4 (D5): not only once the worker has written it to the check file."""
+    bridge = offline(box(), REACHABLE)
+    assert factory.client.last(test_selfupdate.UPDATE).json()["origin"] == REACHABLE
+    jobs = held_back(monkeypatch)
+    a_download_that_got_no_answer(bridge, factory)
+    assert factory.client.last(test_selfupdate.UPDATE).json()["origin"] == UNREACHABLE
+    assert jobs, "the note waits for the worker; the topic does not"
+    jobs.run()
+    checks = updatecheck.read_checks(bridge.updates.check_path)
+    assert checks[bridge.updates.lineage]["origin"] == UNREACHABLE
+
+
+def test_the_clock_sentence_says_only_what_the_receiver_knows():
+    """D-S3: an answer with an address this clock calls expired may come from any broker client,
+    so the sentence does not say that Home Assistant answered."""
+    assert selfupdate.CLOCK_SKEW == (
+        "an answer arrived whose download address had already expired by the receiver's clock; "
+        "if the receiver's clock is wrong, set it and try again")
+
+
+def test_noting_the_helpers_word_publishes_it(box, factory, monkeypatch):
+    """`note_unreachable` says it on `update` itself, whoever calls it and whatever publishes
+    next; the check file follows when the worker has its turn."""
+    bridge = offline(box(), REACHABLE)
+    jobs = held_back(monkeypatch)
+    before = len(factory.client.all_for(test_selfupdate.UPDATE))
+    bridge.updates.note_unreachable()
+    updates = factory.client.all_for(test_selfupdate.UPDATE)
+    assert len(updates) == before + 1
+    assert updates[-1].json()["origin"] == UNREACHABLE
+    assert jobs

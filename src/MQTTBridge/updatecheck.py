@@ -41,8 +41,9 @@ than `ORIGIN_FRESH_SECONDS`, the install asks for the probe alone: the check's o
 the signature file with five seconds and a 1 KiB cap, on the same worker, its body discarded.
 Nothing else ever asks for it - not a timer, not a command over MQTT - so a receiver nobody asks
 still makes no connection but the broker's. An update helper that could not reach the origin
-says so in its record, and that is kept as the origin's word too (`note_unreachable`): the next
-install at the television asks Home Assistant straight away.
+says so in its record, and that is kept as the origin's word too (`note_unreachable`) - for the
+ten-minute limit between updates that its own failed end starts, and ten minutes more - so the
+next install at the television that the limit lets through asks Home Assistant without probing.
 
 **Limits.** Manual checks - `cmd/update_check`, from the broker or the page - share one
 ten-minute limit (the origin's own cache lifetime); inside it the answer is the stored result and
@@ -310,8 +311,9 @@ class UpdateChecker:
         self._check_error = None
         self._origin = UNKNOWN
         # When this process last learned `_origin` (the monotonic clock), or None: never, or
-        # only from the check file.
+        # only from the check file; and for how long that word counts as fresh.
         self._origin_seen = None
+        self._origin_fresh_for = ORIGIN_FRESH_SECONDS
         # Callbacks of installs waiting for the probe they asked for (`probe`). Main loop only.
         self._probe_waiters = []
         self._held = None
@@ -324,10 +326,14 @@ class UpdateChecker:
         return self._origin
 
     def origin_fresh(self):
-        """Whether `reachability` is a probe's word of the last `ORIGIN_FRESH_SECONDS`."""
+        """Whether `reachability` is a word of this process still young enough to be taken.
+
+        A probe's or a check's lasts `ORIGIN_FRESH_SECONDS`; an update helper's as long as it
+        was noted for (`note_unreachable`).
+        """
         if self._origin == UNKNOWN or self._origin_seen is None:
             return False
-        return 0 <= self.monotonic() - self._origin_seen < ORIGIN_FRESH_SECONDS
+        return 0 <= self.monotonic() - self._origin_seen < self._origin_fresh_for
 
     def probe(self, callback):
         """Probe the origin now, for an install asked for at the television or on the page.
@@ -339,18 +345,24 @@ class UpdateChecker:
         self._probe_waiters.append(callback)
         self._enqueue(("probe",))
 
-    def note_unreachable(self):
+    def note_unreachable(self, fresh_for=ORIGIN_FRESH_SECONDS):
         """An update helper could not reach the origin: that is the origin's word now.
 
-        Kept in the check file too, by the worker, like a probe's.
+        Fresh for `fresh_for` seconds: the plugin asks for longer than a probe's ten minutes,
+        because the failed transaction that brings the word also starts the ten-minute limit
+        between updates, and a word that aged with the limit would be looked at again by the
+        very next install the limit lets through (`selfupdate.HELPER_WORD_SECONDS`). Kept in
+        the check file too, by the worker, like a probe's - read back after a restart it has
+        no age, like any other.
         """
-        self._set_origin(UNREACHABLE)
+        self._set_origin(UNREACHABLE, fresh_for)
         self.publish()
         self._enqueue(("note", UNREACHABLE))
 
-    def _set_origin(self, origin):
+    def _set_origin(self, origin, fresh_for=ORIGIN_FRESH_SECONDS):
         self._origin = origin
         self._origin_seen = self.monotonic()
+        self._origin_fresh_for = fresh_for
 
     def _call_probe_waiters(self):
         waiters, self._probe_waiters = self._probe_waiters, []

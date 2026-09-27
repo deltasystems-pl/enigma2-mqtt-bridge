@@ -83,8 +83,10 @@ again first: the check's own five-second probe, on the check's worker, while the
 consents to (spec ae.4, "an explicit TV/page action"); nothing else probes, and a command over
 MQTT never does. `reachable`: the helper fetches the release itself. `unreachable`: the plugin
 asks the companion integration instead. A helper whose own download could not reach the origin
-says so in its record, and that becomes the origin's word too, so the next install at the
-television asks Home Assistant without looking again.
+says so in its record, and that becomes the origin's word too. Its failed end starts the
+ten-minute limit between updates, so that word lasts the limit and ten minutes more
+(`HELPER_WORD_SECONDS`): the next install at the television that the limit lets through asks
+Home Assistant without looking again. After that, or after a restart, it is looked at again.
 
 To ask, the plugin publishes `relay_request` (QoS 1, never retained) with a fresh id, the version
 and the serial of the index it holds, and waits at most 120 s for `cmd/relay` naming that id -
@@ -105,9 +107,12 @@ minutes have passed by the time an answer is taken, so the whole refusal table i
 before the helper starts, and the transaction is still the television's or the page's: a
 downgrade chosen there stays one. With no answer, or no broker or integration to ask, the install
 is refused (`no_relay`); nothing was changed. An answer of Home Assistant's shape that only this
-receiver's clock calls expired - its clock ahead of Home Assistant's by more than the address
+receiver's clock calls expired - a clock ahead of Home Assistant's by more than the address
 lives - ends the wait with `clock_skew` instead, because "Home Assistant did not answer" would
-send the household looking for the wrong fault. A command over MQTT brings its own address or
+send the household looking for the wrong fault. Its sentence says only what the receiver knows:
+an answer came whose address its clock calls expired. It does not say that Home Assistant sent
+it - any broker client may have (review round 2) - and setting a wrong clock is harmless either
+way. A command over MQTT brings its own address or
 asks the receiver to fetch (spec ae.4), so it never asks back.
 
 Every wait has a timer, and every wait also ends by its age on the monotonic clock whenever it is
@@ -138,7 +143,7 @@ from .mqttclient import MAX_QUEUED_MESSAGES
 from .origin import MQTT, PAGE, SCREEN, granted
 from .publisher import Refusal
 from .uninstall import _attach, installed_by_package_manager
-from .updatecheck import UNREACHABLE, offer
+from .updatecheck import ORIGIN_FRESH_SECONDS, UNREACHABLE, offer
 from .version import CONTRACT, __version__
 
 LOG = get_logger("selfupdate")
@@ -168,6 +173,10 @@ LAUNCH_WAIT_SECONDS = 60
 # and lets the lock go last. The end is taken once the lock is gone - or after this long.
 RELEASE_WAIT_SECONDS = 5
 RATE_LIMIT_SECONDS = 10 * 60
+# How long an update helper's "the origin gave no answer" counts as the origin's word (see the
+# module). The failed transaction that brings it starts the limit above, so the word must outlive
+# the limit to reach the next install at all; after that it lasts as long as a probe's.
+HELPER_WORD_SECONDS = RATE_LIMIT_SECONDS + ORIGIN_FRESH_SECONDS
 QUESTION_TIMEOUT_SECONDS = 60
 QUIT_RESTART = 3
 
@@ -213,10 +222,10 @@ RELAY = "the download address from Home Assistant is not valid"
 # relay handshake (or no broker to ask); the screen says it in the household's language.
 NO_RELAY = ("the receiver cannot reach the plugin's release origin and Home Assistant did not "
             "answer, so the update cannot be installed")
-# Home Assistant did answer, with an address this receiver's clock already calls expired.
-CLOCK_SKEW = ("Home Assistant answered, but the receiver's clock differs from Home Assistant's, "
-              "so the download address had already expired; set the receiver's clock and try "
-              "again")
+# An answer of Home Assistant's shape came, with an address this receiver's clock already calls
+# expired. Who sent it is not known here, so the sentence does not say.
+CLOCK_SKEW = ("an answer arrived whose download address had already expired by the receiver's "
+              "clock; if the receiver's clock is wrong, set it and try again")
 NO_SPACE = updatehelper.SENTENCES["no_space"]
 RATE_LIMITED = "an update ran less than ten minutes ago"
 DOORS = "an update is being applied on the receiver"
@@ -1054,7 +1063,7 @@ class SelfUpdater:
             return
         self._relay_wait = None
         self._relay_ticker.stop()
-        LOG.info("update to %s: Home Assistant answered request %s", wait["version"], wait["id"])
+        LOG.info("update to %s: request %s was answered", wait["version"], wait["id"])
         refusal = self._request(json.dumps({"version": wait["version"], "sha256": wait["sha256"],
                                             "relay": relay}),
                                 wait["origin"], wait["downgrade"])
@@ -1070,8 +1079,8 @@ class SelfUpdater:
         if wait is None:
             return
         if wait.get("expired"):
-            LOG.warning("update to %s: Home Assistant answered request %s only with an address "
-                        "this receiver's clock calls expired", wait["version"], wait["id"])
+            LOG.warning("update to %s: request %s was answered only with an address this "
+                        "receiver's clock calls expired", wait["version"], wait["id"])
             self.relay_refusal = Refusal(CLOCK_SKEW, "clock_skew")
         else:
             LOG.warning("update to %s: Home Assistant did not answer request %s within %d s",
@@ -1090,7 +1099,7 @@ class SelfUpdater:
         LOG.info("update %s could not reach the release origin; the next install at the "
                  "television asks Home Assistant", record.get("id"))
         try:
-            note()
+            note(fresh_for=HELPER_WORD_SECONDS)
         except Exception:
             LOG.exception("could not note the origin as unreachable")
 
