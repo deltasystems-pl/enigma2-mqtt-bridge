@@ -1219,12 +1219,27 @@ def feed(tmp_path_factory):
     ca_key, ca_crt = str(work / "ca.key"), str(work / "ca.crt")
     key, csr, crt, ext = (str(work / name) for name in ("leaf.key", "leaf.csr", "leaf.crt",
                                                          "ext.cnf"))
-    openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/CN=test CA",
+    # Extensions as a strict verifier wants them - Python 3.13 and later set
+    # VERIFY_X509_STRICT in the default context, which refuses a CA without key usage.
+    ca_config = str(work / "ca.cnf")
+    with open(ca_config, "w", encoding="ascii") as handle:
+        handle.write(
+            "[req]\ndistinguished_name = dn\nx509_extensions = ca\nprompt = no\n"
+            "[dn]\nCN = test CA\n"
+            "[ca]\nbasicConstraints = critical,CA:TRUE\n"
+            "keyUsage = critical,keyCertSign,cRLSign\nsubjectKeyIdentifier = hash\n"
+        )
+    openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-config", ca_config,
             "-keyout", ca_key, "-out", ca_crt)
     openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=localhost", "-keyout", key,
             "-out", csr)
     with open(ext, "w", encoding="ascii") as handle:
-        handle.write("subjectAltName=DNS:localhost\nbasicConstraints=CA:FALSE\n")
+        handle.write(
+            "subjectAltName = DNS:localhost\nbasicConstraints = critical,CA:FALSE\n"
+            "keyUsage = critical,digitalSignature,keyEncipherment\n"
+            "extendedKeyUsage = serverAuth\nsubjectKeyIdentifier = hash\n"
+            "authorityKeyIdentifier = keyid\n"
+        )
     openssl("x509", "-req", "-in", csr, "-CA", ca_crt, "-CAkey", ca_key, "-CAcreateserial",
             "-days", "2", "-extfile", ext, "-out", crt)
 
