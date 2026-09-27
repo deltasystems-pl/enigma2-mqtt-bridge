@@ -33,7 +33,7 @@ import json
 
 from .config import HA_MODES
 from .log import get_logger, redact
-from .origin import MQTT, PAGE, granted
+from .origin import MQTT, PAGE, SCREEN, granted
 
 LOG = get_logger("commands")
 
@@ -155,13 +155,19 @@ class CommandDispatcher:
 
         return self._execute(name, handler, decode(payload), MQTT) is None
 
-    def run(self, name, text, origin):
+    def run(self, name, text, origin, **consents):
         """One command from somewhere other than the broker; the refusal, or None.
 
         The page calls this with the payload a broker client would have sent.
         The size limit is the broker's, applied the same way; the retained-
         command rule has no meaning off the broker and is not asked. An unknown
         name is refused exactly as it is over MQTT, on `last_error`.
+
+        `consents` are what the person at the television or on the page has
+        just confirmed - today only `downgrade=True`, after the question that
+        names what an older release takes away. They travel down the call, as
+        the origin does, and are never part of the payload: nothing a broker
+        client writes can carry one, and `handle()` never passes any.
         """
         text = str(text or "")
         if len(text.encode("utf-8")) > MAX_PAYLOAD_BYTES:
@@ -171,12 +177,14 @@ class CommandDispatcher:
         if handler is None:
             self.bridge.publish_last_error(name, "unknown command")
             return "unknown command"
-        return self._execute(name, handler, text, origin)
+        return self._execute(name, handler, text, origin, consents)
 
-    def _execute(self, name, handler, text, origin):
+    def _execute(self, name, handler, text, origin, consents=None):
         """Run one handler, and say how it went on `last_error`. The refusal, or None."""
         if origin == PAGE:
             LOG.info("cmd/%s from the OpenWebif page", name)
+        elif origin == SCREEN:
+            LOG.info("cmd/%s from the receiver's own screen", name)
         else:
             LOG.info("cmd/%s", name)
         doors = self._doors()
@@ -188,7 +196,7 @@ class CommandDispatcher:
                 self.bridge.publish_last_error(name, doors)
             return doors
         try:
-            error = handler(text, origin=origin)
+            error = handler(text, origin=origin, **(consents or {}))
         except Exception as exception:
             LOG.exception("cmd/%s raised", name)
             error = type(exception).__name__ + ": " + redact(str(exception))
@@ -658,11 +666,13 @@ class CommandDispatcher:
         """
         return self.bridge.updates.request_check(origin=origin)
 
-    def update(self, text, origin=MQTT):
+    def update(self, text, origin=MQTT, downgrade=False):
         """Install one signed release: every guard here, the rest in the update helper.
 
         `{"version": "0.4.1" | "latest", "sha256": ..., "relay": {"url", "expires"}}`.
         Upgrades and repairs only - a lower version is refused over MQTT whatever the
-        payload says. The answer is the `update` topic moving (`selfupdate.py`).
+        payload says. `downgrade` is the television's or the page's answered question
+        (`run()`); the updater honours it only for those two origins. The answer is the
+        `update` topic moving (`selfupdate.py`).
         """
-        return self.bridge.self_update.request(text, origin=origin)
+        return self.bridge.self_update.request(text, origin=origin, downgrade=downgrade)

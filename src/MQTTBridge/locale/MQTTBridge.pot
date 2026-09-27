@@ -710,3 +710,231 @@ msgstr ""
 #: src/MQTTBridge/webif.py
 msgid "The receiver switches to channel 1, the first channel of its first bouquet, and empties its list of recently watched channels."
 msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "Plugin updates"
+msgstr ""
+
+#: src/MQTTBridge/updatescreen.py
+msgid "Close"
+msgstr ""
+
+#: src/MQTTBridge/updatescreen.py
+msgid "Install"
+msgstr ""
+
+#: src/MQTTBridge/updatescreen.py
+msgid "Check now"
+msgstr ""
+
+#: src/MQTTBridge/updatescreen.py
+msgid "Asked for the list of versions; it is shown here as soon as it arrives."
+msgstr ""
+
+#: src/MQTTBridge/updatescreen.py
+msgid "The update to version %s has started."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "When the new version is in place the receiver's user interface restarts; the picture stops for about half a minute."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "%s - newer version"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "Update to %(target)s, started %(who)s: %(phase)s"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "This copy of the plugin was not installed by the package manager, so it cannot update itself."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "An installation or update of the plugin is already running on the receiver."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "The receiver's package manager is busy. Try again in a moment."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "The receiver is in standby. An update restarts the receiver's user interface, which wakes it and may switch the television on. Switch the receiver on and try again."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "The receiver is recording or is about to start a recording. Try again when the recording has finished."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "An EPG import is running. Try again when it has finished."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "The receiver cannot restart its user interface right now. Try again in a moment."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "There is not enough free space on the receiver."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "An update ran less than ten minutes ago. Try again later."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "The update could not be started; the plugin log says why."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "%(version)s - cannot be installed: %(reason)s"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "%s - installed"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "%s - older version"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "Installed version: %s"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "from Home Assistant"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "from the internet"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "No list of versions is known yet. Check for updates first."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "The last check could not reach the list of versions on the internet."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "Last update to %(target)s, started %(who)s: %(result)s"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "Version %s is not on the plugin's signed list of versions. Check for updates and try again."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "Version %s has been withdrawn by the plugin's authors."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "Version %s is older than the oldest version this plugin can install."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "Version %s does not work with this plugin or with the Home Assistant integration."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "Version %s needs a package that is not installed on this receiver."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "Version %s is already installed and running."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "downloading"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "checking the download"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "saving the current version"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "installing"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "restarting the user interface"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "checking the new version"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "putting the previous version back"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "over MQTT"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "on the television"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "on the OpenWebif page"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "over SSH"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "installed"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "withdrawn before the restart; the previous version runs"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "the new version did not start; the previous version was put back"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "failed; the previous version runs"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "interrupted"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "does not work with this plugin or with the Home Assistant integration"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "needs a package that is not installed on this receiver"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "List of versions no. %(serial)s of %(date)s, %(source)s"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "Install version %s of the plugin?"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "The last check failed (%s)."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "Install the older version %s? The plugin's newer features will disappear until it is updated again."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Install a plugin version"
+msgstr ""

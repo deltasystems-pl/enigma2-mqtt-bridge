@@ -34,6 +34,17 @@ permission and nothing else: every household-safety guard still applies.
 The page is script-free (`default-src 'none'`), so every confirmation is a
 second page rendered by the server, never a dialog.
 
+**Installing a release of the plugin** is `cmd/update` with the origin `page`
+(spec ae.4, ae.6): OpenWebif has admitted whoever is here, so neither
+`update_check` nor `update_allowed` is asked, and every household guard still
+is. It is always confirmed - it ends in a restart of the user interface - and a
+version below the running one is a downgrade, whose confirmation names what it
+takes away. That confirmation is the only way to one: the consent it gives is
+kept in the session with the pending confirmation, never sent by the browser,
+so no form another page could forge carries it. The versions offered are the
+ones the signed index offers (`updateview.py`, shared with the television's
+screen).
+
 **How the page is opened.** OpenWebif's menu entry loads it into its own
 content panel with jQuery (`$("#content_container").load(url)`), which injects
 whatever comes back into OpenWebif's document and runs any script in it. So a
@@ -79,7 +90,7 @@ except ImportError:  # OpenWebif is optional; tests exercise the resource as a d
         INTERNAL_SERVER_ERROR = 500
 
 
-from . import buildid
+from . import buildid, updateview
 from . import config as settings_module
 from . import log as log_module
 from .i18n import _
@@ -486,11 +497,15 @@ class Action:
 
     `build` turns the form's values into the payload a broker client would have
     sent. `confirm`, when it returns a sentence, puts a second page in front of
-    the command that says what the household loses.
+    the command that says what the household loses. `consent` names what a
+    "yes" to that sentence grants the handler (`CommandDispatcher.run`); it is
+    kept with the pending confirmation and passed only once it is confirmed.
+    `done`, given the payload, is what the page says when the command was
+    accepted, where "Done" would claim too much.
     """
 
     def __init__(self, key, command, label, fields=(), build=None, confirm=None,
-                 ends_session=False):
+                 ends_session=False, consent=None, done=None):
         self.key = key
         self.command = command
         self.label = label
@@ -498,6 +513,8 @@ class Action:
         self.build = build or (lambda _values: "")
         self.confirm = confirm
         self.ends_session = ends_session
+        self.consent = consent
+        self.done = done
 
 
 def _json(payload):
@@ -508,6 +525,16 @@ def _zap_payload(values):
     return _json({values["by"]: values["channel"]})
 
 
+def _update_consent(values):
+    # Granted by the downgrade question alone: `updateview.question` asks it for exactly
+    # these versions.
+    return {"downgrade": True} if updateview.older(values["version"]) else {}
+
+
+def _update_started(payload):
+    return _("The update to version %s has started.") % json.loads(payload)["version"]
+
+
 def _message_payload(values):
     return _json({
         "text": values["text"], "type": values["type"], "timeout": values["timeout"],
@@ -515,7 +542,7 @@ def _message_payload(values):
     })
 
 
-def actions(bouquets=(), node_id="", history=()):
+def actions(bouquets=(), node_id="", history=(), versions=()):
     """Every page action, in the order the page shows them.
 
     Built per request, so every label is in the language of the moment. Every
@@ -525,7 +552,8 @@ def actions(bouquets=(), node_id="", history=()):
     the confirmation a broker client has to type, and on the page the second,
     server-rendered step is that confirmation. `history` is the last published
     `zap_history`, as `(sref, name)`: the page offers what the topic said, by
-    reference, as a consumer would.
+    reference, as a consumer would. `versions` is `(version, label)` of every
+    release the signed index offers that can be installed (`updateview`).
     """
     on_off = (("on", _("On")), ("off", _("Off")))
     sref = Field("sref", "text", _("Service reference"))
@@ -677,6 +705,14 @@ def actions(bouquets=(), node_id="", history=()):
         # Needs no `update_check`: asking from the page is the consent to one request
         # to the release origin. The ten-minute limit applies here as over MQTT.
         Action("update_check", "update_check", _("Check for plugin updates now")),
+        Action(
+            "update", "update", _("Install a plugin version"),
+            (Field("version", "version", _("Version"), versions),),
+            build=lambda values: _json({"version": values["version"]}),
+            confirm=lambda values: updateview.question(values["version"]),
+            consent=_update_consent,
+            done=_update_started,
+        ),
         Action("discovery", "discovery", _("Publish discovery again")),
         Action(
             "ha_mode", "ha_mode", _("Home Assistant mode"),
@@ -743,7 +779,7 @@ def _field_value(request, field):
     if field.kind == "checkbox":
         return _bool_arg(request, field.name) == "true"
     text = _single_arg(request, field.name)
-    if field.kind == "select":
+    if field.kind in ("select", "version"):
         if text not in [value for value, _label in field.options]:
             raise ValueError(field.name + " is not one of the offered choices")
         return text
@@ -959,8 +995,14 @@ def _running_bridge():
     return bridge
 
 
+def _versions(bridge):
+    """`(version, label)` of every release the page may offer to install."""
+    return updateview.installable(bridge) if bridge is not None else []
+
+
 def _action(key, bridge=None):
-    for action in actions(_bouquets(bridge), _node_id(bridge), _history(bridge)):
+    for action in actions(_bouquets(bridge), _node_id(bridge), _history(bridge),
+                          _versions(bridge)):
         if action.key == key:
             return action
     raise ValueError("unknown action")
@@ -976,12 +1018,17 @@ def _act(request):
     payload = action.build(values)
     sentence = action.confirm(values) if action.confirm is not None else None
     if sentence:
-        return _ask(request, action.key, payload, action.label, sentence)
+        consents = action.consent(values) if action.consent is not None else None
+        return _ask(request, action.key, payload, action.label, sentence, consents=consents)
     return _perform(request, bridge, action, payload)
 
 
-def _perform(request, bridge, action, payload):
-    """Run one command through the dispatcher, as the page."""
+def _perform(request, bridge, action, payload, consents=None):
+    """Run one command through the dispatcher, as the page.
+
+    `consents` come only from a confirmation this session was shown (`_confirmed`).
+    """
+    consents = dict(consents or {})
     _rotate(request)
     if action.ends_session:
         # Rendered before the command runs: once the main loop quits, nothing
@@ -991,22 +1038,31 @@ def _perform(request, bridge, action, payload):
             request,
             _("Sent: %s. The receiver may stop answering this page now.") % action.label,
         )
-        error = bridge.run_command(action.command, payload, PAGE)
+        error = bridge.run_command(action.command, payload, PAGE, **consents)
         if error is None:
             return body
         return _answer(request, _("Refused: %s") % error)
-    error = bridge.run_command(action.command, payload, PAGE)
+    error = bridge.run_command(action.command, payload, PAGE, **consents)
     if error:
         return _answer(request, _("Refused: %s") % error)
+    if action.done is not None:
+        return _answer(request, action.done(payload))
     return _answer(request, _("Done: %s") % action.label)
 
 
-def _ask(request, key, payload, label, sentence, detail="", changes=None):
-    """The first step of a confirmed action: a fresh token bound to exactly this."""
+def _ask(request, key, payload, label, sentence, detail="", changes=None, consents=None):
+    """The first step of a confirmed action: a fresh token bound to exactly this.
+
+    `consents` stay here, on the server, with the pending confirmation: the browser
+    sends back the token, the action and the payload, and nothing else it sends can
+    add one.
+    """
     token = secrets.token_urlsafe(32)
     pending = {"token": token, "action": key, "payload": payload}
     if changes is not None:
         pending["changes"] = dict(changes)
+    if consents:
+        pending["consents"] = dict(consents)
     _session(request)[CONFIRM_KEY] = pending
     try:
         return _confirmation(request, label, sentence, key, payload, token, detail)
@@ -1040,7 +1096,7 @@ def _confirmed(request):
             raise RuntimeError("the bridge is unavailable")
         return _apply(request, bridge, pending.get("changes") or {})
     bridge = _running_bridge()
-    return _perform(request, bridge, _action(key, bridge), payload)
+    return _perform(request, bridge, _action(key, bridge), payload, pending.get("consents"))
 
 
 # ------------------------------------------------------------------ rendering --
@@ -1196,7 +1252,9 @@ def _settings_section(section, token):
 def _action_control(field):
     if field.kind == "checkbox":
         return _checkbox(field.name, False)
-    if field.kind == "select" or (field.kind in ("bouquet", "history") and field.options):
+    if field.kind in ("select", "version") or (
+        field.kind in ("bouquet", "history") and field.options
+    ):
         return _select(field.name, field.options, None)
     if field.kind == "number":
         limits = ""
@@ -1213,6 +1271,11 @@ def _action_form(action, token, running):
         f"<label><span>{_e(field.label)}</span>{_action_control(field)}</label>"
         for field in action.fields
     )
+    # Nothing to choose from - no signed list of versions yet - is nothing to send.
+    if any(field.kind == "version" and not field.options for field in action.fields):
+        running = False
+        controls += "<p>" + _e(_("No list of versions is known yet. Check for updates first.")) \
+            + "</p>"
     return (
         "<form method='post' class='action'>"
         f"<fieldset{'' if running else ' disabled'}><legend>{_e(action.label)}</legend>"
@@ -1271,7 +1334,8 @@ def _actions_section(request, bridge, token):
     forms = "".join(
         _action_form(action, token, running)
         + (_screenshot_figure(request, bridge) if action.key == "screenshot" else "")
-        for action in actions(_bouquets(bridge), _node_id(bridge), _history(bridge))
+        for action in actions(_bouquets(bridge), _node_id(bridge), _history(bridge),
+                              _versions(bridge))
     )
     return (
         f"<section><h2>{_e(_('Commands'))}</h2>{note}"
@@ -1318,6 +1382,22 @@ def _status_section(bridge, section):
         f"<h3>{_e(_('Diagnostics'))}</h3>"
         f"<dl>{_rows((name, _json(item)) for name, item in sorted(diagnostics.items()))}</dl>"
         "</section>"
+    )
+
+
+def _updates_section(bridge):
+    """What the television's "Plugin updates" screen shows, for the page's readers."""
+    lines = updateview.header(bridge)
+    running = updateview.transaction_line(bridge)
+    if running:
+        lines.append(running)
+    rows = updateview.rows(bridge) if bridge is not None else []
+    listing = "".join("<li>" + _e(updateview.row_label(row)) + "</li>" for row in rows)
+    return (
+        "<section><h2>" + _e(_("Plugin updates")) + "</h2>"
+        + "".join("<p>" + _e(line) + "</p>" for line in lines)
+        + ("<ul>" + listing + "</ul>" if listing else "")
+        + "</section>"
     )
 
 
@@ -1396,6 +1476,7 @@ def _page(request, message=""):
         notice
         + _status_section(bridge, section)
         + _settings_section(section, token)
+        + _updates_section(bridge)
         + _actions_section(request, bridge, token)
         + _topics_section(bridge)
         + f"<section><h2>{_e(_('Sanitized log tail'))}</h2><pre>{log_tail}</pre></section>"

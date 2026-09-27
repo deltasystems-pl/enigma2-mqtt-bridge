@@ -8,6 +8,11 @@ been in every enigma2 flavour for a decade and needs no registration at all.
 The status line is the point of the screen as much as the fields are: a box that
 is idle because the broker address is empty looks exactly like a box that cannot
 reach the broker, unless somebody says which it is.
+
+The blue key opens "Plugin updates" (`updatescreen.py`): the versions the signed index offers,
+a check, and an install - the television's half of the self-update, which needs neither
+`update_check` nor `update_allowed` because the person holding the remote control is the
+consent (spec ae.4).
 """
 
 from Components.ActionMap import ActionMap
@@ -20,6 +25,7 @@ from Screens.Screen import Screen
 from .i18n import _
 from .log import get_logger
 from .selfupdate import household_doors
+from .updatescreen import MQTTBridgeUpdates
 
 LOG = get_logger("setup")
 
@@ -134,6 +140,8 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
                     foregroundColor="red" />
             <widget name="key_green" position="230,550" size="200,30" font="Regular;22"
                     foregroundColor="green" />
+            <widget name="key_blue" position="650,550" size="230,30" font="Regular;22"
+                    foregroundColor="blue" />
         </screen>
     """
 
@@ -157,6 +165,7 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
         self["status"] = Label(status_text(self._bridge_or_running(), self.settings))
         self["key_red"] = Label(_("Cancel"))
         self["key_green"] = Label(_("Save"))
+        self["key_blue"] = Label(_("Plugin updates"))
         self["mqttbridgeActions"] = ActionMap(
             ["SetupActions", "ColorActions"],
             {
@@ -164,6 +173,7 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
                 "green": self.keySave,
                 "cancel": self.keyCancel,
                 "red": self.keyCancel,
+                "blue": self.keyUpdates,
             },
             -2,
         )
@@ -250,6 +260,22 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
             except Exception:
                 LOG.exception("the bridge could not be restarted with the new settings")
         self.close(True)
+
+    def keyUpdates(self):
+        """Blue: the "Plugin updates" screen - or, behind an update's closed doors, only why not.
+
+        Unsaved edits on this screen stay as they are: the updates screen changes no setting,
+        and closing it comes back here.
+        """
+        try:
+            bridge = self._bridge_or_running()
+            if bridge is not None and _updating(bridge):
+                self.session.open(MessageBox, household_doors(bridge.self_update),
+                                  getattr(MessageBox, "TYPE_INFO", 1))
+                return
+            self.session.open(MQTTBridgeUpdates, bridge=bridge)
+        except Exception:
+            LOG.exception("the plugin updates screen could not be opened")
 
     def _tell_and_close(self, text):
         try:

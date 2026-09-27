@@ -1286,11 +1286,37 @@ menu_list_module = _module("Components.MenuList")
 
 
 class MenuList(GUIComponent):
+    """`Components/MenuList.py` as far as a screen of tuples needs it.
+
+    The image's list keeps its entries in an `eListboxPythonStringContent`, which draws each
+    entry's first element and hands the whole entry back from `getCurrent()`; `setList`
+    replaces the entries and leaves the cursor where it was, within the new list (the
+    listbox's `entryReset(false)`). The selection is the listbox's, moved by the remote
+    control; a test moves it with `moveToIndex`, which the image has too. An empty list has no
+    current entry (the content answers None).
+    """
+
     GUI_WIDGET = eListbox
 
     def __init__(self, entries=None, enableWrapAround=True, content=None):
         GUIComponent.__init__(self)
         self.list = list(entries or [])
+        self.selection = 0
+
+    def setList(self, entries):
+        self.list = list(entries or [])
+        self.selection = min(self.selection, max(0, len(self.list) - 1))
+
+    def getCurrent(self):
+        if not self.list:
+            return None
+        return self.list[min(self.selection, len(self.list) - 1)]
+
+    def getSelectionIndex(self):
+        return self.selection
+
+    def moveToIndex(self, index):
+        self.selection = index
 
 
 menu_list_module.MenuList = MenuList
