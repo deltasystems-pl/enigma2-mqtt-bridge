@@ -1862,3 +1862,284 @@ def test_a_drill_link_is_not_followed_or_used(tmp_path):
     drill_file(scene).symlink_to(target)
     assert scene.run() == 0
     assert scene.init_calls() == [] and target.exists()
+
+
+@pytest.mark.parametrize("kind", ["content", "fifo"])
+def test_a_drill_name_that_is_not_an_empty_file_is_ignored_and_left(tmp_path, kind):
+    # The drill's file is made empty; anything else of that name was put there for another
+    # reason - and a pipe is never opened.
+    scene = Scene(tmp_path, acceptance=True)
+    scene.plugin_word()
+    if kind == "content":
+        drill_file(scene).write_text("r2\n")
+    else:
+        os.mkfifo(drill_file(scene))
+    assert scene.run() == 0
+    assert scene.last()["result"] == "installed"
+    assert scene.init_calls() == [] and "drill" not in scene.status()["record"]
+    assert os.path.lexists(drill_file(scene))
+
+
+# ----------------------------------------------- R2 before `init 4`, closely --
+
+
+def test_an_error_recording_the_channel_at_r2s_start_still_puts_the_old_version_back(
+        tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    real = updatehelper.Transaction.statusinfo
+
+    def statusinfo(self):
+        # Every look before the stop fails the same way, so a second R2 would meet it again.
+        if self.status.get("phase") == "rolling_back" and not scene.init_calls():
+            raise RecursionError("maximum recursion depth exceeded")
+        return real(self)
+    monkeypatch.setattr(updatehelper.Transaction, "statusinfo", statusinfo)
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.init_calls() == ["4", "3"] and scene.box.pids and not scene.locked()
+    record = scene.status()["record"]
+    assert record["internal_error"].startswith("RecursionError")
+    # The record taken before the restart stands in: the channel playing then comes back.
+    assert scene.box.lastservice_at_start == TVP1
+
+
+@pytest.mark.parametrize("error", [RuntimeError("boom"), Escape()], ids=["error", "escape"])
+def test_whatever_escapes_r2_before_init_4_still_ends_with_the_old_version(tmp_path, error):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+
+    def breaks_once():
+        scene.box.pauses.pop("rollback_recorded")
+        raise error
+    scene.box.pauses["rollback_recorded"] = breaks_once
+    if isinstance(error, Exception):
+        assert scene.run() == 1
+    else:
+        with pytest.raises(Escape):
+            scene.run()
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "internal_error")
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.init_calls() == ["4", "3"] and scene.box.pids and not scene.locked()
+    assert scene.box.init_log[0] == ("4", f"# plugin {NEW}\n")
+
+
+# ------------------------------------------------ a restore that cannot finish --
+
+
+def end_by(scene, path):
+    """The ends that put the files back: the undo and the withdraw (no restart), and R2."""
+    if path == "undo":
+        scene.box.pauses["opkg_done"] = lambda: scene.transaction.on_signal(signal.SIGHUP)
+        return "interrupted"
+    if path == "withdraw":
+        scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+        return "question"
+    scene.plugin_word(started=False)
+    return "not_started"
+
+
+def installed_version(scene):
+    status, _info = updatehelper.opkg_paths(scene.box.root)
+    text = Path(status).read_text()
+    return text.split(updatehelper.PACKAGE + "\nVersion: ")[1].split("\n")[0]
+
+
+@pytest.mark.parametrize("error", [OSError(28, "No space left on device"),
+                                   OSError(5, "Input/output error")], ids=["enospc", "eio"])
+@pytest.mark.parametrize("path", ["undo", "withdraw", "r2"])
+def test_opkgs_records_that_cannot_be_written_still_let_the_old_code_back(
+        tmp_path, monkeypatch, path, error):
+    scene = Scene(tmp_path)
+    cause = end_by(scene, path)
+    status, _info = updatehelper.opkg_paths(scene.box.root)
+    real = updatehelper.atomic_write
+
+    def failing(target, data, mode=0o600):
+        if target == status:
+            raise error
+        return real(target, data, mode)
+    monkeypatch.setattr(updatehelper, "atomic_write", failing)
+    assert scene.run() == 1
+    # The code that decides what runs is the old one, hook included ...
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.box.read(HOOK) == f"# hook {OLD}\n"
+    # ... and the end says exactly what is missing, and what repairs it.
+    last = scene.last()
+    assert (last["result"], last["reason"]) == ("failed", "restore_incomplete")
+    assert OLD in last["error"] and "Force plugin reinstall" in last["error"]
+    assert error.strerror in last["error"]
+    record = scene.status()["record"]
+    assert record["restore"].startswith("partial: opkg's records")
+    assert record["cause"] == cause
+    assert installed_version(scene) == NEW and not scene.locked()
+    if path == "r2":
+        assert scene.init_calls() == ["4", "3"] and scene.box.pids
+        assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+        # The settings block and the channel went back all the same.
+        assert scene.box.lastservice_at_start == TVP1
+    else:
+        assert scene.init_calls() == []
+
+
+@pytest.mark.parametrize("path", ["undo", "withdraw", "r2"])
+def test_a_plugin_tree_that_cannot_go_back_leaves_opkgs_records_agreeing_with_it(
+        tmp_path, monkeypatch, path):
+    scene = Scene(tmp_path)
+    cause = end_by(scene, path)
+
+    def broken(*_args):
+        raise OSError(5, "Input/output error")
+    monkeypatch.setattr(updatehelper, "_replace_tree", broken)
+    assert scene.run() == 1
+    assert scene.plugin_py() == f"# plugin {NEW}\n"
+    # Nothing was put back before the tree, so opkg still names what is on disk.
+    assert installed_version(scene) == NEW
+    last = scene.last()
+    assert (last["result"], last["reason"]) == ("failed", "restore_failed")
+    assert "Force plugin reinstall" in last["error"] and "Input/output error" in last["error"]
+    record = scene.status()["record"]
+    assert record["restore"].startswith("failed") and record["cause"] == cause
+    assert not scene.locked()
+
+
+def test_a_settings_block_that_cannot_be_written_is_named_after_the_code_is_back(
+        tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    settings = scene.box.path(updatehelper.SETTINGS)
+    real = updatehelper.atomic_write
+    failed = []
+
+    def failing(target, data, mode=0o600):
+        # Only the restore's write: the channel written after it is R2's own.
+        if target == settings and not failed:
+            failed.append(target)
+            raise OSError(28, "No space left on device")
+        return real(target, data, mode)
+    monkeypatch.setattr(updatehelper, "atomic_write", failing)
+    assert scene.run() == 1
+    assert scene.plugin_py() == f"# plugin {OLD}\n" and installed_version(scene) == OLD
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "restore_incomplete")
+    record = scene.status()["record"]
+    assert record["restore"] == "partial: the settings block: [Errno 28] No space left on device"
+    assert scene.init_calls() == ["4", "3"]
+
+
+def test_a_restart_during_a_withdraw_that_left_opkgs_records_still_goes_to_r2(
+        tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+    status, _info = updatehelper.opkg_paths(scene.box.root)
+    real = updatehelper.atomic_write
+
+    def failing(target, data, mode=0o600):
+        if target == status:
+            raise OSError(28, "No space left on device")
+        return real(target, data, mode)
+    monkeypatch.setattr(updatehelper, "atomic_write", failing)
+
+    def restart_and_speak():
+        scene.box.restart()
+        updatehelper.write_json(str(scene.directory / "started.json"),
+                                {"version": NEW, "commit": "e" * 40, "pid": 200})
+    scene.box.pauses["withdrawn"] = restart_and_speak
+    assert scene.run() == 1
+    # The old code was back when the new process started: it is never proved, but stopped.
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "restore_incomplete")
+    assert scene.init_calls() == ["4", "3"]
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+
+
+# ------------------------------------------------------- gaps the mutants found --
+
+
+@pytest.mark.parametrize("started_by", ["mqtt", "home_assistant"])
+def test_a_repair_of_the_installed_version_is_no_downgrade(tmp_path, started_by):
+    # `cmd/update` is for upgrades and repairs: the version installed, installed again.
+    ipk = package(OLD)
+    scene = Scene(tmp_path, target=OLD, ipk=ipk, entries=[entry_for(OLD, ipk)],
+                  started_by=started_by)
+
+    def plugin_word():
+        updatehelper.write_json(str(scene.directory / "restart.json"), {"pid": 100})
+        scene.box.at(5, scene.box.restart)
+        scene.box.at(8, lambda: updatehelper.write_json(
+            str(scene.directory / "started.json"), {"version": OLD, "commit": "e" * 40,
+                                                    "pid": 200}))
+    scene.box.pauses["restarting"] = plugin_word
+    assert scene.run() == 0
+    assert (scene.last()["result"], scene.last()["reason"]) == ("installed", None)
+    assert "--force-downgrade" not in scene.opkg_calls()[0]
+
+
+def test_a_restart_that_lands_during_the_undo_goes_to_r2(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.box.opkg_mode = "partial"
+    real = updatehelper.restore_snapshot
+
+    def restore_while_the_interface_restarts(*args, **kwargs):
+        real(*args, **kwargs)
+        if not scene.init_calls():
+            scene.box.restart()
+    monkeypatch.setattr(updatehelper, "restore_snapshot", restore_while_the_interface_restarts)
+    assert scene.run() == 1
+    # The new process may have read either version: stopped, restored again, started.
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "manifest")
+    assert scene.init_calls() == ["4", "3"]
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+
+
+def test_an_interface_restart_just_before_opkg_runs_changes_nothing(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    real = updatehelper.write_json
+
+    def marker_then_restart(path, value, mode=0o600):
+        real(path, value, mode)
+        if path.endswith("mqttbridge-update.json") and value.get("phase") == "installing":
+            scene.box.pids = {150}
+    monkeypatch.setattr(updatehelper, "write_json", marker_then_restart)
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("interrupted", "interrupted")
+    assert scene.opkg_calls() == [] and scene.init_calls() == []
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+
+
+def test_a_child_seen_before_restarting_is_never_the_restart(tmp_path):
+    scene = tier_two(tmp_path)
+    log = scene.box.path(updatehelper.LOG_PATHS[0])
+
+    def a_child_is_running():
+        scene.box.pids = {100, 101}
+        scene.box.fds[101] = {log}
+
+    def the_old_interface_quits():
+        # The child outlives it, holding the old plugin's log; no new interface comes.
+        updatehelper.write_json(str(scene.directory / "restart.json"), {"pid": 100})
+        scene.box.pids = {101}
+    scene.box.pauses["opkg_done"] = a_child_is_running
+    scene.box.pauses["restarting"] = the_old_interface_quits
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    assert scene.status()["record"]["proof"] == "none"
+
+
+def test_a_slow_restart_beside_a_remembered_child_still_gets_its_proof_window(tmp_path):
+    scene = Scene(tmp_path)
+
+    def a_child_is_running():
+        scene.box.pids = {100, 101}
+
+    def the_old_interface_quits():
+        updatehelper.write_json(str(scene.directory / "restart.json"), {"pid": 100})
+        scene.box.pids = {101}
+        # The new interface takes 130 s to come up: inside the 180 s, past a 120 s proof.
+        scene.box.at(130, lambda: setattr(scene.box, "pids", {101, 200}))
+        scene.box.at(133, lambda: updatehelper.write_json(
+            str(scene.directory / "started.json"), {"version": NEW, "commit": "e" * 40,
+                                                    "pid": 200}))
+    scene.box.pauses["opkg_done"] = a_child_is_running
+    scene.box.pauses["restarting"] = the_old_interface_quits
+    assert scene.run() == 0
+    assert scene.last()["result"] == "installed"
