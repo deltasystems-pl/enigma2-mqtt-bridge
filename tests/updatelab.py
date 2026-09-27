@@ -134,6 +134,10 @@ class FakeOrigin:
     def down(self):
         self.unreachable = True
 
+    def fail(self, name):
+        """`name` alone cannot be fetched: the probe answered, the second request did not."""
+        self.failing = getattr(self, "failing", set()) | {name}
+
     def names(self):
         return [call[0][len(self.origin):] for call in self.calls]
 
@@ -145,6 +149,8 @@ class FakeOrigin:
             raise updatecheck.Unreachable("no route to host")
         assert url.startswith(self.origin), url
         name = url[len(self.origin):]
+        if name in getattr(self, "failing", ()):
+            raise updatecheck.Unreachable("connection reset")
         status, body = self.files.get(name, (404, b"not found"))
         if self.queued.get(name):
             self.files[name] = self.queued[name].pop(0)
@@ -154,3 +160,42 @@ class FakeOrigin:
 def inline(job):
     """The worker, run now: the test is the main loop and the thread at once."""
     job()
+
+
+class Deferred:
+    """A worker that runs only when the test says: a job started now is still running."""
+
+    def __init__(self):
+        self.jobs = []
+
+    def __call__(self, job):
+        self.jobs.append(job)
+
+    def run(self, count=None):
+        ran = 0
+        while self.jobs and (count is None or ran < count):
+            self.jobs.pop(0)()
+            ran += 1
+        return ran
+
+
+class MainLoop:
+    """A main loop that runs what a thread hands it only when the test turns it."""
+
+    def __init__(self):
+        import threading
+
+        self.queue = []
+        self._lock = threading.Lock()
+
+    def __call__(self, function, *args, **kwargs):
+        with self._lock:
+            self.queue.append((function, args, kwargs))
+
+    def turn(self):
+        while True:
+            with self._lock:
+                if not self.queue:
+                    return
+                function, args, kwargs = self.queue.pop(0)
+            function(*args, **kwargs)

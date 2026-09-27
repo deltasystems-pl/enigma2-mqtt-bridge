@@ -353,15 +353,43 @@ def test_an_unexpected_failure_is_reported_and_the_next_check_runs(box, factory,
 
 
 def test_a_check_runs_on_a_worker_thread_and_answers_on_the_main_loop(
-        box, factory, settings, origin, wait_until):
+        make_bridge, factory, settings, origin, clock, wait_until, monkeypatch):
+    """A main loop that runs only when turned: the worker's result waits for it, and is applied
+    on the thread that turns it - never on the worker's."""
+    import threading
+
     from MQTTBridge import updatecheck
 
-    box.updates.run_in_background = updatecheck.in_thread
+    loop = updatelab.MainLoop()
+    settings.host.value = "192.0.2.5"
+    settings.node_id.value = NODE
     settings.update_check.value = True
+    bridge = make_bridge(dispatcher=loop)
+    bridge.updates.keys = TEST_KEYS
+    bridge.updates.fetch = origin
+    bridge.updates.clock = clock
+    bridge.start()
+    factory.client.fire_connect()
+    loop.turn()
+
+    applied_on = []
+    deliver = updatecheck.UpdateChecker._deliver
+
+    def spy(self, result):
+        applied_on.append(threading.get_ident())
+        return deliver(self, result)
+
+    monkeypatch.setattr(updatecheck.UpdateChecker, "_deliver", spy)
+    bridge.updates.run_in_background = updatecheck.in_thread
     origin.serve(*signed(1))
-    check(factory)
-    assert wait_until(lambda: factory.client.last(UPDATE_TOPIC) is not None
-                      and update_state(factory)["index"] is not None)
+    factory.client.fire_message(COMMAND, "PRESS")
+    loop.turn()
+    assert wait_until(lambda: bool(loop.queue))
+    assert bridge.updates.payload()["index"] is None
+    assert applied_on == []
+    loop.turn()
+    assert applied_on == [threading.get_ident()]
+    assert update_state(factory)["index"]["serial"] == 1
 
 
 # --------------------------------------------------------------------- the daily check --
@@ -833,3 +861,461 @@ def test_the_fetch_refuses_a_certificate_nobody_vouches_for(tmp_path):
     finally:
         server.server_close()
         thread.join(timeout=5)
+
+
+# ------------------------------------------------------------- review round 1 --
+
+
+def test_a_check_whose_index_could_not_be_kept_says_so(box, factory, settings, origin, clock,
+                                                        monkeypatch):
+    """A full flash: the index verified, but nothing could be written - that is not success."""
+    from MQTTBridge import updatecheck
+
+    def refuse(*_args):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(updatecheck.os, "replace", refuse)
+    settings.update_check.value = True
+    origin.serve(*signed(1))
+    check(factory)
+    state = update_state(factory)
+    assert state["check_error"] == "write_failed"
+    assert state["index"] is None
+    clock.now = NOW + 600
+    check(factory)
+    assert update_state(factory)["check_error"] == "write_failed"
+
+
+def test_a_check_that_learned_nothing_leaves_the_trust_file_alone(box, factory, settings,
+                                                                   origin, clock):
+    """Only a change of what is trusted writes the trust file; a check's bookkeeping lives apart."""
+    settings.update_check.value = True
+    origin.serve(*signed(5))
+    check(factory)
+    before = os.stat(box.updates.path)
+    for offset, pair in ((600, signed(5)), (1200, signed(4))):
+        origin.serve(*pair)
+        clock.now = NOW + offset
+        check(factory)
+    origin.down()
+    clock.now = NOW + 1800
+    check(factory)
+    after = os.stat(box.updates.path)
+    assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
+    assert update_state(factory)["checked"] == NOW + 1800
+    assert stat.S_IMODE(os.stat(box.updates.check_path).st_mode) == 0o600
+
+
+def test_the_checks_bookkeeping_is_kept_per_lineage(tmp_path):
+    from MQTTBridge import updatecheck
+    from MQTTBridge.origin import PAGE
+
+    paths = {"path": str(tmp_path / "index.json"), "check_path": str(tmp_path / "check.json")}
+    down = FakeOrigin()
+    down.down()
+    release_build = updatecheck.UpdateChecker(None, keys=TEST_KEYS, acceptance=False,
+                                              clock=Clock(), **paths)
+    release_build.fetch = down
+    release_build.start()
+    assert release_build.request_check(origin=PAGE) is None
+    assert release_build.payload()["checked"] == NOW
+
+    acceptance_build = updatecheck.UpdateChecker(None, keys=TEST_KEYS, acceptance=True,
+                                                 clock=Clock(), **paths)
+    acceptance_build.start()
+    assert (acceptance_build.payload()["checked"], acceptance_build.payload()["origin"]) == (
+        None, "unknown")
+    again = updatecheck.UpdateChecker(None, keys=TEST_KEYS, acceptance=False, clock=Clock(),
+                                      **paths)
+    again.start()
+    assert again.payload()["origin"] == "unreachable"
+
+
+def test_a_state_file_holding_null_is_damaged_memory(tmp_path):
+    from MQTTBridge import updatecheck
+
+    path = str(tmp_path / "mqttbridge-index.json")
+    checker = updatecheck.UpdateChecker(None, path=path, keys=TEST_KEYS, acceptance=False)
+    checker.start()
+    checker.on_release_index(relay_payload(*signed(50)), True)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("null")
+    checker.on_release_index(relay_payload(*signed(3)), True)
+    assert checker.last_relay_verdict == "bad_memory"
+    with open(path, encoding="utf-8") as handle:
+        assert handle.read() == "null"
+
+
+def test_the_limit_holds_while_a_check_is_still_running(box, factory, settings, origin):
+    from MQTTBridge.origin import PAGE
+
+    worker = updatelab.Deferred()
+    box.updates.run_in_background = worker
+    settings.update_check.value = True
+    origin.serve(*signed(1))
+    check(factory)
+    check(factory)
+    assert box.run_command("update_check", "", PAGE) is None
+    worker.run()
+    assert origin.names() == [trust.SIGNATURE_FILE, trust.INDEX_FILE]
+
+
+def test_ha_mode_decides_min_integration_on_the_published_topic(box, factory):
+    releases = [release("0.4.0", min_integration="0.4.0"), release("0.3.0", self_update=False)]
+    relay(factory, relay_payload(*signed(1, releases)))
+    state = update_state(factory)
+    assert state["available"][0] == {"version": "0.4.0", "compatible": True, "reason": None}
+    assert state["latest_compatible"] == "0.4.0"
+
+    factory.client.fire_message("enigma2/" + NODE + "/cmd/ha_mode", "integration")
+    state = update_state(factory)
+    assert state["available"][0] == {"version": "0.4.0", "compatible": False,
+                                     "reason": "incompatible"}
+    assert state["latest_compatible"] == "0.3.0"
+
+
+def test_the_probe_result_is_kept_across_a_restart(box, factory, settings, origin, make_bridge,
+                                                   clock):
+    settings.update_check.value = True
+    origin.down()
+    check(factory)
+    box.stop()
+    again = make_bridge()
+    again.updates.keys = TEST_KEYS
+    again.updates.clock = clock
+    again.start()
+    factory.client.fire_connect()
+    state = update_state(factory)
+    assert (state["origin"], state["check_error"], state["checked"]) == (
+        "unreachable", "unreachable", NOW)
+
+
+def test_a_stamp_from_a_clock_that_was_ahead_does_not_block_the_daily_check(box, settings,
+                                                                            origin, clock):
+    settings.update_check.value = True
+    origin.serve(*signed(1))
+    box.updates._ticker.timer.fire()
+    assert len(origin.calls) == 2
+    clock.now = NOW - 7200
+    box.updates._ticker.timer.fire()
+    assert len(origin.calls) == 4
+
+
+def test_a_check_asked_for_before_the_file_is_loaded_keeps_its_stamp(
+        box, factory, settings, origin, make_bridge, clock, monkeypatch):
+    from MQTTBridge import updatecheck
+
+    settings.update_check.value = True
+    origin.serve(*signed(1))
+    clock.now = NOW - 3600
+    check(factory)
+    box.stop()
+
+    worker = updatelab.Deferred()
+    monkeypatch.setattr(updatecheck.UpdateChecker, "run_in_background", staticmethod(worker))
+    clock.now = NOW
+    again = make_bridge()
+    again.updates.keys = TEST_KEYS
+    fresh = FakeOrigin()
+    fresh.serve(*signed(1))
+    again.updates.fetch = fresh
+    again.updates.clock = clock
+    again.start()
+    factory.client.fire_connect()
+    check(factory)
+    worker.run(count=1)
+    clock.now = NOW + 1
+    check(factory)
+    worker.run()
+    assert len(fresh.calls) == 2
+
+
+def test_the_builds_commit_time_is_a_clock_floor_too():
+    from MQTTBridge import updatecheck
+
+    later = updatecheck.CLOCK_FLOOR + 10 ** 6
+    checker = updatecheck.UpdateChecker(
+        None, keys=TEST_KEYS, acceptance=False,
+        build={"commit": "", "time": later, "dirty": False, "flavour": "development"},
+    )
+    assert checker.clock_floor == later
+
+
+def test_an_index_that_cannot_be_fetched_leaves_the_probe_reachable(box, factory, settings,
+                                                                    origin):
+    settings.update_check.value = True
+    origin.serve(*signed(1))
+    origin.fail(trust.INDEX_FILE)
+    check(factory)
+    state = update_state(factory)
+    assert (state["origin"], state["check_error"]) == ("reachable", "unreachable")
+
+
+@pytest.mark.parametrize("name", [trust.SIGNATURE_FILE, trust.INDEX_FILE])
+def test_a_success_other_than_200_is_an_http_error(box, factory, settings, origin, name):
+    settings.update_check.value = True
+    origin.serve(*signed(1))
+    origin.answer(name, 204, b"")
+    check(factory)
+    assert update_state(factory)["check_error"] == "http_error"
+
+
+def test_only_the_newest_relayed_index_waits(box, factory, settings, origin):
+    worker = updatelab.Deferred()
+    box.updates.run_in_background = worker
+    settings.update_check.value = True
+    origin.serve(*signed(1))
+    check(factory)
+    relay(factory, relay_payload(*signed(5)))
+    relay(factory, relay_payload(*signed(3)))
+    worker.run()
+    assert update_state(factory)["index"]["serial"] == 3
+
+
+def test_the_installed_packages_are_read_again_for_every_index(tmp_path):
+    from MQTTBridge import updatecheck
+
+    database = tmp_path / "root" / "var" / "lib" / "opkg"
+    database.mkdir(parents=True)
+    status = database / "status"
+    status.write_text("Package: python3-core\nStatus: install ok installed\n", encoding="utf-8")
+    checker = updatecheck.UpdateChecker(None, path=str(tmp_path / "index.json"), keys=TEST_KEYS,
+                                        acceptance=False)
+    checker.opkg_root = str(tmp_path / "root")
+    checker.start()
+    needs = [release("0.4.0", depends=("python3-core", "python3-json"))]
+    checker.on_release_index(relay_payload(*signed(1, needs)), True)
+    assert checker.payload()["available"][0]["reason"] == "depends"
+    status.write_text("Package: python3-core\nStatus: install ok installed\n\n"
+                      "Package: python3-json\nStatus: install ok installed\n", encoding="utf-8")
+    checker.on_release_index(relay_payload(*signed(2, needs)), True)
+    assert checker.payload()["available"][0]["compatible"] is True
+
+
+def test_the_state_is_written_whole_or_not_at_all(tmp_path, monkeypatch):
+    from MQTTBridge import updatecheck
+
+    path = str(tmp_path / "state.json")
+    assert updatecheck.write_state(path, {"kept": True})
+
+    def half(_value, handle, **_kwargs):
+        handle.write('{"trunc')
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(updatecheck.json, "dump", half)
+    assert updatecheck.write_state(path, {"lost": True}) is False
+    with open(path, encoding="utf-8") as handle:
+        assert json.load(handle) == {"kept": True}
+    assert os.listdir(str(tmp_path)) == ["state.json"]
+
+
+def test_the_state_reaches_the_disk_before_it_replaces_the_old_one(tmp_path, monkeypatch):
+    from MQTTBridge import updatecheck
+
+    order = []
+    fsync, replace = updatecheck.os.fsync, updatecheck.os.replace
+    monkeypatch.setattr(updatecheck.os, "fsync",
+                        lambda descriptor: order.append("fsync") or fsync(descriptor))
+    monkeypatch.setattr(updatecheck.os, "replace",
+                        lambda source, target: order.append("replace") or replace(source, target))
+    assert updatecheck.write_state(str(tmp_path / "state.json"), {"a": 1})
+    assert order == ["fsync", "replace"]
+
+
+def test_a_default_context_that_does_not_verify_is_refused(monkeypatch):
+    from MQTTBridge import updatecheck
+
+    monkeypatch.setattr(ssl, "create_default_context", ssl._create_unverified_context)
+    FakeConnection.made = []
+    FakeConnection.answer = (200, b"body")
+    with pytest.raises(updatecheck.Unreachable):
+        updatecheck.https_get(trust.ORIGIN + trust.SIGNATURE_FILE, 1024, 5,
+                              connection_factory=FakeConnection)
+    assert FakeConnection.made == []
+
+
+# ------------------------------------------------- a slow peer, on a real socket --
+
+
+def _trickling_peer(first, piece, pieces, interval):
+    """A peer that answers the request with `first`, then one `piece` every `interval` s."""
+    import socket
+    import threading
+    import time
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+
+    def serve():
+        try:
+            connection, _address = listener.accept()
+        except OSError:
+            return
+        try:
+            connection.recv(4096)
+            connection.sendall(first)
+            for _ in range(pieces):
+                time.sleep(interval)
+                connection.sendall(piece)
+        except OSError:
+            pass
+        finally:
+            connection.close()
+            listener.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    return listener.getsockname()[1]
+
+
+class PlainConnection:
+    """`http.client.HTTPConnection` with the TLS context dropped: the slow peer speaks plain HTTP,
+    which is all a deadline has to be proved against."""
+
+    def __new__(cls, host, port, timeout=None, context=None):
+        import http.client
+
+        return http.client.HTTPConnection(host, port, timeout=timeout)
+
+
+@pytest.mark.parametrize("first, piece", [
+    (b"HTTP/1.1 200 OK\r\n", b"X-Slow: yes\r\n"),
+    (b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n", b"a" * 10),
+], ids=["headers", "body"])
+def test_the_timeout_bounds_the_whole_answer(first, piece):
+    import time
+
+    from MQTTBridge import updatecheck
+
+    port = _trickling_peer(first, piece, pieces=80, interval=0.1)
+    started = time.monotonic()
+    with pytest.raises(updatecheck.Unreachable):
+        updatecheck.https_get(f"https://localhost:{port}/releases.json", 65536, 1,
+                              connection_factory=PlainConnection)
+    assert time.monotonic() - started < 3
+
+
+# --------------------------------------------- a fake feed on a real TLS server --
+
+
+@pytest.fixture(scope="module")
+def feed(tmp_path_factory):
+    """The origin as `http.server` over real TLS, with a CA of its own for `SSL_CERT_FILE`."""
+    import http.server
+    import shutil
+    import subprocess
+    import threading
+    from types import SimpleNamespace
+
+    if shutil.which("openssl") is None:
+        pytest.skip("no openssl to make certificates with")
+    work = tmp_path_factory.mktemp("feed")
+
+    def openssl(*args):
+        made = subprocess.run(["openssl", *args], capture_output=True)
+        if made.returncode != 0:
+            pytest.skip("openssl could not make a certificate")
+
+    ca_key, ca_crt = str(work / "ca.key"), str(work / "ca.crt")
+    key, csr, crt, ext = (str(work / name) for name in ("leaf.key", "leaf.csr", "leaf.crt",
+                                                         "ext.cnf"))
+    openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/CN=test CA",
+            "-keyout", ca_key, "-out", ca_crt)
+    openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=localhost", "-keyout", key,
+            "-out", csr)
+    with open(ext, "w", encoding="ascii") as handle:
+        handle.write("subjectAltName=DNS:localhost\nbasicConstraints=CA:FALSE\n")
+    openssl("x509", "-req", "-in", csr, "-CA", ca_crt, "-CAkey", ca_key, "-CAcreateserial",
+            "-days", "2", "-extfile", ext, "-out", crt)
+
+    state = SimpleNamespace(files={}, hits=[], ca=ca_crt, port=None)
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self):
+            state.hits.append(self.path)
+            status, body = state.files.get(self.path, (404, b"missing"))
+            if status == "endless":
+                self.send_response(200)
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.close_connection = True
+                try:
+                    while True:
+                        self.wfile.write(b"a" * 4096)
+                except OSError:
+                    return
+            self.send_response(status)
+            if 300 <= status < 400:
+                self.send_header("Location", f"https://localhost:{state.port}/elsewhere")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(crt, key)
+    server.socket = context.wrap_socket(server.socket, server_side=True)
+    state.port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield state
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.fixture
+def fed_box(box, feed, monkeypatch, settings):
+    from MQTTBridge import updatecheck
+
+    monkeypatch.setenv("SSL_CERT_FILE", feed.ca)
+    feed.files.clear()
+    feed.hits.clear()
+    box.updates.fetch = updatecheck.https_get
+    box.updates.origin = f"https://localhost:{feed.port}/feed/"
+    settings.update_check.value = True
+    return box
+
+
+def _publish(feed, index_raw, signature_raw):
+    feed.files["/feed/" + trust.INDEX_FILE] = (200, index_raw)
+    feed.files["/feed/" + trust.SIGNATURE_FILE] = (200, signature_raw)
+
+
+def test_a_real_feed_is_fetched_verified_and_accepted(fed_box, factory, feed):
+    _publish(feed, *signed(1, four_releases()))
+    check(factory)
+    state = update_state(factory)
+    assert (state["origin"], state["check_error"]) == ("reachable", None)
+    assert state["index"]["serial"] == 1
+    assert feed.hits == ["/feed/" + trust.SIGNATURE_FILE, "/feed/" + trust.INDEX_FILE]
+
+
+def test_a_real_redirect_is_answered_and_never_followed(fed_box, factory, feed):
+    _publish(feed, *signed(1))
+    feed.files["/feed/" + trust.SIGNATURE_FILE] = (302, b"")
+    check(factory)
+    assert update_state(factory)["check_error"] == "redirect"
+    assert feed.hits == ["/feed/" + trust.SIGNATURE_FILE]
+
+
+def test_a_real_index_with_no_end_is_read_one_byte_past_the_cap(fed_box, factory, feed):
+    _publish(feed, *signed(1))
+    feed.files["/feed/" + trust.INDEX_FILE] = ("endless", b"")
+    check(factory)
+    assert update_state(factory)["check_error"] == "too_large"
+
+
+def test_a_real_certificate_for_another_name_is_refused(fed_box, factory, feed, monkeypatch):
+    monkeypatch.setattr(ssl, "_create_default_https_context", ssl._create_unverified_context)
+    _publish(feed, *signed(1))
+    fed_box.updates.origin = f"https://127.0.0.1:{feed.port}/feed/"
+    check(factory)
+    state = update_state(factory)
+    assert (state["origin"], state["check_error"]) == ("unreachable", "unreachable")
+    assert state["index"] is None
+    assert feed.hits == []
