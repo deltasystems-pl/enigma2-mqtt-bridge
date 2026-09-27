@@ -1232,11 +1232,13 @@ Home Assistant: force plugin reinstall)". After `restore_failed` and `restore_in
 (it may still be running): "an update stopped part-way, so the plugin's files may not be the
 running version's; install the plugin again (from Home Assistant: force plugin reinstall)". When
 a rollback put the previous version's files back under an interface that was never seen to stop
-(`reason` `not_stopped`), the process still running is the one they changed under: the doors
-stay closed with "an update was rolled back while the receiver's interface kept running, so the
+(`reason` `not_stopped`), a process the helper lists as left running (its pid in
+`record.unstopped`; with no list, a process that does not run the version put back) is the one
+they changed under: the doors stay closed with "an update was rolled back while the receiver's interface kept running, so the
 plugin's files are no longer the ones it runs; restart the receiver's interface", `last_error`
 carries the helper's sentence, and `cmd/restart_gui` - the repair - is the one command still
-accepted, with its own guards; the page offers it under the sentence. After
+accepted, with its own guards; the page offers it under the sentence. Any other process - one that started since - reports
+the end and opens as usual. After
 `interface_not_started` nothing runs to read the end: the plugin that starts next reports it
 (`result: failed`) and opens as after any other. At
 `restarting` the standby, recording and
