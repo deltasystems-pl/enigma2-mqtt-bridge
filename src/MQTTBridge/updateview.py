@@ -15,6 +15,16 @@ and whether the running build is the release it is listed beside, `selfupdate.py
 dispatcher judges a downgrade by the same function, so the question and the answer cannot
 disagree.
 
+**A wait is said as a wait.** An install at the television or on the page is accepted before it
+starts when the receiver first looks at the release origin, or asks Home Assistant for the
+package because the origin does not answer (`selfupdate.py`, the relay handshake). Both places
+then say what it waits for (`relay_line`) and, once it ended without an update, why
+(`relay_outcome`) - never that an update started.
+
+**One line per version on the television.** A list row does not wrap, so a version that cannot
+be installed says only that (`row_label`); the reason is `row_detail`, shown when the row is
+chosen and listed whole on the page.
+
 **Every string is built when it is asked for**, never at import, so the language is the one the
 receiver shows now. The refusal sentences are keyed by the reason codes `cmd/update` and
 `cmd/update_check` put on `last_error`: the code is stable, the English sentence there is the
@@ -162,10 +172,15 @@ def _runs_release(bridge, version):
 
 
 def row_label(row):
+    """The row as the television's list shows it: one line, which never wraps.
+
+    A version that cannot be installed says only that; why is `row_detail`, which the screen
+    shows when the row is chosen and the page lists in full (review round 2: the reasons ran
+    past the list's width in every language).
+    """
     version, relation, reason = row
     if reason is not None:
-        return _("%(version)s - cannot be installed: %(reason)s") % {
-            "version": version, "reason": _reason(reason)}
+        return _("%s - cannot be installed") % version
     if relation == INSTALLED:
         return _("%s - installed") % version
     if relation == SAME_NUMBER:
@@ -173,6 +188,15 @@ def row_label(row):
     if relation == OLDER:
         return _("%s - older version") % version
     return _("%s - newer version") % version
+
+
+def row_detail(row):
+    """The row with the whole reason a version cannot be installed, for a box that wraps."""
+    version, _relation, reason = row
+    if reason is None:
+        return row_label(row)
+    return _("%(version)s - cannot be installed: %(reason)s") % {
+        "version": version, "reason": _reason(reason)}
 
 
 def installable(bridge):
@@ -232,6 +256,43 @@ def doors(bridge):
     return household_doors(updater) if closed else None
 
 
+def relay_line(bridge):
+    """What an install at the television or on the page waits for, while it waits; else None.
+
+    The relay handshake (`selfupdate.py`): first a look at whether the release origin answers,
+    then - when it does not - Home Assistant's answer, counted down. Both are said as the
+    household sees them: the internet, and Home Assistant.
+    """
+    updater = getattr(bridge, "self_update", None)
+    try:
+        wait = updater.relay_wait() if updater is not None else None
+    except Exception:
+        LOG.exception("the install's wait could not be read")
+        wait = None
+    if not isinstance(wait, dict) or not wait.get("version"):
+        return None
+    if wait.get("phase") == "probe":
+        return _("Checking whether the receiver can reach the internet to download version "
+                 "%s.") % wait["version"]
+    return _("The receiver has no access to the internet, so it has asked Home Assistant for "
+             "version %(version)s. Waiting for the answer: %(seconds)s s left.") % {
+        "version": wait["version"], "seconds": wait.get("seconds_left", "-")}
+
+
+def relay_outcome(bridge):
+    """How the last such wait ended when it did not start an update, in the household's words.
+
+    None when it started one, or when nothing waited. The refusal is the dispatcher's own
+    (`SelfUpdater.relay_refusal`): no answer, an answer this clock calls expired, or a refusal
+    of the table asked again when the wait ended.
+    """
+    updater = getattr(bridge, "self_update", None)
+    refusal = getattr(updater, "relay_refusal", None) if updater is not None else None
+    if not refusal:
+        return None
+    return household_refusal(refusal, getattr(updater, "relay_version", None))
+
+
 def question(version):
     """What is asked before an install of `version`: the downgrade question names the loss."""
     if older(version):
@@ -282,6 +343,14 @@ def household_refusal(refusal, version=None):
         "no_space": _("There is not enough free space on the receiver."),
         "rate_limited": _("An update ran less than ten minutes ago. Try again later."),
         "internal_error": _("The update could not be started; the plugin log says why."),
+        # The relay handshake's two ends without an update (spec ae.6).
+        "no_relay": _("The receiver has no access to the internet, and Home Assistant did not "
+                      "answer. The installation is not possible."),
+        # Only what the receiver knows: an answer came - from whom, nothing on the broker says -
+        # with an address its own clock calls expired.
+        "clock_skew": _("An answer arrived, but its download address had already expired by "
+                        "the receiver's clock. If the receiver's clock is wrong, set it and try "
+                        "again."),
     }
     for code in ("recording_due", "recording_unknown"):
         sentences[code] = sentences["recording"]

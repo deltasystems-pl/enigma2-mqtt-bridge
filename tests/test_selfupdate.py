@@ -2147,6 +2147,32 @@ def test_the_page_offers_only_the_interface_restart_after_not_stopped(starting, 
     assert bridge.self_update.closed
 
 
+def test_behind_the_doors_only_the_repairs_own_confirmation_is_answered(starting, factory,
+                                                                         receiver, monkeypatch):
+    """A confirmation asked before the doors closed is answered only when it is the repair's;
+    any other gets the sentence, and nothing it asked for runs."""
+    from test_webif import action_fields, confirmation, new_session, post
+
+    bridge, directory = following(starting, factory, receiver)
+    monkeypatch.setattr(webif, "_bridge", lambda: bridge)
+    resource = webif.MQTTBridgeWebResource()
+    other, repair = new_session(), new_session()
+    _request, asked_reboot = post(resource, other, action_fields("reboot"))
+    _request, asked_restart = post(resource, repair, action_fields("restart_gui"))
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped",
+                error=str(updatehelper.Fail("not_stopped", previous="0.2.0")),
+                finished=NOW + 200, record={"restore": "done", "interface": "not restarted"})
+    tick()
+    assert bridge.self_update.repair() == "restart_gui"
+    request, body = post(resource, other, confirmation(asked_reboot), csrf=None)
+    assert request.response_code == 409
+    assert webif.CONFIRM_KEY not in other.sessionNamespaces
+    assert receiver.session.opened == []
+    request, body = post(resource, repair, confirmation(asked_restart), csrf=None)
+    assert request.response_code == 200
+    assert len(restarts(receiver)) == 1
+
+
 def test_a_followed_failed_restore_under_a_process_r2_could_not_stop_is_stuck(starting,
                                                                               factory, receiver):
     """The restore reasons win over `not_stopped`, and this process is the one they changed under.

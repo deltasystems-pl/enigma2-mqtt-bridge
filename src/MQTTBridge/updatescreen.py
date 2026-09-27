@@ -21,6 +21,12 @@ update. Only a "yes" to *that* question carries the downgrade consent down the c
 version and the consent are bound into the question's own callback when it is asked, so an
 answer acts on nothing but the question it answers and is never judged again from the list.
 
+**An install may wait before it starts** (the relay handshake, `selfupdate.py`): first while the
+receiver looks at whether the release origin answers, then - when it does not - for Home
+Assistant to fetch the package for it, at most two minutes. The status box says which, counted
+down, and never "started" for an update that has not; when the wait this screen started ends,
+it says how - the update started, or why not, in the household's words.
+
 **The doors.** From the helper's `installing` on, the plugin's files are being replaced under
 this process (`selfupdate.py`). The screen may stay open - the image's restart question opens on
 top of it (spec ae.6a) - but it then shows only the sentence the setup screen and the page show,
@@ -80,6 +86,8 @@ class MQTTBridgeUpdates(Screen):
         self._bridge = bridge if bridge is not None else plugin_module.get_bridge()
         self._rows = None
         self._said = ""
+        # The version this screen's install waits for (the relay handshake), until it ends.
+        self._waiting = None
         self["info"] = Label("")
         self["list"] = MenuList([])
         self["status"] = Label("")
@@ -146,8 +154,27 @@ class MQTTBridgeUpdates(Screen):
             versions = [row[0] for row in rows]
             if chosen is not None and chosen[0] in versions:
                 self["list"].moveToIndex(versions.index(chosen[0]))
-        status = [line for line in (updateview.transaction_line(bridge), self._said) if line]
+        said = self._waited()
+        status = [line for line in (updateview.transaction_line(bridge), said) if line]
         self["status"].setText("\n".join(status))
+
+    def _waited(self):
+        """What the status box says below the update's line: a wait, how it ended, or `_said`.
+
+        While an install waits - for the look at the release origin, then for Home Assistant -
+        the wait is said, counted down, whoever started it. When the wait this screen started
+        ends, its end is said once and kept: the update started, or the refusal in the
+        household's words (`no_relay`, `clock_skew`, or a guard asked again).
+        """
+        bridge = self._bridge
+        waiting = updateview.relay_line(bridge)
+        if waiting:
+            return waiting
+        if self._waiting is not None:
+            version, self._waiting = self._waiting, None
+            self._said = updateview.relay_outcome(bridge) or \
+                _("The update to version %s has started.") % version
+        return self._said
 
     def _idle(self):
         bridge = self._bridge
@@ -184,7 +211,8 @@ class MQTTBridgeUpdates(Screen):
             return
         version, _relation, reason = row
         if reason is not None:
-            self._say(updateview.row_label(row))
+            # The row says only that it cannot be installed; here is why, in a box that wraps.
+            self._say(updateview.row_detail(row))
             return
         idle = self._idle()
         if idle:
@@ -222,6 +250,12 @@ class MQTTBridgeUpdates(Screen):
         if refusal:
             self._say(updateview.doors(bridge)
                       or updateview.household_refusal(refusal, version))
+            return
+        if updateview.relay_line(bridge):
+            # Accepted, but waiting (the relay handshake): the wait is said until it ends, and
+            # then how it ended - not "started" for an update that may never start.
+            self._waiting = version
+            self._say("")
             return
         self._say(_("The update to version %s has started.") % version)
 

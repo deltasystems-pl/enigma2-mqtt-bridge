@@ -545,6 +545,11 @@ def _update_consent(values):
 
 
 def _update_started(payload):
+    # Accepted is not started when the install waits first (the relay handshake): the page
+    # says what it waits for, and its "Plugin updates" section says how the wait ended.
+    waiting = updateview.relay_line(_bridge())
+    if waiting:
+        return waiting
     return _("The update to version %s has started.") % json.loads(payload)["version"]
 
 
@@ -1407,8 +1412,13 @@ def _updates_section(bridge):
     running = updateview.transaction_line(bridge)
     if running:
         lines.append(running)
+    # An install that waits, or how the last wait ended without an update (the relay handshake).
+    waited = updateview.relay_line(bridge) or updateview.relay_outcome(bridge)
+    if waited:
+        lines.append(waited)
     rows = updateview.rows(bridge) if bridge is not None else []
-    listing = "".join("<li>" + _e(updateview.row_label(row)) + "</li>" for row in rows)
+    # The page wraps, so each version that cannot be installed is listed with its reason.
+    listing = "".join("<li>" + _e(updateview.row_detail(row)) + "</li>" for row in rows)
     return (
         "<section><h2>" + _e(_("Plugin updates")) + "</h2>"
         + "".join("<p>" + _e(line) + "</p>" for line in lines)

@@ -409,6 +409,8 @@ class SelfUpdater:
         self._probe_ticker = Ticker(self._probe_overdue, "self-update origin probe")
         self._relay_wait = None
         self.relay_refusal = None
+        # The version that wait was for, so a sentence that names it can (`updateview.py`).
+        self.relay_version = None
         self._relay_ticker = Ticker(self._relay_unanswered, "self-update relay wait")
         self._queue = []
         self._outstanding = []
@@ -657,6 +659,7 @@ class SelfUpdater:
         wait ended, when it was not a launch, is `relay_refusal`.
         """
         self.relay_refusal = None
+        self.relay_version = None
         return self._request(text, origin, downgrade)
 
     def _request(self, text, origin, downgrade, probed=False):
@@ -974,6 +977,7 @@ class SelfUpdater:
             return
         if outcome:
             self.relay_refusal = outcome
+            self.relay_version = wait["version"]
             self.bridge.publish_last_error(COMMAND, outcome)
         else:
             self.bridge.clear_last_error()
@@ -1104,6 +1108,7 @@ class SelfUpdater:
                                 wait["origin"], wait["downgrade"])
         if refusal:
             self.relay_refusal = refusal
+            self.relay_version = wait["version"]
             self.bridge.publish_last_error(COMMAND, refusal)
         else:
             self.bridge.clear_last_error()
@@ -1121,6 +1126,7 @@ class SelfUpdater:
             LOG.warning("update to %s: Home Assistant did not answer request %s within %d s",
                         wait["version"], wait["id"], RELAY_WAIT_SECONDS)
             self.relay_refusal = Refusal(NO_RELAY, "no_relay")
+        self.relay_version = wait["version"]
         self.bridge.publish_last_error(COMMAND, self.relay_refusal)
 
     def _origin_failed(self, record):

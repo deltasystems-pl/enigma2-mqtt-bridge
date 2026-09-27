@@ -978,3 +978,23 @@ msgstr ""
 #: src/MQTTBridge/webif.py
 msgid "This confirmation was asked for more than ten minutes ago and has expired. Nothing was changed; start again."
 msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "%s - cannot be installed"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "Checking whether the receiver can reach the internet to download version %s."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "The receiver has no access to the internet, so it has asked Home Assistant for version %(version)s. Waiting for the answer: %(seconds)s s left."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "The receiver has no access to the internet, and Home Assistant did not answer. The installation is not possible."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "An answer arrived, but its download address had already expired by the receiver's clock. If the receiver's clock is wrong, set it and try again."
+msgstr ""

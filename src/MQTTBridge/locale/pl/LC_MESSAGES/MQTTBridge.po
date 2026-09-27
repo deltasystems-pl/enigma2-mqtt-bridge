@@ -978,3 +978,23 @@ msgstr "Gdy nowa wersja będzie gotowa, interfejs dekodera uruchomi się ponowni
 #: src/MQTTBridge/webif.py
 msgid "This confirmation was asked for more than ten minutes ago and has expired. Nothing was changed; start again."
 msgstr "To potwierdzenie wyświetlono ponad dziesięć minut temu i wygasło. Nic nie zmieniono; zacznij od nowa."
+
+#: src/MQTTBridge/updateview.py
+msgid "%s - cannot be installed"
+msgstr "%s - nie można zainstalować"
+
+#: src/MQTTBridge/updateview.py
+msgid "Checking whether the receiver can reach the internet to download version %s."
+msgstr "Sprawdzanie, czy dekoder ma dostęp do internetu, aby pobrać wersję %s."
+
+#: src/MQTTBridge/updateview.py
+msgid "The receiver has no access to the internet, so it has asked Home Assistant for version %(version)s. Waiting for the answer: %(seconds)s s left."
+msgstr "Dekoder nie ma dostępu do internetu, więc poprosił Home Assistant o wersję %(version)s. Oczekiwanie na odpowiedź: jeszcze %(seconds)s s."
+
+#: src/MQTTBridge/updateview.py
+msgid "The receiver has no access to the internet, and Home Assistant did not answer. The installation is not possible."
+msgstr "Dekoder nie ma dostępu do internetu, a Home Assistant nie odpowiedział. Instalacja nie jest możliwa."
+
+#: src/MQTTBridge/updateview.py
+msgid "An answer arrived, but its download address had already expired by the receiver's clock. If the receiver's clock is wrong, set it and try again."
+msgstr "Nadeszła odpowiedź, ale według zegara dekodera jej adres pobierania już wygasł. Jeśli zegar dekodera jest źle ustawiony, ustaw go i spróbuj ponownie."

@@ -21,6 +21,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import test_selfupdate_relay
 from conftest import MainLoop, MessageBox, RecordTimerEntry
 from test_selfupdate import (
     BUILD,
@@ -164,16 +165,23 @@ def test_a_version_that_cannot_be_installed_says_why_and_is_not_offered(box):
     # What opkg says is installed; the test's receiver has no opkg database of its own.
     bridge.updates._installed = frozenset({"python3-core"})
     screen = screen_of(bridge)
+    # A row is one line on the television, so it says only that; OK says why (review round 2).
     assert labels(screen) == [
-        "0.5.0 - cannot be installed: does not work with this plugin or with the Home "
-        "Assistant integration",
-        "0.4.0 - cannot be installed: needs a package that is not installed on this receiver",
+        "0.5.0 - cannot be installed",
+        "0.4.0 - cannot be installed",
         RUNNING,
     ]
     assert updateview.installable(bridge) == [("0.3.0", RUNNING)]
     screen.keyInstall()
     assert screen.session.questions == []
-    assert "does not work with this plugin" in screen["status"].text
+    assert screen["status"].text == (
+        "0.5.0 - cannot be installed: does not work with this plugin or with the Home "
+        "Assistant integration")
+    choose(screen, "0.4.0")
+    screen.keyInstall()
+    assert screen["status"].text == (
+        "0.4.0 - cannot be installed: needs a package that is not installed on this receiver")
+    assert screen.session.questions == []
     assert directories(bridge.root) == []
 
 
@@ -378,7 +386,7 @@ def test_a_second_install_is_told_in_the_households_words(box, factory):
     "no_capability", "busy", "opkg_busy", "standby", "recording", "recording_due",
     "recording_unknown", "epg_import", "cannot_restart", "unknown_version", "withdrawn",
     "below_floor", "incompatible", "depends", "current", "no_space", "rate_limited",
-    "internal_error",
+    "internal_error", "no_relay", "clock_skew",
 ])
 def test_every_refusal_the_television_can_meet_is_a_household_sentence(reason):
     said = updateview.household_refusal(Refusal("contract sentence", reason), "0.4.0")
@@ -923,7 +931,7 @@ STARTERS = ("mqtt", "home_assistant", "screen", "page", "ssh")
 REFUSALS = ("no_capability", "busy", "opkg_busy", "standby", "recording", "recording_due",
             "recording_unknown", "epg_import", "cannot_restart", "unknown_version", "withdrawn",
             "below_floor", "incompatible", "depends", "current", "no_space", "rate_limited",
-            "internal_error")
+            "internal_error", "no_relay", "clock_skew")
 # The longest reason a bridge goes idle with, in English as it is kept.
 IDLE = "the bridge failed to start"
 
@@ -987,8 +995,12 @@ def transaction_lines():
 def said_lines(translate):
     said = [updateview.household_refusal(Refusal("contract sentence", reason), LONG)
             for reason in REFUSALS]
-    said += [updateview.row_label((LONG, updateview.NEWER, reason))
+    # OK on a version that cannot be installed says the whole reason here (review round 2).
+    said += [updateview.row_detail((LONG, updateview.NEWER, reason))
              for reason in ("incompatible", "depends")]
+    # The relay handshake's two waits, at their longest count (review round 2).
+    said += [relay_line_of({"version": LONG, "seconds_left": seconds, "phase": phase})
+             for phase, seconds in (("probe", 60), ("relay", 120))]
     said += [translate("The update to version %s has started.") % LONG,
              translate("Asked for the list of versions; it is shown here as soon as it arrives."),
              translate("Commands need a running bridge: %s") % translate(
@@ -1023,6 +1035,12 @@ def test_the_words_fit_the_screen(language, box, settings, monkeypatch):
     per_line, info_lines = room["info"]
     for lines in header_lines(translate):
         assert wrapped("\n".join(lines), per_line) <= info_lines, (language, lines)
+    # A list row is one line and never wraps (review round 2, S-d2): the list is as wide as the
+    # text boxes, and a MenuList row is drawn in the skin's list font, taken at the same 22 px.
+    per_row = list_width() // int(22 * GLYPH)
+    for row in list_rows():
+        label = updateview.row_label(row)
+        assert len(label) <= per_row, (language, label, len(label), per_row)
     # Every key label on one line, on this screen and on the setup screen that opens it.
     bridge = box()
     for screen, skin in ((screen_of(bridge), MQTTBridgeUpdates.skin),
@@ -1032,3 +1050,238 @@ def test_the_words_fit_the_screen(language, box, settings, monkeypatch):
         for name, (per_line, _lines) in budget(skin).items():
             if name.startswith("key_"):
                 assert len(screen[name].text) <= per_line, (language, name, screen[name].text)
+
+
+def relay_line_of(wait):
+    """The line the screen and the page show for one `SelfUpdater.relay_wait()` answer."""
+    return updateview.relay_line(SimpleNamespace(self_update=SimpleNamespace(
+        relay_wait=lambda: wait)))
+
+
+def list_width():
+    widget = ElementTree.fromstring(MQTTBridgeUpdates.skin).find(".//widget[@name='list']")
+    return int(widget.get("size").split(",")[0])
+
+
+def list_rows():
+    """Every kind of row the list can show, with a long version number."""
+    rows = [(LONG, relation, None) for relation in (
+        updateview.INSTALLED, updateview.SAME_NUMBER, updateview.OLDER, updateview.NEWER)]
+    rows += [(LONG, updateview.NEWER, reason) for reason in ("incompatible", "depends",
+                                                              "a_reason_nobody_knows_yet")]
+    return rows
+
+
+# ------------------------------------------------------------ review round 2 --
+
+PROBE_LINE = "Checking whether the receiver can reach the internet to download version 0.4.0."
+NO_RELAY_SAID = ("The receiver has no access to the internet, and Home Assistant did not "
+                 "answer. The installation is not possible.")
+CLOCK_SKEW_SAID = ("An answer arrived, but its download address had already expired by the "
+                   "receiver's clock. If the receiver's clock is wrong, set it and try again.")
+STARTED = "The update to version 0.4.0 has started."
+
+
+def relay_line(seconds):
+    return ("The receiver has no access to the internet, so it has asked Home Assistant for "
+            f"version 0.4.0. Waiting for the answer: {seconds} s left.")
+
+
+@pytest.fixture
+def no_internet(monkeypatch):
+    """The release origin, not answering the probe at all."""
+    fake = test_selfupdate_relay.Origin(answers=False)
+    monkeypatch.setattr(updatecheck.UpdateChecker, "fetch", staticmethod(fake))
+    return fake
+
+
+def install_at_the_television(bridge, version="0.4.0"):
+    screen = screen_of(bridge)
+    choose(screen, version)
+    screen.keyInstall()
+    screen.session.answer(True)
+    return screen
+
+
+def test_the_screen_says_it_looks_at_the_origin_and_then_asks_home_assistant(box, no_internet,
+                                                                             monkeypatch):
+    bridge = test_selfupdate_relay.unprobed(test_selfupdate_relay.offline(box()))
+    jobs = test_selfupdate_relay.held_back(monkeypatch)
+    screen = install_at_the_television(bridge)
+    assert bridge.self_update.relay_wait()["phase"] == "probe"
+    assert screen["status"].text == PROBE_LINE
+    jobs.run()
+    screen.refresh()
+    assert screen["status"].text == relay_line(120)
+    assert STARTED not in screen["status"].text
+
+
+def test_the_screen_counts_down_the_wait_for_home_assistant(box, mono):
+    bridge = test_selfupdate_relay.offline(box())
+    screen = install_at_the_television(bridge)
+    assert screen["status"].text == relay_line(120)
+    mono.now += 30
+    screen.refresh()
+    assert screen["status"].text == relay_line(90)
+
+
+def test_no_answer_from_home_assistant_is_said_in_the_households_words(box, factory):
+    bridge = test_selfupdate_relay.offline(box())
+    screen = install_at_the_television(bridge)
+    MainLoop.advance(test_selfupdate_relay.WAIT_MS)
+    screen.refresh()
+    assert screen["status"].text == NO_RELAY_SAID
+    assert refusal(factory.client)[0] == "no_relay"
+    assert directories(bridge.root) == []
+
+
+def test_without_an_integration_the_screen_says_it_at_once(box):
+    bridge = test_selfupdate_relay.offline(box(), integration=False)
+    screen = install_at_the_television(bridge)
+    assert screen["status"].text == NO_RELAY_SAID
+
+
+def test_an_answer_this_clock_calls_expired_is_said_as_such(box, factory, monkeypatch):
+    bridge = test_selfupdate_relay.offline(box())
+    monkeypatch.setattr(selfupdate.SelfUpdater, "clock", staticmethod(lambda: NOW + 700))
+    screen = install_at_the_television(bridge)
+    test_selfupdate_relay.reply(factory, test_selfupdate_relay.answer_for(
+        factory, expires=NOW + 600))
+    MainLoop.advance(test_selfupdate_relay.WAIT_MS)
+    screen.refresh()
+    assert screen["status"].text == CLOCK_SKEW_SAID
+    assert "Home Assistant" not in screen["status"].text
+
+
+def test_an_answer_taken_starts_the_update_and_the_screen_says_so(box, factory):
+    bridge = test_selfupdate_relay.offline(box())
+    screen = install_at_the_television(bridge)
+    test_selfupdate_relay.reply(factory, test_selfupdate_relay.answer_for(factory))
+    screen.refresh()
+    status = screen["status"].text
+    assert STARTED in status
+    assert "Update to 0.4.0, started on the television: downloading" in status
+    assert request_of(directories(bridge.root)[0])["relay"]["url"] == test_selfupdate_relay.URL
+
+
+def test_a_wait_the_page_started_is_shown_but_its_end_is_not_the_screens(box):
+    bridge = test_selfupdate_relay.offline(box())
+    screen = screen_of(bridge)
+    assert bridge.run_command("update", json.dumps({"version": "0.4.0"}), PAGE) is None
+    screen.refresh()
+    assert screen["status"].text == relay_line(120)
+    MainLoop.advance(test_selfupdate_relay.WAIT_MS)
+    screen.refresh()
+    assert screen["status"].text == ""
+
+
+def test_the_page_shows_the_relay_handshake(box, page, no_internet, monkeypatch):
+    bridge = test_selfupdate_relay.unprobed(test_selfupdate_relay.offline(box()))
+    jobs = test_selfupdate_relay.held_back(monkeypatch)
+    resource = page(bridge)
+    session = new_session()
+    _request, body = post(resource, session, install_fields("0.4.0"))
+    request, body = post(resource, session, confirmation(body), csrf=None)
+    text = html.unescape(body.decode("utf-8"))
+    assert request.response_code == 200
+    assert PROBE_LINE in text and STARTED not in text
+    jobs.run()
+    text = html.unescape(get_page(resource)[1].decode("utf-8"))
+    assert relay_line(120) in text
+    MainLoop.advance(test_selfupdate_relay.WAIT_MS)
+    text = html.unescape(get_page(resource)[1].decode("utf-8"))
+    assert NO_RELAY_SAID in text and "Waiting for the answer" not in text
+
+
+def test_the_polish_relay_sentences():
+    """Spec ae.6: the television's sentence when neither the internet nor Home Assistant can
+    deliver the package, word for word."""
+    from test_locale import LOCALE, catalogue
+
+    entries = catalogue(LOCALE / "pl" / "LC_MESSAGES" / "MQTTBridge.po")
+    assert entries[NO_RELAY_SAID] == ("Dekoder nie ma dostępu do internetu, a Home Assistant nie "
+                                      "odpowiedział. Instalacja nie jest możliwa.")
+    # Only what the receiver knows: an answer came, and its clock called it expired.
+    assert "Home Assistant" not in entries[CLOCK_SKEW_SAID]
+
+
+def test_a_cross_site_post_behind_closed_doors_is_refused_and_keeps_the_confirmation(
+        box, page, factory):
+    """S-d1 (E1): the same-origin check comes first, so another site cannot drop a pending
+    confirmation by posting while the doors are closed."""
+    bridge = box()
+    resource = page(bridge)
+    session = new_session()
+    _request, body = post(resource, session, install_fields("0.4.0"))
+    pending = dict(session.sessionNamespaces[webif.CONFIRM_KEY])
+    directory = accepted(bridge, factory)
+    helper_says(directory, phase="installing")
+    tick()
+    assert bridge.self_update.closed
+    request, _body = post(resource, session, install_fields("0.4.0"),
+                          origin="http://attacker.example")
+    assert request.response_code == 403
+    assert session.sessionNamespaces[webif.CONFIRM_KEY] == pending
+
+
+@pytest.mark.parametrize(("age", "expired"), [(599, False), (601, True)])
+def test_a_page_confirmation_lasts_ten_minutes(age, expired, box, page):
+    """S-d1 (E3): ten minutes, written out rather than read from the code."""
+    bridge = box()
+    resource = page(bridge)
+    session = new_session()
+    _request, body = post(resource, session, install_fields("0.4.0"))
+    session.sessionNamespaces[webif.CONFIRM_KEY]["asked"] -= age
+    request, body = post(resource, session, confirmation(body), csrf=None)
+    assert (request.response_code == 403) is expired
+    assert (b"more than ten minutes ago" in body) is expired
+    assert len(directories(bridge.root)) == (0 if expired else 1)
+
+
+CHECK_SENTENCES = {
+    "The last check could not reach the list of versions on the internet.":
+        [updatecheck.ERROR_UNREACHABLE],
+    "The last check could not download the list of versions.":
+        [updatecheck.ERROR_REDIRECT, updatecheck.ERROR_HTTP],
+    "The plugin's list of versions has an invalid signature or is older than the one already "
+    "known. Nothing was changed.":
+        sorted(set(trust.REASONS) | {updatecheck.MALFORMED_RELAY, updatecheck.TOO_LARGE}),
+    "The last check could not save the list of versions; the receiver's memory may be full.":
+        [trustfile.WRITE_FAILED],
+    "The last check could not save the list of versions. Try again in a moment.":
+        [trustfile.TRUST_BUSY],
+    "The receiver's record of the list of versions cannot be read, so no list is checked.":
+        [trustfile.ERROR_BAD_MEMORY, trustfile.ERROR_BAD_KEYS],
+    "The last check failed; the plugin log says why.": [updatecheck.ERROR_INTERNAL],
+}
+
+
+@pytest.mark.parametrize(("sentence", "code"), [
+    (sentence, code) for sentence, codes in CHECK_SENTENCES.items() for code in codes])
+def test_each_check_error_says_what_its_group_means(sentence, code, box):
+    """S-d1 (E7): not only no raw code - the sentence of the code's own group."""
+    bridge = box()
+    bridge.updates._check_error = code
+    assert updateview.header(bridge)[-1] == sentence
+
+
+def test_every_check_error_code_has_a_group():
+    grouped = {code for codes in CHECK_SENTENCES.values() for code in codes}
+    assert grouped == set(CHECK_ERRORS)
+
+
+def test_a_wait_that_ends_in_a_refusal_names_its_version_on_the_page(box, page, no_internet,
+                                                                     monkeypatch):
+    """The table is asked again when the look at the origin answers; a refusal that names the
+    version names the one the wait was for, which the page itself does not know."""
+    bridge = test_selfupdate_relay.unprobed(test_selfupdate_relay.offline(box()))
+    jobs = test_selfupdate_relay.held_back(monkeypatch)
+    resource = page(bridge)
+    session = new_session()
+    _request, body = post(resource, session, install_fields("0.4.0"))
+    post(resource, session, confirmation(body), csrf=None)
+    hold(bridge, [release("0.3.0"), release("0.2.5"), release("0.2.0")])
+    jobs.run()
+    text = html.unescape(get_page(resource)[1].decode("utf-8"))
+    assert ("Version 0.4.0 is not on the plugin's signed list of versions. Check for updates "
+            "and try again.") in text
