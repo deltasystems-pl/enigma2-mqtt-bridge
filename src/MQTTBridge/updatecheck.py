@@ -635,16 +635,15 @@ class UpdateChecker:
 
         The file's index can be lost while its memory - rightly - still names the serial; the
         same genuine index then comes back and the rule calls it a replay. Only with nothing
-        authentic held, from a key that is neither silenced nor below the rank floor, and at a
-        serial equal to the one remembered for it.
+        authentic held, and at a serial equal to the one remembered for its key. (A silenced key,
+        or one below the rank floor, never gets here: the rule refuses it as `rank` before it
+        looks at the serial.)
         """
         if self._authentic(part) is not None:
             return None
         try:
             index, key = trust.authenticate(index_raw, signature_raw, self.keys)
         except trust.Refused:
-            return None
-        if key.key_id in memory["silenced"] or key.rank < trust.rank_floor(self.keys, memory):
             return None
         if memory["serials"].get(key.key_id) != index["serial"]:
             return None

@@ -575,6 +575,54 @@ def test_an_acceptance_build_never_holds_what_a_release_build_accepted(tmp_path)
     assert acceptance_build.last_relay_verdict == "accept"
 
 
+def _drop_held(path):
+    with open(path, encoding="utf-8") as handle:
+        stored = json.load(handle)
+    del stored["held"]
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(stored, handle)
+
+
+def test_an_index_lost_from_the_file_is_held_again_at_the_serial_remembered(tmp_path):
+    from MQTTBridge import updatecheck
+
+    path = str(tmp_path / "mqttbridge-index.json")
+    first = updatecheck.UpdateChecker(None, path=path, keys=TEST_KEYS, acceptance=False)
+    first.start()
+    index_raw, signature_raw = signed(4)
+    first.on_release_index(relay_payload(index_raw, signature_raw), True)
+    _drop_held(path)
+
+    again = updatecheck.UpdateChecker(None, path=path, keys=TEST_KEYS, acceptance=False)
+    again.start()
+    assert again.payload()["index"] is None
+    again.on_release_index(relay_payload(*signed(3)), True)
+    assert again.last_relay_verdict == "replay"
+    assert again.payload()["index"] is None
+    again.on_release_index(relay_payload(index_raw, signature_raw), True)
+    assert again.last_relay_verdict == "taken_back"
+    assert again.payload()["index"]["serial"] == 4
+
+    kept = updatecheck.UpdateChecker(None, path=path, keys=TEST_KEYS, acceptance=False)
+    kept.start()
+    assert kept.payload()["index"]["serial"] == 4
+
+
+def test_an_index_that_could_not_be_kept_is_not_shown(tmp_path, monkeypatch):
+    from MQTTBridge import updatecheck
+
+    def refuse(*_args):
+        raise OSError("read-only file system")
+
+    path = str(tmp_path / "mqttbridge-index.json")
+    checker = updatecheck.UpdateChecker(None, path=path, keys=TEST_KEYS, acceptance=False)
+    checker.start()
+    monkeypatch.setattr(updatecheck.os, "replace", refuse)
+    checker.on_release_index(relay_payload(*signed(1)), True)
+    assert checker.last_relay_verdict == "write_failed"
+    assert checker.payload()["index"] is None
+
+
 def test_the_stored_state_keeps_what_it_does_not_know(tmp_path):
     from MQTTBridge import updatecheck
 
