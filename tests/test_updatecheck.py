@@ -1498,3 +1498,22 @@ def test_the_check_reads_the_installed_packages_again(box, factory, settings, or
     clock.now = NOW + 600
     check(factory)
     assert update_state(factory)["available"][0]["compatible"] is True
+
+
+def test_a_trust_lock_file_left_with_another_mode_is_made_0600(tmp_path):
+    """TRANSACTION.md section 1: the lock file is 0600 whoever made it.
+
+    `os.open` sets a mode only on the file it creates, so a lock file left by anything else -
+    an older build, a person, a restored backup - kept its mode for ever.
+    """
+    from MQTTBridge import updatecheck
+
+    path =str(tmp_path / "mqttbridge-index.json")
+    lock = tmp_path / "mqttbridge-index.lock"
+    lock.write_text("")
+    lock.chmod(0o644)
+    checker = updatecheck.UpdateChecker(None, path=path, keys=updatelab.TEST_KEYS,
+                                        acceptance=True)
+    verdict, _held = checker._keep(*updatelab.signed(1), "relay")
+    assert verdict == "accept"
+    assert lock.stat().st_mode & 0o777 == 0o600

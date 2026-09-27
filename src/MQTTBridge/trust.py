@@ -69,7 +69,10 @@ import json
 import re
 from typing import NamedTuple
 
-from . import ed25519
+try:
+    from . import ed25519
+except ImportError:  # the update helper's flat copy, run as a script
+    import ed25519
 
 # Where releases come from. A constant, not a setting: fetched with verified TLS and no redirects,
 # and only an acceptance build may carry another one (`tools/make-buildinfo.py` refuses it for any
