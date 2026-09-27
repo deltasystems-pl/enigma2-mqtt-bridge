@@ -21,15 +21,19 @@ version that has no section here.
   standby, the recording guard, an EPG import, an image that cannot restart, then the index's own
   rules, the running release, the checksum, Home Assistant's relay address, free space and ten
   minutes since the last update. The work is done by the update helper outside enigma2; the plugin
-  follows it on `update.transaction`. While the new files are on disk under the running plugin its
-  doors are closed: every command, the OpenWebif page and the setup screen say "an update is being
+  follows it on `update.transaction`. From the moment the package manager starts until the restart
+  the plugin's doors are closed: every command, the OpenWebif page and the setup screen say "an update is being
   applied". A question on the television that nobody answers within 60 s withdraws the update. A
   downgrade chosen on the receiver first retracts every retained topic but `availability`, and
   publishes nothing after that. The plugin that starts afterwards confirms itself to the helper - even
   when it is switched off - and reports how the update ended, including after a power cut. It reads
   **`enigma2mqtt/integration/<node>`**, the companion integration's version, contract and floor, and
-  judges `update.available` and `cmd/update` by it. A helper that stops without an end is reported
-  `interrupted`. Nothing of this has run on a receiver yet.
+  judges `update.available` and `cmd/update` by it. A receiver that went into standby, or started
+  recording or an EPG import, before the restart is not restarted: the update is withdrawn with
+  that reason. `cmd/uninstall` is refused (`busy`) while an update runs or its lock is held, and
+  `cmd/update` while an uninstall runs. A helper that stops without an end is reported
+  `interrupted`; the next `cmd/update` says when its lock lets a new one start, and the start after
+  a restart says how it ended, by the build that runs. Nothing of this has run on a receiver yet.
 
 - **Every package says which build it is.** `info` gains `build` - the commit the package was
   built from, the commit's time, whether the tracked files matched it, the flavour, and the commit

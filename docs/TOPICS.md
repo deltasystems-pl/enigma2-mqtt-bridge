@@ -1092,7 +1092,7 @@ connection.
 | Field | Type | Meaning |
 |---|---|---|
 | `id` | string | Twelve lowercase hexadecimal digits, one per transaction ([TRANSACTION.md](TRANSACTION.md)) |
-| `started_by` | string | `mqtt`, `home_assistant` (a `cmd/update` carrying a relay address), `screen`, `page` or `ssh` |
+| `started_by` | string | `mqtt`, `home_assistant` (a `cmd/update` carrying a relay address), `screen` or `page`. An install over SSH is not reported here - it has no phases to report - and while it holds the lock `cmd/update` is refused `busy` |
 | `target`, `from` | string | The release being installed, and the version that ran when it began |
 | `phase` | string | `downloading`, `verifying`, `snapshot`, `installing`, `restarting`, `proving`, `rolling_back` or `finished` |
 | `started`, `finished` | int or `null` | Epoch seconds; `finished` only once the phase is `finished` |
@@ -1100,7 +1100,7 @@ connection.
 | `error` | string or `null` | Why it did not end `installed`, in English; the same sentence and its `reason` go on `last_error` for `cmd/update` |
 
 The phases come from the update helper, which runs outside enigma2, polled once a second. From
-`restarting` on the new release is on disk under the running plugin, whose doors are closed (§2,
+`installing` on the package manager is replacing the files under the running plugin, whose doors are closed (§2,
 `cmd/update`); the plugin that starts after the restart reports the rest. After a downgrade chosen on
 the receiver the old plugin publishes nothing from the retraction on, so this topic stands still
 until the older release connects.
@@ -1124,7 +1124,7 @@ to the user reads this topic, not the absence of a state change.
 | `cmd` | string | The command refused |
 | `error` | string | Why, in English, for the person reading the topic. This is the contract's human text |
 | `ts` | int | When, in epoch seconds |
-| `reason` | string, optional | Since 0.3.0. A stable code for the refusal, **only** from a command that defines codes - today `history_clear`, `update_check`'s `not_permitted`, `update` (and `zap_history`'s `playback`); see §2. Absent, not `null`, otherwise, so every other refusal is exactly what it was. A consumer that knows the code can say the refusal in the household's language, and one that does not ignores the field |
+| `reason` | string, optional | Since 0.3.0. A stable code for the refusal, **only** from a command that defines codes - today `history_clear`, `update_check`'s `not_permitted`, `update`, `uninstall`'s `busy` (and `zap_history`'s `playback`); see §2. Absent, not `null`, otherwise, so every other refusal is exactly what it was. A consumer that knows the code can say the refusal in the household's language, and one that does not ignores the field |
 
 ```json
 {"cmd": "history_clear", "error": "the receiver's zap history holds at most one channel, and 0 does nothing then", "reason": "too_short", "ts": 1789459213}
@@ -1175,7 +1175,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `discovery` | any | Republishes the announcement, the channel list, and the discovery payloads in discovery mode | - |
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
 | `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
-| `uninstall` - since 0.3.0 | this receiver's node id, exactly (surrounding whitespace is stripped; case matters) | Removes the plugin from the receiver: stops publishing, retracts every retained topic this node owns at QoS 1, publishes `offline` last, removes the package and restarts the interface. 🔴 **A one-way door** | Refused, before anything changes, in this order: unless `uninstall_allowed` is on - „uninstall is switched off in the plugin's settings"; unless the payload is this node's id - „the payload must be this receiver's node id"; without the `uninstall` capability - „this plugin was not installed by the package manager, so it cannot remove itself"; while an EPG import runs - „an EPG import is running", exactly as `restart_gui` refuses it and with the same lapse, because the removal ends in the same restart; by the same recording guard as `deep_standby`; where the image has no way to restart the interface; while a removal is already running - „an uninstall is already running". See below |
+| `uninstall` - since 0.3.0 | this receiver's node id, exactly (surrounding whitespace is stripped; case matters) | Removes the plugin from the receiver: stops publishing, retracts every retained topic this node owns at QoS 1, publishes `offline` last, removes the package and restarts the interface. 🔴 **A one-way door** | Refused, before anything changes, in this order: unless `uninstall_allowed` is on - „uninstall is switched off in the plugin's settings"; unless the payload is this node's id - „the payload must be this receiver's node id"; while an update runs, or an update or an SSH install holds the transaction lock - `cmd/update`'s `busy` sentence, with `reason` `busy`, because both end in the package manager and a restart; without the `uninstall` capability - „this plugin was not installed by the package manager, so it cannot remove itself"; while an EPG import runs - „an EPG import is running", exactly as `restart_gui` refuses it and with the same lapse, because the removal ends in the same restart; by the same recording guard as `deep_standby`; where the image has no way to restart the interface; while a removal is already running - „an uninstall is already running". See below |
 | `update` - added after 0.3.0 (unreleased), capability `self_update` | `{"version": "0.4.1" \| "latest", "sha256": "<64 hex>", "relay": {"url": "...", "expires": <epoch>}}`; `sha256` and `relay` optional | Installs one signed release of the plugin and restarts the interface to run it, keeping the channel being watched; rolls back by itself when the new release does not start. **Upgrades and repairs only** - never a downgrade over MQTT. The answer is `update.transaction` moving (§1). See below | Refused before anything changes, in the order below, each with a `reason` on `last_error` |
 | `update_check` - added after 0.3.0 (unreleased) | any (`PRESS` by convention) | Asks the plugin's release origin for the signed release index, judges what comes back, and says what it found on `update` (§1) | Refused unless `update_check` is on: "checking for updates is switched off in the plugin's settings" (`reason` `not_permitted`). At most one request per ten minutes, shared with the OpenWebif page: inside that the command succeeds, nothing is fetched and `update` stands as the last check left it. The answer is `update` changing once the check has run, as for every command. **The payload is ignored**: nothing from the broker names where to look |
 
@@ -1194,7 +1194,8 @@ changes and in this order:
 |---|---|---|
 | `update_allowed` is off (over MQTT) | "updates over MQTT are switched off in the plugin's settings" | `not_permitted` |
 | no `self_update` capability | "this plugin was not installed by the package manager, so it cannot update itself" | `no_capability` |
-| an update or an SSH install holds the transaction lock | "an update is already running on the receiver" | `busy` |
+| an update or an SSH install holds the transaction lock | "an update is already running on the receiver" - or, when the lock is an update's whose helper has provably stopped, "the previous update stopped without finishing; a new one is possible in about <n> minutes, when its lock on the receiver expires" | `busy` |
+| an uninstall runs | "the plugin is being removed from the receiver" | `busy` |
 | opkg's lock is held | "the receiver's package manager is busy" | `opkg_busy` |
 | the receiver is in standby | "the receiver is in standby; an update restarts the interface, which wakes the receiver and may switch the television on" | `standby` |
 | a recording runs / starts within ten minutes / the image will not say | the recording guard's sentence, as for `cmd/restart_gui` | `recording` / `recording_due` / `recording_unknown` |
@@ -1210,15 +1211,20 @@ changes and in this order:
 | that release runs and is on disk (version and build commit both the signed entry's) | "version <v> is already installed and running" | `current` |
 | `sha256` is not the signed entry's | "the requested checksum does not match the signed release index" | `checksum` |
 | `relay` is not `http(s)://<host>[:port]/api/enigma2_mqtt/relay/<43 url-safe characters>` with a whole-number `expires` still ahead | "the download address from Home Assistant is not valid" | `relay` |
-| free space under `/home/root` below twice the package plus the plugin's size plus 2 MiB | "there is not enough free space on the receiver" | `no_space` |
+| free space under `/home/root` below twice the package plus the plugin's size plus 2.25 MiB | "there is not enough free space on the receiver" | `no_space` |
 | an update ended less than ten minutes ago | "an update ran less than ten minutes ago" | `rate_limited` |
 
 Accepted, the plugin starts its update helper outside enigma2 and follows it on `update`. The
 helper judges the index again, downloads and verifies the package, keeps a rollback point and runs
-the package manager. 🔴 **From `phase: restarting` the doors are closed**: every command - over
+the package manager. 🔴 **From `phase: installing` the doors are closed**: every command - over
 MQTT, from the OpenWebif page - is refused with "an update is being applied on the receiver"
 (retained and oversized commands are still discarded first), no feature area publishes, and the
-page and the setup screen say only that. Then the image's own restart: a clean quit that saves the
+page and the setup screen say only that. When the package manager fails, the old files go back
+and the doors open again with a fresh session. At `restarting` the standby, recording and
+EPG-import guards are asked again, and when one holds the update is withdrawn
+(`withdrawn_before_restart`, `reason` `standby`, `recording` or `epg_import`) rather than
+restarting a receiver that went into standby or started recording meanwhile. Otherwise the
+image's own restart: a clean quit that saves the
 settings, so the receiver comes back on the channel it was showing. When the image asks on the
 television first (a recording, a stream, timeshift) and nobody says yes within 60 s, the update is
 withdrawn - `result: withdrawn_before_restart`, `reason` `question` - and the plugin opens a fresh

@@ -108,8 +108,9 @@ A reader ignores keys it does not know. The helper of released 0.3.1 reads only 
 integration main reads `id` as well, and only from a record without `origin`.
 🔴 **The record is ASCII**: the released helper decodes it as ASCII, and a record it cannot decode falls to rule 1 of §2.3 -
 judged by the directory's age, so a live lock with a non-ASCII record looks stale after 30 minutes
-however fresh its heartbeat. A record **without** `origin` is the SSH installer's, and is reported
-as `started_by: ssh`.
+however fresh its heartbeat. A record **without** `origin` is the SSH installer's. The plugin does
+not report an SSH install on `update.transaction` - it writes no phases to report - and while its
+lock is held `cmd/update` and `cmd/uninstall` are refused `busy`.
 
 ### 2.3 When a lock is stale (released, and unchanged)
 
@@ -306,7 +307,11 @@ package is installed and its files verified, and again at every later phase and 
 - It is **ignored** when its boot id differs and no lock with its `id` exists, or when its deadline
   has passed.
 - After a power loss, the plugin that starts reports `installed` when it is `to`, `rolled_back`
-  when it is `from`, `interrupted` otherwise - and removes the marker.
+  when it is `from`, `interrupted` otherwise - and removes the marker. "It is" means the version
+  **and** the build commit (a release built again under the same number is another build); a
+  `from` without a commit is judged by its version. The same verdict is given in the same boot
+  when the helper named by the transaction directory's `helper.pid` is no longer running: the
+  plugin that saw it die kept the marker for exactly this (§7).
 - 0.2.0 and 0.3.x never read it; the next plugin that knows it discards a stale one by these rules.
 - The plugin removes it once it has reported the end - read from the marker, from `status.json`,
   or from the last-transaction record - and when it gives up on a transaction whose helper has
@@ -537,9 +542,9 @@ up to 40 s of waiting for opkg's lock (with `init 4` it was a few seconds). A mo
 imports for the first time in that window is new code in an old process. This is accepted as
 bounded. When the withdraw fails (`withdraw_failed`, §5.1) the bound does not hold: the new files
 stay under the running plugin until the next restart, which then starts the new version unchecked.
-The self-update path does not have it: from the moment the package is installed, the plugin
-answers every command, its setup screen and its OpenWebif page with "an update is being applied on
-the receiver" until the restart or the withdrawal.
+The self-update path does not have it: from the moment the package manager starts (`installing`),
+the plugin answers every command, its setup screen and its OpenWebif page with "an update is being
+applied on the receiver" until the restart, the withdrawal, or the package manager's failure.
 
 ---
 
@@ -568,9 +573,11 @@ renamed into place.
 | `helper.py`, `trust.py`, `ed25519.py`, `trustfile.py`, `netfetch.py` | the plugin | The helper and the four standard-library modules it imports, copied from the plugin directory, so the package manager replacing that directory takes nothing from under it |
 | `status.json` (0600) | the helper | `id`, `started_by`, `target`, `from`, `phase`, `started`, `finished`, `result`, `reason`, `error` - the shape of `update.transaction` plus `reason` - a `heartbeat` stamp, `restart` once the plugin asked, and at the end `record`: which proof passed (`marker`, `log_fd`, `webif_hook` or `none`), `restart` (`clean` or `stopped`), `channel`, `standby`, `bouquet`, `restore`, `lastservice`, `digest` (`matched`, `unavailable` or `not_checked`) |
 | `<filename>.ipk` | the helper | The package, after its size and sha256 matched the signed entry |
-| `helper.pid` | `start-stop-daemon -m` | The helper's pid, written for the process that became the helper. 🔴 `-p` is what makes the launch work at all: without a pid file busybox's `start-stop-daemon -S -x /usr/bin/python3` matches **any** running python3 and starts nothing. The plugin also reads it to tell a helper that stopped (`/proc/<pid>` gone, or its command line no longer naming `helper.py`) from one that is still at work: a helper killed outright never writes `finished`, and `status.json`'s stamp moves only with a phase |
+| `helper.pid` | `start-stop-daemon -m` | The helper's pid, written for the process that became the helper. 🔴 `-p` is what makes the launch work at all: without a pid file busybox's `start-stop-daemon -S -x /usr/bin/python3` matches **any** running python3 and starts nothing. The plugin also reads it to tell a helper that stopped (`/proc/<pid>` gone, or its command line no longer holding this directory's `helper.py` as one
+whole argument - the integration's `installer_helper.py`, or another transaction's helper, on a
+pid used again is not it) from one that is still at work: a helper killed outright never writes `finished`, and `status.json`'s stamp moves only with a phase |
 | `restart.json` | the plugin | It has asked the image to restart (R1); `{"pid"}`. From here the helper waits 180 s for a new enigma2 |
-| `withdraw` | the plugin | Put the old files back: `{"reason": "question"}` - the image's question was answered "no" or timed out - or `{"reason": "retraction"}` - a downgrade's retraction was not acknowledged within 15 s. Anything else, an empty file included, is read as `question` |
+| `withdraw` | the plugin | Put the old files back: `{"reason": "question"}` - the image's question was answered "no" or timed out - or `{"reason": "retraction"}` - a downgrade's retraction was not acknowledged within 15 s - or `{"reason": "standby"}`, `{"reason": "recording"}`, `{"reason": "epg_import"}` - asked again right before the restart, that guard now refuses (a recording due within ten minutes, or a receiver that will not say, is `recording`). Anything else, an empty file included, is read as `question` |
 | `started.json` | the new plugin, at its start | `{"version", "commit", "pid"}` - the tier-1 proof; both must be the target's signed ones |
 
 **The helper's reason codes** (with `result: failed` unless named): `busy`, `bad_request`,
@@ -578,16 +585,27 @@ renamed into place.
 `withdrawn`, `below_floor`, `incompatible`, `depends`, `downgrade`, `checksum`, then `download`,
 `bad_package` (size, sha256, the `ar` layout, the control file, a path outside the plugin, or
 the release page's digest), `no_space`, `opkg_busy`, `snapshot_failed`, `opkg_failed`, `manifest`,
-`time_limit`; `question` and `retraction` with `withdrawn_before_restart`; `not_started` with `rolled_back`;
+`time_limit`; `question`, `retraction`, `standby`, `recording` and `epg_import` with
+`withdrawn_before_restart`; `not_started` with `rolled_back`;
 `interrupted` (a signal, or the lock taken) with `interrupted`; `internal_error`.
 **The plugin's side.** `cmd/update` runs every refusal of TOPICS.md §2 before anything changes, makes
 this directory, writes `request.json`, copies the files and runs
 `/sbin/start-stop-daemon -S -b -m -p <dir>/helper.pid -x /usr/bin/python3 -- <dir>/helper.py <id>`
 through `eConsoleAppContainer`. It reads `status.json` once a second into `update.transaction`. A
 launch that exits non-zero, or no `status.json` within 60 s, is `failed` (`internal_error`) and the
-directory is removed. At `restarting` it closes its doors, retracts first for a downgrade, writes
-`restart.json` and asks the image to restart. When the helper stops without an end, the plugin reports
-`interrupted` itself and leaves the lock to go stale. The plugin that starts after a restart writes
+directory is removed. At `installing` it closes its doors: the package manager is replacing the
+files under it. At `restarting` it asks the standby, recording and EPG-import guards again and,
+when one holds, writes `withdraw` with that reason instead of asking; otherwise it retracts first
+for a downgrade, writes `restart.json` and asks the image to restart. When the helper stops
+without an end, the plugin reports `interrupted` itself - reading `status.json` once more first,
+so a helper that wrote its end and exited is reported as it ended - and leaves the lock to go
+stale; from `installing` on it also keeps the marker, so the next start judges the transaction by
+the build that runs. Until the lock is stale `cmd/update` is refused `busy` with "the previous
+update stopped without finishing; a new one is possible in about <n> minutes, when its lock on
+the receiver expires" - said only for a self-update's record of this boot whose helper is
+provably gone; the lock is not taken back. While a transaction runs or the lock is held,
+`cmd/uninstall` is refused `busy`, and `cmd/update` while an uninstall runs. A followed
+transaction past the marker's deadline is let go. The plugin that starts after a restart writes
 `started.json` - never the process whose pid is the request's `enigma2_pid` - and follows the
 marker to the end.
 
