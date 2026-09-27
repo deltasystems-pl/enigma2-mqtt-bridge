@@ -40,16 +40,18 @@ and settings survive a plugin upgrade.
 | `softcam_autoheal_seconds` | `90` | How long a stuck decode has to hold before that happens, 30 to 600. A healthy encrypted channel refreshes its ECM file about every ten seconds, so anything much shorter is reading noise |
 | `epg_import_allowed` | `off` | Gate for `cmd/epg_import`, which starts the image's EPG importer now. Off by default because the end of every import freezes the menus for two or three seconds; see below |
 | `uninstall_allowed` | `off` | Gate for `cmd/uninstall`, which removes the plugin from the receiver. Off by default because it is a one-way door: afterwards only the receiver's own plugin menu or SSH can put the plugin back. See below |
+| `update_check` | `off` | Let the receiver ask the plugin's release origin on the internet which releases exist - once a day, and when `cmd/update_check` asks - and publish what it found on the `update` topic. Off by default because the receiver then makes no connection but the broker's. A receiver without internet learns of releases from Home Assistant instead, which needs no setting. It only checks; nothing is installed. See below |
 | `log_level` | `info` | `error` / `warning` / `info` / `debug` |
 
-🔴 **`deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed` and
-`uninstall_allowed` are never writable over MQTT.** They are
+🔴 **`deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`,
+`uninstall_allowed` and `update_check` are never writable over MQTT.** They are
 set on the receiver - here, in the provisioning file, or on the [OpenWebif page](#the-openwebif-page)
 - and published in `info.settings` so that a consumer can hide a control the box would always
 refuse, but `cmd/config` rejects them like any other key outside its allowlist. The rule is the
-same for all four: a setting that **enables** a command is granted on the receiver, and a setting
+same for all of them: a setting that **enables** a command is granted on the receiver, and a setting
 that only **tunes** a command already permitted - `softcam_autoheal` and its delay - may be
-changed from the broker.
+changed from the broker. `update_check` enables no command on the receiver, but it is what lets
+the receiver reach the internet at all, which is the receiver's to decide.
 
 🔴 **`cec_standby_workaround` is never writable over MQTT, and it is not echoed at all.** It is
 not a permission for a command - it switches on code that closes a screen you may be looking at,
@@ -214,10 +216,36 @@ What stays on the receiver, on purpose:
 | `/home/root/mqttbridge.log*` | The only record of what the removal did |
 | `/home/root/mqttbridge-backups/` | Snapshots made by the guided installer or by you. 🔴 They hold copies of the settings, so of the broker password too |
 | `/etc/opkg/enigma2-mqtt-bridge.conf` | The feed. It is what lets the receiver's own plugin menu install the plugin again |
+| `/etc/enigma2/mqttbridge-index.json` | What the receiver has learned from the signed release index (below). Removing it would let an index the receiver already refused for good be accepted again after a reinstall |
 
 Reinstalling from the receiver's own menu (*Plugins -> Download plugins -> Extensions*) with the feed
 still configured brings the plugin back on its kept broker, node id and Home Assistant mode, and an
 integration entry that was kept picks it up again with every entity as it was.
+
+### What checking for updates does
+
+The plugin's releases are listed in a **signed release index**
+([RELEASE-INDEX.md](RELEASE-INDEX.md)), and the receiver believes nothing else about which releases
+exist: an index counts only once its signature verifies with a key built into the plugin, and never
+if it is older than one the receiver already accepted. What the receiver holds is on the `update`
+topic ([TOPICS.md](TOPICS.md)) - the index's serial and age, the newest compatible release and up to
+twenty releases with the reason any of them is not compatible.
+
+It learns of an index in two ways:
+
+- **From the internet**, only with `update_check` on: once a day, once its clock has been set, and
+  when `cmd/update_check` asks - or, whatever the setting says, when you press *Check for plugin
+  updates now* on the [OpenWebif page](#the-openwebif-page). Asking again within ten minutes
+  answers with the last result and fetches nothing. The receiver asks one fixed address over HTTPS,
+  checks its certificate, and follows no redirect.
+- **From Home Assistant**, with no setting at all: the companion integration publishes the index it
+  verified on the retained topic `enigma2mqtt/release_index`, and the receiver verifies it again
+  itself. This is how a receiver with no internet learns of releases, and it makes no connection.
+
+With `update_check` off and nobody pressing the page's button, the receiver makes no connection
+other than the broker's. Checking installs nothing: installing an update from the index is not part
+of this release. What the receiver has learned is kept in `/etc/enigma2/mqttbridge-index.json`
+(0600), which a removal leaves in place on purpose.
 
 ### What a screenshot costs
 
@@ -363,7 +391,8 @@ For headless installs - and for the companion integration's guided installer - w
   "deep_standby_allowed": false,
   "softcam_restart_allowed": false,
   "epg_import_allowed": false,
-  "uninstall_allowed": false
+  "uninstall_allowed": false,
+  "update_check": false
 }
 ```
 
