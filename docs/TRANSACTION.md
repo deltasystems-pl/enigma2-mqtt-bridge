@@ -733,9 +733,13 @@ the helper writes the marker before it runs the package manager and runs nothing
 nothing changed, and the doors reopen with a fresh session. A plugin that only follows the
 transaction - the one its restart started - closes its doors at `rolling_back`: R2 is putting the
 previous version's files back under it, for as long as three minutes when the interface does not
-stop. The end opens them again on the same conditions as for the process that asked; a helper that
-stops during `rolling_back`, or a followed transaction that passes the marker's deadline while
-they are closed, leaves them closed with the same reinstall sentence.
+stop. The end opens them again on the same conditions as for the process that asked. A helper
+that stops during `rolling_back`, a followed transaction that passes the marker's deadline while
+they are closed, and one whose status, marker and last-transaction record all go missing while
+they are closed, are judged as a helper that stopped in the phase last seen: the reinstall
+sentence for the build the forward restart started, since the files went back under it; for a
+process R2 itself started - one that began following at `rolling_back`, after the files went
+back - the build rule alone, so on its own build it opens.
 Until the lock is stale `cmd/update` is refused `busy` with "the previous
 update stopped without finishing; a new one is possible in about <n> minutes, when its lock on
 the receiver expires" - said only for a self-update's record of this boot whose helper is
@@ -795,21 +799,25 @@ that ran through a transaction - the one that asked, or one that followed it - o
 or reloads, after **any** end and whatever the reason, the result or `record.unstopped` say, it
 compares the build it loaded at its start (`info.build`: the commit, its time, `dirty` and the
 flavour) with the build id on disk (`buildinfo.py`, read as literals, never imported). When they
-differ, it runs other code than the files underneath it, and it is held exactly as a listed process
-is: the doors closed, no reload, the restart sentence, `restart_gui` let through. When the old files
-were not all put back as well (`restore_failed`, `restore_incomplete`, or a helper that stopped
-during `rolling_back`), the reinstall sentence stays, and a restart is not let through: it would
-start a mix. The pid and the version remain the cheaper first signal and still hold a process by
-themselves; they can no longer open one whose build is not the one on disk.
+differ, it runs other code than the files underneath it, and it is held as a listed process is - the
+doors closed, no reload, `restart_gui` let through - with a sentence of its own, since nothing needs
+to have been undone (a failed launch, a withdrawn update, an `installed` end): "the receiver's
+interface runs a different build of the plugin than the one now installed; restart the receiver's
+interface". The rollback's restart sentence stays for `not_stopped`, where the pid or the version
+holds the process. When the old files were not all put back as well (`restore_failed`,
+`restore_incomplete`, or a helper that stopped during `rolling_back`), the reinstall sentence stays,
+and a restart is not let through: it would start a mix. The pid and the version remain the cheaper
+first signal and still hold a process by themselves; they can no longer open one whose build is not
+the one on disk.
 
-A build id on disk that cannot be read is not the running build. A process that loaded one at
-its start and finds none now - the file missing, unreadable, or not what the builder writes - had
-its files changed under it, or damaged, and is held with the restart sentence: the conservative
+A build id on disk that cannot be read is not the running build. A process that loaded one at its
+start and finds none now - the file missing, unreadable, or not what the builder writes - had its
+files changed under it, or damaged, and is held with the build rule's sentence: the conservative
 side, since the restart runs whatever is on disk, and a process that starts is never held. Only a
-copy nobody built, which never had a build id, finding none either cannot tell, and the pid list
-and the version decide alone. A process that starts loads its build id from the files it started
-on, so at a start there is nothing to compare: the rule is for a process that was already running
-when the files changed.
+copy nobody built, which never had a build id, finding none either cannot tell, and the pid list and
+the version decide alone. A process that starts loads its build id from the files it started on, so
+at a start there is nothing to compare: the rule is for a process that was already running when the
+files changed.
 
 **What it re-judges**: the index is read again - fetched from the origin only when the request
 carries no relay address (an install Home Assistant drives needs no internet on the receiver and

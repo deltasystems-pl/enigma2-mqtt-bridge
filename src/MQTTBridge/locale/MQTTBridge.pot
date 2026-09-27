@@ -687,6 +687,10 @@ msgstr ""
 msgid "The update of the plugin was undone, but the receiver's user interface did not restart. Please restart the user interface."
 msgstr ""
 
+#: src/MQTTBridge/selfupdate.py
+msgid "The receiver's user interface is running a different version of the plugin than the one now installed. Please restart the user interface."
+msgstr ""
+
 #: src/MQTTBridge/webif.py
 msgid "Check for plugin updates now"
 msgstr ""

@@ -38,10 +38,11 @@ version that has no section here.
   interface's doors stay closed and say to restart it - the one command they still let through; a
   plugin started since opens as usual. Whatever the end, a plugin that ran through the update
   compares its own build with the build on disk before it opens again, and one that runs another
-  build stays closed the same way; a plugin started by the update's restart also closes its doors
-  while the old files go back. A helper that stops without an end is reported `interrupted`; the
-  next `cmd/update` says when its lock lets a new one start, and the start after a restart says how
-  it ended, by the build that runs. Nothing of this has run on a receiver yet.
+  build stays closed, says so, and lets the same restart through; a plugin started by the update's
+  restart also closes its doors while the old files go back. A helper that stops without an end is
+  reported `interrupted`; the next `cmd/update` says when its lock lets a new one start, and the
+  start after a restart says how it ended, by the build that runs. Nothing of this has run on a
+  receiver yet.
 
 - **Every package says which build it is.** `info` gains `build` - the commit the package was
   built from, the commit's time, whether the tracked files matched it, the flavour, and the commit

@@ -1241,15 +1241,18 @@ accepted, with its own guards; the page offers it under the sentence. The helper
 wrong, so whatever the end, a plugin that ran through the update also compares the build it loaded
 at its start with the build id on disk before it opens again: when they differ - or the file on disk
 can no longer be read - it runs other code than the files underneath it, and its doors stay closed
-the same way (with the reinstall sentence instead when the old files were not all put back). Any
-other process - one that started since, on the files on disk - reports the end and opens as usual. A
-plugin that only follows an update, started by its restart, closes its doors too while the old files
-go back (`rolling_back`); they open at the end on the same conditions, and stay closed with the
-reinstall sentence when the helper stops meanwhile. After `interface_not_started` nothing runs to
-read the end: the plugin that starts next reports it (`result: failed`) and opens as after any
-other. At `restarting` the standby, recording and EPG-import guards are asked again, and when one
-holds the update is withdrawn (`withdrawn_before_restart`, `reason` `standby`, `recording` or
-`epg_import`) rather than restarting a receiver that went into standby or started recording
+with "the receiver's interface runs a different build of the plugin than the one now installed;
+restart the receiver's interface" and the same `cmd/restart_gui` (with the reinstall sentence
+instead when the old files were not all put back). Any other process - one that started since, on
+the files on disk - reports the end and opens as usual. A plugin that only follows an update,
+started by its restart, closes its doors too while the old files go back (`rolling_back`); they open
+at the end on the same conditions, and when the helper stops or its records go missing meanwhile
+they stay closed with the reinstall sentence - except in a plugin that R2 itself started, which runs
+the files put back and opens when its build is the one on disk. After `interface_not_started`
+nothing runs to read the end: the plugin that starts next reports it (`result: failed`) and opens as
+after any other. At `restarting` the standby, recording and EPG-import guards are asked again, and
+when one holds the update is withdrawn (`withdrawn_before_restart`, `reason` `standby`, `recording`
+or `epg_import`) rather than restarting a receiver that went into standby or started recording
 meanwhile. Otherwise the image's own restart: a clean quit that saves the settings, so the receiver
 comes back on the channel it was showing. When the image asks on the television first (a recording,
 a stream, timeshift) and nobody says yes within 60 s, the update is withdrawn -
