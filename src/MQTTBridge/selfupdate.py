@@ -35,7 +35,8 @@ new code in an old process, so every module this path and the closed state use i
 when the plugin starts, the publishers are stopped, and every command - over MQTT, from the
 page, from the setup screen - answers "an update is being applied on the receiver". When the
 package manager fails, the helper puts the old files back and says `finished`, and the doors
-open again with a fresh session. When nothing put them back - the restore failed, or the helper
+open again with a fresh session. When nothing put them back - the restore failed or left opkg's
+records naming the new version (`restore_failed`, `restore_incomplete`), or the helper
 stopped once the package manager had started, perhaps leaving it running as an orphan - the
 doors stay closed for good and say to install the plugin again; that is judged from what the
 helper left behind, so a failure that fell between two polls closes them too.
@@ -172,6 +173,15 @@ STUCK = ("an update failed and the plugin's previous files could not be put back
 STUCK_STOPPED = ("an update stopped part-way, so the plugin's files may not be the running "
                  "version's; install the plugin again (from Home Assistant: force plugin "
                  "reinstall)")
+# ... and after a restore that put the code back but not all of opkg's records or the settings
+# block (`record.restore` `partial: ...`): the package manager's view no longer matches the
+# files, which only a reinstall puts right.
+STUCK_PARTIAL = ("an update failed; the plugin's previous version is back, but not all of its "
+                 "package records; install the plugin again (from Home Assistant: force plugin "
+                 "reinstall)")
+# The helper's own reasons for a restore that did not complete; their sentence already names
+# the reinstall, so `last_error` carries it alone.
+RESTORE_REASONS = ("restore_failed", "restore_incomplete")
 
 # The wall clock is believed only from here on: no update helper wrote an end before
 # 2026-01-01 (UTC), and a receiver that booted without a clock says a time in 1970.
@@ -185,8 +195,13 @@ FILES_PHASES = ("installing", "restarting", "proving", "rolling_back")
 def household_doors(updater=None):
     """What the setup screen and the page say while the doors are closed."""
     if getattr(updater, "stuck", False):
-        return _("The update of the plugin failed and its previous version could not be put "
-                 "back. Please install the plugin again, for example from Home Assistant.")
+        if getattr(updater, "_stuck_sentence", STUCK) == STUCK:
+            return _("The update of the plugin failed and its previous version could not be "
+                     "put back. Please install the plugin again, for example from Home "
+                     "Assistant.")
+        # The code is back but not all of its records, or the helper stopped part-way.
+        return _("The update of the plugin did not finish cleanly. Please install the plugin "
+                 "again, for example from Home Assistant.")
     return _("An update of the plugin is being applied on this receiver. Please wait.")
 
 
@@ -924,9 +939,15 @@ class SelfUpdater:
                 # the files under this process changed - even when the whole failure fell
                 # between two polls. A process that started on those files is not the one
                 # they changed under, so only our own transaction is stuck.
+                # Both of the helper's restore reasons count: `restore_failed` (`failed: ...`,
+                # the code not back) and `restore_incomplete` (`partial: ...`, the code back
+                # but not all of opkg's records or the settings block).
                 unrestored = isinstance(restore, str) and restore != "done"
+                stuck = None
+                if unrestored and current["ours"]:
+                    stuck = STUCK_PARTIAL if restore.startswith("partial") else STUCK
                 self._end(payload, record.get("reason"), followed=not current["ours"],
-                          stuck=STUCK if unrestored and current["ours"] else None)
+                          stuck=stuck)
             return
         if current["ours"]:
             if phase in FILES_PHASES and not self.closed:
@@ -1035,8 +1056,10 @@ class SelfUpdater:
             # Said on `update` and `last_error` - unless a downgrade's retraction made this
             # process silent, which it stays: the page and the setup screen still say it.
             self._publish()
-            said = Refusal((error or result or "failed") + "; " + stuck,
-                           reason or result or "failed")
+            text = error or result or "failed"
+            if reason not in RESTORE_REASONS:
+                text += "; " + stuck
+            said = Refusal(text, reason or result or "failed")
             if self.bridge.connected:
                 self.bridge.publish_last_error(COMMAND, said)
             else:

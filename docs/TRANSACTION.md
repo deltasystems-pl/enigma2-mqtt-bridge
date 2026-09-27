@@ -640,7 +640,7 @@ the integration's **Force plugin reinstall (SSH)**, the repair for both: `restor
 mix, are on disk, and opkg's records still name the new version, because the helper puts the code
 back first (§3.1) - and `restore_incomplete` (`record.restore` `partial: ...`) when the old code
 is back but opkg's records or the settings block are not: a full flash, or an I/O error on opkg's
-status file. After either, the plugin is to keep its doors closed (planned), and a withdraw or an
+status file. After either, the plugin keeps its doors closed (below), and a withdraw or an
 undo still goes to R2 when the interface restarted meanwhile. The second is `interrupted` because
 the lock was taken, after which the helper touches nothing of the receiver.
 **The plugin's side.** `cmd/update` runs every refusal of TOPICS.md §2 before anything changes, makes
@@ -651,10 +651,12 @@ launch that exits non-zero, or no `status.json` within 60 s, is `failed` (`inter
 directory is removed. At `installing` it closes its doors: the package manager is replacing the
 files under it. They stay closed through `rolling_back` (the acceptance drill goes there
 straight from `installing`) until the end, which reopens them with a fresh session - except a
-`failed` end whose `record.restore` is not `done`: the files under the running process may then
-be the new release's or a mix, a fresh session would import them, so the doors stay closed and
-every command, the page and the setup screen say to install the plugin again (the companion
-integration's forced reinstall over SSH). That is decided from the end's record alone - the
+`failed` end whose `record.restore` is not `done` - `restore_failed` or `restore_incomplete`:
+the files under the running process may then be the new release's or a mix, or the old code
+with opkg's records naming the new version, a fresh session would import them, so the doors
+stay closed and every command, the page and the setup screen say to install the plugin again
+(the companion integration's forced reinstall over SSH). `last_error` carries the helper's
+sentence as it is, since it names that repair already. That is decided from the end's record alone - the
 helper tries a restore only once the package manager has run - so an end the plugin reads
 without having seen `installing` (the whole failure between two reads) closes the doors then. The request's `acceptance`, `keys` and `origin` are
 the running build's own, never anything a command, the page or the integration's topic says. At `restarting` it asks the standby, recording and EPG-import guards again and,

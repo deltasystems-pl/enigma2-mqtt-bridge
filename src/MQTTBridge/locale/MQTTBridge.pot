@@ -679,6 +679,10 @@ msgstr ""
 msgid "The update of the plugin failed and its previous version could not be put back. Please install the plugin again, for example from Home Assistant."
 msgstr ""
 
+#: src/MQTTBridge/selfupdate.py
+msgid "The update of the plugin did not finish cleanly. Please install the plugin again, for example from Home Assistant."
+msgstr ""
+
 #: src/MQTTBridge/webif.py
 msgid "Check for plugin updates now"
 msgstr ""

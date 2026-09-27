@@ -1795,6 +1795,42 @@ def test_a_stuck_end_while_disconnected_is_said_by_the_next_connect(box, factory
     assert reason == "opkg_failed" and "install the plugin again" in error
 
 
+@pytest.mark.parametrize("seen", [True, False])
+@pytest.mark.parametrize("reason, restore, name", [
+    ("restore_failed", "failed: [Errno 28] No space left on device", "STUCK"),
+    ("restore_incomplete", "partial: opkg's records: [Errno 5] Input/output error",
+     "STUCK_PARTIAL"),
+])
+def test_the_helpers_restore_reasons_keep_the_doors_closed(reason, restore, name, seen,
+                                                          box, factory):
+    """The helper's own ends for a restore that did not complete: no reload after either."""
+    sentence = getattr(selfupdate, name, "(no such sentence)")
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    if seen:
+        helper_says(directory, phase="installing")
+    tick()
+    assert bridge.self_update.closed is seen
+    clients = len(factory.clients)
+    detail = restore.split(": ", 1)[1]
+    error = str(updatehelper.Fail(reason, previous="0.3.0", detail=detail))
+    helper_says(directory, phase="finished", result="failed", reason=reason, error=error,
+                finished=NOW + 5, record={"restore": restore, "cause": "opkg_failed"})
+    tick()
+    assert len(factory.clients) == clients
+    assert bridge.self_update.closed and bridge.self_update.stuck
+    assert bridge._publishers == []
+    # The helper's sentence names the reinstall already, and is said as it is.
+    assert refusal(factory.client) == (reason, error)
+    assert "reinstall" in error
+    assert bridge.run_command("restart_gui", "PRESS", PAGE) == sentence
+    assert "install the plugin again" in sentence
+    household = selfupdate.household_doors(bridge.self_update)
+    assert household != selfupdate.household_doors()
+    assert ("could not be put back" in household) is (reason == "restore_failed")
+
+
 def test_a_failure_with_nothing_to_restore_is_not_stuck(box, factory):
     """The helper tries a restore only after the package manager ran: none, nothing changed."""
     bridge = box()

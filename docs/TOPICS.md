@@ -1224,7 +1224,11 @@ and the doors open again with a fresh session - unless the old files could not b
 then the doors stay closed, and every command is refused with "an update failed and the
 plugin's previous files could not be put back; install the plugin again (from Home Assistant:
 force plugin reinstall)" - also when that failure came and went between two readings of the
-helper's status. So do they when the update helper stops once the package manager has started
+helper's status. When the old code is back but not all of opkg's records or the settings block
+(`reason` `restore_incomplete`), the doors stay closed too, with "an update failed; the plugin's
+previous version is back, but not all of its package records; install the plugin again (from
+Home Assistant: force plugin reinstall)". After `restore_failed` and `restore_incomplete`,
+`last_error` carries the helper's own sentence, which names the reinstall. So do they when the update helper stops once the package manager has started
 (it may still be running): "an update stopped part-way, so the plugin's files may not be the
 running version's; install the plugin again (from Home Assistant: force plugin reinstall)". At
 `restarting` the standby, recording and
