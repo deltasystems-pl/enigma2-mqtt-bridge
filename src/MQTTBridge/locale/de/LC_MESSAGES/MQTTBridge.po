@@ -688,6 +688,10 @@ msgstr "Die Aktualisierung des Plugins wurde nicht sauber abgeschlossen. Bitte i
 msgid "The update of the plugin was undone, but the receiver's user interface did not restart. Please restart the user interface."
 msgstr "Die Aktualisierung des Plugins wurde rückgängig gemacht, aber die Benutzeroberfläche des Receivers wurde nicht neu gestartet. Bitte starten Sie die Benutzeroberfläche neu."
 
+#: src/MQTTBridge/selfupdate.py
+msgid "The receiver's user interface is running a different version of the plugin than the one now installed. Please restart the user interface."
+msgstr "Die Benutzeroberfläche des Receivers verwendet eine andere Version des Plugins als die jetzt installierte. Bitte starten Sie die Benutzeroberfläche neu."
+
 #: src/MQTTBridge/webif.py
 msgid "Check for plugin updates now"
 msgstr "Jetzt nach Plugin-Aktualisierungen suchen"
