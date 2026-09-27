@@ -1867,10 +1867,11 @@ class Transaction:
 
         The result says what runs, not only what is on disk: `rolled_back` only when the old
         files are back and an enigma2 R2 had not seen before started on them. With the files
-        back and none, it is `failed`: `not_stopped` when the stop was never seen - `init 3`
-        then starts nothing, and the process R2 could not stop runs on with the code it had -
-        or `interface_not_started` when nothing came after a stop. The first reason stays as
-        `cause`. A restore that did not complete keeps its own reason before either.
+        back and none, it is `failed`: `not_stopped` when the stop was never seen and something
+        still runs - `init 3` then starts nothing, and the process R2 could not stop runs on
+        with the code it had; `unstopped` names it - or `interface_not_started` when nothing
+        runs even after `init 3` was sent once more. The first reason stays as `cause`. A
+        restore that did not complete keeps its own reason before either.
 
         Before `init 4` nothing has been stopped, so this is not yet the unit: the record is
         best effort (an error in it leaves the one taken before the restart), and only once the
@@ -1959,14 +1960,26 @@ class Transaction:
         # Not stopped, `init 3` asks for a runlevel that never left and starts nothing: the
         # process R2 could not stop runs on, with whatever code it had, over the old files.
         started = self.wait(came_back, START_WAIT)
-        if not started and stopped:
-            # Stopped, and nothing came: an `init 3` that answered and took no effect, or never
-            # got through at all. The interface is down either way; asking again costs nothing.
-            self.record["start"] = "again"
-            self.start_interface()
-            started = self.wait(came_back, START_AGAIN_WAIT)
+        running = None  # the last look when nothing started: None when it could not be read
         if not started:
-            self.record["interface"] = "not started" if stopped else "not restarted"
+            running = receiver.enigma2_look()
+            if stopped or running == set():
+                # Nothing runs: an `init 3` that answered and took no effect, one that never got
+                # through, or a process R2 could not stop that has since quit. The interface
+                # is down either way, and asking again costs nothing.
+                self.record["start"] = "again"
+                self.start_interface()
+                started = self.wait(came_back, START_AGAIN_WAIT)
+                running = None if started else receiver.enigma2_look()
+        if not stopped and looked:
+            # The processes R2 could not stop, so that whoever reads this end - a plugin at its
+            # start - can tell by its own pid whether it is one of them.
+            self.record["unstopped"] = sorted(survivors)
+        # Nothing new started and the stop was never seen: what runs, as far as a look can
+        # tell, is what R2 could not stop, with the code it had.
+        still = not started and not stopped and running != set()
+        if not started:
+            self.record["interface"] = "not restarted" if still else "not started"
         if started and recorded and receiver.clock() < limit:
             try:
                 self.verify(recorded)
@@ -1979,7 +1992,7 @@ class Transaction:
             self.record["channel"] = "not recorded"
         else:
             # Not restarted, the channel was never touched; not started, there is none.
-            self.record["channel"] = "lost" if stopped else "unconfirmed"
+            self.record["channel"] = "unconfirmed" if still else "lost"
         end = self.restore_failure(failure)
         back = self.record.get("restore") == "done"
         if back and not started:
@@ -1987,7 +2000,7 @@ class Transaction:
             # says the old version runs: never `rolled_back`, which the plugin and Home
             # Assistant read as exactly that. The first reason stays, as `cause`.
             self.record["cause"] = failure.reason
-            end = Fail("interface_not_started" if stopped else "not_stopped",
+            end = Fail("not_stopped" if still else "interface_not_started",
                        previous=self.request["from"]["version"])
         self.finish("rolled_back" if back and started else "failed", end)
         return 1

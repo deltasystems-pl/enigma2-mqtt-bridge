@@ -2322,6 +2322,7 @@ def test_an_interface_that_never_stopped_is_not_reported_rolled_back(tmp_path):
     record = scene.status()["record"]
     assert (record["restore"], record["stop"], record["interface"], record["cause"]) == (
         "done", "not seen", "not restarted", "not_started")
+    assert record["unstopped"] == [200]
     # The old files are on disk, but the process that runs is the one R2 could not stop.
     assert scene.plugin_py() == f"# plugin {OLD}\n" and scene.box.pids == {200}
     assert record["channel"] == "unconfirmed" and scene.box.zaps == []
@@ -2650,3 +2651,36 @@ def test_a_proc_that_cannot_be_listed_is_unknown_to_r2_and_empty_to_the_rest(tmp
     receiver = updatehelper.Receiver(root=str(tmp_path), proc=str(tmp_path / "no-proc"))
     assert receiver.enigma2_look() is None
     assert receiver.enigma2_pids() == set()
+
+
+
+# ------------------------------ what R2 could not stop, and what became of it --
+
+
+@pytest.mark.parametrize("comes_back", [True, False], ids=["restarts", "stays_down"])
+def test_an_unstopped_interface_that_quits_after_init_3_gets_init_3_again(tmp_path, comes_back):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    real = scene.box.run
+
+    def quits_ten_seconds_after_init_3(argv, timeout):
+        code = real(argv, timeout)
+        if argv[0] == scene.box.init and argv[1] == "3" and scene.init_calls() == ["4", "3"]:
+            def quits():
+                scene.box.pids = set()
+                scene.box.start_fails = not comes_back
+            scene.box.at(10, quits)
+        return code
+    scene.box.run = quits_ten_seconds_after_init_3
+    assert scene.run() == 1
+    record = scene.status()["record"]
+    assert (record["stop"], record["unstopped"], record["start"]) == ("not seen", [200], "again")
+    if comes_back:
+        assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+        assert scene.box.pids == {300} and "interface" not in record
+    else:
+        # Nothing runs: not the process R2 could not stop, and not the old version either.
+        assert (scene.last()["result"], scene.last()["reason"]) == (
+            "failed", "interface_not_started")
+        assert not scene.box.pids and record["interface"] == "not started"
