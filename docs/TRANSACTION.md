@@ -196,7 +196,13 @@ never be mistaken for a rollback point.
 | `webif-cache/` | Its compiled bytecode, in either of the two places images put it |
 
 A restore replaces the package's status stanza, its info files, the plugin directory, the hook and
-its bytecode; the settings lines and the provisioning file only when asked to.
+its bytecode; the settings lines and the provisioning file only when asked to. The order differs
+between the two programs, and either is safe to repeat (§3.3): the integration's installer writes
+opkg's records first; the self-update's helper puts **the code back first** - the plugin
+directory, the hook and its bytecode, which decide what runs at the next start - and opkg's records
+and the settings lines after it, each tried whatever became of the other. A full flash or an I/O
+error on opkg's status file then leaves the old code in place and only the records naming the new
+version, which the helper reports as such (§7), instead of stopping before the tree went back.
 
 ### 3.2 Pruning (released)
 
@@ -271,8 +277,10 @@ there, R2's included, swaps the plugin directory in as below. Then:
   a plugin tree, the restore compares the two directories' filesystems before it takes opkg's lock
   or changes anything, and refuses when they differ. A snapshot without one - the rollback of a
   first install, which takes the live tree away - skips that check: on an image whose plugin
-  directory sits on another filesystem than `/usr/lib/enigma2/python/`, such a restore replaces
-  opkg's records and then fails at the rename that sets the live tree aside.
+  directory sits on another filesystem than `/usr/lib/enigma2/python/`, the installer's restore
+  replaces opkg's records and then fails at the rename that sets the live tree aside (the
+  self-update's helper, which puts the tree back first, would fail there before touching opkg's
+  records).
 - Then the enigma2 pid is read again - on integration main for up to 60 s, and compared with the
   pid read **before the restart was requested**, never with a later reading, so a restart that
   began after the last look is still a restart. If it changed - somebody answered the question - the
@@ -590,7 +598,7 @@ renamed into place.
 |---|---|---|
 | `request.json` (0600) | the plugin, before it starts the helper | `id`; `target` (a release number - `latest` is resolved by the plugin); `sha256` or `null`; `relay` `{"url", "expires"}` or `null`; `started_by`; `downgrade` (true only for a lower version chosen at the television or on the page); `from` `{"version", "commit"}`; `enigma2_pid` (the plugin's own process - the one whose end §5's restart rule waits for); `keys`, `acceptance` and `origin` - the index keys, lineage and origin of the build that asks, so the helper judges by what the running build trusts; `contract`; `integration` (`enigma2mqtt/integration/<node>` as read, or `null`) and `integration_mode`. A request the helper cannot read ends as `failed`, reason `bad_request` |
 | `helper.py`, `trust.py`, `ed25519.py`, `trustfile.py`, `netfetch.py` | the plugin | The helper and the four standard-library modules it imports, copied from the plugin directory, so the package manager replacing that directory takes nothing from under it |
-| `status.json` (0600) | the helper that holds the lock | `id`, `started_by`, `target`, `from`, `phase`, `started`, `finished`, `result`, `reason`, `error` - the shape of `update.transaction` plus `reason` - a `heartbeat` stamp, `restart` once the plugin asked, and at the end `record`: which proof passed (`marker`, `log_fd`, `webif_hook` or `none`), `restart` (`clean` or `stopped`), `channel`, `standby`, `bouquet`, `restore`, `lastservice`, `digest` (`matched`, `unavailable` or `not_checked`), `index_verdict` and `index_kept` when the helper fetched the index, `interface: not started` when no enigma2 came back after R2's `init 3`, `marker` when a marker write after the package manager failed, and `internal_error` for an error nothing expected. A second helper started for the same `id` that finds the lock held by its own `id` - or cannot read the owner yet - writes nothing here; one refused by another transaction's lock writes its `busy` |
+| `status.json` (0600) | the helper that holds the lock | `id`, `started_by`, `target`, `from`, `phase`, `started`, `finished`, `result`, `reason`, `error` - the shape of `update.transaction` plus `reason` - a `heartbeat` stamp, `restart` once the plugin asked, and at the end `record`: which proof passed (`marker`, `log_fd`, `webif_hook` or `none`), `restart` (`clean` or `stopped`), `channel`, `standby`, `bouquet`, `restore` (`done`; `partial: <what is missing>` when the code is back and opkg's records or the settings block are not; `failed: <error>` when the code is not back; `interrupted`), `cause` (the reason the end had before a restore that did not complete replaced it), `lastservice`, `digest` (`matched`, `unavailable` or `not_checked`), `index_verdict` and `index_kept` when the helper fetched the index, `interface: not started` when no enigma2 came back after R2's `init 3`, `marker` when a marker write after the package manager failed, and `internal_error` for an error nothing expected. A second helper started for the same `id` that finds the lock held by its own `id` - or cannot read the owner yet - writes nothing here; one refused by another transaction's lock writes its `busy` |
 | `<filename>.ipk` | the helper | The package, after its size and sha256 matched the signed entry |
 | `restart.json` | the plugin | It has asked the image to restart (R1); `{"pid"}`. From here the helper waits 180 s for a new enigma2 |
 | `withdraw` | the plugin | The image's question was answered "no" or timed out: put the old files back |
@@ -608,10 +616,18 @@ before the package manager ran) with `interrupted`, and with `rolled_back` when 
 restarted after the package manager started and before `restarting`; `internal_error` (an error nothing expected, the package
 or the first marker not written) with `failed`, or with `rolled_back` when it came after the
 restart and R2 put the old version back; `drill` with `rolled_back`, only for an acceptance
-build (below). After the package manager ran, `installed` comes only
-after the proof, and every other result only once the old files are back - with two exceptions
-that say so: `failed` with a `record.restore` other than `done`, and `interrupted` because the
-lock was taken, after which the helper touches nothing of the receiver.
+build (below); `restore_failed` and `restore_incomplete` with `failed`, below. After the package
+manager ran, `installed` comes only after the proof, and every other result only once the old
+files are back - with two exceptions that say so. The first is a restore that did not complete,
+which replaces the end's reason (the first one is kept as `record.cause`) and whose sentence names
+the integration's **Force plugin reinstall (SSH)**, the repair for both: `restore_failed`
+(`record.restore` `failed: ...`) when the old code could not be put back - the new files, or a
+mix, are on disk, and opkg's records still name the new version, because the helper puts the code
+back first (§3.1) - and `restore_incomplete` (`record.restore` `partial: ...`) when the old code
+is back but opkg's records or the settings block are not: a full flash, or an I/O error on opkg's
+status file. After either, the plugin is to keep its doors closed (planned), and a withdraw or an
+undo still goes to R2 when the interface restarted meanwhile. The second is `interrupted` because
+the lock was taken, after which the helper touches nothing of the receiver.
 **What it re-judges**: the index is read again - fetched from the origin only when the request
 carries no relay address (an install Home Assistant drives needs no internet on the receiver and
 asks for none), otherwise the index the receiver already holds - and every rule of the index is

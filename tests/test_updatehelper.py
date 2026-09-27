@@ -1870,3 +1870,130 @@ def test_whatever_escapes_r2_before_init_4_still_ends_with_the_old_version(tmp_p
     assert scene.plugin_py() == f"# plugin {OLD}\n"
     assert scene.init_calls() == ["4", "3"] and scene.box.pids and not scene.locked()
     assert scene.box.init_log[0] == ("4", f"# plugin {NEW}\n")
+
+
+# ------------------------------------------------ a restore that cannot finish --
+
+
+def end_by(scene, path):
+    """The ends that put the files back: the undo and the withdraw (no restart), and R2."""
+    if path == "undo":
+        scene.box.pauses["opkg_done"] = lambda: scene.transaction.on_signal(signal.SIGHUP)
+        return "interrupted"
+    if path == "withdraw":
+        scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+        return "question"
+    scene.plugin_word(started=False)
+    return "not_started"
+
+
+def installed_version(scene):
+    status, _info = updatehelper.opkg_paths(scene.box.root)
+    text = Path(status).read_text()
+    return text.split(updatehelper.PACKAGE + "\nVersion: ")[1].split("\n")[0]
+
+
+@pytest.mark.parametrize("error", [OSError(28, "No space left on device"),
+                                   OSError(5, "Input/output error")], ids=["enospc", "eio"])
+@pytest.mark.parametrize("path", ["undo", "withdraw", "r2"])
+def test_opkgs_records_that_cannot_be_written_still_let_the_old_code_back(
+        tmp_path, monkeypatch, path, error):
+    scene = Scene(tmp_path)
+    cause = end_by(scene, path)
+    status, _info = updatehelper.opkg_paths(scene.box.root)
+    real = updatehelper.atomic_write
+
+    def failing(target, data, mode=0o600):
+        if target == status:
+            raise error
+        return real(target, data, mode)
+    monkeypatch.setattr(updatehelper, "atomic_write", failing)
+    assert scene.run() == 1
+    # The code that decides what runs is the old one, hook included ...
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.box.read(HOOK) == f"# hook {OLD}\n"
+    # ... and the end says exactly what is missing, and what repairs it.
+    last = scene.last()
+    assert (last["result"], last["reason"]) == ("failed", "restore_incomplete")
+    assert OLD in last["error"] and "Force plugin reinstall" in last["error"]
+    assert error.strerror in last["error"]
+    record = scene.status()["record"]
+    assert record["restore"].startswith("partial: opkg's records")
+    assert record["cause"] == cause
+    assert installed_version(scene) == NEW and not scene.locked()
+    if path == "r2":
+        assert scene.init_calls() == ["4", "3"] and scene.box.pids
+        assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+        # The settings block and the channel went back all the same.
+        assert scene.box.lastservice_at_start == TVP1
+    else:
+        assert scene.init_calls() == []
+
+
+@pytest.mark.parametrize("path", ["undo", "withdraw", "r2"])
+def test_a_plugin_tree_that_cannot_go_back_leaves_opkgs_records_agreeing_with_it(
+        tmp_path, monkeypatch, path):
+    scene = Scene(tmp_path)
+    cause = end_by(scene, path)
+
+    def broken(*_args):
+        raise OSError(5, "Input/output error")
+    monkeypatch.setattr(updatehelper, "_replace_tree", broken)
+    assert scene.run() == 1
+    assert scene.plugin_py() == f"# plugin {NEW}\n"
+    # Nothing was put back before the tree, so opkg still names what is on disk.
+    assert installed_version(scene) == NEW
+    last = scene.last()
+    assert (last["result"], last["reason"]) == ("failed", "restore_failed")
+    assert "Force plugin reinstall" in last["error"] and "Input/output error" in last["error"]
+    record = scene.status()["record"]
+    assert record["restore"].startswith("failed") and record["cause"] == cause
+    assert not scene.locked()
+
+
+def test_a_settings_block_that_cannot_be_written_is_named_after_the_code_is_back(
+        tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    settings = scene.box.path(updatehelper.SETTINGS)
+    real = updatehelper.atomic_write
+    failed = []
+
+    def failing(target, data, mode=0o600):
+        # Only the restore's write: the channel written after it is R2's own.
+        if target == settings and not failed:
+            failed.append(target)
+            raise OSError(28, "No space left on device")
+        return real(target, data, mode)
+    monkeypatch.setattr(updatehelper, "atomic_write", failing)
+    assert scene.run() == 1
+    assert scene.plugin_py() == f"# plugin {OLD}\n" and installed_version(scene) == OLD
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "restore_incomplete")
+    record = scene.status()["record"]
+    assert record["restore"] == "partial: the settings block: [Errno 28] No space left on device"
+    assert scene.init_calls() == ["4", "3"]
+
+
+def test_a_restart_during_a_withdraw_that_left_opkgs_records_still_goes_to_r2(
+        tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+    status, _info = updatehelper.opkg_paths(scene.box.root)
+    real = updatehelper.atomic_write
+
+    def failing(target, data, mode=0o600):
+        if target == status:
+            raise OSError(28, "No space left on device")
+        return real(target, data, mode)
+    monkeypatch.setattr(updatehelper, "atomic_write", failing)
+
+    def restart_and_speak():
+        scene.box.restart()
+        updatehelper.write_json(str(scene.directory / "started.json"),
+                                {"version": NEW, "commit": "e" * 40, "pid": 200})
+    scene.box.pauses["withdrawn"] = restart_and_speak
+    assert scene.run() == 1
+    # The old code was back when the new process started: it is never proved, but stopped.
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "restore_incomplete")
+    assert scene.init_calls() == ["4", "3"]
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")

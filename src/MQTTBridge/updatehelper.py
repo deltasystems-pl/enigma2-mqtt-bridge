@@ -68,7 +68,12 @@ of the marker and of `status.json` is best effort - a full flash changes how the
 recorded, never which end it is - and an error nothing expected still ends the way a planned
 failure would: the files go back under the interface that asked, or by R2 once it has gone -
 also when it comes at the start of R2, before anything was stopped. Once `init 4` has been
-sent, `init 3` follows in a `finally`.
+sent, `init 3` follows in a `finally`. A restore puts the code back first - the plugin tree, the
+hook and its bytecode - and opkg's records and the settings block after it, so a full flash or
+an I/O error on opkg's status file cannot keep the old code from coming back. A restore that
+did not complete ends `failed` with a reason of its own - `restore_failed`, or
+`restore_incomplete` when the code is back and only the records are not - whose sentence names
+the forced reinstall that repairs both.
 
 **Signals.** `HUP`, `INT`, `TERM` and `PIPE` only set a flag, read at the next step. Before the
 package manager has run they end the transaction with nothing changed; from then until the
@@ -212,6 +217,11 @@ SENTENCES = {
     "internal_error": "the update helper failed: {detail}",
     "drill": "an acceptance drill sent the update straight into its rollback; the previous "
              "version is back",
+    "restore_failed": "the previous version could not be put back ({detail}); reinstall the "
+                      "plugin with Force plugin reinstall (SSH) in Home Assistant",
+    "restore_incomplete": "the previous version {previous} is back, but not all of its records "
+                          "({detail}); reinstall the plugin with Force plugin reinstall (SSH) "
+                          "in Home Assistant",
 }
 
 
@@ -234,6 +244,10 @@ class LockLost(Exception):
 
 class OpkgBusy(Exception):
     """opkg's lock stayed held by somebody else for the whole of the wait."""
+
+
+class PartialRestore(Exception):
+    """The old code is back - tree, hook, bytecode - but opkg's records or the settings are not."""
 
 
 # ------------------------------------------------------------------- the receiver --
@@ -856,12 +870,22 @@ def _replace_tree(root, source, live, token):
 
 
 def restore_snapshot(receiver, backup, settings):
-    """Put the snapshot back: opkg's records, the plugin tree, the hook - and the settings block.
+    """Put the snapshot back: the plugin tree, the hook - then opkg's records and the settings.
 
     The settings block only when asked, which R2 does once enigma2 is seen stopped: a block
     written while enigma2 runs is overwritten from memory by its next clean quit. Every file
     goes back by a rename and the plugin tree by two, so an interface that restarts in the
     middle finds the whole old tree or the whole new one.
+
+    **The code first.** What runs at the next start is the tree, the hook and its bytecode, so
+    they go back before anything else; opkg's status file and info files and the settings block
+    follow, each tried whatever became of the other. A full flash or an I/O error on opkg's
+    status file then leaves the old code in place with records that still name the new version
+    - `PartialRestore`, which the caller reports as such - instead of the new code with nothing
+    put back. An error in the code part raises as it comes, and opkg's records are then left
+    untouched, still agreeing with the files on disk. (The companion integration's installer
+    writes opkg's records first; both orders restore the same snapshot, and restoring it twice
+    is safe either way - TRANSACTION.md 3.3.)
     """
     root = receiver.root
     metadata = read_json(os.path.join(backup, "snapshot.json"))
@@ -888,18 +912,6 @@ def restore_snapshot(receiver, backup, settings):
         if os.stat(staging_parent).st_dev != os.stat(beside).st_dev:
             raise ValueError("the plugin directory cannot be swapped in by a rename")
     with opkg_lock(receiver, OPKG_LOCK_WAIT_RESTORE):
-        with open(status, encoding="utf-8") as handle:
-            current = [s for s in _stanzas(handle.read()) if _package_name(s) != PACKAGE]
-        if metadata["package_status"]:
-            with open(os.path.join(backup, "package-status"), encoding="utf-8") as handle:
-                current.append(handle.read().strip())
-        atomic_write(status, "\n\n".join(current) + "\n", mode=None)
-        wanted = {os.path.basename(source) for source in info_sources}
-        for candidate in glob.glob(os.path.join(info, PACKAGE + ".*")):
-            if os.path.basename(candidate) not in wanted:
-                _remove_own(candidate)
-        for source in info_sources:
-            _replace_file(source, os.path.join(info, os.path.basename(source)))
         _replace_tree(root, os.path.join(backup, "plugin") if metadata["plugin"] else None,
                       plugin, token)
         if metadata["webif_shim"] or metadata["webif_cache"]:
@@ -919,18 +931,48 @@ def restore_snapshot(receiver, backup, settings):
         for target, source in placed.items():
             os.makedirs(os.path.dirname(target), exist_ok=True)
             _replace_file(source, target)
+        missing = []
+        try:
+            _restore_records(backup, metadata, status, info, info_sources)
+        except Exception as error:  # the code is back; what is not is named, never hidden
+            missing.append("opkg's records: " + (str(error) or type(error).__name__))
         if settings:
-            path = os.path.join(root, SETTINGS)
-            unrelated = []
-            if os.path.isfile(path):
-                with open(path, encoding="utf-8") as handle:
-                    unrelated = [line for line in handle.read().splitlines()
-                                 if not line.startswith(SETTINGS_PREFIX)]
-            with open(os.path.join(backup, "plugin-settings"), encoding="utf-8") as handle:
-                block = handle.read()
-            if metadata["settings"] or unrelated:
-                atomic_write(path, "".join(line + "\n" for line in unrelated) + block,
-                             mode=None)
+            try:
+                _restore_settings(root, backup, metadata)
+            except Exception as error:
+                missing.append("the settings block: " + (str(error) or type(error).__name__))
+        if missing:
+            raise PartialRestore("; ".join(missing))
+
+
+def _restore_records(backup, metadata, status, info, info_sources):
+    """opkg's status stanza and info files of the package, as the snapshot has them."""
+    with open(status, encoding="utf-8") as handle:
+        current = [s for s in _stanzas(handle.read()) if _package_name(s) != PACKAGE]
+    if metadata["package_status"]:
+        with open(os.path.join(backup, "package-status"), encoding="utf-8") as handle:
+            current.append(handle.read().strip())
+    atomic_write(status, "\n\n".join(current) + "\n", mode=None)
+    wanted = {os.path.basename(source) for source in info_sources}
+    for candidate in glob.glob(os.path.join(info, PACKAGE + ".*")):
+        if os.path.basename(candidate) not in wanted:
+            _remove_own(candidate)
+    for source in info_sources:
+        _replace_file(source, os.path.join(info, os.path.basename(source)))
+
+
+def _restore_settings(root, backup, metadata):
+    """The plugin's settings block back, every other line of the settings file kept."""
+    path = os.path.join(root, SETTINGS)
+    unrelated = []
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as handle:
+            unrelated = [line for line in handle.read().splitlines()
+                         if not line.startswith(SETTINGS_PREFIX)]
+    with open(os.path.join(backup, "plugin-settings"), encoding="utf-8") as handle:
+        block = handle.read()
+    if metadata["settings"] or unrelated:
+        atomic_write(path, "".join(line + "\n" for line in unrelated) + block, mode=None)
 
 
 def write_lastservice(root, reference):
@@ -1611,18 +1653,40 @@ class Transaction:
             if self.restarted_at is None:
                 self.restarted_at = self.receiver.clock()
             return self.rollback(failure)
-        try:
-            restore_snapshot(self.receiver, self.snapshot, settings=False)
-        except (OSError, ValueError, OpkgBusy) as error:
-            self.record["restore"] = "failed: " + str(error)
+        if self.put_back(settings=False) != "done":
             result = "failed"
-        else:
-            self.record["restore"] = "done"
         if not self.original_running():
             self.restarted_at = self.receiver.clock()
             return self.rollback(failure)
-        self.finish(result, failure)
+        self.finish(result, self.restore_failure(failure))
         return 1
+
+    def put_back(self, settings):
+        """`restore_snapshot`, recorded: `done`, `partial` (the code is back, not all of its
+        records) or `failed` (the code is not back - the new files, or a mix, are on disk)."""
+        try:
+            restore_snapshot(self.receiver, self.snapshot, settings=settings)
+        except PartialRestore as error:
+            self.record["restore"] = "partial: " + str(error)
+            return "partial"
+        except Exception as error:  # whatever it was, the end says the files are not back
+            self.record["restore"] = "failed: " + (str(error) or type(error).__name__)
+            return "failed"
+        self.record["restore"] = "done"
+        return "done"
+
+    def restore_failure(self, failure):
+        """The failure an end reports: its own, or - when the restore did not complete - the
+        restore's, whose sentence names the repair; the first cause stays in the record."""
+        outcome = self.record.get("restore")
+        if outcome is None or outcome == "done":
+            return failure
+        self.record["cause"] = failure.reason
+        detail = outcome.split(": ", 1)[-1]
+        if outcome.startswith("partial"):
+            return Fail("restore_incomplete", previous=self.request["from"]["version"],
+                        detail=detail)
+        return Fail("restore_failed", detail=detail)
 
     def any_log_writable(self):
         for relative in LOG_PATHS:
@@ -1670,12 +1734,9 @@ class Transaction:
     def withdraw(self, word):
         """R1 without a restart: the old files back under the running interface, then look again."""
         self.receiver.pause("withdrawing")
-        try:
-            restore_snapshot(self.receiver, self.snapshot, settings=False)
-            restored = True
-        except (OSError, ValueError, OpkgBusy) as error:
-            restored = False
-            self.record["restore"] = "failed: " + str(error)
+        # The code back, even without all of its records, is what a restarted process may have
+        # read, so it counts as restored for the look below.
+        restored = self.put_back(settings=False) != "failed"
         self.receiver.pause("withdrawn")
         if not self.original_running():
             # A restart happened while the files went back: the new process may have read
@@ -1693,9 +1754,9 @@ class Transaction:
         else:
             failure = Fail("question")
             result = "withdrawn_before_restart"
-        if not restored:
+        if self.record["restore"] != "done":
             result = "failed"
-        self.finish(result, failure)
+        self.finish(result, self.restore_failure(failure))
         return 0 if result == "withdrawn_before_restart" else 1
 
     # ------------------------------------------------------------------- proof --
@@ -1776,11 +1837,7 @@ class Transaction:
             receiver.run([receiver.init, "4"], STOP_WAIT)
             stopped = self.wait(lambda: not receiver.enigma2_pids(), STOP_WAIT)
             receiver.pause("rollback_stopped")
-            try:
-                restore_snapshot(receiver, self.snapshot, settings=stopped)
-                self.record["restore"] = "done"
-            except Exception as error:  # whatever it was, init 3 comes next
-                self.record["restore"] = "failed: " + (str(error) or type(error).__name__)
+            self.put_back(settings=stopped)  # recorded, whatever it was: init 3 comes next
             receiver.pause("rollback_restored")
             service = recorded.get("service") if recorded else None
             if stopped and service:
@@ -1803,7 +1860,8 @@ class Transaction:
             self.verify(recorded)
         else:
             self.record.update(channel="not recorded" if not recorded else "lost")
-        self.finish("rolled_back" if self.record.get("restore") == "done" else "failed", failure)
+        self.finish("rolled_back" if self.record.get("restore") == "done" else "failed",
+                    self.restore_failure(failure))
         return 1
 
     def wait(self, condition, seconds):
