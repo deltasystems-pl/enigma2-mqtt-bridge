@@ -152,7 +152,7 @@ not by the checker; their types are the tables below.
 |---|---|---|
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
-| unreleased, on `main` after 0.3.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
+| unreleased, on `main` after 0.3.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3). **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
 
 ---
 
@@ -196,7 +196,8 @@ announcement retained.
                "cam_telemetry": false, "oscam_telemetry": false,
                "softcam_autoheal": false, "softcam_autoheal_seconds": 90,
                "deep_standby_allowed": false, "softcam_restart_allowed": false,
-               "epg_import_allowed": false, "uninstall_allowed": false},
+               "epg_import_allowed": false, "uninstall_allowed": false,
+               "update_check": false},
   "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
                    "volume", "hdd", "process", "channels", "bouquet_context", "epg_grid", "keys",
                    "screenshot", "toast", "message"]
@@ -216,7 +217,7 @@ announcement retained.
 | `uptime` | int | Seconds since boot |
 | `wol` | object | Since 0.3.0. What the **image** says about Wake-on-LAN - whether it has a switch for it and whether that is on. See below |
 | `ha_mode` | string | `discovery` \| `integration` \| `off` - the acknowledgement of `cmd/ha_mode` |
-| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5-3600), `screenshot_delay` (post-zap settling seconds, 1-30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30-600). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed` (bools, off by default). See below. |
+| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5-3600), `screenshot_delay` (post-zap settling seconds, 1-30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30-600). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`, `uninstall_allowed` and `update_check` (bools, off by default). See below. |
 | `capabilities` | list of strings | Which hooks this image actually gave the plugin |
 
 **Presence in `settings` is not permission to write it back.** Until 0.2.0 this object was „the
@@ -231,6 +232,7 @@ settings it did mean to change as well.
 | `softcam_restart_allowed` | 0.3.0 | Whether `cmd/softcam_restart` is permitted over MQTT, and with it the opt-in auto-heal. Always present, whichever way it is set | The same places, and never over MQTT |
 | `epg_import_allowed` | 0.3.0 | Whether `cmd/epg_import` is permitted over MQTT. Always present, whichever way it is set | The same places, and never over MQTT |
 | `uninstall_allowed` | 0.3.0 | Whether `cmd/uninstall` is permitted over MQTT. Always present, whichever way it is set. A consumer offers the removal only on a **stated** `true` together with the `uninstall` capability: for a one-way door, silence means no | The same places, and never over MQTT |
+| `update_check` | unreleased | Whether the receiver asks the plugin's release origin, on the internet, which releases there are: once a day, and when `cmd/update_check` asks over MQTT. Not a permission for anything on the receiver, but the one switch that lets it make a connection other than the broker's, so it sits on this side of the line for the same reason. Always present, whichever way it is set | The same places, and never over MQTT |
 
 The rule behind which side of the line a setting falls on: one that **enables a command** is never
 writable over MQTT - it is set on the receiver (the setup screen, the provisioning file, or the
@@ -1036,6 +1038,44 @@ every reconnect. The plugin observes keys and **never consumes them** - the rece
 exactly as it would with the plugin absent - and publishing is capped so that holding a button
 cannot flood the broker. `publish_keys` turns the topic off.
 
+### `<base>/<node>/update` - added after 0.3.0 (unreleased)
+
+Retained. Which releases of the plugin this receiver could install, read from the signed release
+index ([RELEASE-INDEX.md](RELEASE-INDEX.md), [ADR-0015](adr/0015-signed-self-update.md)) and from
+nowhere else: a release the index does not name is not here. Published on every connect by every
+receiver, whatever its settings, and again when an index is accepted, when a check ends and when
+`ha_mode` changes.
+
+```json
+{"origin": "reachable", "checked": 1790410000, "check_error": null,
+ "index": {"serial": 7, "issued": 1790500000, "source": "origin"},
+ "latest_compatible": "0.4.1",
+ "available": [{"version": "0.4.1", "compatible": true, "reason": null},
+               {"version": "0.4.0", "compatible": true, "reason": null}],
+ "transaction": null}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `origin` | string | `reachable`, `unreachable` or `unknown`: whether the receiver's last probe of the release origin - a verified HTTPS request for the index's signature file, five seconds - got an answer. `unknown` until the receiver has probed, which it does only when it checks (below) |
+| `checked` | int or `null` | When the receiver last checked, epoch seconds. Stamped when the check starts, so a check that failed has a time too. Volatile in the sense of [ADR-0006](adr/0006-volatile-fields-and-publish-on-change.md): a check that changed nothing else does not publish the topic again |
+| `check_error` | string or `null` | Why the last check brought no index, `null` when it did or found the one already held: `unreachable`, `redirect` (the origin answered with a redirect, which is never followed), `http_error`, `too_large`, `bad_memory` (what the receiver keeps about the index cannot be read, and nothing is judged until it is removed - [RELEASE-INDEX.md](RELEASE-INDEX.md), "Loading it"), `internal_error`, or a reason code of the rule for accepting an index (`bad_signature`, `replay`, `rank`, `jump` and the others RELEASE-INDEX.md lists). An open enumeration |
+| `index` | object or `null` | The index this receiver holds: `serial`, `issued` (epoch seconds; when it was built - its age, never an expiry) and `source`, `origin` (fetched by the receiver) or `relay` (relayed on `enigma2mqtt/release_index`, §3). `null` while it holds none |
+| `latest_compatible` | string or `null` | The newest compatible release in `available`; `null` when none is |
+| `available` | list | The twenty newest releases at or above the index's floor that are not withdrawn, newest first, as `{"version", "compatible", "reason"}`. `reason` is `null` when compatible; otherwise `incompatible` - another contract major, or a release that needs a newer integration while `ha_mode` is `integration` (the integration's own version is not read yet) - or `depends`, a package the release needs is not installed (not judged when opkg's database cannot be read). An open enumeration. The running release and older ones are listed too: whether one may be installed, and from where, is the install's business |
+| `transaction` | object or `null` | An update in progress or the last one finished. Always `null` until the plugin can install an update itself (§5) |
+
+**When the receiver checks.** Only when asked. With `update_check` on (the read-only setting
+above), once a day - after its clock has been set - and on `cmd/update_check`; from the plugin's
+OpenWebif page ("Check for plugin updates now") whatever the setting says, because whoever the page
+admits could switch it on anyway. Manual checks share one ten-minute limit, inside which the last
+result is the answer and nothing is fetched. With `update_check` off and nobody at the page, the
+receiver makes no connection but the broker's. A check fetches the signature file first (the
+probe, 1 KiB), then the index (ten seconds, 64 KiB), from the origin built into the plugin, over
+TLS that verifies the certificate and the host name, and never follows a redirect. An index relayed
+on `enigma2mqtt/release_index` (§3) is judged by the same rule, needs no setting and causes no
+connection.
+
 ### `<base>/<node>/last_error`
 
 Retained.
@@ -1055,7 +1095,7 @@ to the user reads this topic, not the absence of a state change.
 | `cmd` | string | The command refused |
 | `error` | string | Why, in English, for the person reading the topic. This is the contract's human text |
 | `ts` | int | When, in epoch seconds |
-| `reason` | string, optional | Since 0.3.0. A stable code for the refusal, **only** from a command that defines codes - today `history_clear` (and `zap_history`'s `playback`); see §2. Absent, not `null`, otherwise, so every other refusal is exactly what it was. A consumer that knows the code can say the refusal in the household's language, and one that does not ignores the field |
+| `reason` | string, optional | Since 0.3.0. A stable code for the refusal, **only** from a command that defines codes - today `history_clear`, `update_check`'s `not_permitted` (and `zap_history`'s `playback`); see §2. Absent, not `null`, otherwise, so every other refusal is exactly what it was. A consumer that knows the code can say the refusal in the household's language, and one that does not ignores the field |
 
 ```json
 {"cmd": "history_clear", "error": "the receiver's zap history holds at most one channel, and 0 does nothing then", "reason": "too_short", "ts": 1789459213}
@@ -1107,6 +1147,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
 | `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
 | `uninstall` - since 0.3.0 | this receiver's node id, exactly (surrounding whitespace is stripped; case matters) | Removes the plugin from the receiver: stops publishing, retracts every retained topic this node owns at QoS 1, publishes `offline` last, removes the package and restarts the interface. 🔴 **A one-way door** | Refused, before anything changes, in this order: unless `uninstall_allowed` is on - „uninstall is switched off in the plugin's settings"; unless the payload is this node's id - „the payload must be this receiver's node id"; without the `uninstall` capability - „this plugin was not installed by the package manager, so it cannot remove itself"; while an EPG import runs - „an EPG import is running", exactly as `restart_gui` refuses it and with the same lapse, because the removal ends in the same restart; by the same recording guard as `deep_standby`; where the image has no way to restart the interface; while a removal is already running - „an uninstall is already running". See below |
+| `update_check` - added after 0.3.0 (unreleased) | any (`PRESS` by convention) | Asks the plugin's release origin for the signed release index, judges what comes back, and says what it found on `update` (§1) | Refused unless `update_check` is on: "checking for updates is switched off in the plugin's settings" (`reason` `not_permitted`). At most one request per ten minutes, shared with the OpenWebif page: inside that the command succeeds, nothing is fetched and `update` stands as the last check left it. The answer is `update` changing once the check has run, as for every command. **The payload is ignored**: nothing from the broker names where to look |
 
 Every one of them is refused when it arrives retained, as above.
 
@@ -1578,6 +1619,14 @@ The companion integration subscribes to `enigma2mqtt/discovery/#` and offers a c
 every announcement it sees. Anything else that wants to enumerate boxes on a broker can do the
 same.
 
+### Topics the plugin reads
+
+Besides its own command topics, the plugin subscribes to one topic it does not own.
+
+| Topic | Published by | What the plugin does with it |
+|---|---|---|
+| `enigma2mqtt/release_index` - added after 0.3.0 (unreleased) | The companion integration, retained, after it verified a newer index: `{"index": "<base64 of the exact signed bytes>", "sig": "<base64 of the signature file>"}` | Judges it by the rule for accepting an index ([RELEASE-INDEX.md](RELEASE-INDEX.md)), exactly as an index it fetched itself, and keeps it when the rule accepts it - `update.index.source` is then `relay`. A refusal is a line in the plugin's log, never `last_error`. A payload over 88 KiB is dropped unread. It needs no setting and causes no connection, so a receiver without internet learns of releases this way. The plugin never publishes to it and never retracts it |
+
 ---
 
 ## 4. Home Assistant discovery
@@ -1716,8 +1765,9 @@ retained ghost nobody can find: the list is the only record that they exist.
 
 This section is where a planned addition is written down before it is built, so that a consumer can
 be written against its shape; the previous ones - `uninstall_allowed` and `cmd/uninstall`
-([ADR-0004](adr/0004-remote-uninstall.md)), and `info.build` and `info.contract` - are in §1 and
-§2 now. Until a capability is in
+([ADR-0004](adr/0004-remote-uninstall.md)), `info.build` and `info.contract`, and the check half of
+the updates below (`update_check`, the `update` topic, `cmd/update_check` and the relayed
+`enigma2mqtt/release_index`) - are in §1, §2 and §3 now. Until a capability is in
 `info.capabilities`, the box does not have it - that rule is unchanged, and it is how a consumer
 tells a plan from a feature. **No released plugin publishes, accepts or reads anything below.**
 
@@ -1729,38 +1779,29 @@ addition is additive under [Contract version](#contract-version), so it stays co
 install itself - the lock it shares with the integration's installer, the snapshot, the marker, and
 how a restart keeps the household's channel - is described in [TRANSACTION.md](TRANSACTION.md). The
 index itself - its format, its keys, the rule for accepting one, and how it is published - is
-built already and described in [RELEASE-INDEX.md](RELEASE-INDEX.md); what `release_index` below
-carries is that index, byte for byte.
+built already and described in [RELEASE-INDEX.md](RELEASE-INDEX.md), and so is the check: the
+`update_check` setting, the `update` topic, `cmd/update_check` and the relayed
+`enigma2mqtt/release_index` are in §1, §2 and §3. What is still planned is the install.
 
 | Kind | Name | Shape |
 |---|---|---|
-| Setting | `update_check` | bool, off by default, **read-only** in `info.settings`: set on the receiver, never through `cmd/config`. With it on, the plugin checks the index once a day and answers `cmd/update_check` |
 | Setting | `update_allowed` | bool permission, off by default, **read-only** in `info.settings`: whether `cmd/update` is obeyed over MQTT |
 | Capability | `self_update` | the package manager installed this copy and the receiver can run the update helper detached from enigma2 |
-| State topic | `update` | retained, QoS 0, JSON, published on change - below |
-| Command | `update_check` | any; refused unless `update_check` is on; at most one fetch per 10 minutes, a repeat answers from the last result |
 | Command | `update` | JSON - below. Upgrades and repairs only, never a downgrade |
 | Command | `relay` | JSON `{"id", "version", "url", "expires"}`: Home Assistant's answer to a `relay_request` |
 | Event topic | `relay_request` | `<base>/<node>/relay_request`, **not retained**, QoS 1, JSON `{"id", "version", "serial"}`: a receiver without internet asks Home Assistant for a package |
-| Consumer topic | `enigma2mqtt/integration/<node>` | retained, QoS 1, **published by the companion integration**: `{"integration": "0.4.0", "contract": 1, "plugin_min": "0.2.0"}`; retracted when the integration's entry is removed |
-| Consumer topic | `enigma2mqtt/release_index` | retained, **published by the companion integration** after it verified a newer index: `{"index": "<base64 of the exact signed bytes>", "sig": "<base64 of the signature file>"}`. The plugin verifies it itself and never retracts it |
+| Consumer topic | `enigma2mqtt/integration/<node>` | retained, QoS 1, **published by the companion integration**: `{"integration": "0.4.0", "contract": 1, "plugin_min": "0.2.0"}`; retracted when the integration's entry is removed. Once read, it replaces the rule `update.available` uses without it (§1) |
 
-**The `update` topic:**
+**`update.transaction`** - `null` in the `update` topic of §1 until `cmd/update` is built - will
+carry the update in progress or the last one finished:
 
 ```json
-{"origin": "unreachable", "checked": 1790410000, "check_error": null,
- "index": {"serial": 7, "issued": 1790500000, "source": "relay"},
- "latest_compatible": "0.4.1",
- "available": [{"version": "0.4.1", "compatible": true, "reason": null}],
- "transaction": {"id": "a1b2c3d4e5f6", "started_by": "home_assistant", "target": "0.4.1",
-                 "from": "0.4.0", "phase": "installing", "started": 1790410100,
-                 "finished": null, "result": null, "error": null}}
+{"id": "a1b2c3d4e5f6", "started_by": "home_assistant", "target": "0.4.1",
+ "from": "0.4.0", "phase": "installing", "started": 1790410100,
+ "finished": null, "result": null, "error": null}
 ```
 
-`origin` is `reachable`, `unreachable` or `unknown`; `checked` is volatile in the sense of
-[ADR-0006](adr/0006-volatile-fields-and-publish-on-change.md). `available` holds the 20 newest
-releases at or above the index's floor that are not withdrawn, each with the reason when it is not
-compatible. `transaction.phase` is one of `downloading`, `verifying`, `snapshot`, `installing`,
+`transaction.phase` is one of `downloading`, `verifying`, `snapshot`, `installing`,
 `restarting`, `proving`, `rolling_back`, `finished`; `transaction.result`, only with `finished`, is
 one of `installed`, `withdrawn_before_restart`, `rolled_back`, `failed`, `interrupted`;
 `transaction.started_by` is one of `mqtt`, `home_assistant`, `screen`, `page`, `ssh`.

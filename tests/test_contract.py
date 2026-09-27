@@ -402,6 +402,31 @@ def test_a_removed_outside_topic_is_refused(checker, contract):
     assert _mentions(problems, "topic", "enigma2mqtt/discovery/<node>/config", "removed")
 
 
+def test_the_update_check_is_in_the_contract_and_out_of_the_plan(checker, topics_text):
+    parsed = checker.parse_topics(topics_text)
+    assert parsed["settings"]["update_check"] == {
+        "type": "bool", "writable": False, "since": "unreleased",
+    }
+    assert parsed["state_topics"]["update"] == {"payload": "json", "retained": True}
+    assert "update_check" in parsed["commands"]
+    assert "enigma2mqtt/release_index" in parsed["other_topics"]
+    planned = {(row["kind"], row["name"]) for row in parsed["planned"]}
+    assert ("setting", "update_allowed") in planned
+    assert ("command", "update") in planned
+    assert ("consumer topic", "enigma2mqtt/integration/<node>") in planned
+    assert not planned & {
+        ("setting", "update_check"), ("state topic", "update"), ("command", "update_check"),
+        ("consumer topic", "enigma2mqtt/release_index"),
+    }
+
+
+def test_a_topic_the_plugin_reads_missing_from_the_data_is_named(checker, topics_text,
+                                                                  contract):
+    contract["other_topics"].remove("enigma2mqtt/release_index")
+    problems = checker.check_consistency(topics_text, contract)
+    assert _mentions(problems, "enigma2mqtt/release_index", "not in docs/contract.json")
+
+
 def test_a_dropped_exception_is_refused(checker, contract):
     newer = copy.deepcopy(contract)
     newer["exceptions"] = [

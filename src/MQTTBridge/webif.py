@@ -154,6 +154,7 @@ SETTING_GROUPS = (
             "softcam_restart_allowed",
             "epg_import_allowed",
             "uninstall_allowed",
+            "update_check",
             "cec_standby_workaround",
             "osd_toast",
         ),
@@ -671,6 +672,9 @@ def actions(bouquets=(), node_id="", history=()):
                 "freeze for two or three seconds while the guide is saved."
             ),
         ),
+        # Needs no `update_check`: asking from the page is the consent to one request
+        # to the release origin. The ten-minute limit applies here as over MQTT.
+        Action("update_check", "update_check", _("Check for plugin updates now")),
         Action("discovery", "discovery", _("Publish discovery again")),
         Action(
             "ha_mode", "ha_mode", _("Home Assistant mode"),

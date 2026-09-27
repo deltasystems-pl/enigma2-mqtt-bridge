@@ -9,7 +9,8 @@ the named in-major exceptions, and the planned additions. Two checks run on it:
 
 1. **Agreement.** The prose is parsed at the places where it states the contract - the state-topic
    headings of section 1, the command table of section 2, the `info` field tables, the settings
-   row and the read-only table, the capability sentence, the announcement and discovery topics,
+   row and the read-only table, the capability sentence, the announcement, the topics the plugin
+   reads and the discovery topics,
    the "Contract version" section with its exception table, and the planned table - and every
    difference from the data is a problem. Neither side is the master: a change to one without the
    other fails, whichever it is.
@@ -311,13 +312,23 @@ def _capabilities(text: str) -> list[str]:
 
 
 def _other_topics(text: str) -> list[str]:
-    announcement = BACKTICKED.findall("\n".join(_top_section(text, "## 3.")))
+    """The topics outside the node's tree: the announcement, the topics the plugin reads -
+    section 3's `| Topic | Published by |` table - and the discovery topics of section 4."""
+    section = _top_section(text, "## 3.")
+    announcement = BACKTICKED.findall("\n".join(section))
     if not announcement or not announcement[0].startswith("enigma2mqtt/"):
         raise ContractParseError("section 3 no longer starts with the announcement topic")
+    read = _tables(section, re.compile(r"^\| Topic \| Published by \|"))
+    if len(read) != 1:
+        raise ContractParseError("section 3 has no single `| Topic | Published by |` table")
     tables = _tables(_top_section(text, "## 4."), re.compile(r"^\| Topic \|"))
     if not tables:
         raise ContractParseError("section 4 has no topic table")
-    return sorted([announcement[0]] + [_first_name(row[0]) for row in tables[0]])
+    return sorted(
+        [announcement[0]]
+        + [_first_name(row[0]) for row in read[0]]
+        + [_first_name(row[0]) for row in tables[0]]
+    )
 
 
 def _exceptions(text: str) -> list[dict]:

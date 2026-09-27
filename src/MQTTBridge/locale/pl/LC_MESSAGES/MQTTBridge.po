@@ -663,6 +663,14 @@ msgstr "EPG-Importer pobiera teraz przewodnik. Na koniec menu zatrzymują się n
 msgid "Allow removing the plugin remotely"
 msgstr "Zezwalaj na zdalne usunięcie wtyczki"
 
+#: src/MQTTBridge/setup.py
+msgid "Check daily for plugin updates"
+msgstr "Codziennie sprawdzaj aktualizacje wtyczki"
+
+#: src/MQTTBridge/webif.py
+msgid "Check for plugin updates now"
+msgstr "Sprawdź teraz aktualizacje wtyczki"
+
 #: src/MQTTBridge/webif.py
 msgid "Remove the plugin from this receiver"
 msgstr "Usuń wtyczkę z tego dekodera"

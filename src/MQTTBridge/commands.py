@@ -118,6 +118,7 @@ class CommandDispatcher:
             "ha_mode": self.ha_mode,
             "reset": self.reset,
             "uninstall": self.uninstall,
+            "update_check": self.update_check,
         }
         # Command topics of this node that somebody left a retained message on,
         # this session. Discarding one is not clearing it: the broker hands it
@@ -633,3 +634,13 @@ class CommandDispatcher:
         before anything changes, so the dispatcher clears `last_error` first.
         """
         return self.bridge.uninstaller.request(text, origin=origin)
+
+    def update_check(self, _text, origin=MQTT):
+        """Ask the release origin which releases there are - or answer with the last answer.
+
+        The payload is ignored: nothing from the broker names where to look. Refused over
+        MQTT unless `update_check` is on; inside ten minutes of the last check the stored
+        result is the answer and nothing is fetched (`updatecheck.py`). The answer is the
+        `update` topic, published when the worker has finished.
+        """
+        return self.bridge.updates.request_check(origin=origin)

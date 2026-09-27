@@ -178,7 +178,8 @@ def test_snapshot_timings_name_only_publishers_and_warn_when_slow(
 
     text = plugin_log()
     assert "slow snapshot publisher=slow elapsed_ms=400 topics=1" in text
-    assert "slow snapshot total elapsed_ms=1199 topics=2" in text
+    # info, the slow publisher's one topic, and `update`.
+    assert "slow snapshot total elapsed_ms=1199 topics=3" in text
     assert "private" not in text
     assert "payload" not in text
 

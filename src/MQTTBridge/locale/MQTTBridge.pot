@@ -663,6 +663,14 @@ msgstr ""
 msgid "Allow removing the plugin remotely"
 msgstr ""
 
+#: src/MQTTBridge/setup.py
+msgid "Check daily for plugin updates"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Check for plugin updates now"
+msgstr ""
+
 #: src/MQTTBridge/webif.py
 msgid "Remove the plugin from this receiver"
 msgstr ""

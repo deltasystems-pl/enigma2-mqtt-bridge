@@ -52,6 +52,9 @@ from .publisher import Publisher
 from .uninstall import DEFERRED as UNINSTALL_DEFERRED
 from .uninstall import RUNNING as UNINSTALL_RUNNING
 from .uninstall import Uninstaller
+from .updatecheck import RELEASE_INDEX_TOPIC, UpdateChecker
+from .updatecheck import SUFFIX as UPDATE_SUFFIX
+from .updatecheck import VOLATILE as UPDATE_VOLATILE
 from .version import CONTRACT, __version__
 
 # `Publisher` is re-exported: it is part of this module's interface - every
@@ -168,6 +171,10 @@ class Bridge:
         # Built with the bridge, so that nothing the removal runs is a first
         # import after the package has gone.
         self._uninstaller = Uninstaller(self)
+        # Built with the bridge as well, and kept across reloads: what it has
+        # judged is the receiver's, not the session's, and its ten-minute limit
+        # must not reset with every settings save.
+        self._updates = UpdateChecker(self)
         # A refusal that has to wait for a session to be published on: the
         # reason a removal failed, reported once the fresh session is up.
         self._pending_error = None
@@ -311,6 +318,11 @@ class Bridge:
         if self._uninstaller.closed:
             return UNINSTALL_RUNNING
         return self._commands.run(name, text, origin)
+
+    @property
+    def updates(self):
+        """The update check: the `update` topic, `cmd/update_check` and the relayed index."""
+        return self._updates
 
     @property
     def uninstaller(self):
@@ -519,6 +531,7 @@ class Bridge:
         if self._loop_monitor is not None:
             self._loop_monitor.start()
         self._build_ticker.start(buildid.CHECK_MILLISECONDS)
+        self._updates.start()
         self._will_topic = self.topic("availability")
         self._session_settings = self._connection_settings()
         self.client.set_will(self._will_topic, OFFLINE, qos=WILL_QOS, retain=True)
@@ -585,10 +598,11 @@ class Bridge:
         self._publishers = []
 
     def _stop_timers(self):
-        """The session's own timers: the loop monitor and the build-on-disk check."""
+        """The session's own timers: the loop monitor, the build-on-disk check, the daily check."""
         if self._loop_monitor is not None:
             self._loop_monitor.stop()
         self._build_ticker.stop()
+        self._updates.stop()
 
     def reload(self):
         """Apply changed settings. Called by the setup screen after a save.
@@ -856,6 +870,10 @@ class Bridge:
         self.publish_announcement(info)
         self.publish_discovery(info)
         self.client.subscribe(self.command_root + "/#", qos=COMMAND_QOS)
+        # The signed release index, relayed by the companion integration for a
+        # receiver without internet. Retained, so a fresh session is handed it at
+        # once; judged like any fetched index, and never obeyed as a command.
+        self.client.subscribe(RELEASE_INDEX_TOPIC, qos=COMMAND_QOS)
         self.state.save()
         if self._pending_error is not None:
             command, message = self._pending_error
@@ -866,6 +884,9 @@ class Bridge:
         if self._uninstaller.closed:
             # Asked first: from here on nothing may re-create a topic.
             LOG.info("discarding a message on %s: the plugin is removing itself", topic)
+            return
+        if topic == RELEASE_INDEX_TOPIC:
+            self._updates.on_release_index(payload, retain)
             return
         self._commands.handle(topic, payload, retain)
 
@@ -1041,6 +1062,14 @@ class Bridge:
                 if elapsed >= SLOW_SNAPSHOT_PUBLISHER_SECONDS:
                     LOG.warning("slow snapshot publisher=%s elapsed_ms=%d topics=%d",
                                 publisher.name, int(elapsed * 1000), published)
+        # Not a publisher: `update` is no feature area of the image and claims no
+        # capability. What it says comes from the release index, on every box.
+        try:
+            self.publish_json(self.topic(UPDATE_SUFFIX), self._updates.payload(),
+                              volatile=UPDATE_VOLATILE)
+            topic_count += 1
+        except Exception:
+            LOG.exception("the update check could not produce a snapshot")
         elapsed = time.monotonic() - snapshot_started
         LOG.info("snapshot complete elapsed_ms=%d topics=%d", int(elapsed * 1000), topic_count)
         if elapsed >= SLOW_SNAPSHOT_TOTAL_SECONDS:
@@ -1190,6 +1219,8 @@ class Bridge:
         self.publish_json(self.topic("info"), info)
         self.publish_announcement(info)
         self.publish_discovery(info)
+        # Which releases are compatible depends on whether an integration is in use.
+        self._updates.publish()
         self.state.save()
 
     def reset_retained(self):
