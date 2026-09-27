@@ -60,8 +60,8 @@ version that has no section here.
   helper starts, and the install stays the television's or the page's. No answer: refused with
   `reason` `no_relay`, nothing changed; only answers that this receiver's clock calls expired:
   `clock_skew`, with a sentence that says an answer came and asks to check the receiver's clock -
-  not that Home Assistant answered, since any broker client may have. A wait whose timer could not start still ends by its age. A request that carries an
-  address never contacts the origin. The address rule is now one function shared by the plugin and
+  not that Home Assistant answered, since any broker client may have. A wait whose timer could
+  not start still ends by its age. A request that carries an address never contacts the origin. The address rule is now one function shared by the plugin and
   the helper, and it no longer takes a bracketed IPv6 host or a port outside 1-65535 in
   `cmd/update`. That is a rule about how the address is written: a host name may resolve to any
   address, IPv6 included, and the bytes are verified whatever answers.

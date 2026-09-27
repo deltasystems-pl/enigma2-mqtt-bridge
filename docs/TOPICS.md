@@ -1316,10 +1316,10 @@ Assistant's shape carried an address that this receiver's clock already calls ex
 ahead of Home Assistant's by more than the address lives - the refusal is `clock_skew` instead
 (the row above). Its sentence says only what the receiver can know: such an answer may come from
 any broker client, so it does not claim that Home Assistant answered. While a receiver probes or
-waits, `cmd/update` and `cmd/uninstall` are refused `busy`; a wait whose timer did not run ends by its age the next time anything asks. A `cmd/update`
-over MQTT never asks back: Home Assistant sends its address with it, and a command without one asks
-the receiver to fetch. A request that carries a relay address never makes the receiver contact the
-origin at all. "No IPv6 literal" in the `relay` refusal is a rule about the address as written:
+waits, `cmd/update` and `cmd/uninstall` are refused `busy`; a wait whose timer did not run ends
+by its age the next time anything asks. A `cmd/update` over MQTT never asks back: Home Assistant
+sends its address with it, and a command without one asks the receiver to fetch. A request that
+carries a relay address never makes the receiver contact the origin at all. "No IPv6 literal" in the `relay` refusal is a rule about the address as written:
 a host name may resolve to any address, and whatever answers there, the bytes are verified.
 
 ### `cmd/zap` goes through the channel list - since 0.3.0
