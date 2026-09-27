@@ -1,0 +1,1168 @@
+"""The update helper (`updatehelper.py`) against a fake receiver.
+
+A temporary root holds the plugin, opkg's database and enigma2's settings; `Box` stands in for
+everything else the helper asks - the clock, `/proc`, `init`, `opkg`, OpenWebif and the origin -
+and moves only when the helper sleeps, so every wait is deterministic. Named pause points
+(`Receiver.pause`) are where a test changes the world - a new enigma2, a signal, the plugin's
+word - at exactly one step of the sequence. The last tests run the helper as the receiver does:
+a copy in its own directory, a separate process, a real signal while it waits at a FIFO.
+"""
+
+import hashlib
+import io
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import tarfile
+import threading
+import time
+from pathlib import Path
+
+import indexlab
+import pytest
+import released_installer_0_3_1 as released
+import updatelab
+
+from MQTTBridge import trust, updatehelper
+
+PLUGIN = updatehelper.PLUGIN_DIR
+HOOK = updatehelper.WEBIF_SHIM
+TVP1 = "1:0:19:283D:3FB:1:C00000:0:0:0:"
+TVN = "1:0:19:283E:3FB:1:C00000:0:0:0:"
+ORIGIN = "https://origin.test/feed/"
+TID = "0123456789ab"
+OLD, NEW = "0.4.0", "0.4.1"
+
+
+def package(version, *, extra=None, control_version=None, name=None):
+    data = {"./" + PLUGIN + "/plugin.py": f"# plugin {version}\n".encode(),
+            "./" + PLUGIN + "/__init__.py": b"",
+            "./" + HOOK: f"# hook {version}\n".encode()}
+    data.update(extra or {})
+    control = (f"Package: {name or updatehelper.PACKAGE}\nVersion: {control_version or version}\n"
+               "Architecture: all\n").encode()
+    members = [("debian-binary", b"2.0\n"),
+               ("control.tar.gz", indexlab._tar({"./control": control})),
+               ("data.tar.gz", indexlab._tar(data))]
+    out = b"!<arch>\n"
+    for member, content in members:
+        header = f"{member + '/':<16}{0:<12}{0:<6}{0:<6}{'100644':<8}{len(content):<10}`\n"
+        out += header.encode("ascii") + content + (b"\n" if len(content) % 2 else b"")
+    return out
+
+
+def entry_for(version, ipk, **changes):
+    entry = updatelab.release(version)
+    entry.update(size=len(ipk), sha256=hashlib.sha256(ipk).hexdigest(), commit="e" * 40)
+    entry.update(changes)
+    return entry
+
+
+class Box(updatehelper.Receiver):
+    """A receiver whose clock, processes, init, opkg, OpenWebif and origin the test owns."""
+
+    def __init__(self, tmp):
+        super().__init__(root=str(tmp / "root"), proc=str(tmp / "proc"), init="/stand-in/init",
+                         opkg="/stand-in/opkg")
+        self.t = 1000.0
+        self.events = []
+        self.argv = []
+        self.pids = {100}
+        self.fds = {}
+        self.service = TVP1
+        self.standby = False
+        self.webif_up = True
+        self.hook_status = 404
+        self.opkg_mode = "install"
+        self.opkg_blocker = None
+        self.urls = {}
+        self.relayed = {}
+        self.free = 1 << 40
+        self.pauses = {}
+        self.zaps = []
+        self.power = []
+        self.seen = []
+        self.init_log = []
+        self.lastservice_at_start = None
+        self.fetched = []
+        self.stops = True
+
+    # time
+    def clock(self):
+        return self.t
+
+    def now(self):
+        return 1790410000 + int(self.t)
+
+    def sleep(self, seconds):
+        self.t += seconds
+        for event in [e for e in self.events if e[0] <= self.t]:
+            self.events.remove(event)
+            event[1]()
+
+    def at(self, delay, action):
+        self.events.append((self.t + delay, action))
+
+    def boot_id(self):
+        return "boot-1"
+
+    def uptime(self):
+        return self.t
+
+    # processes
+    def enigma2_pids(self):
+        return set(self.pids)
+
+    def open_files(self, pid):
+        return set(self.fds.get(pid, ()))
+
+    def restart(self, pid=200):
+        self.pids = {pid}
+
+    # programs
+    def run(self, argv, timeout):
+        assert isinstance(argv, list) and all(isinstance(a, str) for a in argv)
+        self.argv.append(list(argv))
+        if argv[0] == self.init:
+            self.init_log.append((argv[1], self.read(PLUGIN + "/plugin.py")))
+            if argv[1] == "4" and self.stops:
+                self.pids = set()
+                self.webif_up = False
+            elif argv[1] == "3":
+                self.lastservice_at_start = self.setting("config.tv.lastservice")
+                self.pids = {300}
+                self.webif_up = True
+                self.service = self.lastservice_at_start or TVN
+            return 0
+        if argv[0] == self.opkg:
+            if self.opkg_blocker is not None:
+                self.opkg_blocker()
+            if self.opkg_mode == "fail":
+                self.last_output = "Collected errors:\n * something went wrong"
+                return 255
+            self.install(argv[-1])
+            if self.opkg_mode == "partial":
+                with open(self.path(PLUGIN + "/plugin.py"), "w") as handle:
+                    handle.write("# garbage\n")
+            return 0
+        raise AssertionError("unexpected program " + repr(argv))
+
+    def install(self, ipk):
+        with open(ipk, "rb") as handle:
+            members = dict(updatehelper.ar_members(handle.read()))
+        with tarfile.open(fileobj=io.BytesIO(members["data.tar.gz"]), mode="r:gz") as data:
+            for member in data.getmembers():
+                relative = updatehelper._member_path(member.name)
+                if not relative:
+                    continue
+                target = self.path(relative)
+                if member.isdir():
+                    os.makedirs(target, exist_ok=True)
+                else:
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    with open(target, "wb") as handle:
+                        handle.write(data.extractfile(member).read())
+        with tarfile.open(fileobj=io.BytesIO(members["control.tar.gz"]), mode="r:gz") as control:
+            text = control.extractfile("./control").read().decode()
+        version = next(line.split(": ")[1] for line in text.splitlines()
+                       if line.startswith("Version"))
+        write_status(self, version)
+
+    # OpenWebif on the receiver
+    def webif(self, path):
+        self.seen.append(path)
+        if not self.webif_up:
+            return None
+        if path == "/api/statusinfo":
+            return 200, json.dumps({"currservice_serviceref": self.service,
+                                    "inStandby": "true" if self.standby else "false"}).encode()
+        if path.startswith("/api/zap?sRef="):
+            from urllib.parse import unquote
+
+            self.zaps.append(unquote(path.split("=", 1)[1]))
+            self.service = self.zaps[-1]
+            return 200, b'{"result": true}'
+        if path.startswith("/api/powerstate?newstate="):
+            self.power.append(path.rsplit("=", 1)[1])
+            self.standby = True
+            return 200, b"{}"
+        if path == "/mqttbridge":
+            return self.hook_status, b""
+        return 404, b""
+
+    def fetch_origin(self, url, cap, timeout):
+        self.fetched.append(url)
+        answer = self.urls.get(url)
+        if answer is None:
+            raise updatehelper.netfetch.Unreachable("no route to host")
+        return answer
+
+    def fetch_relay(self, url, cap, timeout):
+        answer = self.relayed.get(url)
+        if answer is None:
+            raise updatehelper.netfetch.Unreachable("connection refused")
+        return answer
+
+    def free_bytes(self, path):
+        return self.free
+
+    def pause(self, name):
+        action = self.pauses.get(name)
+        if action is not None:
+            action()
+
+    # reading the root
+    def read(self, relative):
+        try:
+            with open(self.path(relative)) as handle:
+                return handle.read()
+        except OSError:
+            return None
+
+    def setting(self, key):
+        for line in (self.read(updatehelper.SETTINGS) or "").splitlines():
+            if line.startswith(key + "="):
+                return line.split("=", 1)[1]
+        return None
+
+
+def write_status(box, version):
+    status, info = updatehelper.opkg_paths(box.root)
+    stanzas = [
+        "Package: busybox\nVersion: 1.36\nStatus: install ok installed",
+        "Package: python3-core\nVersion: 3.12\nStatus: install ok installed",
+        f"Package: {updatehelper.PACKAGE}\nVersion: {version}\nStatus: install ok installed",
+    ]
+    Path(status).write_text("\n\n".join(stanzas) + "\n")
+    Path(info).mkdir(parents=True, exist_ok=True)
+    Path(info, updatehelper.PACKAGE + ".control").write_text(f"Version: {version}\n")
+    Path(info, updatehelper.PACKAGE + ".list").write_text("/" + PLUGIN + "/plugin.py\n")
+
+
+class Scene:
+    """A receiver with OLD installed and running, and an index offering NEW."""
+
+    def __init__(self, tmp, *, target=NEW, started_by="mqtt", downgrade=False, relay=None,
+                 entries=None, request=None, acceptance=True, ipk=None, floor="0.2.0",
+                 integration=None, integration_mode=False):
+        self.tmp = tmp
+        self.box = Box(tmp)
+        root = Path(self.box.root)
+        (root / PLUGIN).mkdir(parents=True)
+        (root / PLUGIN / "plugin.py").write_text(f"# plugin {OLD}\n")
+        (root / PLUGIN / "__init__.py").write_text("")
+        (root / HOOK).parent.mkdir(parents=True)
+        (root / HOOK).write_text(f"# hook {OLD}\n")
+        (root / "var/lib/opkg").mkdir(parents=True)
+        write_status(self.box, OLD)
+        (root / "etc/enigma2").mkdir(parents=True)
+        (root / updatehelper.SETTINGS).write_text(
+            "config.plugins.mqttbridge.enabled=true\nconfig.tv.lastservice=" + TVN
+            + "\nconfig.misc.x=1\n")
+        (root / "home/root").mkdir(parents=True)
+        (root / "tmp").mkdir()
+        self.ipk = ipk if ipk is not None else package(target)
+        self.entries = entries if entries is not None else [
+            entry_for(target, self.ipk), updatelab.release(OLD),
+        ]
+        index_raw, signature = updatelab.signed(7, self.entries, floor=floor)
+        self.box.urls[ORIGIN + trust.SIGNATURE_FILE] = (200, signature)
+        self.box.urls[ORIGIN + trust.INDEX_FILE] = (200, index_raw)
+        self.box.urls[ORIGIN + self.entries[0]["filename"]] = (200, self.ipk)
+        self.directory = root / updatehelper.BACKUPS / ("update-" + TID)
+        self.directory.mkdir(parents=True, mode=0o700)
+        self.request = {
+            "id": TID, "target": target, "sha256": self.entries[0]["sha256"],
+            "relay": relay, "started_by": started_by, "downgrade": downgrade,
+            "from": {"version": OLD, "commit": "a" * 40}, "enigma2_pid": 100,
+            "keys": trust.keys_to_data(updatelab.TEST_KEYS), "acceptance": acceptance,
+            "origin": ORIGIN, "contract": 1, "integration": integration,
+            "integration_mode": integration_mode,
+        }
+        self.request.update(request or {})
+        updatehelper.write_json(str(self.directory / "request.json"), self.request)
+        self.transaction = updatehelper.Transaction(str(self.directory), self.box)
+        self.transaction.beat_interval = 3600
+
+    def plugin_word(self, restart=True, started=True, delay=5):
+        """The plugin's part at `restarting`: ask, the interface restarts, the new one reports."""
+        def act():
+            if restart:
+                updatehelper.write_json(str(self.directory / "restart.json"), {"pid": 100})
+                self.box.at(delay, self.box.restart)
+            if started:
+                self.box.at(delay + 3, lambda: updatehelper.write_json(
+                    str(self.directory / "started.json"),
+                    {"version": NEW, "commit": "e" * 40, "pid": 200}))
+        self.box.pauses["restarting"] = act
+
+    def run(self):
+        return self.transaction.run()
+
+    def status(self):
+        path = self.directory / "status.json"
+        if path.exists():
+            return json.loads(path.read_text())
+        return self.transaction.status
+
+    def last(self):
+        return json.loads((Path(self.box.root) / updatehelper.LAST).read_text())
+
+    def marker(self):
+        path = Path(self.box.root) / updatehelper.MARKER
+        return json.loads(path.read_text()) if path.exists() else None
+
+    def plugin_py(self):
+        return self.box.read(PLUGIN + "/plugin.py")
+
+    def locked(self):
+        return (Path(self.box.root) / updatehelper.BACKUPS / updatehelper.LOCK_NAME).exists()
+
+    def opkg_calls(self):
+        return [a for a in self.box.argv if a[0] == self.box.opkg]
+
+    def init_calls(self):
+        return [a[1] for a in self.box.argv if a[0] == self.box.init]
+
+
+# ---------------------------------------------------------------- the whole path --
+
+
+def test_an_upgrade_proved_by_the_new_plugin_commits(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word()
+    assert scene.run() == 0
+    last = scene.last()
+    assert (last["result"], last["reason"], last["target"], last["from"]) == (
+        "installed", None, NEW, OLD)
+    assert scene.plugin_py() == f"# plugin {NEW}\n"
+    assert not scene.locked()
+    # Committed: the transaction directory goes, one snapshot is kept, the marker says so.
+    assert not scene.directory.exists()
+    assert (Path(scene.box.root) / updatehelper.BACKUPS / ("self-update-" + TID)).is_dir()
+    marker = scene.marker()
+    assert (marker["phase"], marker["result"], marker["to"]) == (
+        "finished", "installed", {"version": NEW, "commit": "e" * 40})
+    assert scene.opkg_calls() == [["/stand-in/opkg", "install", "--force-reinstall",
+                                   str(scene.directory / entry_for(NEW, scene.ipk)["filename"])]]
+    assert scene.init_calls() == []
+
+
+def test_the_marker_is_written_before_the_restart_is_handed_to_the_plugin(tmp_path):
+    scene = Scene(tmp_path)
+    seen = {}
+
+    def at_restarting():
+        seen["marker"] = scene.marker()
+        seen["status"] = json.loads((scene.directory / "status.json").read_text())
+        scene.box.pauses.pop("restarting")
+    scene.box.pauses["restarting"] = at_restarting
+    scene.run()
+    assert seen["status"]["phase"] == "restarting"
+    marker = seen["marker"]
+    assert marker["phase"] == "restarting" and marker["id"] == TID
+    assert marker["from"] == {"version": OLD, "commit": "a" * 40}
+    assert marker["boot_id"] == "boot-1"
+    assert marker["deadline"] > scene.box.uptime()
+
+
+def test_the_question_answered_no_withdraws_without_a_restart(tmp_path):
+    scene = Scene(tmp_path)
+
+    def plugin_says_no():
+        updatehelper.write_json(str(scene.directory / "restart.json"), {"pid": 100})
+        scene.box.at(60, lambda: (scene.directory / "withdraw").write_text(""))
+    scene.box.pauses["restarting"] = plugin_says_no
+    assert scene.run() == 0
+    assert (scene.last()["result"], scene.last()["reason"]) == (
+        "withdrawn_before_restart", "question")
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.box.read(HOOK) == f"# hook {OLD}\n"
+    status, _info = updatehelper.opkg_paths(scene.box.root)
+    assert f"Version: {OLD}" in Path(status).read_text()
+    assert scene.init_calls() == [] and not scene.locked()
+    # The withdraw never touches the settings block: the running interface owns it.
+    assert scene.box.setting("config.tv.lastservice") == TVN
+
+
+def test_no_word_from_the_plugin_withdraws_after_180_s(tmp_path):
+    scene = Scene(tmp_path)
+    started = {}
+
+    def asked():
+        started["t"] = scene.box.t
+        updatehelper.write_json(str(scene.directory / "restart.json"), {"pid": 100})
+    scene.box.pauses["restarting"] = asked
+    assert scene.run() == 0
+    assert scene.last()["result"] == "withdrawn_before_restart"
+    assert 180 <= scene.box.t - started["t"] <= 182
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+
+
+def test_a_restart_that_lands_during_the_withdraw_goes_to_r2_not_withdrawn(tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+    scene.box.pauses["withdrawing"] = scene.box.restart
+    scene.run()
+    assert scene.last()["result"] == "rolled_back"
+    assert scene.init_calls() == ["4", "3"]
+
+
+def test_a_missing_proof_rolls_back_by_r2_and_restores_the_channel(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.service = TVP1  # playing; the saved lastservice is TVN (they differ)
+    assert scene.run() == 1
+    last = scene.last()
+    assert (last["result"], last["reason"]) == ("rolled_back", "not_started")
+    assert OLD in last["error"]
+    assert scene.init_calls() == ["4", "3"]
+    # The files were back before the interface started again, the settings block too, and the
+    # recorded channel was written while it was stopped - so it started on it (H2 in the stub).
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    assert scene.box.lastservice_at_start == TVP1
+    assert scene.box.zaps == []
+    record = scene.status()["record"]
+    assert (record["restart"], record["channel"], record["restore"]) == ("stopped", "kept",
+                                                                         "done")
+    assert not scene.locked()
+    assert scene.marker()["result"] == "rolled_back"
+
+
+def test_r3_zaps_back_once_when_the_image_ignored_lastservice(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.service = TVP1
+    original = scene.box.run
+
+    def image_ignores_lastservice(argv, timeout):
+        code = original(argv, timeout)
+        if argv[0] == scene.box.init and argv[1] == "3":
+            scene.box.service = TVN
+        return code
+    scene.box.run = image_ignores_lastservice
+    scene.run()
+    assert scene.box.zaps == [TVP1]
+    assert scene.status()["record"]["channel"] == "restored"
+
+
+def test_r3_restores_standby_when_the_rollback_began_in_standby(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+
+    def in_standby():
+        scene.box.standby = True
+    scene.box.pauses["proving"] = in_standby
+    original = scene.box.run
+
+    def comes_up_awake(argv, timeout):
+        code = original(argv, timeout)
+        if argv[0] == scene.box.init and argv[1] == "3":
+            scene.box.standby = False
+        return code
+    scene.box.run = comes_up_awake
+    scene.run()
+    assert scene.box.power == ["5"]
+    assert scene.status()["record"]["standby"] == "restored"
+
+
+def test_r2_with_nothing_recorded_restores_no_channel(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+
+    def silent():
+        scene.box.webif_up = False
+    # OpenWebif answers neither before the restart nor when the rollback begins.
+    scene.box.pauses["installing"] = silent
+    scene.box.pauses["proving"] = silent
+    scene.run()
+    assert scene.box.setting("config.tv.lastservice") == TVN
+    assert scene.status()["record"]["channel"] == "not recorded"
+    assert scene.box.zaps == []
+
+
+# ------------------------------------------------------------------ the proof --
+
+
+def test_tier_two_passes_on_an_fd_seen_on_any_poll(tmp_path):
+    entries = None
+    ipk = package(NEW)
+    entries = [entry_for(NEW, ipk, self_update=False)]
+    scene = Scene(tmp_path, ipk=ipk, entries=entries)
+    scene.plugin_word(started=False)
+    log = scene.box.path(updatehelper.LOG_PATHS[0])
+
+    def rotate():
+        scene.box.fds[200] = {log}
+        scene.box.at(2, lambda: scene.box.fds.pop(200))
+    scene.box.pauses["proving"] = lambda: scene.box.at(50, rotate)
+    assert scene.run() == 0
+    assert scene.status()["record"]["proof"] == "log_fd"
+
+
+def test_tier_two_is_not_proved_by_a_log_line_alone(tmp_path):
+    ipk = package(NEW)
+    scene = Scene(tmp_path, ipk=ipk, entries=[entry_for(NEW, ipk, self_update=False)])
+    scene.plugin_word(started=False)
+    Path(scene.box.path(updatehelper.LOG_PATHS[0])).write_text("starting: plugin=0.4.1\n")
+    assert scene.run() == 1
+    assert scene.last()["result"] == "rolled_back"
+
+
+def test_tier_two_uses_the_hook_when_both_log_paths_are_unwritable(tmp_path, monkeypatch):
+    ipk = package(NEW)
+    scene = Scene(tmp_path, ipk=ipk, entries=[entry_for(NEW, ipk, self_update=False)])
+    scene.plugin_word(started=False)
+    monkeypatch.setattr(scene.transaction, "any_log_writable", lambda: False)
+    scene.box.hook_status = 200
+    assert scene.run() == 0
+    assert scene.status()["record"]["proof"] == "webif_hook"
+
+
+def test_a_hook_answering_404_is_no_proof(tmp_path, monkeypatch):
+    ipk = package(NEW)
+    scene = Scene(tmp_path, ipk=ipk, entries=[entry_for(NEW, ipk, self_update=False)])
+    scene.plugin_word(started=False)
+    monkeypatch.setattr(scene.transaction, "any_log_writable", lambda: False)
+    assert scene.run() == 1
+    assert scene.last()["result"] == "rolled_back"
+    assert "/mqttbridge" in scene.box.seen
+
+
+def test_the_hook_is_not_asked_while_a_log_path_is_writable(tmp_path):
+    ipk = package(NEW)
+    scene = Scene(tmp_path, ipk=ipk, entries=[entry_for(NEW, ipk, self_update=False)])
+    scene.plugin_word(started=False)
+    scene.box.hook_status = 200
+    assert scene.run() == 1
+    assert "/mqttbridge" not in scene.box.seen
+
+
+def test_tier_one_needs_the_signed_commit(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.pauses["proving"] = lambda: updatehelper.write_json(
+        str(scene.directory / "started.json"), {"version": NEW, "commit": "f" * 40})
+    assert scene.run() == 1
+    assert scene.last()["result"] == "rolled_back"
+
+
+# -------------------------------------------------------------- what is refused --
+
+
+@pytest.mark.parametrize("change, reason", [
+    (dict(target="0.9.9"), "unknown_version"),
+    (dict(sha256="0" * 64), "checksum"),
+])
+def test_a_request_the_index_does_not_back_is_refused(tmp_path, change, reason):
+    scene = Scene(tmp_path, request=change)
+    assert scene.run() == 1
+    assert scene.last()["reason"] == reason
+    assert scene.plugin_py() == f"# plugin {OLD}\n" and not scene.locked()
+    assert scene.opkg_calls() == []
+    assert not list((Path(scene.box.root) / updatehelper.BACKUPS).glob("self-update-*"))
+
+
+@pytest.mark.parametrize("entry_change, reason", [
+    (dict(withdrawn="broken"), "withdrawn"),
+    (dict(contract=2), "incompatible"),
+    (dict(depends=["python3-missing"]), "depends"),
+])
+def test_the_index_rules_are_judged_again_by_the_helper(tmp_path, entry_change, reason):
+    ipk = package(NEW)
+    scene = Scene(tmp_path, ipk=ipk, entries=[entry_for(NEW, ipk, **entry_change)])
+    assert scene.run() == 1
+    assert scene.last()["reason"] == reason
+    assert scene.opkg_calls() == []
+
+
+def test_below_the_floor_is_refused(tmp_path):
+    scene = Scene(tmp_path, floor="0.5.0")
+    scene.run()
+    assert scene.last()["reason"] == "below_floor"
+
+
+def test_the_floor_itself_may_be_installed(tmp_path):
+    scene = Scene(tmp_path, floor=NEW)
+    scene.plugin_word()
+    assert scene.run() == 0
+
+
+def test_the_integrations_word_narrows_the_choice(tmp_path):
+    ipk = package(NEW)
+    scene = Scene(tmp_path, ipk=ipk, entries=[entry_for(NEW, ipk, min_integration="0.5.0")],
+                  integration={"integration": "0.4.0", "contract": 1, "plugin_min": "0.2.0"})
+    scene.run()
+    assert scene.last()["reason"] == "incompatible"
+    assert "Home Assistant integration" in scene.last()["error"]
+
+
+def test_a_downgrade_over_mqtt_is_refused_even_if_the_request_says_downgrade(tmp_path):
+    ipk = package("0.3.9")
+    scene = Scene(tmp_path, target="0.3.9", ipk=ipk, downgrade=True, started_by="home_assistant")
+    scene.run()
+    assert scene.last()["reason"] == "downgrade"
+    assert scene.opkg_calls() == []
+
+
+def test_a_downgrade_from_the_television_forces_it(tmp_path):
+    ipk = package("0.3.9")
+    scene = Scene(tmp_path, target="0.3.9", ipk=ipk, downgrade=True, started_by="screen")
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+    scene.run()
+    assert "--force-downgrade" in scene.opkg_calls()[0]
+
+
+def test_an_upgrade_never_forces_a_downgrade(tmp_path):
+    scene = Scene(tmp_path, started_by="screen")
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+    scene.run()
+    assert "--force-downgrade" not in scene.opkg_calls()[0]
+
+
+@pytest.mark.parametrize("ipk, detail", [
+    (package(NEW, control_version="0.4.2"), "version"),
+    (package(NEW, name="enigma2-plugin-extensions-other"), "package is not"),
+    (package(NEW, extra={"./etc/passwd": b"x"}), "outside the plugin"),
+    (package(NEW, extra={"./" + PLUGIN + "/../../x.py": b"x"}), "unsafe"),
+    (b"!<arch>\n", "three members"),
+    (b"not an archive", "not an ar"),
+])
+def test_a_package_that_is_not_the_release_is_refused_before_opkg(tmp_path, ipk, detail):
+    scene = Scene(tmp_path, ipk=ipk)
+    scene.run()
+    assert scene.last()["reason"] == "bad_package"
+    assert detail in scene.last()["error"]
+    assert scene.opkg_calls() == []
+
+
+def test_a_package_of_another_size_or_checksum_is_refused(tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.urls[ORIGIN + scene.entries[0]["filename"]] = (200, scene.ipk + b"x")
+    scene.run()
+    assert scene.last()["reason"] == "bad_package"
+
+
+def test_not_enough_space_is_refused_before_the_snapshot(tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.free = 2 * len(scene.ipk)
+    scene.run()
+    assert scene.last()["reason"] == "no_space"
+    assert not list((Path(scene.box.root) / updatehelper.BACKUPS).glob("self-update-*"))
+
+
+def test_the_origin_is_not_asked_when_home_assistant_relays(tmp_path):
+    relay = {"url": "http://192.0.2.10:8123/api/enigma2_mqtt/relay/" + "a" * 43,
+             "expires": 1790999999}
+    scene = Scene(tmp_path, relay=relay)
+    # The index the receiver holds (relayed earlier), and the package from the relay only.
+    index_raw, signature = updatelab.signed(7, scene.entries)
+    from MQTTBridge import trustfile
+
+    trustfile.keep(scene.box.path(updatehelper.TRUST_FILE), updatelab.TEST_KEYS, True,
+                   index_raw, signature, "relay", 1)
+    scene.box.urls.clear()
+    scene.box.relayed[relay["url"]] = (200, scene.ipk)
+    scene.plugin_word()
+    assert scene.run() == 0
+    assert scene.status()["record"]["digest"] == "not_checked"
+    # An install Home Assistant drives needs no internet on the receiver, and asks for none.
+    assert scene.box.fetched == []
+
+
+def test_no_index_at_all_is_refused(tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.urls.clear()
+    scene.run()
+    assert scene.last()["reason"] == "unreachable"
+
+
+def test_an_index_the_helper_fetches_is_kept_by_the_trust_files_rule(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word()
+    scene.run()
+    from MQTTBridge import trustfile
+
+    state = trustfile.read_state(scene.box.path(updatehelper.TRUST_FILE))
+    assert trustfile.held_part(state, "acceptance")["source"] == "origin"
+    lock = scene.box.path("etc/enigma2/mqttbridge-index.lock")
+    assert os.stat(lock).st_mode & 0o777 == 0o600
+
+
+def test_the_release_digest_is_cross_checked_when_the_receiver_fetched_it(tmp_path):
+    scene = Scene(tmp_path, acceptance=False)
+    entry = scene.entries[0]
+    api = updatehelper.DIGEST_API + NEW
+    scene.box.urls[api] = (200, json.dumps({"assets": [
+        {"name": entry["filename"], "digest": "sha256:" + "0" * 64}]}).encode())
+    scene.run()
+    assert scene.last()["reason"] == "bad_package"
+    assert "digest" in scene.last()["error"]
+
+
+def test_an_unanswered_digest_request_is_noted_not_fatal(tmp_path):
+    scene = Scene(tmp_path, acceptance=False)
+    scene.plugin_word()
+    assert scene.run() == 0
+    assert scene.status()["record"]["digest"] == "unavailable"
+
+
+# ------------------------------------------------------------ opkg and its lock --
+
+
+def test_opkg_failing_puts_the_old_files_back_without_a_restart(tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.opkg_mode = "fail"
+    scene.run()
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "opkg_failed")
+    assert "something went wrong" in scene.last()["error"]
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.init_calls() == [] and not scene.locked()
+
+
+def test_a_manifest_mismatch_puts_the_old_files_back(tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.opkg_mode = "partial"
+    scene.run()
+    assert scene.last()["reason"] == "manifest"
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+
+
+def test_opkg_busy_is_refused_before_anything_changes(tmp_path):
+    scene = Scene(tmp_path)
+    lock = scene.box.path("run/opkg.lock")
+    os.makedirs(os.path.dirname(lock))
+    holder = subprocess.Popen(
+        [sys.executable, "-c", "import fcntl, os, sys, time\n"
+         "fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT)\n"
+         "fcntl.lockf(fd, fcntl.LOCK_EX)\nprint('held', flush=True)\ntime.sleep(60)\n", lock],
+        stdout=subprocess.PIPE)
+    try:
+        assert holder.stdout.readline() == b"held\n"
+        assert updatehelper.opkg_busy(scene.box)
+        scene.run()
+    finally:
+        holder.kill()
+        holder.wait()
+    assert scene.last()["reason"] == "opkg_busy"
+    assert scene.opkg_calls() == []
+    assert not updatehelper.opkg_busy(scene.box)
+
+
+# ------------------------------------------------------------------- the lock --
+
+
+def lock_owner(scene):
+    return json.loads((Path(scene.box.root) / updatehelper.BACKUPS / updatehelper.LOCK_NAME
+                       / "owner.json").read_text())
+
+
+def test_a_held_lock_is_busy_and_left_alone(tmp_path):
+    scene = Scene(tmp_path)
+    lock = Path(scene.box.root) / updatehelper.BACKUPS / updatehelper.LOCK_NAME
+    lock.mkdir(mode=0o700)
+    (lock / "owner.json").write_text(json.dumps(
+        {"pid": 1, "started": 5, "boot_id": "boot-1", "uptime": scene.box.t - 60}))
+    backups = Path(scene.box.root) / updatehelper.BACKUPS
+    for name in ("update-aaaaaaaaaaaa", "update-bbbbbbbbbbbb", "update-cccccccccccc"):
+        (backups / name).mkdir()
+    assert scene.run() == 1
+    assert scene.status()["reason"] == "busy"
+    assert json.loads((lock / "owner.json").read_text())["pid"] == 1
+    # A helper that never held the lock touches nothing of the transaction that does: not the
+    # last-transaction record, not a transaction directory.
+    assert not (Path(scene.box.root) / updatehelper.LAST).exists()
+    assert all((backups / name).is_dir() for name in (
+        "update-aaaaaaaaaaaa", "update-bbbbbbbbbbbb", "update-cccccccccccc"))
+
+
+def test_a_lock_from_another_boot_is_reclaimed(tmp_path):
+    scene = Scene(tmp_path)
+    lock = Path(scene.box.root) / updatehelper.BACKUPS / updatehelper.LOCK_NAME
+    lock.mkdir(mode=0o700)
+    (lock / "owner.json").write_text(json.dumps(
+        {"pid": 1, "started": int(time.time()), "boot_id": "boot-0",
+         "uptime": scene.box.t - 10}))
+    # Fresh by the clock and by uptime: only the boot id says that its holder is gone.
+    scene.plugin_word()
+    assert scene.run() == 0
+
+
+def test_the_owner_record_names_the_transaction(tmp_path):
+    scene = Scene(tmp_path, started_by="home_assistant")
+    seen = {}
+    scene.box.pauses["downloading"] = lambda: seen.update(lock_owner(scene))
+    scene.run()
+    assert {k: seen[k] for k in ("origin", "id", "target", "boot_id")} == {
+        "origin": "home_assistant", "id": TID, "target": NEW, "boot_id": "boot-1"}
+
+
+def point_released_at(monkeypatch, box):
+    monkeypatch.setattr(released, "BOOT_ID_PATH", Path(box.proc) / "boot_id")
+    monkeypatch.setattr(released, "UPTIME_PATH", Path(box.proc) / "uptime")
+    os.makedirs(box.proc, exist_ok=True)
+    (Path(box.proc) / "boot_id").write_text("boot-1\n")
+
+    def set_uptime(value):
+        box.t = value
+        (Path(box.proc) / "uptime").write_text(f"{value:.2f} 0.00\n")
+    return set_uptime
+
+
+def test_the_heartbeat_keeps_the_released_installer_from_reclaiming(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    set_uptime = point_released_at(monkeypatch, scene.box)
+    set_uptime(1000.0)
+    scene.transaction.load_request()
+    scene.transaction.claim()
+    lock = Path(scene.box.root) / updatehelper.BACKUPS / updatehelper.LOCK_NAME
+    set_uptime(1000.0 + 31 * 60)
+    assert released._is_stale(lock) != ""        # no beat: the released rule reclaims it
+    assert scene.transaction.beat()
+    assert released._is_stale(lock) == ""        # one beat: held, 31 minutes in
+
+
+def test_the_heartbeat_thread_beats_while_opkg_blocks(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    set_uptime = point_released_at(monkeypatch, scene.box)
+    set_uptime(1000.0)
+    scene.transaction.beat_interval = 0.01
+    lock = Path(scene.box.root) / updatehelper.BACKUPS / updatehelper.LOCK_NAME
+    inside = threading.Event()
+    go = threading.Event()
+    verdicts = []
+
+    def blocking_opkg():
+        inside.set()
+        assert go.wait(10)
+    scene.box.opkg_blocker = blocking_opkg
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+    worker = threading.Thread(target=scene.run)
+    worker.start()
+    assert inside.wait(10)
+    set_uptime(1000.0 + 31 * 60)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and released._is_stale(lock) != "":
+        time.sleep(0.01)
+    verdicts.append(released._is_stale(lock))
+    go.set()
+    worker.join(10)
+    assert verdicts == [""]
+
+
+def test_a_lock_taken_from_the_helper_stops_it_touching_the_receiver(tmp_path):
+    scene = Scene(tmp_path)
+
+    def taken():
+        lock = Path(scene.box.root) / updatehelper.BACKUPS / updatehelper.LOCK_NAME
+        (lock / "owner.json").write_text(json.dumps({"id": "ffffffffffff"}))
+        scene.transaction.beat()
+    scene.box.pauses["snapshot"] = taken
+    assert scene.run() == 1
+    assert scene.last()["result"] == "interrupted"
+    assert scene.opkg_calls() == []
+    assert json.loads((Path(scene.box.root) / updatehelper.BACKUPS / updatehelper.LOCK_NAME
+                       / "owner.json").read_text())["id"] == "ffffffffffff"
+
+
+# ---------------------------------------------------------- signals and bounds --
+
+
+def test_a_signal_before_opkg_ends_it_with_nothing_changed(tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.pauses["installing"] = lambda: scene.transaction.on_signal(signal.SIGTERM)
+    scene.run()
+    assert scene.last()["result"] == "interrupted"
+    assert scene.opkg_calls() == [] and not scene.locked()
+    assert not list((Path(scene.box.root) / updatehelper.BACKUPS).glob("self-update-*"))
+
+
+def test_a_signal_after_opkg_puts_the_old_files_back(tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.pauses["opkg_done"] = lambda: scene.transaction.on_signal(signal.SIGHUP)
+    scene.run()
+    assert scene.last()["result"] == "interrupted"
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.init_calls() == []
+
+
+def test_a_signal_while_waiting_for_the_restart_withdraws(tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.pauses["restarting"] = lambda: scene.transaction.on_signal(signal.SIGTERM)
+    scene.run()
+    assert scene.last()["result"] == "interrupted"
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+
+
+@pytest.mark.parametrize("point", ["rollback_recorded", "rollback_stopped", "rollback_restored"])
+def test_a_signal_inside_r2_never_starts_the_interface_over_an_unrestored_tree(tmp_path, point):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.pauses[point] = lambda: scene.transaction.on_signal(signal.SIGTERM)
+    scene.run()
+    assert scene.init_calls() == ["4", "3"]
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    assert scene.last()["result"] == "rolled_back"
+
+
+def test_the_forward_path_gives_up_at_its_bound(tmp_path):
+    scene = Scene(tmp_path)
+
+    def slow():
+        scene.box.t += updatehelper.FORWARD_LIMIT + 1
+    scene.box.pauses["verifying"] = slow
+    scene.run()
+    assert scene.last()["reason"] == "time_limit" and not scene.locked()
+    assert scene.opkg_calls() == []
+
+
+def test_a_failed_start_is_rolled_back_within_its_bound(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    marks = {}
+    scene.box.pauses["rollback_recorded"] = lambda: marks.setdefault("start", scene.box.t)
+    scene.run()
+    assert scene.box.t - marks["start"] < updatehelper.ROLLBACK_LIMIT
+
+
+# -------------------------------------------------------------------- pruning --
+
+
+def test_only_self_update_snapshots_are_pruned_and_the_own_one_kept(tmp_path):
+    scene = Scene(tmp_path)
+    backups = Path(scene.box.root) / updatehelper.BACKUPS
+    for index, name in enumerate(("self-update-aaaaaaaaaaaa", "self-update-bbbbbbbbbbbb",
+                                  "ha-installer-cccccccccccc", "self-update-extra", "mine")):
+        (backups / name).mkdir()
+        os.utime(backups / name, (1000 + index, 1000 + index))
+    scene.plugin_word()
+    scene.run()
+    left = sorted(p.name for p in backups.iterdir() if not p.name.startswith("."))
+    assert left == ["ha-installer-cccccccccccc", "mine", "self-update-" + TID,
+                    "self-update-bbbbbbbbbbbb", "self-update-extra"]
+
+
+# ------------------------------------------------------------ receiver reading --
+
+
+def test_enigma2_is_found_by_its_process_name(tmp_path):
+    proc = tmp_path / "proc"
+    for pid, name in ((1, "init"), (812, "enigma2"), (813, "enigma2.sh"), (900, "python3")):
+        (proc / str(pid)).mkdir(parents=True)
+        (proc / str(pid) / "comm").write_text(name + "\n")
+    (proc / "self").mkdir()
+    receiver = updatehelper.Receiver(root=str(tmp_path), proc=str(proc))
+    assert receiver.enigma2_pids() == {812}
+    (proc / "812" / "fd").mkdir()
+    os.symlink("/home/root/mqttbridge.log", proc / "812" / "fd" / "7")
+    assert receiver.open_files(812) == {"/home/root/mqttbridge.log"}
+
+
+def test_programs_run_by_argv_and_never_through_a_shell(tmp_path, monkeypatch):
+    calls = []
+
+    def fake(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+    monkeypatch.setattr(updatehelper.subprocess, "run", fake)
+    updatehelper.Receiver(root=str(tmp_path)).run(["/sbin/init", "3"], 5)
+    assert calls[0][0] == ["/sbin/init", "3"]
+    assert not calls[0][1].get("shell")
+
+
+def test_the_helpers_modules_import_nothing_of_the_plugins():
+    source = Path(updatehelper.__file__).parent
+    for name in ("updatehelper.py",) + updatehelper.COPIED_MODULES:
+        text = (source / name).read_text()
+        for line in text.splitlines():
+            if line.startswith(("import ", "from ")) and "from ." in line:
+                pytest.fail(name + " imports from the plugin outside a fallback: " + line)
+
+
+# ------------------------------------------------- the helper as a real process --
+
+
+INIT_STAND_IN = """#!/bin/sh
+# init stand-in: runlevel 4 removes enigma2 from the fake /proc, 3 starts a new one.
+echo "$1 $(cat "$ROOT/{plugin}/plugin.py")" >> "$LOG"
+if [ "$1" = 4 ]; then rm -rf "$PROC/100" "$PROC/200"; fi
+if [ "$1" = 3 ]; then mkdir -p "$PROC/300"; echo enigma2 > "$PROC/300/comm"; fi
+"""
+
+OPKG_STAND_IN = """#!/bin/sh
+# opkg stand-in: installs the new plugin.py.
+echo "# plugin {new}" > "$ROOT/{plugin}/plugin.py"
+echo "# hook {new}" > "$ROOT/{hook}"
+"""
+
+
+def shells():
+    found = []
+    for shell in ("/bin/sh", "/bin/bash", "/bin/dash"):
+        if os.path.exists(shell):
+            found.append([shell])
+    if shutil.which("busybox"):
+        found.append([shutil.which("busybox"), "sh"])
+    return found
+
+
+@pytest.mark.parametrize("shell", shells(), ids=lambda s: " ".join(s))
+def test_a_real_sigterm_inside_r2_waits_for_the_restore(tmp_path, shell):
+    """The receiver's way: a copy in its own directory, its own process, a real signal."""
+    ipk = package(NEW)
+    scene = Scene(tmp_path, ipk=ipk, request={"relay": {"url": "http://127.0.0.1:9/x",
+                                                        "expires": 0}})
+    root = Path(scene.box.root)
+    proc = tmp_path / "proc"
+    (proc / "100").mkdir(parents=True)
+    (proc / "100" / "comm").write_text("enigma2\n")
+    index_raw, signature = updatelab.signed(7, scene.entries)
+    from MQTTBridge import trustfile
+
+    trustfile.keep(str(root / updatehelper.TRUST_FILE), updatelab.TEST_KEYS, True, index_raw,
+                   signature, "relay", 1)
+    import http.server
+
+    class Serve(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(ipk)))
+            self.end_headers()
+            self.wfile.write(ipk)
+
+        def log_message(self, *args):
+            pass
+    server = http.server.HTTPServer(("127.0.0.1", 0), Serve)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    request = json.loads((scene.directory / "request.json").read_text())
+    request["relay"]["url"] = f"http://127.0.0.1:{server.server_port}/relay"
+    updatehelper.write_json(str(scene.directory / "request.json"), request)
+    source = Path(updatehelper.__file__).parent
+    shutil.copy(source / "updatehelper.py", scene.directory / "helper.py")
+    for name in updatehelper.COPIED_MODULES:
+        shutil.copy(source / name, scene.directory / name)
+    stand = tmp_path / "stand-in"
+    stand.mkdir()
+    for name, text in (("init", INIT_STAND_IN), ("opkg", OPKG_STAND_IN)):
+        script = stand / name
+        script.write_text(text.format(plugin=PLUGIN, hook=HOOK, new=NEW))
+        script.chmod(0o755)
+    wrappers = {}
+    for name in ("init", "opkg"):
+        wrapper = stand / (name + "-run")
+        wrapper.write_text("#!/bin/sh\nexec " + " ".join(shell) + " " + str(stand / name)
+                           + ' "$@"\n')
+        wrapper.chmod(0o755)
+        wrappers[name] = str(wrapper)
+    fifos = {}
+    for name in ("restarting", "rollback_stopped"):
+        fifos[name] = str(tmp_path / (name + ".fifo"))
+        os.mkfifo(fifos[name])
+    config = {"root": str(root), "proc": str(proc), "init": wrappers["init"],
+              "opkg": wrappers["opkg"], "webif": "http://127.0.0.1:9", "pauses": fifos,
+              "constants": {"POLL": 0.05, "PROOF_POLL": 0.05, "PROOF_WINDOW": 0.5,
+                            "PLUGIN_WAIT": 10, "STOP_WAIT": 5, "START_WAIT": 5,
+                            "SERVICE_WAIT": 0.2, "EFFECT_WAIT": 0.2}}
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    environment = dict(os.environ, ROOT=str(root), PROC=str(proc), LOG=str(tmp_path / "init.log"))
+    helper = subprocess.Popen([sys.executable, str(scene.directory / "helper.py"), TID, "--test",
+                               str(tmp_path / "config.json")], env=environment,
+                              cwd=str(tmp_path))
+    try:
+        with open(fifos["restarting"], "w") as release:
+            # The plugin asked and the interface restarted; the new one never reports.
+            updatehelper.write_json(str(scene.directory / "restart.json"), {"pid": 100})
+            shutil.rmtree(proc / "100")
+            (proc / "200").mkdir()
+            (proc / "200" / "comm").write_text("enigma2\n")
+            release.write("go")
+        with open(fifos["rollback_stopped"], "w") as release:
+            helper.send_signal(signal.SIGTERM)
+            time.sleep(0.2)
+            release.write("go")
+        assert helper.wait(30) == 1
+    finally:
+        if helper.poll() is None:
+            helper.kill()
+        server.shutdown()
+    lines = (tmp_path / "init.log").read_text().splitlines()
+    assert lines == [f"4 # plugin {NEW}", f"3 # plugin {OLD}"]
+    last = json.loads((root / updatehelper.LAST).read_text())
+    assert last["result"] == "rolled_back"
+    assert not (root / updatehelper.BACKUPS / updatehelper.LOCK_NAME).exists()
+
+
+# ------------------------------------------------------- the settings block --
+
+
+def household_changes_a_plugin_setting(scene):
+    path = Path(scene.box.path(updatehelper.SETTINGS))
+    path.write_text(path.read_text().replace("mqttbridge.enabled=true", "mqttbridge.enabled=false"))
+
+
+def test_the_withdraw_leaves_the_settings_block_to_the_running_interface(tmp_path):
+    scene = Scene(tmp_path)
+
+    def meanwhile():
+        household_changes_a_plugin_setting(scene)
+        (scene.directory / "withdraw").write_text("")
+    scene.box.pauses["restarting"] = meanwhile
+    scene.run()
+    assert scene.last()["result"] == "withdrawn_before_restart"
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "false"
+
+
+def test_r2_puts_the_settings_block_back_once_the_interface_is_stopped(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    scene.run()
+    assert scene.last()["result"] == "rolled_back"
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "true"
+    assert scene.box.setting("config.misc.x") == "1"
+
+
+def test_r2_writes_nothing_into_the_settings_of_an_interface_that_did_not_stop(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    scene.run()
+    assert scene.box.setting("config.tv.lastservice") == TVN
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "false"
+    # The files still went back, and the interface was still started.
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.init_calls() == ["4", "3"]
+
+
+def test_the_integrations_contract_must_match(tmp_path):
+    scene = Scene(tmp_path, integration={"integration": "0.4.0", "contract": 2,
+                                         "plugin_min": "0.2.0"})
+    scene.run()
+    assert scene.last()["reason"] == "incompatible"
+
+
+def test_the_integrations_floor_raises_the_index_floor(tmp_path):
+    scene = Scene(tmp_path, integration={"integration": "0.4.0", "contract": 1,
+                                         "plugin_min": "0.5.0"})
+    scene.run()
+    assert scene.last()["reason"] == "below_floor"
+
+
+def test_without_the_integrations_word_a_needed_integration_is_unmet_in_integration_mode(
+        tmp_path):
+    ipk = package(NEW)
+    scene = Scene(tmp_path, ipk=ipk, entries=[entry_for(NEW, ipk, min_integration="0.4.0")],
+                  integration_mode=True)
+    scene.run()
+    assert scene.last()["reason"] == "incompatible"
+
+
+def test_without_the_integrations_word_a_needed_integration_is_met_in_discovery_mode(tmp_path):
+    ipk = package(NEW)
+    scene = Scene(tmp_path, ipk=ipk, entries=[entry_for(NEW, ipk, min_integration="0.4.0")])
+    scene.plugin_word()
+    assert scene.run() == 0
