@@ -400,6 +400,31 @@ def test_a_withdraw_for_an_unacknowledged_retraction_says_so(tmp_path):
     assert scene.plugin_py() == f"# plugin {OLD}\n"
 
 
+@pytest.mark.parametrize("reason", ["standby", "recording", "epg_import"])
+def test_a_withdraw_for_a_household_change_before_the_restart_says_which(reason, tmp_path):
+    """The plugin asks the household's guards again right before the restart (review S2)."""
+    scene = Scene(tmp_path)
+
+    def plugin_withdraws():
+        updatehelper.write_json(str(scene.directory / "withdraw"), {"reason": reason})
+    scene.box.pauses["restarting"] = plugin_withdraws
+    assert scene.run() == 0
+    assert (scene.last()["result"], scene.last()["reason"]) == (
+        "withdrawn_before_restart", reason)
+    assert scene.last()["error"] == updatehelper.SENTENCES[reason]
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+
+
+def test_a_withdraw_with_an_unknown_reason_is_the_question(tmp_path):
+    scene = Scene(tmp_path)
+
+    def plugin_withdraws():
+        updatehelper.write_json(str(scene.directory / "withdraw"), {"reason": "downgrade"})
+    scene.box.pauses["restarting"] = plugin_withdraws
+    assert scene.run() == 0
+    assert scene.last()["reason"] == "question"
+
+
 def test_no_word_from_the_plugin_withdraws_after_180_s(tmp_path):
     scene = Scene(tmp_path)
     started = {}

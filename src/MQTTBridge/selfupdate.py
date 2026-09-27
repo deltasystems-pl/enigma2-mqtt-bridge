@@ -28,17 +28,30 @@ transaction directory, which nothing has written yet: without it busybox's `star
 looks for *any* running `/usr/bin/python3`, and finding one it answers "already running" and
 starts nothing.
 
-**The doors (M3).** From the helper's phase `restarting` on, the files on disk are the new
-release's and the process is still the old one. A module imported for the first time now would
-be new code in an old process, so every module this path and the closed state use is imported
+**The doors (M3).** From the helper's phase `installing` on, the package manager is rewriting
+the files on disk under the running process, and after it they are the new release's while the
+process is still the old one. A module imported for the first time now would be half-written or
+new code in an old process, so every module this path and the closed state use is imported
 when the plugin starts, the publishers are stopped, and every command - over MQTT, from the
-page, from the setup screen - answers "an update is being applied on the receiver". For a
+page, from the setup screen - answers "an update is being applied on the receiver". When the
+package manager fails, the helper puts the old files back and says `finished`, and the doors
+open again with a fresh session. The restart itself waits for the helper's `restarting`: for a
 downgrade chosen at the television or on the page, every retained topic the node owns except
-`availability` is then retracted at QoS 1, because the older release does not know the newer
+`availability` is first retracted at QoS 1, because the older release does not know the newer
 one's topics and would leave them on the broker for ever (section 11 v of the plan, B1). From
 that retraction on nothing at all is published (S-a): refusals are logged, not put on
 `last_error`, and the `update` relay stops, so nothing the older release does not know is
 re-created behind the retraction.
+
+**One transaction at a time.** `cmd/uninstall` runs the package manager too, and a removal next
+to an update ends in whichever the package manager did last. So an uninstall is refused while an
+update runs or the shared lock is held (`busy`), and an update while an uninstall runs.
+
+**The household at the restart.** The request was judged when it came; the restart comes
+minutes later. Right before the question the standby, recording and EPG-import guards are asked
+again, and a receiver that went into standby meanwhile - or started recording - is not restarted:
+the update is withdrawn, with that reason. It is not held back for later, because the helper's
+own bound would end it anyway, and a restart hours later is not what anybody asked for.
 
 **The restart (rule R1).** `TryQuitMainloop(session, 3, timeout=60, default_yes=False)` - the
 image's own clean quit, which saves the settings and with them the channel being watched. It
@@ -53,10 +66,13 @@ session-start screen (the HbbTV plugin's zero-size `VBMain`) stacks every dialog
 logging is configured - before the provisioning file and before it asks whether it is switched
 on - so a new release that is switched off still confirms that it started (`started.json`, the
 tier-1 proof). A marker from another boot whose lock is still there tells of a power loss, and
-is answered by the running version: `installed`, `rolled_back` or `interrupted`.
+is answered by the running version: `installed`, `rolled_back` or `interrupted` - and so is a
+marker whose helper is provably gone in this boot, which is how a restart after a helper that
+died says how the transaction ended.
 """
 
 import json
+import math
 import os
 import re
 import secrets
@@ -137,6 +153,15 @@ NO_SPACE = updatehelper.SENTENCES["no_space"]
 RATE_LIMITED = "an update ran less than ten minutes ago"
 DOORS = "an update is being applied on the receiver"
 NOT_STARTED = "the update could not be started: {detail}"
+# `busy`, when the lock's owner is a self-update helper that is provably gone: the lock stays
+# until the stale rule every implementation shares lets it go (TRANSACTION.md section 2.3).
+STOPPED = ("the previous update stopped without finishing; a new one is possible in about "
+           "{minutes} minutes, when its lock on the receiver expires")
+UNINSTALLING = "the plugin is being removed from the receiver"
+
+# From these phases on the package manager has touched the plugin's files (the doors close), and
+# a helper that stops leaves them in a state only the next start can judge (the marker stays).
+FILES_PHASES = ("installing", "restarting", "proving", "rolling_back")
 
 
 def household_doors():
@@ -371,39 +396,53 @@ class SelfUpdater:
             LOG.info("discarding the update marker of %s: past its deadline", ident)
             self._remove_marker(ident)
             return
-        running = self._running()
         if marker.get("phase") == "finished":
             LOG.info("update %s finished before this start: %s", ident, marker.get("result"))
             self._end(public(marker), marker.get("reason"), followed=True)
             return
+        directory = os.path.join(self.backups, "update-" + ident)
         if not same_boot:
             # The receiver lost power (or was reset) with the transaction under way: nothing of
             # it runs any more, and what is running now says how it ended.
-            target = marker.get("to") if isinstance(marker.get("to"), dict) else {}
-            before = marker.get("from") if isinstance(marker.get("from"), dict) else {}
-            if running["version"] == target.get("version") and (
-                    running["commit"] == target.get("commit")):
-                result, reason = "installed", None
-            elif running["version"] == before.get("version"):
-                result, reason = "rolled_back", "interrupted"
-            else:
-                result, reason = "interrupted", "interrupted"
-            record = public(marker) or {}
-            record.update(phase="finished", result=result, finished=int(self.clock()),
-                          error=None if result == "installed" else
-                          str(updatehelper.Fail("interrupted", detail="the receiver restarted")))
-            LOG.warning("update %s was cut short by a restart of the receiver: %s",
-                        ident, result)
-            self._end(record, reason, followed=True)
+            self._verdict(marker, "the receiver restarted")
             return
-        directory = os.path.join(self.backups, "update-" + ident)
+        if self._helper_gone({"directory": directory}):
+            # The helper died with the files perhaps changed, and the interface restarted since
+            # (review S4): the same verdict, from the build that started.
+            self._verdict(marker, "the update helper stopped")
+            return
         if marker.get("phase") in ("restarting", "proving"):
             self._confirm_start(directory, ident)
         self._current = {"id": ident, "directory": directory, "ours": False, "downgrade": False,
-                         "launched": self.monotonic(), "finished_seen": None,
+                         "launched": self.monotonic(), "finished_seen": None, "asked": True,
                          "deadline": marker.get("deadline")}
         self._transaction = public(marker)
         self._poll_ticker.start(POLL_MILLISECONDS)
+
+    def _verdict(self, marker, cause):
+        """How a transaction nothing runs any more ended, said by the build running now.
+
+        By version and build commit: a release built again under the same number (spike S1)
+        is another build, so the number alone would call the old one `installed`. `from`
+        without a commit - the build before could not read its own - is judged by the number.
+        """
+        running = self._running()
+        target = marker.get("to") if isinstance(marker.get("to"), dict) else {}
+        before = marker.get("from") if isinstance(marker.get("from"), dict) else {}
+        if running["version"] == target.get("version") and \
+                running["commit"] == target.get("commit"):
+            result, reason = "installed", None
+        elif running["version"] == before.get("version") and \
+                running["commit"] == (before.get("commit") or running["commit"]):
+            result, reason = "rolled_back", "interrupted"
+        else:
+            result, reason = "interrupted", "interrupted"
+        record = public(marker) or {}
+        record.update(phase="finished", result=result, finished=int(self.clock()),
+                      error=None if result == "installed" else
+                      str(updatehelper.Fail("interrupted", detail=cause)))
+        LOG.warning("update %s was cut short (%s): %s", marker.get("id"), cause, result)
+        self._end(record, reason, followed=True)
 
     def _past_deadline(self, marker, receiver):
         deadline = marker.get("deadline")
@@ -453,8 +492,12 @@ class SelfUpdater:
             return Refusal(NOT_PERMITTED, "not_permitted")
         if not self.claimed:
             return Refusal(NOT_PACKAGED, "no_capability")
-        if self._current is not None or self._lock_held():
-            return _refusal("busy")
+        refusal = self.busy()
+        if refusal:
+            return refusal
+        uninstaller = getattr(bridge, "uninstaller", None)
+        if uninstaller is not None and uninstaller.phase is not None:
+            return Refusal(UNINSTALLING, "busy")
         if updatehelper.opkg_busy(self._receiver()):
             return _refusal("opkg_busy")
         if power.in_standby():
@@ -497,10 +540,62 @@ class SelfUpdater:
             started_by = "home_assistant" if relay is not None else "mqtt"
         return self._launch(entry, sha, relay, started_by, allowed_downgrade)
 
-    def _lock_held(self):
+    def busy(self):
+        """`busy`, or None: a transaction runs, or the shared lock is held and not stale.
+
+        Asked by `cmd/update` and by `cmd/uninstall` (review M1): both end in the package
+        manager and a restart, and two of them side by side end in whichever ran last.
+        """
+        if self._current is not None:
+            return _refusal("busy")
         if not os.path.isdir(self.lock_dir):
+            return None
+        receiver = self._receiver()
+        if updatehelper.lock_is_stale(receiver, self.lock_dir):
+            return None
+        minutes = self._minutes_left_of_a_dead_lock(receiver)
+        if minutes is not None:
+            return Refusal(STOPPED.format(minutes=minutes), "busy")
+        return _refusal("busy")
+
+    def _minutes_left_of_a_dead_lock(self, receiver):
+        """Minutes until the lock of a provably dead self-update expires, or None (review S3).
+
+        Proved only for a self-update's record (it has `origin`) of this boot whose pid no longer
+        runs that transaction's helper. The SSH installer's record names a process that exits
+        between its steps, so its pid proves nothing (TRANSACTION.md 2.2). The lock is not taken
+        back here: every implementation - the released installer among them - judges it by the
+        one stale rule, and the helper's own claim would refuse it just the same. Only the
+        sentence changes, from "running" to what is true.
+        """
+        owner = self._lock_owner()
+        if not isinstance(owner, dict) or owner.get("origin") is None:
+            return None
+        ident, pid, then = owner.get("id"), _whole(owner.get("pid")), owner.get("uptime")
+        boot, now = receiver.boot_id(), receiver.uptime()
+        if not boot or owner.get("boot_id") != boot or pid is None or now is None:
+            return None
+        if not isinstance(ident, str) or not updatehelper.TRANSACTION_ID.fullmatch(ident):
+            return None
+        if not isinstance(then, (int, float)) or isinstance(then, bool):
+            return None
+        if self._runs(pid, os.path.join(self.backups, "update-" + ident, HELPER_NAME)):
+            return None
+        left = updatehelper.STALE_LOCK_SECONDS - (now - then)
+        return max(1, int(math.ceil(left / 60.0)))
+
+    def _runs(self, pid, path):
+        """Whether process `pid` runs `path`: one whole argument of its command line (review S7).
+
+        Not a substring - the integration's `installer_helper.py` and another transaction's
+        `helper.py` both contain the name - and not the program: every helper is python3.
+        """
+        try:
+            with open(self._path(os.path.join("proc", str(pid), "cmdline")), "rb") as handle:
+                arguments = handle.read(4096).split(b"\0")
+        except OSError:
             return False
-        return not updatehelper.lock_is_stale(self._receiver(), self.lock_dir)
+        return os.fsencode(path) in arguments
 
     def _index(self):
         held = getattr(self.bridge.updates, "_held", None)
@@ -646,7 +741,7 @@ class SelfUpdater:
         now = int(self.clock())
         self._current = {"id": ident, "directory": directory, "ours": True,
                          "downgrade": bool(downgrade), "launched": self.monotonic(),
-                         "finished_seen": None, "deadline": None}
+                         "finished_seen": None, "asked": False, "deadline": None}
         self._transaction = {"id": ident, "started_by": started_by, "target": entry["version"],
                              "from": __version__, "phase": "downloading", "started": now,
                              "finished": None, "result": None, "error": None}
@@ -697,11 +792,22 @@ class SelfUpdater:
         error = NOT_STARTED.format(detail=detail)
         record = dict(self._transaction or {}, phase="finished", result="failed",
                       finished=int(self.clock()), error=error)
-        self._transaction = public(record)
-        self._publish()
-        self.bridge.publish_last_error(COMMAND, Refusal(error, "internal_error"))
+        # Through the one end every transaction takes, so doors a vanished transaction had
+        # closed open again (review S10).
+        self._end(public(record), "internal_error", followed=False)
 
     # ------------------------------------------------------------ following --
+
+    def _record(self, current):
+        """What the helper last wrote about this transaction: its status, the marker, the last."""
+        status = updatehelper.read_json(os.path.join(current["directory"], STATUS))
+        if status is not None and status.get("id") == current["id"]:
+            return status
+        for relative in (updatehelper.MARKER, updatehelper.LAST):
+            record = updatehelper.read_json(self._path(relative))
+            if record is not None and record.get("id") == current["id"]:
+                return record
+        return None
 
     def _poll(self):
         current = self._current
@@ -709,18 +815,7 @@ class SelfUpdater:
             self._poll_ticker.stop()
             return
         directory = current["directory"]
-        status = updatehelper.read_json(os.path.join(directory, STATUS))
-        if status is not None and status.get("id") != current["id"]:
-            status = None
-        record = status
-        if record is None:
-            marker = updatehelper.read_json(self._path(updatehelper.MARKER))
-            if marker is not None and marker.get("id") == current["id"]:
-                record = marker
-        if record is None:
-            last = updatehelper.read_json(self._path(updatehelper.LAST))
-            if last is not None and last.get("id") == current["id"]:
-                record = last
+        record = self._record(current)
         if record is None:
             if current["ours"] and self._helper_gone(current):
                 self._launch_failed("the helper stopped before it wrote anything")
@@ -732,14 +827,19 @@ class SelfUpdater:
                 self._current = None
                 self._poll_ticker.stop()
             return
+        if record.get("phase") != "finished" and self._helper_gone(current):
+            # Read once more: a helper that wrote its end and exited between the read above and
+            # the look into /proc ended the way it wrote (review S6).
+            again = self._record(current)
+            if again is None or again.get("phase") != "finished":
+                self._helper_died(current, again or record)
+                return
+            record = again
         payload = public(record)
         if payload is not None and payload != self._transaction:
             self._transaction = payload
             self._publish()
         phase = record.get("phase")
-        if phase != "finished" and self._helper_gone(current):
-            self._helper_died(current, record)
-            return
         if phase == "finished":
             owner = self._lock_owner()
             released = owner is None or owner.get("id") != current["id"]
@@ -750,10 +850,15 @@ class SelfUpdater:
                 self._poll_ticker.stop()
                 self._end(payload, record.get("reason"), followed=not current["ours"])
             return
-        if current["ours"] and phase == "restarting" and not self.closed:
-            self._close_doors()
+        if current["ours"]:
+            if phase in FILES_PHASES and not self.closed:
+                self._close_doors()
+            if phase == "restarting" and not current["asked"]:
+                current["asked"] = True
+                self._restart()
             return
-        if not current["ours"] and self._past_deadline(record, self._receiver()):
+        # The marker's deadline, read when the following began: `status.json` has none (S5).
+        if self._past_deadline(current, self._receiver()):
             LOG.warning("update %s is past its deadline; no longer following it", current["id"])
             self._current = None
             self._poll_ticker.stop()
@@ -765,36 +870,35 @@ class SelfUpdater:
         Its status file says nothing about that: a helper killed outright never writes
         `finished`, and the file's stamp moves only with a phase. The pid file does - written
         by `start-stop-daemon -m` for the process that became the helper - checked against
-        `/proc`, and against the command line, so a pid used again by another program is not
-        taken for it. No pid file, no verdict.
+        `/proc`, and against the helper's own path in its command line, so a pid used again by
+        another program, or by another helper, is not taken for it. No pid file, no verdict.
         """
         try:
             with open(os.path.join(current["directory"], PID_FILE), encoding="ascii") as handle:
                 pid = int(handle.read().strip())
         except (OSError, ValueError, UnicodeDecodeError):
             return False
-        try:
-            with open(self._path(os.path.join("proc", str(pid), "cmdline")), "rb") as handle:
-                command = handle.read(4096)
-        except OSError:
-            return True
-        return HELPER_NAME.encode("ascii") not in command
+        return not self._runs(pid, os.path.join(current["directory"], HELPER_NAME))
 
     def _helper_died(self, current, record):
         """The helper is gone mid-way: say so, and never wait for an end it cannot write."""
         self._current = None
         self._poll_ticker.stop()
         detail = "the update helper stopped"
-        if record.get("phase") in ("installing", "restarting", "proving", "rolling_back"):
+        touched = record.get("phase") in FILES_PHASES
+        if touched:
             detail += ("; the plugin's files may not be the running version's - restart the "
                        "receiver's interface, or install the plugin again")
         error = str(updatehelper.Fail("interrupted", detail=detail))
         LOG.error("update %s: %s", current["id"], error)
         payload = public(dict(record, phase="finished", result="interrupted",
                               finished=int(self.clock()), error=error))
-        self._end(payload, "interrupted", followed=not current["ours"])
+        # With the files perhaps changed the marker stays (review S4): the next start - after
+        # the restart this sentence asks for, or after a reboot - judges it by the build that
+        # starts. The helper writes it from `restarting` on; before that there is none.
+        self._end(payload, "interrupted", followed=not current["ours"], keep_marker=touched)
 
-    def _end(self, payload, reason, followed):
+    def _end(self, payload, reason, followed, keep_marker=False):
         """Say how a transaction ended; reopen the doors with a fresh session when closed."""
         if payload is not None:
             self._transaction = payload
@@ -802,7 +906,8 @@ class SelfUpdater:
         error = (payload or {}).get("error")
         ident = (payload or {}).get("id")
         LOG.warning("update %s ended: %s%s", ident, result, " (" + error + ")" if error else "")
-        self._remove_marker(ident)
+        if not keep_marker:
+            self._remove_marker(ident)
         refusal = None
         if result != "installed" and error:
             refusal = Refusal(error, reason or result or "failed")
@@ -832,15 +937,45 @@ class SelfUpdater:
     # ------------------------------------------------------------- the doors --
 
     def _close_doors(self):
-        current = self._current
+        """From `installing`: the package manager is replacing the files under this process."""
         self.closed = True
         self.bridge._stop_publishers()
-        LOG.warning("update %s: the new files are on disk; commands, the page and the setup "
-                    "screen are closed until the interface restarts", current["id"])
-        if current["downgrade"]:
-            self._begin_retraction()
+        LOG.warning("update %s: the plugin's files are being replaced; commands, the page and "
+                    "the setup screen are closed until the update ends", self._current["id"])
+
+    def _restart(self):
+        """From `restarting`: the downgrade's retraction first, then the question."""
+        if not self._current["downgrade"]:
+            self._ask_restart()
             return
-        self._ask_restart()
+        # Asked before the retraction too: a withdrawn downgrade need not retract anything.
+        if self._withdrawn_for_the_household():
+            return
+        self._begin_retraction()
+
+    def _household_changed(self):
+        """The request's standby, recording and EPG-import guards, asked again (review S2).
+
+        The reason code the helper puts on `last_error`, or None. A recording due within ten
+        minutes, or a receiver that will not say, counts as a recording - as at the request.
+        """
+        bridge = self.bridge
+        if power.in_standby():
+            return "standby"
+        if recording.guard(bridge.session):
+            return "recording"
+        follower = bridge.publisher("epg_import")
+        if follower.blocks_power() if follower is not None else epgimport.running():
+            return "epg_import"
+        return None
+
+    def _withdrawn_for_the_household(self):
+        reason = self._household_changed()
+        if reason is None:
+            return False
+        LOG.warning("update %s: withdrawn before the restart (%s)", self._current["id"], reason)
+        self._withdraw(reason)
+        return True
 
     def _begin_retraction(self):
         bridge = self.bridge
@@ -915,6 +1050,8 @@ class SelfUpdater:
     def _ask_restart(self):
         """R1: the image's clean quit, with its question bounded at sixty seconds."""
         current = self._current
+        if self._withdrawn_for_the_household():
+            return
         try:
             updatehelper.write_json(os.path.join(current["directory"], RESTART),
                                     {"pid": os.getpid()})

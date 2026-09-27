@@ -151,6 +151,8 @@ PHASES = ("downloading", "verifying", "snapshot", "installing", "restarting", "p
 RESULTS = ("installed", "withdrawn_before_restart", "rolled_back", "failed", "interrupted")
 STARTED_BY = ("mqtt", "home_assistant", "screen", "page", "ssh")
 DOWNGRADE_ORIGINS = ("screen", "page")
+# What the plugin may name in `withdraw` (TRANSACTION.md section 7); anything else is the question.
+WITHDRAW_REASONS = ("question", "retraction", "standby", "recording", "epg_import")
 
 # The helper's sentences, English: they reach `last_error` through the plugin that reports the
 # end, and Home Assistant says them in the household's language by their reason code.
@@ -181,6 +183,13 @@ SENTENCES = {
                 "answered no, or nobody answered); the update was withdrawn",
     "retraction": "the downgrade was withdrawn before the restart: the broker did not confirm "
                   "that this receiver's topics were retracted",
+    # The plugin asks the household's guards again right before the restart.
+    "standby": "the receiver went into standby before its interface was restarted; the update "
+               "was withdrawn, so as not to wake it",
+    "recording": "a recording was running or due when the interface was to be restarted; the "
+                 "update was withdrawn",
+    "epg_import": "an EPG import started before the interface was restarted; the update was "
+                  "withdrawn",
     "internal_error": "the update helper failed: {detail}",
 }
 
@@ -1471,8 +1480,9 @@ class Transaction:
             result = "failed"
         else:
             # The plugin may say why it withdrew; anything it does not say is the question.
-            said = read_json(self.path("withdraw")) or {}
-            failure = Fail("retraction" if said.get("reason") == "retraction" else "question")
+            said = read_json(self.path("withdraw"))
+            reason = said.get("reason") if isinstance(said, dict) else None
+            failure = Fail(reason if reason in WITHDRAW_REASONS else "question")
             result = "withdrawn_before_restart"
         if not restored:
             result = "failed"

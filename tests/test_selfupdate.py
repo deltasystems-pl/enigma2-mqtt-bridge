@@ -12,7 +12,9 @@ helper never starts; a test writes the files the helper would write.
 
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -30,6 +32,8 @@ from updatelab import index_bytes, release
 from MQTTBridge import epgimport, power, recording, selfupdate, trust, updatehelper, webif
 from MQTTBridge.origin import MQTT, PAGE, SCREEN
 from MQTTBridge.selfupdate import SelfUpdater
+from MQTTBridge.uninstall import Uninstaller
+from MQTTBridge.updatecheck import RELEASE_INDEX_TOPIC
 from MQTTBridge.version import __version__
 
 NODE = "vuuno4kse_005301"
@@ -47,6 +51,7 @@ BOOT = "3f1c2a50-0000-4000-8000-000000000001"
 OTHER_BOOT = "3f1c2a50-0000-4000-8000-000000000002"
 UPTIME = 1000.0
 DOORS = "an update is being applied on the receiver"
+BUSY = "an update is already running on the receiver"
 
 assert __version__ == "0.3.0", "the scenarios below place releases around the running 0.3.0"
 
@@ -198,12 +203,27 @@ def tick(count=1):
         MainLoop.advance(selfupdate.POLL_MILLISECONDS)
 
 
-def lock(root, ident, boot=BOOT, uptime=UPTIME - 10):
-    directory = root / "home" / "root" / "mqttbridge-backups" / updatehelper.LOCK_NAME
+def lock(root, ident, boot=BOOT, uptime=UPTIME - 10, origin="mqtt", pid=4242, alive=True):
+    """The shared lock, held by `ident`'s helper - running unless `alive` is False.
+
+    `origin` None is the SSH installer's record, which has none.
+    """
+    backups = root / "home" / "root" / "mqttbridge-backups"
+    directory = backups / updatehelper.LOCK_NAME
     directory.mkdir(parents=True, exist_ok=True)
-    updatehelper.write_json(str(directory / "owner.json"), {
-        "pid": 1, "started": NOW, "boot_id": boot, "uptime": uptime, "origin": "mqtt",
-        "id": ident, "target": "0.4.0"})
+    record = {"pid": pid, "started": NOW, "boot_id": boot, "uptime": uptime, "origin": origin,
+              "id": ident, "target": "0.4.0"}
+    if origin is None:
+        del record["origin"]
+    updatehelper.write_json(str(directory / "owner.json"), record)
+    proc = root / "proc" / str(pid)
+    if alive:
+        proc.mkdir(parents=True, exist_ok=True)
+        helper = backups / ("update-" + ident) / "helper.py"
+        (proc / "cmdline").write_bytes(b"/usr/bin/python3\0" + str(helper).encode() + b"\0"
+                                       + ident.encode() + b"\0")
+    else:
+        shutil.rmtree(proc, ignore_errors=True)
     return directory
 
 
@@ -513,7 +533,8 @@ def test_the_helpers_phases_reach_the_update_topic(box, factory):
         helper_says(directory, phase=phase)
         tick()
         assert transaction(factory.client)["phase"] == phase
-    assert not bridge.self_update.closed
+        # Review S1: the doors close when the package manager starts, not after it.
+        assert bridge.self_update.closed is (phase == "installing")
 
 
 def test_a_failure_before_the_restart_is_said_without_a_reload(box, factory):
@@ -605,7 +626,8 @@ def test_a_helper_that_died_behind_closed_doors_reopens_them(box, factory, recei
     tick()
     assert not bridge.self_update.closed
     assert len(factory.clients) == clients + 1
-    assert not marker_path.exists()
+    # Review S4: the files may be the new release's; the next start says how it ended.
+    assert marker_path.exists()
     factory.client.fire_connect()
     reason, error = refusal(factory.client)
     assert reason == "interrupted" and "install the plugin again" in error
@@ -1108,9 +1130,43 @@ def test_a_proved_install_asks_for_one_softcam_collapse_where_it_may(box, factor
 # ------------------------------------------------------ no first import --
 
 
-def test_the_closed_path_imports_nothing_new(box, factory, receiver, monkeypatch):
+ISOLATED = "MQTTBRIDGE_TEST_ISOLATED"
+
+
+def test_the_closed_path_imports_nothing_new():
+    """Steps 3-9 with every module the start did not import refused - in a fresh interpreter.
+
+    Review S9: in this process the tests before have imported nearly every module of the plugin,
+    and a module already in `sys.modules` is never refused, so a first import on the closed
+    path passed here while it failed alone. The scenario therefore runs alone, where
+    `sys.modules` holds what the test harness and the bridge's start imported and nothing else.
+    """
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-rA", "-p", "no:cacheprovider",
+         __file__ + "::test_the_closed_path_alone"],
+        env=dict(os.environ, **{ISOLATED: "1"}), cwd=str(Path(__file__).resolve().parents[1]),
+        capture_output=True, text=True, timeout=300)
+    assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
+    # Ran, not skipped.
+    assert "PASSED" in result.stdout and "test_the_closed_path_alone" in result.stdout
+
+
+class _Session:
+    def __init__(self):
+        self.opened = []
+
+    def open(self, screen, *args, **kwargs):
+        self.opened.append(screen)
+
+
+@pytest.mark.skipif(not os.environ.get(ISOLATED),
+                    reason="run alone, in a fresh interpreter, by the test above")
+def test_the_closed_path_alone(box, factory, receiver, monkeypatch):
+    from MQTTBridge import plugin as plugin_module
+
     bridge = box()
     directory = accepted(bridge, factory)
+    monkeypatch.setattr(plugin_module, "_bridge", bridge)
     attempts = []
 
     class Refuse:
@@ -1121,9 +1177,14 @@ def test_the_closed_path_imports_nothing_new(box, factory, receiver, monkeypatch
             return None
 
     monkeypatch.setattr(sys, "meta_path", [Refuse()] + sys.meta_path)
-    helper_says(directory, phase="restarting")
+    helper_says(directory, phase="installing")
     tick()
     factory.client.fire_message(ROOT + "/cmd/zap", b"1:0:19:283D:3FB:1:C00000:0:0:0:")
+    session = _Session()
+    plugin_module.open_setup(session)
+    assert session.opened == [MessageBox]
+    helper_says(directory, phase="restarting")
+    tick()
     receiver.session.callbacks[-1][0](False)
     helper_says(directory, phase="finished", result="withdrawn_before_restart",
                 reason="question", error=updatehelper.SENTENCES["question"], finished=NOW)
@@ -1140,3 +1201,397 @@ def test_every_module_the_update_path_uses_is_imported_with_the_bridge():
     for name in ("selfupdate", "updatehelper", "trust", "trustfile", "netfetch", "power",
                  "recording", "epgimport", "softcam", "updatecheck"):
         assert "MQTTBridge." + name in sys.modules
+
+
+# --------------------------------------------- the update and the uninstall --
+
+
+def uninstall_ready(bridge, settings, monkeypatch):
+    monkeypatch.setattr(Uninstaller, "root", str(bridge.root))
+    monkeypatch.setattr(Uninstaller, "plugin_directory",
+                        str(bridge.root / "plugin" / "MQTTBridge"))
+    settings.uninstall_allowed.value = True
+    assert bridge.uninstaller.probe()
+
+
+def removals(since):
+    return [command for container in ConsoleAppContainer.instances[since:]
+            for command in container.commands if "opkg" in command and "remove" in command]
+
+
+@pytest.mark.parametrize("phase, polled", [
+    ("downloading", True), ("snapshot", True),
+    # The helper has moved on and the plugin has not polled yet: the doors are still open.
+    ("installing", False), ("restarting", False),
+])
+def test_an_uninstall_is_refused_while_an_update_runs(phase, polled, box, factory, settings,
+                                                      monkeypatch):
+    """Review M1: two package-manager transactions never run side by side."""
+    bridge = box()
+    uninstall_ready(bridge, settings, monkeypatch)
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    helper_says(directory, phase=phase)
+    if polled:
+        tick()
+    assert not bridge.self_update.closed
+    since = len(ConsoleAppContainer.instances)
+    factory.client.fire_message(ROOT + "/cmd/uninstall", NODE.encode())
+    assert refusal(factory.client) == ("busy", BUSY)
+    assert bridge.uninstaller.phase is None
+    refused = bridge.uninstaller.request(NODE, origin=PAGE)
+    assert (refused.reason, str(refused)) == ("busy", BUSY)
+    for _ in range(5):
+        MainLoop.advance(100)
+        factory.client.acknowledge()
+    assert removals(since) == []
+
+
+def test_an_uninstall_is_refused_while_an_ssh_install_holds_the_lock(box, factory, settings,
+                                                                    monkeypatch):
+    bridge = box()
+    uninstall_ready(bridge, settings, monkeypatch)
+    held = lock(bridge.root, "0123456789ab", origin=None, alive=False)
+    refused = bridge.uninstaller.request(NODE)
+    assert (refused.reason, str(refused)) == ("busy", BUSY)
+    # The permission and the node id are still asked first.
+    assert bridge.uninstaller.request("another_node") == \
+        "the payload must be this receiver's node id"
+    # A lock of another boot is stale, and holds nothing.
+    shutil.rmtree(held)
+    lock(bridge.root, "0123456789ab", boot=OTHER_BOOT)
+    assert bridge.uninstaller.request(NODE) is None
+
+
+@pytest.mark.parametrize("origin", [MQTT, PAGE, SCREEN])
+def test_an_update_is_refused_while_an_uninstall_runs(origin, box, factory, settings,
+                                                      monkeypatch):
+    """Review M1, the other way: the uninstall's closed doors are not the only guard."""
+    bridge = box()
+    uninstall_ready(bridge, settings, monkeypatch)
+    assert bridge.uninstaller.request(NODE) is None
+    refused = bridge.self_update.request(json.dumps({"version": "0.4.0"}), origin=origin)
+    assert (refused.reason, str(refused)) == ("busy",
+                                              "the plugin is being removed from the receiver")
+    assert directories(bridge.root) == []
+
+
+# ------------------------------------------------ the doors from `installing` --
+
+
+def test_the_doors_close_while_the_package_manager_runs(box, factory, receiver):
+    """Review S1: opkg rewrites the files during `installing`; nothing runs from them then."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    helper_says(directory, phase="installing")
+    tick()
+    assert bridge.self_update.closed and not bridge.self_update.silent
+    assert bridge.publisher("power") is None
+    opened = list(getattr(receiver.session, "opened", []))
+    assert bridge.run_command("restart_gui", "PRESS", PAGE) == DOORS
+    factory.client.fire_message(ROOT + "/cmd/restart_gui", b"PRESS")
+    assert refusal(factory.client) == (None, DOORS)
+    assert list(getattr(receiver.session, "opened", [])) == opened
+    # Nothing is asked yet: the question waits for the helper's `restarting`.
+    assert receiver.session.callbacks == []
+    assert not (directory / "restart.json").exists()
+    helper_says(directory, phase="restarting")
+    tick(3)
+    asked = [c for c in receiver.session.callbacks if c[1] is standby_module.TryQuitMainloop]
+    assert len(asked) == 1
+
+
+def test_a_package_manager_failure_behind_closed_doors_reopens_them(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    helper_says(directory, phase="installing")
+    tick()
+    assert bridge.self_update.closed
+    clients = len(factory.clients)
+    error = "the package manager could not install version 0.4.0: exit 255"
+    helper_says(directory, phase="finished", result="failed", reason="opkg_failed", error=error,
+                finished=NOW + 5)
+    tick()
+    assert not bridge.self_update.closed
+    assert len(factory.clients) == clients + 1
+    factory.client.fire_connect()
+    assert refusal(factory.client) == ("opkg_failed", error)
+
+
+# ------------------------------------------- the household at the restart --
+
+
+@pytest.mark.parametrize("change", ["standby", "recording", "epg_import"])
+def test_a_household_change_before_the_restart_withdraws_instead_of_asking(
+        change, box, factory, receiver, monkeypatch):
+    """Review S2: the guards that refused the request are asked again right before the quit."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    helper_says(directory, phase="installing")
+    tick()
+    if change == "standby":
+        receiver.enter_standby()
+    elif change == "recording":
+        monkeypatch.setattr(recording, "is_recording", lambda session: True)
+    else:
+        monkeypatch.setattr(epgimport, "running", lambda: True)
+    helper_says(directory, phase="restarting")
+    tick()
+    assert json.loads((directory / "withdraw").read_text()) == {"reason": change}
+    assert not (directory / "restart.json").exists()
+    assert receiver.session.callbacks == []
+
+
+def test_a_downgrade_withdrawn_for_standby_retracts_nothing(box, factory, receiver):
+    bridge = box()
+    assert bridge.self_update.request(json.dumps({"version": "0.2.5"}), origin=SCREEN,
+                                      downgrade=True) is None
+    directory = directories(bridge.root)[0]
+    receiver.enter_standby()
+    before = len(factory.client.published)
+    helper_says(directory, phase="restarting")
+    tick()
+    assert json.loads((directory / "withdraw").read_text()) == {"reason": "standby"}
+    assert [e for e in factory.client.published[before:] if e.qos == 1] == []
+    assert not bridge.self_update.silent
+
+
+# ------------------------------------------------------- after a dead helper --
+
+
+def test_after_a_dead_helper_the_next_update_is_told_why_it_must_wait(box, factory):
+    """Review S3: not "already running" - the lock of a helper that is gone, and for how long."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    ident = directory.name[len("update-"):]
+    lock(bridge.root, ident, alive=False)
+    helper_says(directory, phase="snapshot")
+    helper_process(bridge, directory, running=False)
+    tick()
+    assert transaction(factory.client)["result"] == "interrupted"
+    refused = bridge.self_update.request(json.dumps({"version": "0.4.0"}))
+    assert refused.reason == "busy"
+    assert str(refused) == ("the previous update stopped without finishing; a new one is "
+                            "possible in about 30 minutes, when its lock on the receiver expires")
+
+
+@pytest.mark.parametrize("owner", ["running", "ssh"])
+def test_a_lock_that_may_be_alive_is_still_already_running(owner, box):
+    bridge = box()
+    if owner == "running":
+        lock(bridge.root, "0123456789ab")
+    else:
+        # The installer's pid is never a liveness test: its record names a short-lived process.
+        lock(bridge.root, "0123456789ab", origin=None, alive=False)
+    refused = bridge.self_update.request(json.dumps({"version": "0.4.0"}))
+    assert (refused.reason, str(refused)) == ("busy", BUSY)
+
+
+@pytest.mark.parametrize("to, frm, result", [
+    (("0.3.0", COMMIT), ("0.2.0", "ef" * 20), "installed"),
+    (("0.4.0", "ab" * 20), ("0.3.0", COMMIT), "rolled_back"),
+])
+def test_the_start_after_a_dead_helper_says_how_it_ended(to, frm, result, starting, factory):
+    """Review S4: the marker outlives the helper, and the running build is the verdict."""
+    made = {}
+
+    def prepare(root):
+        made["dir"] = marker(root, phase="restarting", to=to, frm=frm)
+        (made["dir"] / "helper.pid").write_text("4321\n")
+
+    bridge = starting(prepare=prepare)
+    factory.client.fire_connect()
+    ended = transaction(factory.client)
+    assert (ended["id"], ended["phase"], ended["result"]) == ("a1b2c3d4e5f6", "finished", result)
+    assert not (bridge.root / updatehelper.MARKER).exists()
+    assert bridge.self_update._current is None
+
+
+def test_a_followed_transaction_past_its_deadline_is_let_go(starting, factory):
+    """Review S5: the marker's deadline bounds the following even while `status.json` exists."""
+    made = {}
+
+    def prepare(root):
+        made["dir"] = marker(root, phase="proving", deadline=UPTIME + 5)
+        helper_says(made["dir"], phase="proving")
+
+    bridge = starting(prepare=prepare)
+    assert bridge.self_update._current is not None
+    tick(3)
+    assert bridge.self_update._current is not None
+    (bridge.root / "proc" / "uptime").write_text(f"{UPTIME + 3600:.2f} 1.00\n")
+    tick()
+    assert bridge.self_update._current is None
+    assert not (bridge.root / updatehelper.MARKER).exists()
+
+
+def test_a_helper_that_finished_and_exited_between_two_reads_is_not_interrupted(
+        box, factory, receiver, monkeypatch):
+    """Review S6: the status is read again once the helper is seen gone."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    helper_says(directory, phase="restarting")
+    tick()
+    real = SelfUpdater._helper_gone
+
+    def finished_then_gone(self, current):
+        helper_says(directory, phase="finished", result="withdrawn_before_restart",
+                    reason="question", error=updatehelper.SENTENCES["question"])
+        helper_process(bridge, directory, running=False)
+        return real(self, current)
+
+    monkeypatch.setattr(SelfUpdater, "_helper_gone", finished_then_gone)
+    tick()
+    factory.client.fire_connect()
+    assert transaction(factory.client)["result"] == "withdrawn_before_restart"
+    assert refusal(factory.client)[0] == "question"
+
+
+@pytest.mark.parametrize("command", [
+    b"python3\0/tmp/mqttbridge-install/installer_helper.py\0",
+    b"/usr/bin/python3\0/home/root/mqttbridge-backups/update-0123456789ab/helper.py\0",
+    b"/usr/bin/python3\0-c\0import helper.py\0",
+])
+def test_only_this_transactions_helper_is_the_helper(command, box, factory):
+    """Review S7: the helper's exact path, as an argument - not a substring of the command."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    assert bridge.self_update._helper_gone(bridge.self_update._current) is False
+    (bridge.root / "proc" / "4321" / "cmdline").write_bytes(command)
+    assert bridge.self_update._helper_gone(bridge.self_update._current) is True
+
+
+def test_the_documented_started_by_values_are_the_ones_the_plugin_produces():
+    """Review S8: an SSH install is not reported on `update`, so `ssh` is not in the contract."""
+    topics = (Path(__file__).resolve().parents[1] / "docs" / "TOPICS.md").read_text(
+        encoding="utf-8")
+    row = next(line for line in topics.splitlines() if line.startswith("| `started_by` |"))
+    values = row.split("|")[3].split(".")[0]
+    assert set(re.findall(r"`([a-z_]+)`", values)) == {
+        "mqtt", "home_assistant", "screen", "page"}
+
+
+def test_a_launch_bound_behind_closed_doors_reopens_them(box, factory, mono):
+    """Review S10: every record gone after the doors closed - the launch bound reopens them."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_says(directory, phase="restarting")
+    tick()
+    assert bridge.self_update.closed
+    shutil.rmtree(directory)
+    clients = len(factory.clients)
+    mono.now = selfupdate.LAUNCH_WAIT_SECONDS + 5
+    tick()
+    assert bridge.self_update._current is None
+    assert not bridge.self_update.closed
+    assert len(factory.clients) == clients + 1
+    factory.client.fire_connect()
+    assert refusal(factory.client)[0] == "internal_error"
+    assert bridge.run_command("restart_gui", "PRESS", PAGE) != DOORS
+
+
+# ------------------------------------------------------ review S11: test gaps --
+
+
+def test_the_normal_end_with_the_pid_file_left_is_not_interrupted(box, factory, receiver):
+    """R3: `finished` written and the helper gone - its pid file stays - is the end it wrote."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    helper_says(directory, phase="restarting")
+    tick()
+    receiver.session.callbacks[-1][0](True)
+    helper_says(directory, phase="finished", result="withdrawn_before_restart",
+                reason="question", error=updatehelper.SENTENCES["question"], finished=NOW + 70)
+    helper_process(bridge, directory, running=False)
+    assert (directory / "helper.pid").exists()
+    tick()
+    factory.client.fire_connect()
+    assert transaction(factory.client)["result"] == "withdrawn_before_restart"
+    assert refusal(factory.client)[0] == "question"
+
+
+def test_a_new_plugin_confirms_while_the_marker_still_says_restarting(starting):
+    """R9: the helper writes `proving` only after it saw the new pid; `restarting` confirms too."""
+    made = {}
+    starting(prepare=lambda root: made.update(dir=marker(root, phase="restarting")))
+    started = json.loads((made["dir"] / "started.json").read_text())
+    assert started == {"version": "0.3.0", "commit": COMMIT, "pid": os.getpid()}
+
+
+@pytest.mark.parametrize("to, frm, result", [
+    # Spike S1's shape: the same number, another build.
+    (("0.3.0", "ab" * 20), ("0.3.0", COMMIT), "rolled_back"),
+    (("0.3.0", COMMIT), ("0.3.0", "ab" * 20), "installed"),
+    (("0.3.0", "ab" * 20), ("0.3.0", "ef" * 20), "interrupted"),
+])
+def test_after_a_power_loss_a_same_number_build_is_judged_by_its_commit(to, frm, result,
+                                                                        starting, factory):
+    """R16: the power-loss verdict compares the build commit, not only the version."""
+    def prepare(root):
+        marker(root, boot=OTHER_BOOT, to=to, frm=frm)
+        lock(root, "a1b2c3d4e5f6", boot=OTHER_BOOT)
+
+    starting(prepare=prepare)
+    factory.client.fire_connect()
+    assert transaction(factory.client)["result"] == result
+
+
+def test_a_retraction_publish_the_session_refuses_withdraws_the_downgrade(box, factory,
+                                                                         receiver):
+    """R7: a publish refused outright (`rc` not 0) is a failed retraction."""
+    bridge = box()
+    assert bridge.self_update.request(json.dumps({"version": "0.2.5"}), origin=SCREEN,
+                                      downgrade=True) is None
+    directory = directories(bridge.root)[0]
+    factory.client.publish_rc = 4
+    helper_says(directory, phase="restarting")
+    tick()
+    assert json.loads((directory / "withdraw").read_text()) == {"reason": "retraction"}
+    assert not (directory / "restart.json").exists()
+    assert receiver.session.callbacks == []
+
+
+def test_the_plugin_menu_entry_behind_closed_doors_says_only_that(box, factory, monkeypatch):
+    """R22: `plugin.open_setup` - the menu entry - with the doors closed opens no setup screen."""
+    from MQTTBridge import plugin as plugin_module
+
+    bridge = box()
+    restarting(bridge, factory)
+    monkeypatch.setattr(plugin_module, "_bridge", bridge)
+    session = _Session()
+    plugin_module.open_setup(session)
+    assert session.opened == [MessageBox]
+
+
+def test_a_status_of_another_transaction_is_not_followed(box, factory):
+    """R10: a status file that names another id says nothing about this transaction."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_says(directory, phase="installing", id="0123456789ab")
+    tick()
+    assert transaction(factory.client)["phase"] == "downloading"
+    assert not bridge.self_update.closed
+
+
+def test_a_version_that_is_not_a_release_number_is_a_bad_request(box, factory):
+    """R20: `0.4` is not `latest` and not a release number: unreadable, not unknown."""
+    box()
+    send(factory, {"version": "0.4"})
+    assert refusal(factory.client)[0] == "bad_request"
+
+
+def test_a_relayed_index_is_not_judged_behind_closed_doors(box, factory, monkeypatch):
+    """R21: nothing is written into the trust file while the doors are closed."""
+    bridge = box()
+    restarting(bridge, factory)
+    calls = []
+    monkeypatch.setattr(bridge.updates, "on_release_index",
+                        lambda payload, retain: calls.append(payload))
+    factory.client.fire_message(RELEASE_INDEX_TOPIC, b'{"index": "", "sig": ""}', retain=True)
+    assert calls == []
