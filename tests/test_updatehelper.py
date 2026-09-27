@@ -2700,3 +2700,19 @@ def test_a_restore_that_failed_keeps_its_reason_when_nothing_starts_either(tmp_p
     record = scene.status()["record"]
     assert (record["interface"], record["cause"]) == ("not started", "not_started")
     assert record["restore"].startswith("failed")
+
+
+def test_without_one_answered_look_during_the_stop_nothing_counts_as_a_start(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    # /proc cannot be listed for the whole of the wait for the stop, and answers again after.
+    scene.box.pauses["rollback_recorded"] = lambda: setattr(scene.box, "unreadable", 10 ** 6)
+    scene.box.pauses["rollback_stopped"] = lambda: setattr(scene.box, "unreadable", 0)
+    assert scene.run() == 1
+    # The enigma2 seen afterwards may be the very one that never stopped: never a start.
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "not_stopped")
+    record = scene.status()["record"]
+    assert record["interface"] == "not restarted" and scene.box.pids == {200}
+    # Which processes R2 could not stop is unknown, so none are named.
+    assert "unstopped" not in record
