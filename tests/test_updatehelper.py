@@ -2396,3 +2396,103 @@ def test_a_partial_withdraw_then_an_r2_cut_short_still_restores_in_r2(tmp_path, 
     status, _info = updatehelper.opkg_paths(scene.box.root)
     assert f"Version: {OLD}\n" in Path(status).read_text()
     assert scene.init_calls() == ["4", "3"] and not scene.locked()
+
+
+# ------------------------------------------- an interruption at every step of R2 --
+
+
+R2_STEPS = ["init_4", "stop_wait", "rollback_stopped", "opkg_lock", "opkg_records",
+            "settings_block", "restore_returned", "rollback_restored", "lastservice", "init_3",
+            "r3"]
+# Where an `Exception` is the restore's own, handled failure (D2): recorded, not retried.
+RESTORE_HANDLES = ("opkg_lock", "opkg_records", "settings_block")
+
+
+def interrupt_r2_at(scene, monkeypatch, step, error, always):
+    """Raise `error` at `step` of R2, once or every time the step comes round."""
+    fired = []
+
+    def fire():
+        # Only inside R2: the snapshot takes opkg's lock too, long before.
+        if "4" not in scene.init_calls() or (fired and not always):
+            return False
+        fired.append(step)
+        return True
+
+    def wrap(owner, name, after, when=lambda *args: True):
+        real = getattr(owner, name)
+
+        def wrapped(*args, **kwargs):
+            if not after and when(*args) and fire():
+                raise error(step)
+            out = real(*args, **kwargs)
+            if after and when(*args) and fire():
+                raise error(step)
+            return out
+        monkeypatch.setattr(owner, name, wrapped)
+
+    def pause():
+        if fire():
+            raise error(step)
+    if step == "init_4":
+        wrap(scene.box, "run", True, lambda argv, _timeout: argv[1:] == ["4"])
+    elif step == "init_3":
+        wrap(scene.box, "run", False, lambda argv, _timeout: argv[1:] == ["3"])
+    elif step == "stop_wait":
+        wrap(scene.box, "enigma2_pids", False)
+    elif step in ("rollback_stopped", "rollback_restored"):
+        scene.box.pauses[step] = pause
+    elif step == "opkg_lock":
+        wrap(updatehelper.opkg_lock, "__enter__", False)
+    elif step == "opkg_records":
+        wrap(updatehelper, "_restore_records", False)
+    elif step == "settings_block":
+        wrap(updatehelper, "_restore_settings", True)
+    elif step == "restore_returned":
+        wrap(updatehelper.Transaction, "put_back", True)
+    elif step == "lastservice":
+        wrap(updatehelper, "write_lastservice", True)
+    else:
+        wrap(updatehelper.Transaction, "statusinfo", False,
+             lambda _self: bool(scene.box.init_log) and scene.box.init_log[-1][0] == "3")
+    return fired
+
+
+@pytest.mark.parametrize("always", [False, True], ids=["once", "always"])
+@pytest.mark.parametrize("error", [Escape, RuntimeError], ids=["escape", "error"])
+@pytest.mark.parametrize("step", R2_STEPS)
+def test_an_interruption_at_any_step_of_r2_ends_as_the_unit_would(
+        tmp_path, monkeypatch, step, error, always):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    fired = interrupt_r2_at(scene, monkeypatch, step, error, always)
+    try:
+        scene.run()
+    except Escape:
+        pass
+    monkeypatch.undo()
+    assert fired
+    last, record = scene.last(), scene.status()["record"]
+    settings = scene.box.read(updatehelper.SETTINGS)
+    # Never a second stop, never the lock kept, never a setting written twice.
+    assert scene.init_calls().count("4") == 1 and not scene.locked()
+    assert settings.count("config.plugins.mqttbridge.enabled=") == 1
+    assert settings.count(updatehelper.LASTSERVICE_KEY + "=") == 1
+    if last["result"] == "rolled_back":
+        assert record["restore"] == "done" and scene.plugin_py() == f"# plugin {OLD}\n"
+    if step == "init_3" and always:
+        # A start that fails every time is the one end without a picture.
+        assert scene.init_calls() == ["4"] and not scene.box.pids
+        return
+    assert scene.init_calls()[-1] == "3" and scene.box.pids
+    if always or (error is RuntimeError and step in RESTORE_HANDLES):
+        return
+    # Interrupted once: whatever it cut short is finished before the start - the old version,
+    # its records, the household's settings block and the recorded channel.
+    assert record["restore"] == "done" and record["stop"] == "seen"
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    status, _info = updatehelper.opkg_paths(scene.box.root)
+    assert f"Version: {OLD}\n" in Path(status).read_text()
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "true"
+    assert scene.box.lastservice_at_start == TVP1
