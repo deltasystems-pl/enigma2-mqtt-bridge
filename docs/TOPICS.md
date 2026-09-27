@@ -1101,10 +1101,10 @@ connection.
 | `error` | string or `null` | Why it did not end `installed`, in English; the same sentence and its `reason` go on `last_error` for `cmd/update` |
 
 The phases come from the update helper, which runs outside enigma2, polled once a second. From
-`installing` on the package manager is replacing the files under the running plugin, whose doors are closed (§2,
-`cmd/update`); the plugin that starts after the restart reports the rest. After a downgrade chosen on
-the receiver the old plugin publishes nothing from the retraction on, so this topic stands still
-until the older release connects.
+`installing` on the package manager is replacing the files under the running plugin, whose doors are
+closed (§2, `cmd/update`); the plugin that starts after the restart reports the rest. After a
+downgrade chosen on the receiver the old plugin publishes nothing from the retraction on, so this
+topic stands still until the older release connects.
 
 ### `<base>/<node>/relay_request` - added after 0.3.0 (unreleased)
 
@@ -1239,43 +1239,48 @@ changes and in this order:
 | started at the television or on the page, the release origin `unreachable`, and nobody to ask for the package - no broker connection, no integration's word on `enigma2mqtt/integration/<node>` (§3) - or no answer within 120 s (below) | "the receiver cannot reach the plugin's release origin and Home Assistant did not answer, so the update cannot be installed" | `no_relay` |
 | started there, and the only answers carried an address of Home Assistant's shape that this receiver's clock calls expired (below) | "an answer arrived whose download address had already expired by the receiver's clock; if the receiver's clock is wrong, set it and try again" | `clock_skew` |
 
-Accepted, the plugin starts its update helper outside enigma2 and follows it on `update`. The
-helper judges the index again, downloads and verifies the package, keeps a rollback point and runs
-the package manager. 🔴 **From `phase: installing` the doors are closed**: every command - over
-MQTT, from the OpenWebif page - is refused with "an update is being applied on the receiver"
-(retained and oversized commands are still discarded first), no feature area publishes, and the
-page and the setup screen say only that. When the package manager fails, the old files go back
-and the doors open again with a fresh session - unless the old files could not be put back:
-then the doors stay closed, and every command is refused with "an update failed and the
-plugin's previous files could not be put back; install the plugin again (from Home Assistant:
-force plugin reinstall)" - also when that failure came and went between two readings of the
-helper's status. When the old code is back but not all of opkg's records or the settings block
-(`reason` `restore_incomplete`), the doors stay closed too, with "an update failed; the plugin's
-previous version is back, but not all of its package records; install the plugin again (from
-Home Assistant: force plugin reinstall)". After `restore_failed` and `restore_incomplete`,
-`last_error` carries the helper's own sentence, which names the reinstall. So do they when the update helper stops once the package manager has started
-(it may still be running): "an update stopped part-way, so the plugin's files may not be the
-running version's; install the plugin again (from Home Assistant: force plugin reinstall)". When
-a rollback put the previous version's files back under an interface that was never seen to stop
-(`reason` `not_stopped`), a process the helper lists as left running (its pid in
-`record.unstopped`; with no list, a process that does not run the version put back) is the one
-they changed under: the doors stay closed with "an update was rolled back while the receiver's interface kept running, so the
+Accepted, the plugin starts its update helper outside enigma2 and follows it on `update`. The helper
+judges the index again, downloads and verifies the package, keeps a rollback point and runs the
+package manager. 🔴 **From `phase: installing` the doors are closed**: every command - over MQTT,
+from the OpenWebif page - is refused with "an update is being applied on the receiver" (retained and
+oversized commands are still discarded first), no feature area publishes, and the page and the setup
+screen say only that. When the package manager fails, the old files go back and the doors open again
+with a fresh session - unless the old files could not be put back: then the doors stay closed, and
+every command is refused with "an update failed and the plugin's previous files could not be put
+back; install the plugin again (from Home Assistant: force plugin reinstall)" - also when that
+failure came and went between two readings of the helper's status. When the old code is back but not
+all of opkg's records or the settings block (`reason` `restore_incomplete`), the doors stay closed
+too, with "an update failed; the plugin's previous version is back, but not all of its package
+records; install the plugin again (from Home Assistant: force plugin reinstall)". After
+`restore_failed` and `restore_incomplete`, `last_error` carries the helper's own sentence, which
+names the reinstall. So do they when the update helper stops once the package manager has started
+(it may still be running): "an update stopped part-way, so the plugin's files may not be the running
+version's; install the plugin again (from Home Assistant: force plugin reinstall)". When a rollback
+put the previous version's files back under an interface that was never seen to stop (`reason`
+`not_stopped`), a process the helper lists as left running (its pid in `record.unstopped`; with no
+list, a process that does not run the version put back) is the one they changed under: the doors
+stay closed with "an update was rolled back while the receiver's interface kept running, so the
 plugin's files are no longer the ones it runs; restart the receiver's interface", `last_error`
 carries the helper's sentence, and `cmd/restart_gui` - the repair - is the one command still
-accepted, with its own guards; the page offers it under the sentence. Any other process - one that started since - reports
-the end and opens as usual. After
-`interface_not_started` nothing runs to read the end: the plugin that starts next reports it
-(`result: failed`) and opens as after any other. At
-`restarting` the standby, recording and
-EPG-import guards are asked again, and when one holds the update is withdrawn
-(`withdrawn_before_restart`, `reason` `standby`, `recording` or `epg_import`) rather than
-restarting a receiver that went into standby or started recording meanwhile. Otherwise the
-image's own restart: a clean quit that saves the
-settings, so the receiver comes back on the channel it was showing. When the image asks on the
-television first (a recording, a stream, timeshift) and nobody says yes within 60 s, the update is
-withdrawn - `result: withdrawn_before_restart`, `reason` `question` - and the plugin opens a fresh
-session, republishing everything. A new release that does not start within two minutes is rolled
-back (`rolled_back`, `reason` `not_started`), and the channel and standby state are put back.
+accepted, with its own guards; the page offers it under the sentence. The helper's account can be
+wrong, so whatever the end, a plugin that ran through the update also compares the build it loaded
+at its start with the build id on disk before it opens again: when they differ - or the file on disk
+can no longer be read - it runs other code than the files underneath it, and its doors stay closed
+the same way (with the reinstall sentence instead when the old files were not all put back). Any
+other process - one that started since, on the files on disk - reports the end and opens as usual. A
+plugin that only follows an update, started by its restart, closes its doors too while the old files
+go back (`rolling_back`); they open at the end on the same conditions, and stay closed with the
+reinstall sentence when the helper stops meanwhile. After `interface_not_started` nothing runs to
+read the end: the plugin that starts next reports it (`result: failed`) and opens as after any
+other. At `restarting` the standby, recording and EPG-import guards are asked again, and when one
+holds the update is withdrawn (`withdrawn_before_restart`, `reason` `standby`, `recording` or
+`epg_import`) rather than restarting a receiver that went into standby or started recording
+meanwhile. Otherwise the image's own restart: a clean quit that saves the settings, so the receiver
+comes back on the channel it was showing. When the image asks on the television first (a recording,
+a stream, timeshift) and nobody says yes within 60 s, the update is withdrawn -
+`result: withdrawn_before_restart`, `reason` `question` - and the plugin opens a fresh session,
+republishing everything. A new release that does not start within two minutes is rolled back
+(`rolled_back`, `reason` `not_started`), and the channel and standby state are put back.
 
 **From the receiver itself.** The receiver's "Plugin updates" screen and the plugin's OpenWebif
 page run this same command, with `started_by` `screen` or `page`. They need no `update_allowed`
