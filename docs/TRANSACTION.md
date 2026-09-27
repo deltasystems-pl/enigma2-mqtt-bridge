@@ -640,7 +640,12 @@ because the request says `downgrade`. The relay address is judged again as well,
 is fetched: `http` or `https`, a host name or IPv4 address without a user part, a port if any,
 exactly the path `/api/enigma2_mqtt/relay/` and a 43-character URL-safe token, nothing after it,
 and an integer `expires` that has not passed by the receiver's clock - otherwise `relay`. The
-host is not checked against anything: a broker client can name any host, and what it serves is
+relay is **IPv4 only**, on both sides: the integration binds each relay address to the receiver's
+IPv4 address, offers one only to a receiver that reported such an address, and names its own IPv4
+address on the receiver's subnet, else its internal URL - so a host written as an IPv6 literal
+(an internal URL configured that way) is refused as `relay` here, before a download the
+integration's binding would refuse anyway. The
+host is not checked against anything else: a broker client can name any host, and what it serves is
 verified against the signed entry before `opkg` sees it. A receiver whose clock still stands in
 1970 cannot tell an expired address from a fresh one; Home Assistant's own expiry of the token
 bounds that case.

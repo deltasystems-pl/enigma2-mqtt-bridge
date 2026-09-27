@@ -152,6 +152,8 @@ DIRECTORY_NAME = re.compile(r"update-[0-9a-f]{12}")
 SERVICE_REF = re.compile(r"[^\x00-\x1f\x7f]{1,1024}")
 # The only shape of address Home Assistant hands out for a package (TRANSACTION.md section 7):
 # its host, a port if any, one fixed path and a `secrets.token_urlsafe(32)` token; nothing else.
+# The host is a name or an IPv4 address, never a bracketed IPv6 literal: Home Assistant binds a
+# relay address to the receiver's IPv4 address, and a download over IPv6 could not match it.
 RELAY_URL = re.compile(r"https?://[A-Za-z0-9.-]{1,253}(?::([0-9]{1,5}))?"
                        r"/api/enigma2_mqtt/relay/[A-Za-z0-9_-]{43}")
 KEEP = 2
@@ -1355,9 +1357,13 @@ class Transaction:
         The request file is the boundary between two programs, so the helper asks what the
         plugin asked: Home Assistant's relay shape - `http` or `https`, a host name or IPv4
         address with no user part, a port if any, the fixed path and a 43-character token, no
-        query - and an `expires` that has not passed by this receiver's clock. The host itself
-        is whatever the message named: a broker client can choose it, and the bytes it serves
-        are verified against the signed entry before `opkg` sees them. A receiver whose clock
+        query - and an `expires` that has not passed by this receiver's clock. IPv4 only, like
+        the integration: it binds each relay address to the receiver's IPv4 address, offers one
+        only to a receiver that reported such an address, and names its own IPv4 address on the
+        receiver's subnet, else its internal URL; an internal URL written as an IPv6 literal is
+        refused here as `relay`, before a download the binding would refuse anyway. The host
+        itself is whatever the message named: a broker client can choose it, and the bytes it
+        serves are verified against the signed entry before `opkg` sees them. A receiver whose clock
         still stands in 1970 cannot tell an old address from a new one; Home Assistant's own
         expiry of the token then bounds it.
         """
