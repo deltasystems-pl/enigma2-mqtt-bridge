@@ -1652,3 +1652,114 @@ def test_a_connection_lost_during_the_retraction_withdraws_at_once(box, factory,
     MainLoop.advance(selfupdate.RETRACTION_POLL_MILLISECONDS)
     assert json.loads((directory / "withdraw").read_text()) == {"reason": "retraction"}
     assert receiver.session.callbacks == []
+
+
+# ------------------------------------------------ the helper's delta review --
+
+
+def test_acceptance_keys_and_origin_come_from_the_build_alone(box, factory):
+    """Delta review: the request's trust fields are the running build's, whatever anyone sends.
+
+    The same field selects the drill hook, the key set and the index's lineage; nothing a
+    broker client, the page or the integration's topic says may reach it.
+    """
+    bridge = box()
+    factory.client.fire_message(INTEGRATION, json.dumps(
+        {"integration": "0.4.0", "contract": 1, "plugin_min": None, "acceptance": True,
+         "origin": "https://example.invalid/", "keys": []}).encode(), retain=True)
+    directory = accepted(bridge, factory, {
+        "version": "0.4.0", "acceptance": True, "origin": "https://example.invalid/",
+        "keys": [{"id": "x", "key": "00" * 32}]})
+    request = json.loads((directory / "request.json").read_text())
+    assert request["acceptance"] is False
+    assert request["origin"] == bridge.updates.origin
+    assert request["keys"] == trust.keys_to_data(bridge.updates.keys)
+    assert "acceptance" not in json.dumps(request["integration"])
+
+
+@pytest.mark.parametrize("origin", [PAGE, SCREEN])
+def test_the_page_and_the_screen_cannot_ask_for_acceptance_either(origin, box):
+    bridge = box()
+    assert bridge.self_update.request(json.dumps({"version": "0.4.0", "acceptance": True}),
+                                      origin=origin) is None
+    request = json.loads((directories(bridge.root)[0] / "request.json").read_text())
+    assert request["acceptance"] is False
+
+
+@pytest.mark.parametrize("installing_seen", [True, False])
+def test_the_drill_from_installing_to_rolling_back_keeps_the_doors_closed(
+        installing_seen, box, factory, receiver):
+    """The acceptance drill goes from `installing` straight into R2, never through `restarting`.
+
+    With a quick package manager the poll may never see `installing` at all.
+    """
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    if installing_seen:
+        helper_says(directory, phase="installing")
+        tick()
+        assert bridge.self_update.closed
+    helper_says(directory, phase="rolling_back")
+    tick(3)
+    assert bridge.self_update.closed
+    assert bridge.run_command("restart_gui", "PRESS", PAGE) == DOORS
+    assert receiver.session.callbacks == []
+    assert not (directory / "restart.json").exists()
+    clients = len(factory.clients)
+    helper_says(directory, phase="finished", result="rolled_back", reason="drill",
+                error=updatehelper.SENTENCES["drill"], finished=NOW + 90,
+                record={"restore": "done"})
+    tick()
+    assert not bridge.self_update.closed
+    assert len(factory.clients) == clients + 1
+
+
+@pytest.mark.parametrize("phase", ["installing", "restarting"])
+def test_a_failed_restore_keeps_the_doors_closed_and_says_to_reinstall(phase, box, factory,
+                                                                      receiver):
+    """Delta review D2: the old files could not be put back - a reload would import new code."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    helper_says(directory, phase=phase)
+    tick()
+    if phase == "restarting":
+        receiver.session.callbacks[-1][0](True)
+    assert bridge.self_update.closed
+    clients = len(factory.clients)
+    helper_says(directory, phase="finished", result="failed", reason="question",
+                error=updatehelper.SENTENCES["question"], finished=NOW + 90,
+                record={"restore": "failed: [Errno 28] No space left on device"})
+    tick()
+    # No fresh session: the doors stay closed, and say why.
+    assert len(factory.clients) == clients
+    assert bridge.self_update.closed
+    assert bridge.self_update._current is None
+    ended = transaction(factory.client)
+    assert (ended["phase"], ended["result"]) == ("finished", "failed")
+    reason, error = refusal(factory.client)
+    assert reason == "question" and "install the plugin again" in error
+    stuck = bridge.run_command("restart_gui", "PRESS", PAGE)
+    assert stuck != DOORS and "install the plugin again" in stuck
+    factory.client.fire_message(ROOT + "/cmd/power", b"standby")
+    assert refusal(factory.client) == (None, stuck)
+    assert selfupdate.household_doors(bridge.self_update) != selfupdate.household_doors()
+
+
+def test_the_page_says_when_the_old_files_could_not_be_put_back(box, factory, monkeypatch):
+    from test_webif import _Request
+
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    helper_says(directory, phase="installing")
+    tick()
+    helper_says(directory, phase="finished", result="failed", reason="opkg_failed",
+                error="the package manager could not install version 0.4.0: exit 255",
+                finished=NOW + 5, record={"restore": "failed: [Errno 5] Input/output error"})
+    tick()
+    monkeypatch.setattr(webif, "_bridge", lambda: bridge)
+    body = webif._page(_Request()).decode("utf-8")
+    assert selfupdate.household_doors(bridge.self_update) in body
+    assert "<form" not in body

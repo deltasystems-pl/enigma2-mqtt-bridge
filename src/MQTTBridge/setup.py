@@ -227,7 +227,7 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
             # session under the update's closed doors. The update ends in a restart, which
             # starts from them.
             LOG.warning("settings saved during an update; not reloading the bridge")
-            self._tell_and_close(household_doors())
+            self._tell_and_close(household_doors(bridge.self_update))
             return
         if bridge is not None and _uninstalling(bridge):
             # 🔴 A reload now would open a fresh session and republish

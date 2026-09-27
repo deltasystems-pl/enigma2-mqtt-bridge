@@ -1220,7 +1220,10 @@ the package manager. 🔴 **From `phase: installing` the doors are closed**: eve
 MQTT, from the OpenWebif page - is refused with "an update is being applied on the receiver"
 (retained and oversized commands are still discarded first), no feature area publishes, and the
 page and the setup screen say only that. When the package manager fails, the old files go back
-and the doors open again with a fresh session. At `restarting` the standby, recording and
+and the doors open again with a fresh session - unless the old files could not be put back:
+then the doors stay closed, and every command is refused with "an update failed and the
+plugin's previous files could not be put back; install the plugin again (from Home Assistant:
+force plugin reinstall)". At `restarting` the standby, recording and
 EPG-import guards are asked again, and when one holds the update is withdrawn
 (`withdrawn_before_restart`, `reason` `standby`, `recording` or `epg_import`) rather than
 restarting a receiver that went into standby or started recording meanwhile. Otherwise the

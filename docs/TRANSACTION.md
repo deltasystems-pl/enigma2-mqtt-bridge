@@ -630,7 +630,13 @@ this directory, writes `request.json`, copies the files and runs
 through `eConsoleAppContainer`. It reads `status.json` once a second into `update.transaction`. A
 launch that exits non-zero, or no `status.json` within 60 s, is `failed` (`internal_error`) and the
 directory is removed. At `installing` it closes its doors: the package manager is replacing the
-files under it. At `restarting` it asks the standby, recording and EPG-import guards again and,
+files under it. They stay closed through `rolling_back` (the acceptance drill goes there
+straight from `installing`) until the end, which reopens them with a fresh session - except a
+`failed` end whose `record.restore` is not `done`: the files under the running process may then
+be the new release's or a mix, a fresh session would import them, so the doors stay closed and
+every command, the page and the setup screen say to install the plugin again (the companion
+integration's forced reinstall over SSH). The request's `acceptance`, `keys` and `origin` are
+the running build's own, never anything a command, the page or the integration's topic says. At `restarting` it asks the standby, recording and EPG-import guards again and,
 when one holds, writes `withdraw` with that reason instead of asking; otherwise it retracts first
 for a downgrade, writes `restart.json` and asks the image to restart. When the helper stops
 without an end, the plugin reports `interrupted` itself - reading `status.json` once more first,

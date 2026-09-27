@@ -1386,7 +1386,8 @@ def _page(request, message=""):
     if bridge is not None and _updating(bridge):
         # The new release is on disk under this process: nothing but the sentence, and no
         # form that could post a change into it (`selfupdate.py`).
-        return _document(request, f"<p class='notice'>{_e(household_doors())}</p>")
+        return _document(request,
+                         f"<p class='notice'>{_e(household_doors(bridge.self_update))}</p>")
     section = _section(bridge)
     token = _csrf_token(request)
     notice = f"<p class='notice'>{_e(message)}</p>" if message else ""

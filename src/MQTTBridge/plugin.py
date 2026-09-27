@@ -73,7 +73,8 @@ def open_setup(session, **kwargs):
 
             from .selfupdate import household_doors
 
-            session.open(MessageBox, household_doors(), getattr(MessageBox, "TYPE_INFO", 1))
+            session.open(MessageBox, household_doors(updater),
+                         getattr(MessageBox, "TYPE_INFO", 1))
             return
         from .setup import MQTTBridgeSetup
 

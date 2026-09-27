@@ -158,14 +158,21 @@ NOT_STARTED = "the update could not be started: {detail}"
 STOPPED = ("the previous update stopped without finishing; a new one is possible in about "
            "{minutes} minutes, when its lock on the receiver expires")
 UNINSTALLING = "the plugin is being removed from the receiver"
+# After a `failed` end whose restore did not complete: the files may be the new release's, or a
+# mix, under this process, and only a reinstall from outside it can repair them (spec ae.7a).
+STUCK = ("an update failed and the plugin's previous files could not be put back; install the "
+         "plugin again (from Home Assistant: force plugin reinstall)")
 
 # From these phases on the package manager has touched the plugin's files (the doors close), and
 # a helper that stops leaves them in a state only the next start can judge (the marker stays).
 FILES_PHASES = ("installing", "restarting", "proving", "rolling_back")
 
 
-def household_doors():
+def household_doors(updater=None):
     """What the setup screen and the page say while the doors are closed."""
+    if getattr(updater, "stuck", False):
+        return _("The update of the plugin failed and its previous version could not be put "
+                 "back. Please install the plugin again, for example from Home Assistant.")
     return _("An update of the plugin is being applied on this receiver. Please wait.")
 
 
@@ -251,6 +258,8 @@ class SelfUpdater:
         self.claimed = False
         self.closed = False
         self.silent = False
+        # The doors stay closed for good: see `STUCK`.
+        self.stuck = False
         self.integration = None
         self._current = None
         self._transaction = None
@@ -341,7 +350,9 @@ class SelfUpdater:
 
     def doors_refusal(self):
         """The sentence every command gets while the doors are closed, or None."""
-        return DOORS if self.closed else None
+        if not self.closed:
+            return None
+        return STUCK if self.stuck else DOORS
 
     def _publish(self):
         if not self.silent:
@@ -856,7 +867,10 @@ class SelfUpdater:
             if released or self.monotonic() - current["finished_seen"] > RELEASE_WAIT_SECONDS:
                 self._current = None
                 self._poll_ticker.stop()
-                self._end(payload, record.get("reason"), followed=not current["ours"])
+                details = record.get("record") if isinstance(record.get("record"), dict) else {}
+                restore = details.get("restore")
+                self._end(payload, record.get("reason"), followed=not current["ours"],
+                          unrestored=isinstance(restore, str) and restore != "done")
             return
         if current["ours"]:
             if phase in FILES_PHASES and not self.closed:
@@ -906,8 +920,15 @@ class SelfUpdater:
         # starts. The helper writes it before the package manager runs (`installing`).
         self._end(payload, "interrupted", followed=not current["ours"], keep_marker=touched)
 
-    def _end(self, payload, reason, followed, keep_marker=False):
-        """Say how a transaction ended; reopen the doors with a fresh session when closed."""
+    def _end(self, payload, reason, followed, keep_marker=False, unrestored=False):
+        """Say how a transaction ended; reopen the doors with a fresh session when closed.
+
+        Not when the helper could not put the old files back (`unrestored`, TRANSACTION.md 7):
+        the files under this process may then be the new release's, or a mix, and the fresh
+        session a reopening starts would import them. The doors stay closed and say so, and the
+        repair is a reinstall from outside this process - Home Assistant's forced reinstall over
+        SSH (delta review D2).
+        """
         if payload is not None:
             self._transaction = payload
         result = (payload or {}).get("result")
@@ -919,6 +940,20 @@ class SelfUpdater:
         refusal = None
         if result != "installed" and error:
             refusal = Refusal(error, reason or result or "failed")
+        if self.closed and unrestored and result != "installed":
+            self.stuck = True
+            self._retraction_ticker.stop()
+            self._queue = []
+            self._outstanding = []
+            LOG.error("update %s: the previous files could not be put back; the doors stay "
+                      "closed until the plugin is installed again", ident)
+            # Said on `update` and `last_error` - unless a downgrade's retraction made this
+            # process silent, which it stays: the page and the setup screen still say it.
+            self._publish()
+            if self.bridge.connected:
+                self.bridge.publish_last_error(COMMAND, Refusal(
+                    (error or result or "failed") + "; " + STUCK, reason or result or "failed"))
+            return
         if self.closed:
             self.closed = False
             self.silent = False
