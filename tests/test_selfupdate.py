@@ -1991,6 +1991,11 @@ def unstopped_sentence():
 
 def following(starting, factory, receiver):
     """A new plugin that started after the forward restart and follows R2 (`ours` False)."""
+    # The marker already says `rolling_back` at this plugin's start, so it records
+    # `began: rolling_back` and is, to the plugin, a process R2 itself started - the build rule
+    # alone judges it when the helper dies. That is right for the finished ends these tests
+    # read; a process of the forward restart that sees R2 begin is `following_the_restart`
+    # (marker at `proving`), and tests of a helper that dies under it start from there.
     made = {}
     bridge = starting(prepare=lambda root: made.update(dir=marker(root, phase="rolling_back")),
                       session=receiver.session)
