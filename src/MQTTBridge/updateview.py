@@ -21,7 +21,8 @@ package because the origin does not answer (`selfupdate.py`, the relay handshake
 then say what it waits for (`relay_line`) and, once it ended without an update, why
 (`relay_outcome`) - never that an update started. The page reads that outcome whenever it is
 loaded, so it says it only for an hour after the wait ended (`RELAY_OUTCOME_SECONDS`); the
-screen that asked reads it once, when its wait ends, and keeps it while it is open.
+screen that asked reads it once, when it first looks after its wait ended - however late that
+is, so it never ages there - and keeps it while it is open.
 
 **One line per version on the television.** A list row does not wrap, so a version that cannot
 be installed says only that (`row_label`); the reason is `row_detail`, shown when the row is
@@ -288,12 +289,15 @@ def relay_line(bridge):
         "version": wait["version"], "seconds": wait.get("seconds_left", "-")}
 
 
-def relay_outcome(bridge):
+def relay_outcome(bridge, aged=True):
     """How the last such wait ended when it did not start an update, in the household's words.
 
-    None when it started one, when nothing waited, or when it ended `RELAY_OUTCOME_SECONDS` ago
-    or more. The refusal is the dispatcher's own (`SelfUpdater.relay_refusal`): no answer, an
-    answer this clock calls expired, or a refusal of the table asked again when the wait ended.
+    None when it started one, when nothing waited, or - with `aged`, for the page - when it
+    ended `RELAY_OUTCOME_SECONDS` ago or more. The screen that asked reads it with `aged` off:
+    whenever it first looks after its wait ended, that is its answer to the person who asked,
+    and falling back to "has started" would say an update started that did not. The refusal is
+    the dispatcher's own (`SelfUpdater.relay_refusal`): no answer, an answer this clock calls
+    expired, or a refusal of the table asked again when the wait ended.
     """
     updater = getattr(bridge, "self_update", None)
     refusal = getattr(updater, "relay_refusal", None) if updater is not None else None
@@ -301,7 +305,7 @@ def relay_outcome(bridge):
         return None
     ended = getattr(updater, "relay_ended", None)
     try:
-        if ended is not None and updater.monotonic() - ended >= RELAY_OUTCOME_SECONDS:
+        if aged and ended is not None and updater.monotonic() - ended >= RELAY_OUTCOME_SECONDS:
             return None
     except Exception:
         # Its age unreadable, the outcome is said: it is still the last wait's, and true.

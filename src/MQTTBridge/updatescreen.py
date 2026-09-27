@@ -172,7 +172,7 @@ class MQTTBridgeUpdates(Screen):
             return waiting
         if self._waiting is not None:
             version, self._waiting = self._waiting, None
-            self._said = updateview.relay_outcome(bridge) or \
+            self._said = updateview.relay_outcome(bridge, aged=False) or \
                 _("The update to version %s has started.") % version
         return self._said
 

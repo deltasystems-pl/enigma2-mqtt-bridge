@@ -53,8 +53,9 @@ screen).
 **A GET can end an install's overdue wait.** An install on a receiver without internet may
 wait before it starts (the relay handshake, `selfupdate.py`), and a wait past its bound is
 ended by whoever looks at it, timer or not (`SelfUpdater.relay_wait`). Loading this page - or a
-refresh of the television's screen - can therefore be what ends it and puts its `no_relay` on
-`last_error`. That is not a GET changing the receiver: it completes an install already
+refresh of the television's screen - can therefore be what ends it and puts its refusal on
+`last_error`: `no_relay` when no answer came, `clock_skew` when every answer that came had
+already expired by this receiver's clock. That is not a GET changing the receiver: it completes an install already
 confirmed, with the end its own timer gives it, only noticed first. The "Plugin updates"
 section says how the last wait ended for an hour after it (`updateview.relay_outcome`).
 

@@ -1318,22 +1318,66 @@ def test_how_the_screens_wait_ended_stays_said_while_the_screen_is_open(answered
     assert said in screen["status"].text
 
 
-@pytest.mark.parametrize(("age", "shown"), [(0, True), (3599, True), (3600, False),
-                                            (86400, False)])
-def test_the_page_says_how_a_wait_ended_for_an_hour(age, shown, box, page, factory, mono):
-    """A day-old "Home Assistant did not answer" is not said as news: the section says how the
-    last wait ended for an hour after it ended. `last_error` is not the page's to age - it keeps
-    the refusal until a command next succeeds, and the Status section shows it there."""
-    bridge = test_selfupdate_relay.offline(box())
+def a_wait_that_ends(how, box, page, factory, receiver, monkeypatch):
+    """An install's wait ended without an update, each of the three ways it can end: the wait's
+    own bound (`no_relay`), an answer taken and its request then refused, and the release
+    origin's look refused when it came back. The bridge, the page and the reason on
+    `last_error`."""
+    relay = test_selfupdate_relay
+    if how == "probe_refused":
+        monkeypatch.setattr(relay.UpdateChecker, "fetch", staticmethod(relay.Origin()))
+        bridge = relay.unprobed(relay.offline(box()))
+        jobs = relay.held_back(monkeypatch)
+        assert relay.ask(bridge) is None
+        receiver.enter_standby()
+        jobs.run()
+        return bridge, page(bridge), "standby"
+    bridge = relay.offline(box())
     resource = page(bridge)
+    if how == "answer_refused":
+        assert relay.ask(bridge) is None
+        receiver.enter_standby()
+        relay.reply(factory, relay.answer_for(factory))
+        return bridge, resource, "standby"
     session = new_session()
     _request, body = post(resource, session, install_fields("0.4.0"))
     post(resource, session, confirmation(body), csrf=None)
-    MainLoop.advance(test_selfupdate_relay.WAIT_MS)
+    MainLoop.advance(relay.WAIT_MS)
+    return bridge, resource, "no_relay"
+
+
+@pytest.mark.parametrize("how", ["unanswered", "answer_refused", "probe_refused"])
+@pytest.mark.parametrize(("age", "shown"), [(0, True), (3599, True), (3600, False),
+                                            (86400, False)])
+def test_the_page_says_how_a_wait_ended_for_an_hour(how, age, shown, box, page, factory, mono,
+                                                    receiver, monkeypatch):
+    """A day-old "Home Assistant did not answer" is not said as news: the section says how the
+    last wait ended for an hour after it ended - whichever way it ended. `last_error` is not the
+    page's to age - it keeps the refusal until a command next succeeds, and the Status section
+    shows it there."""
+    bridge, resource, reason = a_wait_that_ends(how, box, page, factory, receiver, monkeypatch)
+    said = updateview.relay_outcome(bridge)
+    assert said and (said == NO_RELAY_SAID) is (how == "unanswered")
     mono.now += age
-    assert (NO_RELAY_SAID in updates_section(get_page(resource)[1])) is shown
+    assert (said in updates_section(get_page(resource)[1])) is shown
     assert "Waiting for the answer" not in updates_section(get_page(resource)[1])
-    assert refusal(factory.client)[0] == "no_relay"
+    assert refusal(factory.client)[0] == reason
+
+
+def test_the_screen_that_asked_says_how_its_wait_ended_however_late_it_looks(box, factory,
+                                                                              mono):
+    """The screen's own refresh did not run between the wait's end and an hour later (its timer
+    lost, the wait's not): it still says the refusal, never "has started" for an update that
+    did not. Only the page's reading of the outcome ages."""
+    bridge = test_selfupdate_relay.offline(box())
+    screen = install_at_the_television(bridge)
+    screen._ticker.stop()
+    MainLoop.advance(test_selfupdate_relay.WAIT_MS)
+    assert bridge.self_update.relay_refusal.reason == "no_relay"
+    mono.now += 60 * 60 + 1
+    screen.refresh()
+    assert STARTED not in screen["status"].text
+    assert NO_RELAY_SAID in screen["status"].text
 
 
 def test_an_outcome_whose_age_cannot_be_read_is_still_said():
