@@ -1526,6 +1526,64 @@ def test_a_relay_address_of_the_right_shape_is_fetched(tmp_path, url):
 # ------------------------------------------------------------ the package --
 
 
+def payload_with(member):
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.GNU_FORMAT) as tar:
+        for name, body in (("./" + PLUGIN + "/plugin.py", b"# plugin 0.4.1\n"),
+                           ("./" + HOOK, b"# hook\n")):
+            info = tarfile.TarInfo(name)
+            info.size = len(body)
+            tar.addfile(info, io.BytesIO(body))
+        tar.addfile(member)
+    import gzip
+
+    return gzip.compress(buffer.getvalue(), mtime=0)
+
+
+def package_with(member):
+    control = f"Package: {updatehelper.PACKAGE}\nVersion: {NEW}\n".encode()
+    members = [("debian-binary", b"2.0\n"),
+               ("control.tar.gz", indexlab._tar({"./control": control})),
+               ("data.tar.gz", payload_with(member))]
+    out = b"!<arch>\n"
+    for name, content in members:
+        header = f"{name + '/':<16}{0:<12}{0:<6}{0:<6}{'100644':<8}{len(content):<10}`\n"
+        out += header.encode("ascii") + content + (b"\n" if len(content) % 2 else b"")
+    return out
+
+
+def tar_member(name, kind, target=""):
+    info = tarfile.TarInfo(name)
+    info.type = kind
+    info.linkname = target
+    return info
+
+
+@pytest.mark.parametrize("member, detail", [
+    (tar_member("./" + PLUGIN + "/link.py", tarfile.SYMTYPE, "/etc/passwd"), "other than files"),
+    (tar_member("./" + PLUGIN + "/hard.py", tarfile.LNKTYPE, "./" + PLUGIN + "/plugin.py"),
+     "other than files"),
+    (tar_member("./" + PLUGIN + "/tty", tarfile.CHRTYPE), "other than files"),
+    (tar_member("./" + PLUGIN + "/disk", tarfile.BLKTYPE), "other than files"),
+    (tar_member("./" + PLUGIN + "/pipe", tarfile.FIFOTYPE), "other than files"),
+    (tar_member("/" + PLUGIN + "/abs.py", tarfile.REGTYPE), "unsafe"),
+], ids=["symlink", "hardlink", "chardev", "blockdev", "fifo", "absolute"])
+def test_a_package_holding_links_devices_or_absolute_paths_is_refused(tmp_path, member, detail):
+    ipk = package_with(member)
+    scene = Scene(tmp_path, ipk=ipk)
+    scene.run()
+    assert scene.last()["reason"] == "bad_package"
+    assert detail in scene.last()["error"]
+    assert scene.opkg_calls() == []
+
+
+def test_a_request_whose_id_is_not_its_directorys_is_refused(tmp_path):
+    scene = Scene(tmp_path, request={"id": "ba9876543210"})
+    assert scene.run() == 2
+    assert scene.status()["reason"] == "bad_request"
+    assert scene.opkg_calls() == []
+
+
 def test_a_failed_package_write_leaves_no_rollback_point(tmp_path, monkeypatch):
     scene = Scene(tmp_path)
     real = updatehelper.atomic_write
@@ -1541,7 +1599,119 @@ def test_a_failed_package_write_leaves_no_rollback_point(tmp_path, monkeypatch):
     assert scene.opkg_calls() == [] and not scene.locked()
 
 
+# ------------------------------------------------------- the lock, reclaimed --
+
+
+def test_a_lock_refreshed_between_the_two_judgements_is_left_to_its_owner(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    lock = Path(scene.box.root) / updatehelper.BACKUPS / updatehelper.LOCK_NAME
+    lock.mkdir(mode=0o700)
+    owner = {"pid": 1, "started": 5, "boot_id": "boot-0", "uptime": 1.0, "id": "ffffffffffff"}
+    (lock / "owner.json").write_text(json.dumps(owner))
+    verdicts = iter(["it was claimed before the receiver last rebooted", ""])
+    monkeypatch.setattr(updatehelper, "lock_is_stale", lambda receiver, path: next(verdicts))
+    assert scene.run() == 1
+    assert scene.status()["reason"] == "busy"
+    assert json.loads((lock / "owner.json").read_text()) == owner
+
+
+# ------------------------------------------------------- the withdraw, closely --
+
+
+def test_the_withdraw_waits_for_opkgs_lock_and_leaves_the_files_to_it(tmp_path):
+    scene = Scene(tmp_path)
+    lock = scene.box.path("run/opkg.lock")
+    holder = {}
+
+    def opkg_runs_again():
+        os.makedirs(os.path.dirname(lock), exist_ok=True)
+        holder["p"] = subprocess.Popen(
+            [sys.executable, "-c", "import fcntl, os, sys, time\n"
+             "fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT)\n"
+             "fcntl.lockf(fd, fcntl.LOCK_EX)\nprint('held', flush=True)\ntime.sleep(60)\n",
+             lock], stdout=subprocess.PIPE)
+        assert holder["p"].stdout.readline() == b"held\n"
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+    scene.box.pauses["withdrawing"] = opkg_runs_again
+    try:
+        scene.run()
+    finally:
+        holder["p"].kill()
+        holder["p"].wait()
+    assert scene.last()["result"] == "failed"
+    assert scene.status()["record"]["restore"].startswith("failed")
+    assert scene.plugin_py() == f"# plugin {NEW}\n"
+
+
+def test_the_plugins_ask_starts_the_180_s_again(tmp_path):
+    scene = Scene(tmp_path)
+
+    def the_plugin_asks_late():
+        scene.box.at(100, lambda: updatehelper.write_json(
+            str(scene.directory / "restart.json"), {"pid": 100}))
+        scene.box.at(250, scene.box.restart)
+        scene.box.at(253, lambda: updatehelper.write_json(
+            str(scene.directory / "started.json"), {"version": NEW, "commit": "e" * 40,
+                                                    "pid": 200}))
+    scene.box.pauses["restarting"] = the_plugin_asks_late
+    assert scene.run() == 0
+    assert scene.last()["result"] == "installed"
+
+
+def test_a_restart_during_a_completed_withdraw_is_rolled_back_even_if_the_new_plugin_speaks(
+        tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+
+    def restart_and_speak():
+        scene.box.restart()
+        updatehelper.write_json(str(scene.directory / "started.json"),
+                                {"version": NEW, "commit": "e" * 40, "pid": 200})
+    scene.box.pauses["withdrawn"] = restart_and_speak
+    assert scene.run() == 1
+    assert scene.last()["result"] == "rolled_back"
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.init_calls() == ["4", "3"]
+
+
+def test_the_withdraw_removes_what_only_the_new_version_brought(tmp_path):
+    scene = Scene(tmp_path)
+    _status, info = updatehelper.opkg_paths(scene.box.root)
+    extra_info = Path(info, updatehelper.PACKAGE + ".postinst")
+    cache = Path(scene.box.path(HOOK)).parent / "__pycache__"
+    bytecode = cache / "MQTTBridge.cpython-312.pyc"
+    original = scene.box.install
+
+    def install_with_more(ipk):
+        original(ipk)
+        extra_info.write_text("#!/bin/sh\n")
+        cache.mkdir(exist_ok=True)
+        bytecode.write_bytes(b"new bytecode")
+    scene.box.install = install_with_more
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+    assert scene.run() == 0
+    assert not extra_info.exists() and not bytecode.exists()
+
+
 # ---------------------------------------------------------------- R3, closely --
+
+
+def test_a_zap_back_that_does_not_take_is_reported_lost(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.service = TVP1
+    scene.box.zap_works = False
+    original = scene.box.run
+
+    def image_ignores_lastservice(argv, timeout):
+        code = original(argv, timeout)
+        if argv[0] == scene.box.init and argv[1] == "3":
+            scene.box.service = TVN
+        return code
+    scene.box.run = image_ignores_lastservice
+    scene.run()
+    assert scene.box.zaps == [TVP1]
+    assert scene.status()["record"]["channel"] == "lost"
 
 
 def test_an_interface_that_does_not_come_back_is_not_verified(tmp_path):
@@ -1553,3 +1723,11 @@ def test_an_interface_that_does_not_come_back_is_not_verified(tmp_path):
     assert record["interface"] == "not started"
     assert record["channel"] == "lost" and "standby" not in record
     assert scene.box.zaps == []
+
+
+def test_a_rolled_back_transaction_keeps_its_directory(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.run()
+    assert scene.last()["result"] == "rolled_back"
+    assert json.loads((scene.directory / "status.json").read_text())["result"] == "rolled_back"
