@@ -102,6 +102,10 @@
       "payload": "json",
       "retained": true
     },
+    "relay_request": {
+      "payload": "json",
+      "retained": false
+    },
     "last_error": {
       "payload": "json",
       "retained": true
@@ -142,7 +146,8 @@
       "since": "0.3.0"
     },
     "update_check": {},
-    "update": {}
+    "update": {},
+    "relay": {}
   },
   "info_members": {
     "image": "string",
@@ -288,14 +293,5 @@
       "release": "unreleased"
     }
   ],
-  "planned": [
-    {
-      "kind": "command",
-      "name": "relay"
-    },
-    {
-      "kind": "event topic",
-      "name": "relay_request"
-    }
-  ]
+  "planned": []
 }

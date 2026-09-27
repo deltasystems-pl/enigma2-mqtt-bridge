@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from conftest import (
@@ -149,6 +150,10 @@ def box(make_bridge, factory, settings, receiver, tree, mono):
         bridge.start()
         factory.client.fire_connect()
         hold(bridge, releases, floor)
+        # The origin answered a probe a moment ago, so an install at the television or on the
+        # page does not look again (`test_selfupdate_relay.py` takes this away where it matters).
+        bridge.updates._origin = "reachable"
+        bridge.updates._origin_seen = bridge.updates.monotonic()
         bridge.root = root
         return settle(bridge)
 
@@ -912,15 +917,17 @@ def marker(root, ident="a1b2c3d4e5f6", phase="proving", boot=BOOT, deadline=UPTI
 def starting(make_bridge, factory, settings, tree, mono):
     """A plugin that starts on a receiver the test prepared first."""
 
-    def build(enabled=True, prepare=None):
+    def build(enabled=True, prepare=None, session=None):
         root = tree()
         if prepare is not None:
             prepare(root)
         settings.host.value = "10.0.0.5"
         settings.node_id.value = NODE
         settings.enabled.value = enabled
+        # With the receiver's session only where a test needs its publishers or its guards.
+        options = {} if session is None else {"session": session}
         bridge = make_bridge(build=BUILD, build_path=str(
-            root / "plugin" / "MQTTBridge" / "buildinfo.py"))
+            root / "plugin" / "MQTTBridge" / "buildinfo.py"), **options)
         bridge.root = root
         bridge.start()
         return bridge
@@ -1973,3 +1980,312 @@ def test_within_a_boot_the_wall_clock_never_lifts_the_limit(box):
                                    "boot_id": BOOT, "uptime": UPTIME - 60,
                                    "phase": "finished", "result": "installed"})
     assert bridge.self_update.request(json.dumps({"version": "0.4.0"})).reason == "rate_limited"
+
+
+# ------------------------------------------------------------ review round 3 --
+#
+# The helper's R2 now ends `failed` when no interface was seen starting on the old files
+# (TRANSACTION.md section 7): `not_stopped` - the process R2 could not stop runs on over the
+# previous version's files - and `interface_not_started` - nothing runs when it is written.
+
+
+def unstopped_sentence():
+    return getattr(selfupdate, "STUCK_UNSTOPPED", "(no such sentence)")
+
+
+def following(starting, factory, receiver):
+    """A new plugin that started after the forward restart and follows R2 (`ours` False)."""
+    made = {}
+    bridge = starting(prepare=lambda root: made.update(dir=marker(root, phase="rolling_back")),
+                      session=receiver.session)
+    factory.client.fire_connect()
+    assert bridge.self_update._current is not None
+    assert not bridge.self_update._current["ours"]
+    assert not bridge.self_update.closed and bridge._publishers != []
+    helper_process(bridge, made["dir"])
+    return bridge, made["dir"]
+
+
+def asking(box, factory, receiver):
+    """The process that asked, its doors closed since `installing` (`ours` True)."""
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_process(bridge, directory)
+    helper_says(directory, phase="installing")
+    tick()
+    assert bridge.self_update.closed
+    return bridge, directory
+
+
+def restarts(receiver):
+    return [entry for entry in receiver.session.opened
+            if entry == (standby_module.TryQuitMainloop, (3,))]
+
+
+@pytest.mark.parametrize("record", [
+    {"restore": "done", "stop": "not seen", "interface": "not restarted", "cause": "not_started",
+     "channel": "unconfirmed"},
+    # Keyed on the reason too: a record without `interface` is still the process R2 left.
+    {"restore": "done", "cause": "not_started"},
+])
+@pytest.mark.parametrize("who", ["following", "asking"])
+def test_an_interface_r2_could_not_stop_keeps_the_doors_closed_and_says_to_restart(
+        who, record, starting, box, factory, receiver):
+    """`not_stopped`: this process's files are the previous version's now - never a reload."""
+    if who == "following":
+        bridge, directory = following(starting, factory, receiver)
+        previous = "0.2.0"
+    else:
+        bridge, directory = asking(box, factory, receiver)
+        previous = "0.3.0"
+    clients = len(factory.clients)
+    error = str(updatehelper.Fail("not_stopped", previous=previous))
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped", error=error,
+                finished=NOW + 200, record=record)
+    tick()
+    updater = bridge.self_update
+    # No fresh session: it would import the previous version's modules into this process.
+    assert len(factory.clients) == clients
+    assert updater.closed and updater.stuck and updater._current is None
+    assert bridge._publishers == []
+    ended = transaction(factory.client)
+    assert (ended["phase"], ended["result"]) == ("finished", "failed")
+    # The helper's sentence as it is: it names the repair already.
+    assert refusal(factory.client) == ("not_stopped", error)
+    assert not (bridge.root / updatehelper.MARKER).exists()
+    sentence = unstopped_sentence()
+    assert "restart the receiver's interface" in sentence
+    assert "install" not in sentence
+    # Every other command, and the settings, answer the sentence.
+    factory.client.fire_message(ROOT + "/cmd/power", b"standby")
+    assert refusal(factory.client) == (None, sentence)
+    assert bridge.apply_settings({"log_level": "debug"}) == sentence
+    assert bridge.apply_remote_settings({"log_level": "debug"}) == sentence
+    send(factory, {"version": "0.4.0"})
+    assert refusal(factory.client) == (None, sentence)
+    assert restarts(receiver) == []
+    # The repair goes through the closed doors - from the page and over MQTT.
+    assert bridge.run_command("restart_gui", "PRESS", PAGE) is None
+    assert len(restarts(receiver)) == 1
+    factory.client.fire_message(ROOT + "/cmd/restart_gui", b"PRESS")
+    assert len(restarts(receiver)) == 2
+    assert refusal(factory.client) is None
+    # Still no session, and the doors still closed: the restart is what ends this process.
+    assert len(factory.clients) == clients
+    assert updater.closed and updater.doors_refusal() == sentence
+    household = selfupdate.household_doors(updater)
+    assert household not in (selfupdate.household_doors(), selfupdate.household_doors(
+        SimpleNamespace(stuck=True, _stuck_sentence=selfupdate.STUCK)))
+    assert "restart the user interface" in household and "install" not in household
+
+
+def test_the_repair_through_closed_doors_keeps_the_restarts_own_guards(starting, factory,
+                                                                        receiver):
+    """`restart_gui` is let through, not waved through: a recording still refuses it."""
+    from conftest import RecordTimerEntry
+
+    bridge, directory = following(starting, factory, receiver)
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped",
+                error=str(updatehelper.Fail("not_stopped", previous="0.2.0")),
+                finished=NOW + 200, record={"restore": "done", "interface": "not restarted"})
+    tick()
+    receiver.add_timer(state=RecordTimerEntry.StateRunning)
+    assert bridge.run_command("restart_gui", "PRESS", PAGE) == "the receiver is recording"
+    factory.client.fire_message(ROOT + "/cmd/restart_gui", b"PRESS")
+    assert refusal(factory.client) == (None, "the receiver is recording")
+    assert restarts(receiver) == []
+    # Only `restart_gui`: a reboot is not the repair, and stays behind the doors.
+    assert bridge.run_command("reboot", "PRESS", PAGE) == unstopped_sentence()
+
+
+def test_the_page_offers_only_the_interface_restart_after_not_stopped(starting, factory,
+                                                                      receiver, monkeypatch,
+                                                                      settings):
+    from test_setup_screen import FakeSession
+    from test_webif import _Request, action_fields, confirmation, new_session, post
+
+    from MQTTBridge import plugin as plugin_module
+    from MQTTBridge import setup as setup_screen
+
+    bridge, directory = following(starting, factory, receiver)
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped",
+                error=str(updatehelper.Fail("not_stopped", previous="0.2.0")),
+                finished=NOW + 200, record={"restore": "done", "interface": "not restarted"})
+    tick()
+    monkeypatch.setattr(webif, "_bridge", lambda: bridge)
+    body = webif._page(_Request()).decode("utf-8")
+    assert webif._e(selfupdate.household_doors(bridge.self_update)) in body
+    # One form, and it is the restart: nothing else can post into this process.
+    assert body.count("<form") == 1
+    assert "name='action' value='restart_gui'" in body
+    resource = webif.MQTTBridgeWebResource()
+    session = new_session()
+    # Any other form gets the sentence alone, with no question (the page's rule behind closed
+    # doors) - and the repair's form is still there under it.
+    request, body = post(resource, session, action_fields("reboot"))
+    text = body.decode("utf-8")
+    assert request.response_code == 409
+    assert webif._e(selfupdate.household_doors(bridge.self_update)) in text
+    assert "name='form' value='confirm'" not in text
+    assert text.count("<form") == 1 and "name='action' value='restart_gui'" in text
+    assert webif.CONFIRM_KEY not in session.sessionNamespaces
+    assert restarts(receiver) == [] and receiver.session.opened == []
+    _request, body = post(resource, session, action_fields("restart_gui"))
+    request, body = post(resource, session, confirmation(body), csrf=None)
+    assert request.response_code == 200
+    assert b"Sent: Restart the user interface" in body
+    assert len(restarts(receiver)) == 1
+    # The television's plugin entry and setup screen say it, and change nothing.
+    tv = _Session()
+    monkeypatch.setattr(plugin_module, "_bridge", bridge)
+    plugin_module.open_setup(tv)
+    assert tv.opened == [MessageBox]
+    clients = len(factory.clients)
+    screen = setup_screen.MQTTBridgeSetup(FakeSession(), settings=settings, bridge=bridge)
+    screen.keySave()
+    assert len(factory.clients) == clients
+    assert bridge.self_update.closed
+
+
+def test_a_followed_failed_restore_under_a_process_r2_could_not_stop_is_stuck(starting,
+                                                                              factory, receiver):
+    """The restore reasons win over `not_stopped`, and this process is the one they changed under.
+
+    Before round 3 only the process that asked was held for a failed restore; a follower that
+    R2 could not stop is just as much under the changed files.
+    """
+    bridge, directory = following(starting, factory, receiver)
+    clients = len(factory.clients)
+    error = str(updatehelper.Fail("restore_failed", previous="0.2.0",
+                                  detail="[Errno 28] No space left on device"))
+    helper_says(directory, phase="finished", result="failed", reason="restore_failed",
+                error=error, finished=NOW + 200,
+                record={"restore": "failed: [Errno 28] No space left on device",
+                        "stop": "not seen", "interface": "not restarted", "cause": "not_started"})
+    tick()
+    assert len(factory.clients) == clients
+    assert bridge.self_update.closed and bridge.self_update.stuck
+    assert refusal(factory.client) == ("restore_failed", error)
+    assert bridge.self_update.doors_refusal() == selfupdate.STUCK
+    # Here a restart is not the repair: the reinstall is.
+    assert bridge.run_command("restart_gui", "PRESS", PAGE) == selfupdate.STUCK
+
+
+def test_a_process_that_started_after_r2_gave_up_is_not_stuck(starting, factory, receiver):
+    """`interface_not_started` read by an interface that came up late: it runs the old files."""
+    bridge, directory = following(starting, factory, receiver)
+    helper_says(directory, phase="finished", result="failed", reason="interface_not_started",
+                error=str(updatehelper.Fail("interface_not_started", previous="0.2.0")),
+                finished=NOW + 200, record={"restore": "done", "stop": "seen",
+                                            "interface": "not started", "cause": "not_started"})
+    tick()
+    assert bridge.self_update._current is None
+    assert not bridge.self_update.closed and not bridge.self_update.stuck
+    assert refusal(factory.client)[0] == "interface_not_started"
+
+
+@pytest.mark.parametrize("reason, record", [
+    ("interface_not_started",
+     {"restore": "done", "stop": "seen", "interface": "not started", "cause": "not_started"}),
+    # After `not_stopped` the interface was restarted by hand: this start runs the old files.
+    ("not_stopped",
+     {"restore": "done", "stop": "not seen", "interface": "not restarted",
+      "cause": "not_started"}),
+])
+def test_the_next_start_reports_an_r2_without_an_interface_and_opens(reason, record, starting,
+                                                                     factory, receiver):
+    """No plugin ran when the helper wrote it; the one that starts reads it and opens normally."""
+    error = str(updatehelper.Fail(reason, previous="0.3.0"))
+    bridge = starting(prepare=lambda root: marker(
+        root, phase="finished", result="failed", reason=reason, error=error, finished=NOW,
+        to=("0.4.0", "ab" * 20), frm=("0.3.0", COMMIT), record=record),
+        session=receiver.session)
+    updater = bridge.self_update
+    assert not updater.closed and not updater.stuck and updater._current is None
+    assert updater.doors_refusal() is None
+    factory.client.fire_connect()
+    ended = transaction(factory.client)
+    # Said as the helper wrote it: `failed`, never a rollback that runs.
+    assert (ended["id"], ended["phase"], ended["result"]) == ("a1b2c3d4e5f6", "finished",
+                                                              "failed")
+    assert ended["error"] == error
+    assert refusal(factory.client) == (reason, error)
+    assert not (bridge.root / updatehelper.MARKER).exists()
+    assert bridge._publishers != []
+    assert bridge.run_command("restart_gui", "PRESS", PAGE) != unstopped_sentence()
+
+
+@pytest.mark.parametrize("case", ["past_deadline", "another_boot"])
+def test_an_r2_without_an_interface_is_still_on_the_update_topic_after_the_marker_went(
+        case, starting, factory):
+    """A marker past its deadline or from another boot is discarded; the last record still says."""
+    error = str(updatehelper.Fail("interface_not_started", previous="0.3.0"))
+
+    def prepare(root):
+        marker(root, phase="finished", result="failed", reason="interface_not_started",
+               error=error, finished=NOW, deadline=UPTIME - 1 if case == "past_deadline"
+               else UPTIME + 600, boot=OTHER_BOOT if case == "another_boot" else BOOT)
+        updatehelper.write_json(str(root / updatehelper.LAST), {
+            "id": "a1b2c3d4e5f6", "started_by": "home_assistant", "target": "0.4.0",
+            "from": "0.3.0", "phase": "finished", "started": NOW - 100, "finished": NOW,
+            "result": "failed", "reason": "interface_not_started", "error": error})
+
+    bridge = starting(prepare=prepare)
+    assert not bridge.self_update.closed and not bridge.self_update.stuck
+    factory.client.fire_connect()
+    ended = transaction(factory.client)
+    assert (ended["result"], ended["error"]) == ("failed", error)
+
+
+def test_the_repair_path_imports_nothing_new():
+    """After `not_stopped` the files are the previous version's: a first import would load it.
+
+    The page, the television's entry and `restart_gui` through the doors, in a fresh
+    interpreter, with every module the start did not import refused - as for the closed path.
+    """
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-rA", "-p", "no:cacheprovider",
+         __file__ + "::test_the_repair_path_alone"],
+        env=dict(os.environ, **{ISOLATED: "1"}), cwd=str(Path(__file__).resolve().parents[1]),
+        capture_output=True, text=True, timeout=300)
+    assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
+    assert "PASSED" in result.stdout and "test_the_repair_path_alone" in result.stdout
+
+
+@pytest.mark.skipif(not os.environ.get(ISOLATED),
+                    reason="run alone, in a fresh interpreter, by the test above")
+def test_the_repair_path_alone(starting, factory, receiver, monkeypatch):
+    from test_webif import _Request, action_fields, confirmation, new_session, post
+
+    from MQTTBridge import plugin as plugin_module
+
+    bridge, directory = following(starting, factory, receiver)
+    monkeypatch.setattr(plugin_module, "_bridge", bridge)
+    monkeypatch.setattr(webif, "_bridge", lambda: bridge)
+    attempts = []
+
+    class Refuse:
+        def find_spec(self, name, path=None, target=None):
+            if name.startswith("MQTTBridge") and name not in sys.modules:
+                attempts.append(name)
+                raise ImportError("the previous version's files are on disk: " + name)
+            return None
+
+    monkeypatch.setattr(sys, "meta_path", [Refuse()] + sys.meta_path)
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped",
+                error=str(updatehelper.Fail("not_stopped", previous="0.2.0")),
+                finished=NOW + 200, record={"restore": "done", "interface": "not restarted"})
+    tick()
+    assert bridge.self_update.stuck
+    factory.client.fire_message(ROOT + "/cmd/zap", b"1:0:19:283D:3FB:1:C00000:0:0:0:")
+    session = _Session()
+    plugin_module.open_setup(session)
+    assert session.opened == [MessageBox]
+    assert "restart_gui" in webif._page(_Request()).decode("utf-8")
+    resource = webif.MQTTBridgeWebResource()
+    page = new_session()
+    _request, body = post(resource, page, action_fields("restart_gui"))
+    _request, body = post(resource, page, confirmation(body), csrf=None)
+    factory.client.fire_message(ROOT + "/cmd/restart_gui", b"PRESS")
+    assert attempts == []
+    assert len(restarts(receiver)) == 2

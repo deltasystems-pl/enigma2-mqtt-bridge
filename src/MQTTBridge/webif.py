@@ -1485,13 +1485,53 @@ def _doors_closed():
         return False
 
 
+def _repair_posted(request):
+    """Whether this POST is the repair closed doors let through (`SelfUpdater.repair`).
+
+    Its action form, or the answer to the confirmation that action asked. Only the repair: every
+    other form behind the doors gets the sentence alone (`render_POST`). Anything that cannot be
+    read is "no". The token, the confirmation and the command's own guards are all still asked
+    after this - it only decides that the doors do not answer first.
+    """
+    try:
+        key = _bridge().self_update.repair()
+        if key is None:
+            return False
+        form = _single_arg(request, "form")
+        if form == "action":
+            return _single_arg(request, "action") == key
+        if form == "confirm":
+            pending = _session(request).get(CONFIRM_KEY)
+            return isinstance(pending, dict) and pending.get("action") == key
+    except Exception:
+        return False
+    return False
+
+
+def _repair_form(request, bridge):
+    """The form of the command closed doors let through (`SelfUpdater.repair`), or nothing."""
+    try:
+        key = bridge.self_update.repair()
+        if key is None:
+            return ""
+        return _action_form(_action(key, bridge), _csrf_token(request), bool(bridge.running))
+    except Exception:
+        LOG.exception("the repair form could not be rendered")
+        return ""
+
+
 def _page(request, message=""):
     bridge = _bridge()
     if bridge is not None and _updating(bridge):
         # The new release is on disk under this process: nothing but the sentence, and no
-        # form that could post a change into it (`selfupdate.py`).
+        # form that could post a change into it (`selfupdate.py`) - except the one command
+        # that is the repair the sentence names, when it names one. An answer to a command
+        # posted here (the doors' own refusal, or the repair's) is said above it.
+        notice = f"<p class='notice'>{_e(message)}</p>" if message else ""
         return _document(request,
-                         f"<p class='notice'>{_e(household_doors(bridge.self_update))}</p>")
+                         notice
+                         + f"<p class='notice'>{_e(household_doors(bridge.self_update))}</p>"
+                         + _repair_form(request, bridge))
     section = _section(bridge)
     token = _csrf_token(request)
     notice = f"<p class='notice'>{_e(message)}</p>" if message else ""
@@ -1646,12 +1686,14 @@ class MQTTBridgeWebResource(resource.Resource):
         content_type = (request.getHeader("content-type") or "").split(";", 1)[0].lower()
         if content_type != "application/x-www-form-urlencoded" or not _same_origin(request):
             return _answer(request, _("Request rejected."), http.FORBIDDEN)
-        if _doors_closed():
+        if _doors_closed() and not _repair_posted(request):
             # Every form - an install, any other action, a settings save, the answer to a
             # confirmation asked before - gets the sentence alone (spec ae.6 step 3). No
             # question: its answer could only meet the doors, and asking it tells the
             # household something can still be done. Nothing kept: a confirmation asked
             # before the doors closed is dropped, not left to be answered once they reopen.
+            # The one exception is the repair the sentence names (after `not_stopped`, the
+            # interface restart): its form and its confirmation go on, with every check.
             _session(request).pop(CONFIRM_KEY, None)
             return _answer(request, code=http.CONFLICT)
         try:

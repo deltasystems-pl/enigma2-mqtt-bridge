@@ -1211,8 +1211,9 @@ def test_every_command_the_dispatcher_knows_has_a_page_action():
     """A command added to the dispatcher without a page action fails here."""
     handlers = set(CommandDispatcher(SimpleNamespace()).handlers)
     covered = {action.command for action in webif.actions()}
-    # `config` is the settings form itself.
-    assert handlers == covered | {"config"}
+    # `config` is the settings form itself. `relay` is Home Assistant's answer to the
+    # receiver's own question, nobody's action (`selfupdate.py`).
+    assert handlers == covered | {"config", "relay"}
 
 
 def test_the_origin_answers_the_permission_and_nothing_else():

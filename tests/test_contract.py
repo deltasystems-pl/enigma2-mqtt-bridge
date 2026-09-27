@@ -43,6 +43,15 @@ def contract():
     return json.loads(CONTRACT.read_text(encoding="utf-8"))
 
 
+PLANNED_HEADER = "| Kind | Name | Shape |\n|---|---|---|\n"
+
+
+def _plan(text, row):
+    """TOPICS.md with one more row in section 5's planned table."""
+    assert text.count(PLANNED_HEADER) == 1
+    return text.replace(PLANNED_HEADER, PLANNED_HEADER + row + "\n", 1)
+
+
 def _mentions(problems, *words):
     """True when one problem line carries every word - the checker has to say what broke."""
     return any(all(word in line for word in words) for line in problems)
@@ -72,7 +81,10 @@ def test_the_parse_is_not_empty(checker, topics_text):
     }
     assert parsed["settings"]["screenshot"]["type"] == "enum(off|on_zap|interval)"
     assert "uninstall" in parsed["capabilities"]
-    assert {"kind": "command", "name": "relay"} in parsed["planned"]
+    assert "relay" in parsed["commands"]
+    assert parsed["state_topics"]["relay_request"] == {"payload": "json", "retained": False}
+    # Nothing is planned now; the table is there, empty, and a row in it is read (below).
+    assert parsed["planned"] == []
 
 
 # ------------------------------------------------------------- and the code --
@@ -241,11 +253,12 @@ def test_a_contract_major_that_differs_is_named(checker, topics_text, contract):
 
 
 def test_a_planned_row_missing_from_the_data_is_named(checker, topics_text, contract):
-    contract["planned"] = [
-        row for row in contract["planned"] if row != {"kind": "command", "name": "relay"}
-    ]
-    problems = checker.check_consistency(topics_text, contract)
-    assert _mentions(problems, "planned", "relay")
+    planned = _plan(topics_text, "| Command | `teleport` | JSON: moves the box |")
+    assert checker.parse_topics(planned)["planned"] == [{"kind": "command", "name": "teleport"}]
+    problems = checker.check_consistency(planned, contract)
+    assert _mentions(problems, "planned", "teleport")
+    contract["planned"].append({"kind": "command", "name": "teleport"})
+    assert checker.check_consistency(planned, contract) == []
 
 
 def test_a_command_added_to_the_prose_only_is_named(checker, topics_text, contract):
@@ -260,9 +273,7 @@ def test_a_planned_item_that_is_already_implemented_is_refused(checker, topics_t
     # A plan that is also in the implemented tables is a feature pretending to be a promise,
     # or a promise pretending to be a feature: either way a consumer cannot tell which.
     contract["planned"].append({"kind": "command", "name": "zap"})
-    broken_text = topics_text.replace(
-        "| Command | `relay` |", "| Command | `zap` |\n| Command | `relay` |", 1
-    )
+    broken_text = _plan(topics_text, "| Command | `zap` | any |")
     problems = checker.check_consistency(broken_text, contract)
     assert _mentions(problems, "planned", "zap", "already")
 
@@ -368,9 +379,11 @@ def test_a_lower_major_is_refused(checker, contract):
 
 def test_a_plan_may_be_dropped(checker, contract):
     # A planned row is a promise about a shape, not a feature anybody can already rely on.
+    older = copy.deepcopy(contract)
+    older["planned"] = [{"kind": "command", "name": "teleport"}]
     newer = copy.deepcopy(contract)
     newer["planned"] = []
-    assert checker.compare(contract, newer) == []
+    assert checker.compare(older, newer) == []
 
 
 def test_a_setting_retyped_is_refused(checker, contract):
@@ -417,7 +430,8 @@ def test_the_update_check_is_in_the_contract_and_out_of_the_plan(checker, topics
     }
 
 
-def test_the_install_is_in_the_contract_and_only_the_relay_is_planned(checker, topics_text):
+def test_the_install_and_the_relay_are_in_the_contract_and_nothing_is_planned(checker,
+                                                                              topics_text):
     parsed = checker.parse_topics(topics_text)
     assert parsed["settings"]["update_allowed"] == {
         "type": "bool", "writable": False, "since": "unreleased",
@@ -425,8 +439,9 @@ def test_the_install_is_in_the_contract_and_only_the_relay_is_planned(checker, t
     assert "self_update" in parsed["capabilities"]
     assert "update" in parsed["commands"]
     assert "enigma2mqtt/integration/<node>" in parsed["other_topics"]
-    planned = {(row["kind"], row["name"]) for row in parsed["planned"]}
-    assert planned == {("command", "relay"), ("event topic", "relay_request")}
+    assert "relay" in parsed["commands"]
+    assert parsed["state_topics"]["relay_request"] == {"payload": "json", "retained": False}
+    assert parsed["planned"] == []
 
 
 def test_a_topic_the_plugin_reads_missing_from_the_data_is_named(checker, topics_text,

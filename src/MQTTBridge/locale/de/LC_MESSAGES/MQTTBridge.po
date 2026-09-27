@@ -684,6 +684,10 @@ msgstr "Die Aktualisierung des Plugins ist fehlgeschlagen, und die vorherige Ver
 msgid "The update of the plugin did not finish cleanly. Please install the plugin again, for example from Home Assistant."
 msgstr "Die Aktualisierung des Plugins wurde nicht sauber abgeschlossen. Bitte installieren Sie das Plugin erneut, zum Beispiel aus Home Assistant."
 
+#: src/MQTTBridge/selfupdate.py
+msgid "The update of the plugin was undone, but the receiver's user interface did not restart. Please restart the user interface."
+msgstr "Die Aktualisierung des Plugins wurde rückgängig gemacht, aber die Benutzeroberfläche des Receivers wurde nicht neu gestartet. Bitte starten Sie die Benutzeroberfläche neu."
+
 #: src/MQTTBridge/webif.py
 msgid "Check for plugin updates now"
 msgstr "Jetzt nach Plugin-Aktualisierungen suchen"

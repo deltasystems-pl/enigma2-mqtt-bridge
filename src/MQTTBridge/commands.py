@@ -120,6 +120,7 @@ class CommandDispatcher:
             "uninstall": self.uninstall,
             "update_check": self.update_check,
             "update": self.update,
+            "relay": self.relay,
         }
         # Command topics of this node that somebody left a retained message on,
         # this session. Discarding one is not clearing it: the broker hands it
@@ -148,6 +149,13 @@ class CommandDispatcher:
             )
             return False
 
+        if name == "relay":
+            # Home Assistant's answer to this receiver's own `relay_request`, not something to
+            # run: it neither sets nor clears `last_error`, so that an answer nobody here asked
+            # for is a line in the log and nothing more (`selfupdate.py`).
+            self.relay(decode(payload))
+            return True
+
         handler = self.handlers.get(name)
         if handler is None:
             self.bridge.publish_last_error(name, "unknown command")
@@ -173,6 +181,11 @@ class CommandDispatcher:
         if len(text.encode("utf-8")) > MAX_PAYLOAD_BYTES:
             LOG.warning("refusing cmd/%s: over the %d byte limit", name, MAX_PAYLOAD_BYTES)
             return "the command is over the " + str(MAX_PAYLOAD_BYTES) + " byte limit"
+        if name == "relay":
+            # An answer to the receiver's own question, taken from the broker only; from
+            # anywhere else it is nothing, and says nothing on `last_error` either.
+            LOG.info("cmd/relay is taken from the broker only; ignored from %s", origin)
+            return None
         handler = self.handlers.get(name)
         if handler is None:
             self.bridge.publish_last_error(name, "unknown command")
@@ -187,9 +200,10 @@ class CommandDispatcher:
             LOG.info("cmd/%s from the receiver's own screen", name)
         else:
             LOG.info("cmd/%s", name)
-        doors = self._doors()
+        doors = self._doors(name)
         if doors:
-            # The new release is on disk under this process (`selfupdate.py`): nothing runs.
+            # The new release is on disk under this process (`selfupdate.py`): nothing runs -
+            # but the one command that is the repair the closed doors name.
             if self.bridge.self_update.silent:
                 LOG.info("cmd/%s refused, not published: %s", name, doors)
             else:
@@ -216,9 +230,9 @@ class CommandDispatcher:
     def session(self):
         return self.bridge.session
 
-    def _doors(self):
+    def _doors(self, name=None):
         updater = getattr(self.bridge, "self_update", None)
-        return updater.doors_refusal() if updater is not None else None
+        return updater.doors_refusal(name) if updater is not None else None
 
     def publisher(self, name):
         return self.bridge.publisher(name)
@@ -676,3 +690,15 @@ class CommandDispatcher:
         `update` topic moving (`selfupdate.py`).
         """
         return self.bridge.self_update.request(text, origin=origin, downgrade=downgrade)
+
+    def relay(self, text, origin=MQTT):
+        """Home Assistant's answer to the receiver's `relay_request`: `{"id", "version", "url",
+        "expires"}`.
+
+        Taken only from the broker, and only as the answer the receiver is waiting for
+        (`selfupdate.py`); anything else is logged and dropped. It is nobody's action, so the
+        page has none, and an answer that came from anywhere but the broker is not taken.
+        """
+        if origin == MQTT:
+            self.bridge.self_update.on_relay(text)
+        return None

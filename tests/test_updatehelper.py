@@ -8,6 +8,7 @@ word - at exactly one step of the sequence. The last tests run the helper as the
 a copy in its own directory, a separate process, a real signal while it waits at a FIFO.
 """
 
+import errno
 import hashlib
 import io
 import json
@@ -115,8 +116,20 @@ class Box(updatehelper.Receiver):
         return self.t
 
     # processes
+    unreadable = 0  # how many of the next looks at /proc fail to list it
+
     def enigma2_pids(self):
+        # As the receiver's own: a /proc that cannot be listed reads as no enigma2 at all.
+        if self.unreadable:
+            self.unreadable -= 1
+            return set()
         return set(self.pids)
+
+    def enigma2_look(self):
+        if self.unreadable:
+            self.unreadable -= 1
+            return None
+        return self.enigma2_pids()
 
     def open_files(self, pid):
         return set(self.fds.get(pid, ()))
@@ -134,6 +147,10 @@ class Box(updatehelper.Receiver):
                 self.pids = set()
                 self.webif_up = False
             elif argv[1] == "3":
+                if self.pids and not self.stops:
+                    # An `init 4` that took no effect left the runlevel where it was: `init 3`
+                    # starts nothing, and the interface that never stopped runs on.
+                    return 0
                 self.lastservice_at_start = self.setting("config.tv.lastservice")
                 if self.start_fails:
                     return 1
@@ -2143,3 +2160,647 @@ def test_a_slow_restart_beside_a_remembered_child_still_gets_its_proof_window(tm
     scene.box.pauses["restarting"] = the_old_interface_quits
     assert scene.run() == 0
     assert scene.last()["result"] == "installed"
+
+
+# ------------------------------------------------ R2 cut short, and R3 failing --
+
+
+@pytest.mark.parametrize("where", ["rollback_stopped", "restore_once", "restore_always"])
+def test_whatever_cuts_r2_short_after_init_4_is_finished_before_the_interface_starts(
+        tmp_path, monkeypatch, where):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    if where == "rollback_stopped":
+        def escapes():
+            scene.box.pauses.pop("rollback_stopped")
+            raise Escape()
+        scene.box.pauses["rollback_stopped"] = escapes
+    else:
+        real = updatehelper.restore_snapshot
+        calls = []
+
+        def escapes_from_the_restore(*args, **kwargs):
+            calls.append(True)
+            if where == "restore_always" or len(calls) == 1:
+                raise Escape()
+            return real(*args, **kwargs)
+        monkeypatch.setattr(updatehelper, "restore_snapshot", escapes_from_the_restore)
+    with pytest.raises(Escape):
+        scene.run()
+    assert scene.init_calls() == ["4", "3"] and scene.box.pids and not scene.locked()
+    record = scene.status()["record"]
+    # Each remaining step ran on its own: a restore that cannot finish keeps no channel back.
+    assert (record["rollback"], record["lastservice"]) == ("cut short", "written")
+    assert scene.box.lastservice_at_start == TVP1
+    if where == "restore_always":
+        assert record["restore"] == "interrupted"
+        assert scene.box.init_log[-1] == ("3", f"# plugin {NEW}\n")
+    else:
+        # The restore that was cut short is made before the interface starts.
+        assert record["restore"] == "done"
+        assert scene.box.setting("config.plugins.mqttbridge.enabled") == "true"
+        assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+
+
+def test_a_channel_write_that_escapes_twice_still_lets_the_interface_start(
+        tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+
+    def escapes(_root, _reference):
+        raise Escape()
+    monkeypatch.setattr(updatehelper, "write_lastservice", escapes)
+    with pytest.raises(Escape):
+        scene.run()
+    assert scene.init_calls() == ["4", "3"] and scene.box.pids and not scene.locked()
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    record = scene.status()["record"]
+    assert (record["rollback"], record["restore"], record["lastservice"]) == (
+        "cut short", "done", "failed")
+
+
+def test_an_error_in_r3_leaves_a_finished_rollback_rolled_back(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+
+    def broken(self, recorded):
+        raise RuntimeError("the channel check broke")
+    monkeypatch.setattr(updatehelper.Transaction, "verify", broken)
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    assert scene.plugin_py() == f"# plugin {OLD}\n" and scene.init_calls() == ["4", "3"]
+    record = scene.status()["record"]
+    assert (record["channel"], record["standby"]) == ("unconfirmed", "unconfirmed")
+    assert record["internal_error"].startswith("RuntimeError")
+
+
+def test_r2_takes_the_channel_recorded_before_the_restart_when_openwebif_is_silent(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    # OpenWebif answered before the restart; by the time R2 starts, it says nothing.
+    scene.box.pauses["proving"] = lambda: setattr(scene.box, "webif_up", False)
+    assert scene.run() == 1
+    assert scene.last()["result"] == "rolled_back"
+    assert scene.box.lastservice_at_start == TVP1
+    assert scene.status()["record"]["channel"] == "kept"
+
+
+# ---------------------------------------- R2's own start, its stop and its verdict --
+
+
+@pytest.mark.parametrize("error", [Escape, RuntimeError, MemoryError],
+                         ids=["escape", "error", "memory"])
+def test_an_escape_from_the_init_3_call_itself_still_starts_the_interface(tmp_path, error):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    real = scene.box.run
+    refused = []
+
+    def init_3_cannot_be_started_once(argv, timeout):
+        if argv[0] == scene.box.init and argv[1] == "3" and not refused:
+            refused.append(argv[1])
+            raise error("init 3")
+        return real(argv, timeout)
+    scene.box.run = init_3_cannot_be_started_once
+    if issubclass(error, Exception):
+        assert scene.run() == 1
+    else:
+        with pytest.raises(error):
+            scene.run()
+    # `init 3` is safe to repeat, so the `finally` sends it again: the picture comes back on the
+    # old version, with everything R2 did before the call kept.
+    assert refused == ["3"] and scene.init_calls() == ["4", "3"] and scene.box.pids
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    assert scene.box.lastservice_at_start == TVP1 and not scene.locked()
+    record = scene.status()["record"]
+    assert (record["rollback"], record["restore"], record["lastservice"]) == (
+        "cut short", "done", "written")
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "internal_error")
+
+
+@pytest.mark.parametrize("error", [RuntimeError("no child"), MemoryError()],
+                         ids=["error", "memory"])
+def test_a_program_that_cannot_be_started_is_an_exit_status_never_an_escape(
+        tmp_path, monkeypatch, error):
+    def fake(argv, **kwargs):
+        raise error
+    monkeypatch.setattr(updatehelper.subprocess, "run", fake)
+    receiver = updatehelper.Receiver(root=str(tmp_path))
+    assert receiver.run(["/sbin/init", "3"], 5) == 127
+    assert receiver.last_output.startswith(type(error).__name__)
+
+
+def escape_after_init_4(scene):
+    """`init 4` takes effect - or not, as the box does - and then something escapes."""
+    real = scene.box.run
+
+    def init_4_then_escape(argv, timeout):
+        code = real(argv, timeout)
+        if argv[0] == scene.box.init and argv[1] == "4":
+            raise Escape()
+        return code
+    scene.box.run = init_4_then_escape
+
+
+@pytest.mark.parametrize("where", ["init_4", "stop_wait"])
+def test_r2_cut_short_before_it_saw_the_stop_still_restores_a_stopped_interfaces_settings(
+        tmp_path, where):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    if where == "init_4":
+        escape_after_init_4(scene)
+    else:
+        real = scene.box.enigma2_pids
+        looks = []
+
+        def the_first_look_after_init_4_escapes():
+            if scene.init_calls() and not looks:
+                looks.append(True)
+                raise Escape()
+            return real()
+        scene.box.enigma2_pids = the_first_look_after_init_4_escapes
+    with pytest.raises(Escape):
+        scene.run()
+    # enigma2 was down, only not yet seen down: the settings block and the channel go back.
+    assert scene.init_calls() == ["4", "3"] and scene.box.pids and not scene.locked()
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "true"
+    assert scene.box.lastservice_at_start == TVP1
+    record = scene.status()["record"]
+    assert (record["rollback"], record["restore"], record["lastservice"]) == (
+        "cut short", "done", "written")
+
+
+def test_r2_cut_short_in_an_init_4_that_stopped_nothing_writes_no_settings(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    escape_after_init_4(scene)
+    with pytest.raises(Escape):
+        scene.run()
+    # The running interface writes its own settings over any on its next clean quit.
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "false"
+    assert scene.box.setting("config.tv.lastservice") == TVN
+    assert scene.plugin_py() == f"# plugin {OLD}\n" and scene.init_calls() == ["4", "3"]
+    assert scene.status()["record"]["restore"] == "done"
+
+
+def test_an_interface_that_never_stopped_is_not_reported_rolled_back(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    assert scene.run() == 1
+    last = scene.last()
+    assert (last["result"], last["reason"]) == ("failed", "not_stopped")
+    assert OLD in last["error"] and scene.marker()["result"] == "failed"
+    record = scene.status()["record"]
+    assert (record["restore"], record["stop"], record["interface"], record["cause"]) == (
+        "done", "not seen", "not restarted", "not_started")
+    assert record["unstopped"] == [200]
+    # The old files are on disk, but the process that runs is the one R2 could not stop.
+    assert scene.plugin_py() == f"# plugin {OLD}\n" and scene.box.pids == {200}
+    assert record["channel"] == "unconfirmed" and scene.box.zaps == []
+
+
+def test_an_interface_that_did_not_come_back_is_not_reported_rolled_back(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.start_fails = True
+    assert scene.run() == 1
+    last = scene.last()
+    assert (last["result"], last["reason"]) == ("failed", "interface_not_started")
+    assert OLD in last["error"]
+    record = scene.status()["record"]
+    assert (record["restore"], record["stop"], record["interface"], record["cause"]) == (
+        "done", "seen", "not started", "not_started")
+    assert scene.plugin_py() == f"# plugin {OLD}\n" and not scene.box.pids
+
+
+def test_an_interface_that_quit_late_and_came_back_is_rolled_back(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    # Not seen stopped within the wait; gone by the time `init 3` is sent, which then starts.
+    scene.box.pauses["rollback_restored"] = lambda: setattr(scene.box, "pids", set())
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    record = scene.status()["record"]
+    assert (record["restore"], record["stop"]) == ("done", "not seen")
+    assert "interface" not in record and "cause" not in record
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n") and scene.box.pids == {300}
+    # Not seen stopped, so nothing was written into its settings.
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "false"
+
+
+def test_an_error_in_r3_after_the_channel_was_measured_keeps_the_measurement(
+        tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.pauses["proving"] = lambda: setattr(scene.box, "standby", True)
+    real = updatehelper.Transaction.statusinfo
+    looks = []
+
+    def the_second_look_after_the_start_breaks(self):
+        if scene.box.init_log and scene.box.init_log[-1][0] == "3":
+            looks.append(True)
+            if len(looks) > 1:
+                raise RuntimeError("OpenWebif went away")
+        return real(self)
+    monkeypatch.setattr(updatehelper.Transaction, "statusinfo",
+                        the_second_look_after_the_start_breaks)
+    assert scene.run() == 1
+    assert scene.last()["result"] == "rolled_back"
+    record = scene.status()["record"]
+    # The channel had been measured before the error: only what was not stays unconfirmed.
+    assert (record["channel"], record["standby"]) == ("kept", "unconfirmed")
+
+
+def test_a_partial_withdraw_then_an_r2_cut_short_still_restores_in_r2(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+    real = updatehelper._restore_records
+    calls = []
+
+    def records_fail_once(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            raise OSError(5, "Input/output error")
+        return real(*args, **kwargs)
+    monkeypatch.setattr(updatehelper, "_restore_records", records_fail_once)
+    # The withdraw leaves `restore: partial`, a restart lands meanwhile, and R2 is cut short
+    # before its own restore: the `finally` still restores, keyed on R2's own step.
+    scene.box.pauses["withdrawn"] = scene.box.restart
+
+    def escapes():
+        scene.box.pauses.pop("rollback_stopped")
+        raise Escape()
+    scene.box.pauses["rollback_stopped"] = escapes
+    with pytest.raises(Escape):
+        scene.run()
+    record = scene.status()["record"]
+    assert (record["rollback"], record["restore"]) == ("cut short", "done")
+    assert len(calls) == 2 and scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    status, _info = updatehelper.opkg_paths(scene.box.root)
+    assert f"Version: {OLD}\n" in Path(status).read_text()
+    assert scene.init_calls() == ["4", "3"] and not scene.locked()
+
+
+
+def test_r2_waits_for_a_stop_that_takes_a_few_seconds(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    real = scene.box.run
+
+    def enigma2_takes_five_seconds_to_quit(argv, timeout):
+        if argv[0] == scene.box.init and argv[1] == "4":
+            scene.box.at(5, lambda: setattr(scene.box, "pids", set()))
+        return real(argv, timeout)
+    scene.box.run = enigma2_takes_five_seconds_to_quit
+    assert scene.run() == 1
+    # Seen running at first, then seen gone: a stop, with everything that follows one.
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    record = scene.status()["record"]
+    assert (record["stop"], record["restore"], record["lastservice"]) == (
+        "seen", "done", "written")
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "true"
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n") and scene.box.pids == {300}
+
+
+# ------------------------------------------- an interruption at every step of R2 --
+
+
+R2_STEPS = ["init_4", "stop_wait", "rollback_stopped", "opkg_lock", "opkg_records",
+            "settings_block", "restore_returned", "rollback_restored", "lastservice", "init_3",
+            "r3"]
+# Where an `Exception` is the restore's own, handled failure (D2): recorded, not retried.
+RESTORE_HANDLES = ("opkg_lock", "opkg_records", "settings_block")
+
+
+def interrupt_r2_at(scene, monkeypatch, step, error, always):
+    """Raise `error` at `step` of R2, once or every time the step comes round."""
+    fired = []
+
+    def fire():
+        # Only inside R2: the snapshot takes opkg's lock too, long before.
+        if "4" not in scene.init_calls() or (fired and not always):
+            return False
+        fired.append(step)
+        return True
+
+    def wrap(owner, name, after, when=lambda *args: True):
+        real = getattr(owner, name)
+
+        def wrapped(*args, **kwargs):
+            if not after and when(*args) and fire():
+                raise error(step)
+            out = real(*args, **kwargs)
+            if after and when(*args) and fire():
+                raise error(step)
+            return out
+        monkeypatch.setattr(owner, name, wrapped)
+
+    def pause():
+        if fire():
+            raise error(step)
+    if step == "init_4":
+        wrap(scene.box, "run", True, lambda argv, _timeout: argv[1:] == ["4"])
+    elif step == "init_3":
+        wrap(scene.box, "run", False, lambda argv, _timeout: argv[1:] == ["3"])
+    elif step == "stop_wait":
+        wrap(scene.box, "enigma2_pids", False)
+    elif step in ("rollback_stopped", "rollback_restored"):
+        scene.box.pauses[step] = pause
+    elif step == "opkg_lock":
+        wrap(updatehelper.opkg_lock, "__enter__", False)
+    elif step == "opkg_records":
+        wrap(updatehelper, "_restore_records", False)
+    elif step == "settings_block":
+        wrap(updatehelper, "_restore_settings", True)
+    elif step == "restore_returned":
+        wrap(updatehelper.Transaction, "put_back", True)
+    elif step == "lastservice":
+        wrap(updatehelper, "write_lastservice", True)
+    else:
+        wrap(updatehelper.Transaction, "statusinfo", False,
+             lambda _self: bool(scene.box.init_log) and scene.box.init_log[-1][0] == "3")
+    return fired
+
+
+@pytest.mark.parametrize("always", [False, True], ids=["once", "always"])
+@pytest.mark.parametrize("error", [Escape, RuntimeError], ids=["escape", "error"])
+@pytest.mark.parametrize("step", R2_STEPS)
+def test_an_interruption_at_any_step_of_r2_ends_as_the_unit_would(
+        tmp_path, monkeypatch, step, error, always):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    fired = interrupt_r2_at(scene, monkeypatch, step, error, always)
+    try:
+        scene.run()
+    except Escape:
+        pass
+    monkeypatch.undo()
+    assert fired
+    last, record = scene.last(), scene.status()["record"]
+    settings = scene.box.read(updatehelper.SETTINGS)
+    # Never a second stop, never the lock kept, never a setting written twice.
+    assert scene.init_calls().count("4") == 1 and not scene.locked()
+    assert settings.count("config.plugins.mqttbridge.enabled=") == 1
+    assert settings.count(updatehelper.LASTSERVICE_KEY + "=") == 1
+    if last["result"] == "rolled_back":
+        assert record["restore"] == "done" and scene.plugin_py() == f"# plugin {OLD}\n"
+    if step == "init_3" and always:
+        # A start that fails every time is the one end without a picture.
+        assert scene.init_calls() == ["4"] and not scene.box.pids
+        return
+    assert scene.init_calls()[-1] == "3" and scene.box.pids
+    if always or (error is RuntimeError and step in RESTORE_HANDLES):
+        return
+    # Interrupted once: whatever it cut short is finished before the start - the old version,
+    # its records, the household's settings block and the recorded channel.
+    assert record["restore"] == "done" and record["stop"] == "seen"
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    status, _info = updatehelper.opkg_paths(scene.box.root)
+    assert f"Version: {OLD}\n" in Path(status).read_text()
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "true"
+    assert scene.box.lastservice_at_start == TVP1
+
+@pytest.mark.parametrize(("answer", "word"), [
+    (None, "unreachable"),
+    ((500, b"gone"), "reachable"),
+    ((404, b""), "reachable"),
+])
+def test_the_record_says_whether_the_origin_answered_the_download(tmp_path, answer, word):
+    """The plugin keeps "unreachable" as the origin's word (review round 1, MF1); an origin that
+    answered, even with an error, was reachable."""
+    scene = Scene(tmp_path)
+    url = ORIGIN + scene.entries[0]["filename"]
+    if answer is None:
+        del scene.box.urls[url]
+    else:
+        scene.box.urls[url] = answer
+    scene.run()
+    assert scene.last()["reason"] == "download"
+    assert scene.status()["record"]["origin"] == word
+    assert scene.opkg_calls() == []
+
+
+def test_an_index_the_origin_did_not_answer_for_says_so_too(tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.urls.clear()
+    scene.run()
+    assert scene.last()["reason"] == "unreachable"
+    assert scene.status()["record"]["origin"] == "unreachable"
+
+
+def test_a_package_that_is_not_the_release_says_the_origin_answered(tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.urls[ORIGIN + scene.entries[0]["filename"]] = (200, scene.ipk + b"x")
+    scene.run()
+    assert scene.last()["reason"] == "bad_package"
+    assert scene.status()["record"]["origin"] == "reachable"
+
+
+def test_a_relay_that_does_not_answer_says_nothing_of_the_origin(tmp_path):
+    relay = {"url": "http://192.0.2.10:8123/api/enigma2_mqtt/relay/" + "a" * 43,
+             "expires": 1790999999}
+    scene = Scene(tmp_path, relay=relay)
+    index_raw, signature = updatelab.signed(7, scene.entries)
+    from MQTTBridge import trustfile
+
+    trustfile.keep(scene.box.path(updatehelper.TRUST_FILE), updatelab.TEST_KEYS, True,
+                   index_raw, signature, "relay", 1)
+    scene.box.urls.clear()
+    scene.run()
+    assert scene.last()["reason"] == "download"
+    assert "origin" not in scene.status()["record"]
+    assert scene.box.fetched == []
+
+
+# ------------------------------------ `init 3` that does not get through (review 5) --
+
+
+def init_3_fails_once(scene, monkeypatch, failure):
+    """The first `init 3` goes through the helper's own `Receiver.run`, whose child fails."""
+    real = scene.box.run
+    failed = []
+
+    def cannot_start(*_args, **_kwargs):
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(["init", "3"], 30)
+        raise {"memory": MemoryError(), "fork": OSError(errno.ENOMEM, "Cannot allocate memory"),
+               "error": RuntimeError("no child")}[failure]
+
+    def run(argv, timeout):
+        if argv[0] == scene.box.init and argv[1] == "3" and not failed:
+            failed.append(argv)
+            scene.box.argv.append(list(argv))
+            with monkeypatch.context() as patch:
+                patch.setattr(updatehelper.subprocess, "run", cannot_start)
+                return updatehelper.Receiver.run(scene.box, argv, timeout)
+        return real(argv, timeout)
+    scene.box.run = run
+    return failed
+
+
+@pytest.mark.parametrize("failure", ["memory", "fork", "error", "timeout"])
+def test_an_init_3_that_could_not_be_started_is_sent_again(tmp_path, monkeypatch, failure):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    failed = init_3_fails_once(scene, monkeypatch, failure)
+    assert scene.run() == 1
+    assert failed and scene.init_calls() == ["4", "3", "3"] and scene.box.pids == {300}
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    assert scene.status()["record"]["init_3"] == [None if failure == "timeout" else 127, 0]
+    assert scene.box.lastservice_at_start == TVP1
+
+
+def test_an_init_3_that_took_no_effect_after_a_stop_is_sent_again(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    real = scene.box.run
+
+    def the_first_start_is_lost(argv, timeout):
+        if argv[0] == scene.box.init and argv[1] == "3" and "3" not in scene.init_calls():
+            scene.box.argv.append(list(argv))
+            return 0
+        return real(argv, timeout)
+    scene.box.run = the_first_start_is_lost
+    assert scene.run() == 1
+    assert scene.init_calls() == ["4", "3", "3"] and scene.box.pids == {300}
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    assert scene.status()["record"]["start"] == "again"
+
+
+@pytest.mark.parametrize("error", [KeyboardInterrupt, SystemExit])
+def test_receiver_run_lets_what_is_not_an_exception_through(tmp_path, monkeypatch, error):
+    def interrupted(*_args, **_kwargs):
+        raise error()
+    monkeypatch.setattr(updatehelper.subprocess, "run", interrupted)
+    with pytest.raises(error):
+        updatehelper.Receiver(root=str(tmp_path)).run(["/sbin/init", "3"], 5)
+
+
+
+# --------------------------------------- a /proc that cannot be read is unknown --
+
+
+@pytest.mark.parametrize("looks", [1, 10 ** 6], ids=["one_look", "every_look"])
+def test_a_proc_that_cannot_be_listed_is_never_a_stop(tmp_path, looks):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    scene.box.pauses["rollback_recorded"] = lambda: setattr(scene.box, "unreadable", looks)
+    assert scene.run() == 1
+    # init 4 did nothing: the process R2 could not stop runs on, and no look said otherwise.
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "not_stopped")
+    assert scene.status()["record"]["stop"] == "not seen" and scene.box.pids == {200}
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "false"
+    assert scene.box.setting("config.tv.lastservice") == TVN
+
+
+@pytest.mark.parametrize("how", ["unreadable", "raises"])
+def test_a_second_look_that_fails_writes_no_settings(tmp_path, how):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    real = scene.box.run
+
+    def init_4_then_escape_and_proc_fails(argv, timeout):
+        code = real(argv, timeout)
+        if argv[0] == scene.box.init and argv[1] == "4":
+            if how == "unreadable":
+                scene.box.unreadable = 1
+            else:
+                def broken():
+                    raise OSError(errno.EMFILE, "Too many open files")
+                scene.box.enigma2_pids = scene.box.enigma2_look = broken
+            raise Escape()
+        return code
+    scene.box.run = init_4_then_escape_and_proc_fails
+    with pytest.raises(Escape):
+        scene.run()
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "false"
+    assert scene.box.setting("config.tv.lastservice") == TVN
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    assert scene.status()["record"]["stop"] == "not seen"
+
+
+def test_a_proc_that_cannot_be_listed_is_unknown_to_r2_and_empty_to_the_rest(tmp_path):
+    receiver = updatehelper.Receiver(root=str(tmp_path), proc=str(tmp_path / "no-proc"))
+    assert receiver.enigma2_look() is None
+    assert receiver.enigma2_pids() == set()
+
+
+
+# ------------------------------ what R2 could not stop, and what became of it --
+
+
+@pytest.mark.parametrize("comes_back", [True, False], ids=["restarts", "stays_down"])
+def test_an_unstopped_interface_that_quits_after_init_3_gets_init_3_again(tmp_path, comes_back):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    real = scene.box.run
+
+    def quits_ten_seconds_after_init_3(argv, timeout):
+        code = real(argv, timeout)
+        if argv[0] == scene.box.init and argv[1] == "3" and scene.init_calls() == ["4", "3"]:
+            def quits():
+                scene.box.pids = set()
+                scene.box.start_fails = not comes_back
+            scene.box.at(10, quits)
+        return code
+    scene.box.run = quits_ten_seconds_after_init_3
+    assert scene.run() == 1
+    record = scene.status()["record"]
+    assert (record["stop"], record["unstopped"], record["start"]) == ("not seen", [200], "again")
+    if comes_back:
+        assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+        assert scene.box.pids == {300} and "interface" not in record
+    else:
+        # Nothing runs: not the process R2 could not stop, and not the old version either.
+        assert (scene.last()["result"], scene.last()["reason"]) == (
+            "failed", "interface_not_started")
+        assert not scene.box.pids and record["interface"] == "not started"
+
+
+def test_a_restore_that_failed_keeps_its_reason_when_nothing_starts_either(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.start_fails = True
+
+    def no_space(*_args, **_kwargs):
+        raise OSError(errno.ENOSPC, "No space left on device")
+    monkeypatch.setattr(updatehelper, "restore_snapshot", no_space)
+    assert scene.run() == 1
+    # The repair the restore's reason names - a forced reinstall - covers the start as well.
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "restore_failed")
+    record = scene.status()["record"]
+    assert (record["interface"], record["cause"]) == ("not started", "not_started")
+    assert record["restore"].startswith("failed")
+
+
+def test_without_one_answered_look_during_the_stop_nothing_counts_as_a_start(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    # /proc cannot be listed for the whole of the wait for the stop, and answers again after.
+    scene.box.pauses["rollback_recorded"] = lambda: setattr(scene.box, "unreadable", 10 ** 6)
+    scene.box.pauses["rollback_stopped"] = lambda: setattr(scene.box, "unreadable", 0)
+    assert scene.run() == 1
+    # The enigma2 seen afterwards may be the very one that never stopped: never a start.
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "not_stopped")
+    record = scene.status()["record"]
+    assert record["interface"] == "not restarted" and scene.box.pids == {200}
+    # Which processes R2 could not stop is unknown, so none are named.
+    assert "unstopped" not in record
