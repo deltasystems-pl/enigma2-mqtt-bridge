@@ -1219,6 +1219,20 @@ def test_an_interface_restart_during_opkg_is_rolled_back_not_proved(tmp_path):
     assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
 
 
+def test_a_failure_after_an_unasked_restart_stops_the_interface_before_restoring(tmp_path):
+    scene = Scene(tmp_path)
+    scene.box.opkg_mode = "partial"
+
+    def restart_while_opkg_unpacks():
+        scene.box.pids = {150}
+    scene.box.opkg_blocker = restart_while_opkg_unpacks
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "manifest")
+    # R2 straight away: the files go back only once the running process is stopped.
+    assert scene.box.init_log[0] == ("4", "# garbage\n")
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+
+
 def test_a_short_lived_enigma2_child_is_not_the_restart(tmp_path):
     scene = Scene(tmp_path)
 
@@ -1329,6 +1343,8 @@ def test_an_unexpected_error_after_the_restart_rolls_back(tmp_path):
     assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "internal_error")
     assert scene.plugin_py() == f"# plugin {OLD}\n"
     assert scene.init_calls() == ["4", "3"] and not scene.locked()
+    # Nothing was put back under the new interface before it was stopped.
+    assert scene.box.init_log[0] == ("4", f"# plugin {NEW}\n")
 
 
 def test_an_error_inside_the_restore_of_r2_still_starts_the_interface(tmp_path, monkeypatch):
@@ -1437,6 +1453,35 @@ def test_a_second_helper_with_the_same_id_writes_nothing_into_the_first(tmp_path
     assert scene.run() == 0
     assert seen["rc"] == 1
     assert (seen["status"]["phase"], seen["status"]["result"]) == ("snapshot", None)
+
+
+def test_a_lock_whose_owner_cannot_be_read_yet_gets_nothing_written(tmp_path):
+    scene = Scene(tmp_path)
+    # A claimer between its mkdir and its first write - perhaps this transaction's own helper.
+    (Path(scene.box.root) / updatehelper.BACKUPS / updatehelper.LOCK_NAME).mkdir(mode=0o700)
+    assert scene.run() == 1
+    assert not (scene.directory / "status.json").exists()
+
+
+def test_losing_the_race_for_a_freed_lock_is_busy(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    backups = Path(scene.box.root) / updatehelper.BACKUPS
+    lock = backups / updatehelper.LOCK_NAME
+    lock.mkdir(mode=0o700)
+    (lock / "owner.json").write_text(json.dumps({"boot_id": "boot-0", "id": "ffffffffffff"}))
+    calls = []
+
+    def stale(receiver, path):
+        calls.append(path)
+        if len(calls) == 2:
+            # Another claimer takes the name the moment the stale lock was moved aside.
+            lock.mkdir(mode=0o700)
+            (lock / "owner.json").write_text(json.dumps({"id": "eeeeeeeeeeee"}))
+        return "it was claimed before the receiver last rebooted"
+    monkeypatch.setattr(updatehelper, "lock_is_stale", stale)
+    assert scene.run() == 1
+    assert scene.status()["reason"] == "busy"
+    assert json.loads((lock / "owner.json").read_text())["id"] == "eeeeeeeeeeee"
 
 
 def test_a_helper_refused_by_another_transactions_lock_says_busy(tmp_path):
@@ -1595,6 +1640,7 @@ def test_a_failed_package_write_leaves_no_rollback_point(tmp_path, monkeypatch):
     monkeypatch.setattr(updatehelper, "atomic_write", failing)
     assert scene.run() == 1
     assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "internal_error")
+    assert "could not be written" in scene.last()["error"]
     assert not list((Path(scene.box.root) / updatehelper.BACKUPS).glob("self-update-*"))
     assert scene.opkg_calls() == [] and not scene.locked()
 
