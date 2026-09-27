@@ -48,6 +48,7 @@ directory, the marker's `id`, the lock owner's `id` and `update.transaction.id` 
 | `/home/root/mqttbridge-backups/self-update-<id>/` | the self-update (planned) | Its snapshot, schema 2 (0700) |
 | `/home/root/mqttbridge-backups/update-<id>/` | the self-update (the helper is written; the plugin does not start it yet) | The transaction directory (0700), §7: `request.json` (0600), the copy of the helper that runs and the four modules it imports, `status.json`, the downloaded package, and the plugin's words `restart.json`, `withdraw` and `started.json`. Removed when the transaction commits; after any other end it is kept, and the helper keeps its own and the newest other `update-<id>` |
 | `/etc/enigma2/mqttbridge-update.json` | the self-update (written by the helper; not yet read) | The marker (0600), §4 |
+| `/home/root/mqttbridge-backups/drill-r2` | a person, for the hardware acceptance drill | Empty. Honoured only by a self-update started by an **acceptance** build, which removes it and goes from installed straight into R2 (§7); every other build ignores it and leaves it where it is |
 | `/etc/enigma2/mqttbridge-update-last.json` | the self-update's helper | The last transaction's end (0600): `id`, `started_by`, `target`, `from`, `started`, `finished`, `result`, `reason`, `error`, and `boot_id` and `uptime` (seconds since boot) at the end. Written at every end by the helper that held the lock, so that the ten-minute limit between transactions and `update.transaction` outlive the transaction directory. Nothing in it decides anything else. `started` and `finished` are the wall clock, which on a receiver without a battery-backed clock starts in 1970 and jumps when NTP answers, so **the ten-minute limit is measured on the boot, never on the wall clock**: with the same `boot_id` as now, the time since the end is the uptime now minus `uptime`; with another `boot_id`, the transaction ended before this boot, so at least the uptime now has passed; with no `boot_id` (a receiver that does not report one), the limit falls back to `finished` |
 | `/etc/enigma2/mqttbridge-index.json` | the plugin (the update check, `updatecheck.py`); the self-update's helper (`updatehelper.py`), when it fetches the index itself - both through `trustfile.keep` | What the receiver has accepted from the signed release index (0600), written whole and renamed into place: the trust memory in the shape [RELEASE-INDEX.md](RELEASE-INDEX.md) gives it, and under `held` the last accepted index and its signature file - see ADR-0015. Written only when what the receiver trusts changes (an index accepted or taken back), never by a check that learned nothing. 🔴 **Every writer** - the plugin today, the self-update's helper once it exists - follows one rule: take `mqttbridge-index.lock` (below), read this file again, judge the candidate index against that fresh read, write the result whole (temporary file, fsync, rename), let go. A judgement made on an earlier read is never written. **Not the lock of §2**: that one is shared with the integration's installer and held for a whole transaction, so a relayed index could not be kept during any install, and a plugin that died holding it would block every installer for thirty minutes. **Kept on purpose** by `cmd/uninstall` and by a downgrade to 0.2.0 or 0.3.x, which never read it; a reflash or a factory reset starts it again |
 | `/etc/enigma2/mqttbridge-index.lock` | the plugin; the self-update's helper | The trust file's own lock (0600, empty - a lock file found with another mode is made 0600 by whoever opens it next): an exclusive `flock`, taken without blocking and retried for at most two seconds, held only around read - judge - write of the trust file and never across a fetch. `flock` dies with its holder, so a writer killed while holding it blocks nobody. A writer that cannot get it in time writes nothing and says so (`update` `check_error` `trust_busy`). Left in place; its content means nothing |
@@ -603,7 +604,8 @@ plugin, or the release page's digest), `no_space`, `opkg_busy`, `snapshot_failed
 before the package manager ran) with `interrupted`, and with `rolled_back` when the interface
 restarted after the package manager started and before `restarting`; `internal_error` (an error nothing expected, the package
 or the first marker not written) with `failed`, or with `rolled_back` when it came after the
-restart and R2 put the old version back. After the package manager ran, `installed` comes only
+restart and R2 put the old version back; `drill` with `rolled_back`, only for an acceptance
+build (below). After the package manager ran, `installed` comes only
 after the proof, and every other result only once the old files are back - with two exceptions
 that say so: `failed` with a `record.restore` other than `done`, and `interrupted` because the
 lock was taken, after which the helper touches nothing of the receiver.
@@ -623,3 +625,13 @@ host is not checked against anything: a broker client can name any host, and wha
 verified against the signed entry before `opkg` sees it. A receiver whose clock still stands in
 1970 cannot tell an expired address from a fresh one; Home Assistant's own expiry of the token
 bounds that case.
+
+**The acceptance drill's hook.** The hardware acceptance has to prove R2's stop, restore and
+`lastservice` write on a receiver in one restart, without a forward restart and a failed proof
+first. So a helper whose request says `acceptance: true` - which only an `acceptance`-flavour build
+writes; release and development builds always write `false` - looks, once the package is installed
+and verified and before it hands the restart to the plugin, for the empty regular file
+`/home/root/mqttbridge-backups/drill-r2`. When it is there, the helper removes it and goes straight
+into R2: the result is `rolled_back`, reason `drill`, and the record says `drill: r2`. A link is
+never followed. Any other build ignores the file and leaves it in place, and it changes nothing
+else: an acceptance build without the file runs the transaction as any other.

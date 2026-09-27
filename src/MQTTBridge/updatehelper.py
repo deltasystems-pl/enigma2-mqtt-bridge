@@ -123,6 +123,9 @@ PROVISION = "etc/enigma2/mqttbridge.json"
 BACKUPS = "home/root/mqttbridge-backups"
 LOCK_NAME = ".ha-installer.lock"
 MARKER = "etc/enigma2/mqttbridge-update.json"
+# The hardware acceptance drill's hook (TRANSACTION.md section 7): honoured only for a request
+# from an acceptance build, used up by the transaction that honours it.
+DRILL_R2 = "home/root/mqttbridge-backups/drill-r2"
 LAST = "etc/enigma2/mqttbridge-update-last.json"
 TRUST_FILE = "etc/enigma2/mqttbridge-index.json"
 LOG_PATHS = ("home/root/mqttbridge.log", "tmp/mqttbridge.log")
@@ -206,6 +209,8 @@ SENTENCES = {
     "question": "the receiver did not restart its interface (the question on the television was "
                 "answered no, or nobody answered); the update was withdrawn",
     "internal_error": "the update helper failed: {detail}",
+    "drill": "an acceptance drill sent the update straight into its rollback; the previous "
+             "version is back",
 }
 
 
@@ -1549,6 +1554,10 @@ class Transaction:
             self.restarted_at = self.receiver.clock()
             return self.rollback(Fail("interrupted", detail="the receiver's interface restarted "
                                                             "while the update was installed"))
+        if self.drill_requested():
+            # The acceptance drill: from installed straight into R2, with no forward restart, so
+            # the stop-restore-write mechanics are proved on a receiver in one restart.
+            return self.rollback(Fail("drill"))
         self.write_status(phase="restarting")
         self.marker(phase="restarting")
         self.receiver.pause("restarting")
@@ -1556,6 +1565,25 @@ class Transaction:
         if word != "restarted":
             return self.withdraw(word)
         return self.prove()
+
+    def drill_requested(self):
+        """Whether the hardware acceptance drill asks for R2 now; the hook is used up if so.
+
+        Only a request from an acceptance build honours it - release and development builds
+        write `acceptance: false`, so on them the file is ignored and left where it is - and only
+        a regular file of that exact name, never a link.
+        """
+        if not self.request["acceptance"]:
+            return False
+        path = self.receiver.path(DRILL_R2)
+        if os.path.islink(path) or not os.path.isfile(path):
+            return False
+        try:
+            os.remove(path)
+        except OSError:
+            return False
+        self.record["drill"] = "r2"
+        return True
 
     def before_restart_failed(self, failure):
         """Nothing restarted on request: put the files back if the package manager ran, and end."""

@@ -1777,3 +1777,51 @@ def test_a_rolled_back_transaction_keeps_its_directory(tmp_path):
     scene.run()
     assert scene.last()["result"] == "rolled_back"
     assert json.loads((scene.directory / "status.json").read_text())["result"] == "rolled_back"
+
+
+# ------------------------------------------------ the acceptance drill's R2 --
+
+
+def drill_file(scene):
+    return Path(scene.box.root) / updatehelper.DRILL_R2
+
+
+def test_the_drill_file_sends_an_acceptance_build_straight_into_r2(tmp_path):
+    scene = Scene(tmp_path, acceptance=True)
+    asked = []
+    scene.box.pauses["restarting"] = lambda: asked.append(True)
+    scene.box.service = TVP1
+    drill_file(scene).write_text("")
+    assert scene.run() == 1
+    last = scene.last()
+    assert (last["result"], last["reason"]) == ("rolled_back", "drill")
+    # From installed, without a forward restart: never handed to the plugin, one stop and start.
+    assert asked == [] and scene.init_calls() == ["4", "3"]
+    assert scene.box.init_log[0] == ("4", f"# plugin {NEW}\n")
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    assert scene.box.lastservice_at_start == TVP1
+    record = scene.status()["record"]
+    assert (record["drill"], record["restart"], record["restore"]) == ("r2", "stopped", "done")
+    # One transaction's worth: the file is used up.
+    assert not drill_file(scene).exists() and not scene.locked()
+
+
+def test_a_release_or_development_build_ignores_the_drill_file(tmp_path):
+    # Release and development builds both write `acceptance: false` (trust.configured).
+    scene = Scene(tmp_path, acceptance=False)
+    scene.plugin_word()
+    drill_file(scene).write_text("")
+    assert scene.run() == 0
+    assert scene.last()["result"] == "installed"
+    assert scene.init_calls() == [] and "drill" not in scene.status()["record"]
+    assert drill_file(scene).exists()
+
+
+def test_a_drill_link_is_not_followed_or_used(tmp_path):
+    scene = Scene(tmp_path, acceptance=True)
+    scene.plugin_word()
+    target = tmp_path / "elsewhere"
+    target.write_text("")
+    drill_file(scene).symlink_to(target)
+    assert scene.run() == 0
+    assert scene.init_calls() == [] and target.exists()
