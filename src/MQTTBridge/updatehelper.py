@@ -102,6 +102,7 @@ import re
 import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tarfile
@@ -1614,12 +1615,18 @@ class Transaction:
 
         Only a request from an acceptance build honours it - release and development builds
         write `acceptance: false`, so on them the file is ignored and left where it is - and only
-        a regular file of that exact name, never a link.
+        an empty regular file of that exact name, never a link, a directory or a file with
+        something in it: the drill's file is made with `touch`, and anything else of that name
+        was put there for another reason.
         """
         if not self.request["acceptance"]:
             return False
         path = self.receiver.path(DRILL_R2)
-        if os.path.islink(path) or not os.path.isfile(path):
+        try:
+            found = os.lstat(path)
+        except OSError:
+            return False
+        if not stat.S_ISREG(found.st_mode) or found.st_size != 0:
             return False
         try:
             os.remove(path)

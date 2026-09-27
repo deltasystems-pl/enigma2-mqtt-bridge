@@ -1827,6 +1827,22 @@ def test_a_drill_link_is_not_followed_or_used(tmp_path):
     assert scene.init_calls() == [] and target.exists()
 
 
+@pytest.mark.parametrize("kind", ["content", "fifo"])
+def test_a_drill_name_that_is_not_an_empty_file_is_ignored_and_left(tmp_path, kind):
+    # The drill's file is made empty; anything else of that name was put there for another
+    # reason - and a pipe is never opened.
+    scene = Scene(tmp_path, acceptance=True)
+    scene.plugin_word()
+    if kind == "content":
+        drill_file(scene).write_text("r2\n")
+    else:
+        os.mkfifo(drill_file(scene))
+    assert scene.run() == 0
+    assert scene.last()["result"] == "installed"
+    assert scene.init_calls() == [] and "drill" not in scene.status()["record"]
+    assert os.path.lexists(drill_file(scene))
+
+
 # ----------------------------------------------- R2 before `init 4`, closely --
 
 
