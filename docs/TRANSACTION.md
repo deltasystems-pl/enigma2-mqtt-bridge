@@ -553,10 +553,10 @@ So:
   once more, by process name as the wait does, and with no enigma2 running it puts the settings
   block back and writes the channel as the unit would have; only an interface still running, or
   a look that fails, goes without them. A `/proc` that cannot be listed at all (`EMFILE`,
-  `ENOMEM`) is such a look: R2 reads it as unknown, never as "no enigma2", so it is never taken
-  for the stop, and a process is counted as the interface starting again only when a look that
-  did answer during the stop says it was not among those still running then, and none of those
-  still runs beside it.
+  `ENOMEM`), or a process whose name cannot be read for any reason but its exit, is such a look:
+  R2 reads it as unknown, never as "no enigma2", so it is never taken for the stop, and a
+  process is counted as the interface starting again only when a look that did answer during the
+  stop says it was not among those still running then, and none of those still runs beside it.
   `init 3` is safe to repeat - starting a runlevel that is already running changes nothing - so
   the helper repeats it wherever the start is in doubt. The helper's own way of running a
   program turns any error in starting it (a `MemoryError` or a failed fork while the child is

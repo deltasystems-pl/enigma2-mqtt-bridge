@@ -351,13 +351,17 @@ class Receiver:
     def enigma2_pids(self):
         """Every running process named `enigma2`, read from `/proc` - no `pidof` on the image.
 
-        An empty set also when `/proc` cannot be listed; R2, which must tell "none" from "could
-        not look", asks `enigma2_look`.
+        An empty set also when `/proc` cannot be listed, and a process whose name cannot be read
+        is left out; R2, which must tell "none" from "could not look", asks `enigma2_look`.
         """
-        return self.enigma2_look() or set()
+        return self._enigma2(strict=False) or set()
 
     def enigma2_look(self):
-        """`enigma2_pids`, or None when `/proc` itself cannot be listed (EMFILE, ENOMEM)."""
+        """`enigma2_pids`, or None when a look cannot say: `/proc` itself cannot be listed
+        (EMFILE, ENOMEM), or a process's name cannot be read for any reason but its exit."""
+        return self._enigma2(strict=True)
+
+    def _enigma2(self, strict):
         pids = set()
         try:
             names = os.listdir(self.proc)
@@ -371,7 +375,12 @@ class Receiver:
                           errors="replace") as handle:
                     if handle.read().strip() == "enigma2":
                         pids.add(int(name))
-            except OSError:
+            except OSError as error:
+                # A process that exited between the listing and the read is simply gone. Any
+                # other error - out of memory, out of descriptors - may hide an enigma2 still
+                # running, so R2's look is unknown rather than "none".
+                if strict and error.errno not in (errno.ENOENT, errno.ESRCH):
+                    return None
                 continue
         return pids
 

@@ -2896,3 +2896,33 @@ def test_an_enigma2_started_beside_one_r2_could_not_stop_is_no_start(tmp_path, s
         # Once every process R2 could not stop has gone, the new one is the start.
         assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
         assert scene.box.pids == {300} and "interface" not in record
+
+
+# --------------------------------------------- a look that cannot say, closely --
+
+
+@pytest.mark.parametrize("error, look", [
+    ("ENOENT", {100}), ("ESRCH", {100}),
+    ("EMFILE", None), ("ENFILE", None), ("ENOMEM", None), ("EACCES", None),
+])
+def test_a_process_name_that_cannot_be_read_is_unknown_unless_the_process_exited(
+        tmp_path, monkeypatch, error, look):
+    error = getattr(errno, error)
+    proc = tmp_path / "proc"
+    for pid, name in ((100, "enigma2"), (101, "sh"), (102, "enigma2")):
+        (proc / str(pid)).mkdir(parents=True)
+        (proc / str(pid) / "comm").write_text(name + "\n")
+    real_open = open
+
+    def unreadable_102(path, *args, **kwargs):
+        if str(path).endswith(os.path.join("102", "comm")):
+            raise OSError(error, os.strerror(error))
+        return real_open(path, *args, **kwargs)
+    monkeypatch.setattr(updatehelper, "open", unreadable_102, raising=False)
+    receiver = updatehelper.Receiver(root=str(tmp_path), proc=str(proc))
+    # R2 must not read "102 is not enigma2" when it could not tell; a process that exited is
+    # simply gone.
+    assert receiver.enigma2_look() == look
+    # Everything else keeps what it could read.
+    assert receiver.enigma2_pids() == {100}
+
