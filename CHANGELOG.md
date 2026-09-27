@@ -37,6 +37,20 @@ version that has no section here.
   `interrupted`; the next `cmd/update` says when its lock lets a new one start, and the start after
   a restart says how it ended, by the build that runs. Nothing of this has run on a receiver yet.
 
+- **Plugin updates on the television and on the OpenWebif page.** The setup screen's blue key
+  opens *Plugin updates* ("Aktualizacje wtyczki"): the running version and build, the signed list of
+  versions the receiver holds and its age, every version it offers - the running one marked, the
+  ones that cannot be installed with the reason - and the update in progress with who started it.
+  Yellow checks for updates, OK or green installs; the OpenWebif page gains the same section and an
+  *Install a plugin version* action. Neither needs `update_check` or `update_allowed` - pressing is
+  the consent - and every household guard still applies. Every install is asked first, and only
+  here can an older version be installed, after a question that says the newer features disappear
+  until the next update; on the page that consent stays on the receiver with the confirmation step
+  and is never sent by the browser. While the doors are closed both show only the doors sentence;
+  the screen may stay open under the restart question and imports nothing new. Refusals on the
+  television are said in the household's language. Polish and German catalogues carry every new
+  string. Not yet tried on a receiver.
+
 - **Every package says which build it is.** `info` gains `build` - the commit the package was
   built from, the commit's time, whether the tracked files matched it, the flavour, and the commit
   of another build waiting on disk after the files were replaced and before the interface restarts

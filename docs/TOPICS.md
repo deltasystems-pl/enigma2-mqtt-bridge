@@ -1072,8 +1072,9 @@ receiver, whatever its settings, and again when an index is accepted, when a che
 
 **When the receiver checks.** Only when asked. With `update_check` on (the read-only setting
 above), once a day - after its clock has been set - and on `cmd/update_check`; from the plugin's
-OpenWebif page ("Check for plugin updates now") whatever the setting says, because whoever the page
-admits could switch it on anyway. Manual checks share one ten-minute limit, inside which the last
+OpenWebif page ("Check for plugin updates now") and from the receiver's own "Plugin updates"
+screen whatever the setting says, because whoever the page admits, or holds the remote control,
+could switch it on anyway. Manual checks share one ten-minute limit, inside which the last
 result is the answer and nothing is fetched. With `update_check` off and nobody at the page, the
 receiver makes no connection but the broker's. A check fetches the signature file first (the
 probe, 1 KiB), then the index (ten seconds, 64 KiB), from the origin built into the plugin, over
@@ -1241,6 +1242,15 @@ television first (a recording, a stream, timeshift) and nobody says yes within 6
 withdrawn - `result: withdrawn_before_restart`, `reason` `question` - and the plugin opens a fresh
 session, republishing everything. A new release that does not start within two minutes is rolled
 back (`rolled_back`, `reason` `not_started`), and the channel and standby state are put back.
+
+**From the receiver itself.** The receiver's "Plugin updates" screen and the plugin's OpenWebif
+page run this same command, with `started_by` `screen` or `page`. They need no `update_allowed`
+(the person at the television, or admitted by OpenWebif, could switch it on), and every other
+refusal above applies to them unchanged, on `last_error` as for any command. They alone may install
+a version **below** the running one, and only after a question that names what it takes away; the
+consent to that is passed down the call by the screen or the page, never read from a payload, so no
+`cmd/update` a broker client sends can carry one. A downgrade retracts every retained topic but
+`availability` before the restart, as above.
 
 ### `cmd/zap` goes through the channel list - since 0.3.0
 
