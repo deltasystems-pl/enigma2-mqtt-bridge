@@ -22,25 +22,38 @@ holds - re-runs every rule of the index (withdrawn, floor, contract, integration
 downgrade), and checks the package's size and sha256 against the signed entry, its `ar` layout,
 its control file's package and version, and every path in it, before the package manager sees a
 byte. An index it fetches is kept by the trust file's one rule for every writer
-(`trustfile.keep`: its own `flock`, a fresh read, a whole write).
+(`trustfile.keep`: its own `flock`, a fresh read, a whole write); one the rule accepted but that
+could not be kept still decides, because it is the newest the receiver has seen. The relay
+address is judged again too - its shape and its expiry - before it is fetched.
 
 **The sequence** (TRANSACTION.md, sections 2 to 6): claim the transaction lock and start the
 heartbeat - a thread of its own, so a blocking `opkg` cannot starve it; the index; the package;
 the release's asset digest from GitHub, when the receiver fetched it itself; free space; a
-schema-2 snapshot `self-update-<id>`; `opkg install --force-reinstall` (with
-`--force-downgrade` only for a downgrade started at the television or on the page); the
-installed files against the package's manifest; the marker; then the phase `restarting`, which
-is the plugin's cue to close its doors and ask the image for a clean restart (rule R1). The
-plugin answers through the transaction directory: `restart.json` when it has asked,
-`withdraw` when the question on the television was answered "no" or timed out, and - from the
-new plugin, once it has started - `started.json` with its version and build commit.
+schema-2 snapshot `self-update-<id>`; the marker, phase `installing`, so that a power loss or a
+`SIGKILL` while the package manager unpacks is known at the next start; `opkg install
+--force-reinstall` (with `--force-downgrade` only for a version that is lower, and only when the
+television or the page started it); the installed files against the package's manifest; then the
+phase `restarting`, which is the plugin's cue to close its doors and ask the image for a clean
+restart (rule R1). The plugin answers through the transaction directory: `restart.json` when it
+has asked, `withdraw` when the question on the television was answered "no" or timed out, and -
+from the new plugin, once it has started - `started.json` with its version and build commit.
+
+**Which process is the restart.** The request names the enigma2 that asked (`enigma2_pid`). A
+restart is that process gone **and** an enigma2 running that was never seen beside it - a child
+enigma2 forks keeps the name until it runs something else, so a pid seen next to the old one is
+never the new interface, and the proof ignores every such pid. The one that asked gone before
+the package manager ran (a crash, or a restart from the menu, during the download) ends the
+transaction `interrupted` with nothing changed; gone once the package manager had started and
+before `restarting`, the process now running may hold either version or a mix, so it goes to R2
+and is never proved.
 
 **How it ends**, always releasing what it holds:
 
-- no new enigma2 within 180 s, or `withdraw`: the old files and opkg's records go back under the
-  interface that is still running (a staged directory swapped in by one `rename`), the enigma2 pid
-  is read again, and only a receiver that did not restart is reported `withdrawn_before_restart`;
-  one that did goes to R2, because the new process may have read either version;
+- no new enigma2 within 180 s of the plugin's ask, or `withdraw`: the old files and opkg's
+  records go back under the interface that is still running (a staged directory swapped in by
+  one `rename`), the enigma2 pid is read again, and only a receiver that did not restart is
+  reported `withdrawn_before_restart`; one that did goes to R2, because the new process may have
+  read either version;
 - a new enigma2: the proof, for 120 s - tier 1, `started.json` naming the target and its commit,
   for a target whose index entry says it can (`self_update`); tier 2 for 0.2.0 and 0.3.x, the new
   process holding the plugin's log file open, polled every two seconds, or the OpenWebif hook
@@ -50,14 +63,22 @@ new plugin, once it has started - `started.json` with its version and build comm
   recorded channel is written as `config.tv.lastservice`, `init 3`, and R3 compares what the
   image started on with the record, zapping back once and re-entering standby where needed.
 
+**Nothing unproven is left behind.** From the moment the package manager has run, every write
+of the marker and of `status.json` is best effort - a full flash changes how the end is
+recorded, never which end it is - and an error nothing expected still ends the way a planned
+failure would: the files go back under the interface that asked, or by R2 once it has gone.
+Once `init 4` has been sent, `init 3` follows in a `finally`.
+
 **Signals.** `HUP`, `INT`, `TERM` and `PIPE` only set a flag, read at the next step. Before the
 package manager has run they end the transaction with nothing changed; from then until the
 restart they lead to the withdraw; after the restart - the proof, and all of R2 - they are
 ignored until the unit ends. **Once enigma2 has been stopped, nothing but the end of the
 restore leads to starting it again**: the restore runs inside this process, so a signal cannot
 cut it short, and the interface is never started over a tree that is half put back. What no
-handler covers is `SIGKILL` or power, between `init 4` and `init 3`; the marker then tells the
-next plugin that starts, and a reboot frees the lock at once.
+handler covers is `SIGKILL` or power - while the package manager unpacks, or between `init 4`
+and `init 3`; the marker then tells the next plugin that starts, and a reboot frees the lock at
+once. A tree left half installed that cannot start the plugin at all is for the companion
+integration's forced reinstall over SSH (TRANSACTION.md section 4).
 
 **Bounds.** The forward path gives up at 15 minutes and the rollback's waits add up to less than
 five, so the lock is held at most 20 minutes - under the released installer's 30-minute stale
@@ -119,6 +140,10 @@ TRANSACTION_ID = re.compile(r"[0-9a-f]{12}")
 SNAPSHOT_NAME = re.compile(r"self-update-[0-9a-f]{12}")
 DIRECTORY_NAME = re.compile(r"update-[0-9a-f]{12}")
 SERVICE_REF = re.compile(r"[^\x00-\x1f\x7f]{1,1024}")
+# The only shape of address Home Assistant hands out for a package (TRANSACTION.md section 7):
+# its host, a port if any, one fixed path and a `secrets.token_urlsafe(32)` token; nothing else.
+RELAY_URL = re.compile(r"https?://[A-Za-z0-9.-]{1,253}(?::([0-9]{1,5}))?"
+                       r"/api/enigma2_mqtt/relay/[A-Za-z0-9_-]{43}")
 KEEP = 2
 
 STALE_LOCK_SECONDS = 30 * 60
@@ -167,6 +192,7 @@ SENTENCES = {
     "downgrade": "a downgrade can only be started on the receiver or from Home Assistant's "
                  "options",
     "checksum": "the requested checksum does not match the signed release index",
+    "relay": "the download address from Home Assistant is not valid",
     "download": "version {version} could not be downloaded: {detail}",
     "bad_package": "the downloaded package is not the signed release: {detail}",
     "no_space": "there is not enough free space on the receiver",
@@ -995,6 +1021,13 @@ class Transaction:
         self.before = None
         self.logs_writable = True
         self.restarted_at = None
+        # Every enigma2 pid seen while the process that asked was still running: the old
+        # interface and anything it forked. None of them is ever the restarted interface.
+        self.restart_pids = set()
+        self.lower = False
+        self.ended = False
+        self.committed = False
+        self.rolling_back = False
 
     # ---------------------------------------------------------------- the files --
 
@@ -1062,13 +1095,23 @@ class Transaction:
         self.check()
 
     def check(self):
-        """Between steps: the lock still ours, no signal, inside the forward bound."""
+        """Between steps: the lock still ours, no signal, inside the forward bound - and, until
+        the package manager runs, the interface that asked still the one running."""
         if self.lost.is_set():
             raise LockLost()
         if self.signalled is not None:
             raise Fail("interrupted", detail="signal " + str(self.signalled))
         if self.deadline is not None and self.receiver.clock() > self.deadline:
             raise Fail("time_limit")
+        if not self.files_changed and not self.original_running():
+            # A crash and respawn, or a restart from the menu: the process that asked is gone,
+            # and the one running now loaded the old code and knows nothing of this request.
+            raise Fail("interrupted", detail="the receiver's interface restarted before the "
+                                             "update was installed")
+
+    def original_running(self):
+        """Whether the enigma2 that asked for the update (its pid in the request) still runs."""
+        return self.old_pid in self.receiver.enigma2_pids()
 
     def on_signal(self, number, _frame=None):
         self.signalled = number
@@ -1093,25 +1136,52 @@ class Transaction:
         try:
             os.mkdir(self.lock_dir, 0o700)
         except FileExistsError:
-            if not lock_is_stale(self.receiver, self.lock_dir):
-                raise Fail("busy") from None
-            retired = os.path.join(self.backups, "." + LOCK_NAME + "-stale-" + str(os.getpid())
-                                   + "-" + secrets.token_hex(4))
+            self.reclaim()
+        try:
+            write_json(os.path.join(self.lock_dir, "owner.json"), self.owner_record())
+        except OSError:
+            # A lock with no owner record would read as held for thirty minutes.
             try:
-                os.rename(self.lock_dir, retired)
+                os.rmdir(self.lock_dir)
             except OSError:
-                raise Fail("busy") from None
-            if not lock_is_stale(self.receiver, retired):
-                try:
-                    os.rename(retired, self.lock_dir)
-                except OSError:
-                    shutil.rmtree(retired, ignore_errors=True)
-                raise Fail("busy") from None
-            shutil.rmtree(retired, ignore_errors=True)
-            os.mkdir(self.lock_dir, 0o700)
-        write_json(os.path.join(self.lock_dir, "owner.json"), self.owner_record())
+                pass
+            raise
         self.holding = True
         self.claimed = True
+
+    def reclaim(self):
+        """A lock is there: take it over only when it is stale, judged twice; else busy."""
+        if not lock_is_stale(self.receiver, self.lock_dir):
+            raise Fail("busy")
+        retired = os.path.join(self.backups, "." + LOCK_NAME + "-stale-" + str(os.getpid())
+                               + "-" + secrets.token_hex(4))
+        try:
+            os.rename(self.lock_dir, retired)
+        except OSError:
+            raise Fail("busy") from None
+        if not lock_is_stale(self.receiver, retired):
+            try:
+                os.rename(retired, self.lock_dir)
+            except OSError:
+                shutil.rmtree(retired, ignore_errors=True)
+            raise Fail("busy")
+        shutil.rmtree(retired, ignore_errors=True)
+        try:
+            os.mkdir(self.lock_dir, 0o700)
+        except FileExistsError:
+            # Another claimer took the free name in the moment between: it holds the lock now.
+            raise Fail("busy") from None
+
+    def owned_by_another(self):
+        """Whether the lock's owner record names a transaction other than this one.
+
+        Only then may a helper that did not get the lock write its `busy` into its directory:
+        a record naming this id belongs to the helper already running this transaction, whose
+        `status.json` this directory is; one that cannot be read may be that helper between
+        its `mkdir` and its first write.
+        """
+        recorded = read_json(os.path.join(self.lock_dir, "owner.json"))
+        return recorded is not None and recorded.get("id") != self.id
 
     def beat(self):
         """One heartbeat: rewrite the owner record - only while it is still this transaction's."""
@@ -1183,7 +1253,19 @@ class Transaction:
                                        self.request["acceptance"], index_raw, signature,
                                        trustfile.SOURCE_ORIGIN, TRUST_LOCK_WAIT)
         self.record["index_verdict"] = verdict
-        return held[0] if held else None
+        if held:
+            self.record["index_kept"] = True
+            return held[0]
+        if verdict in (trustfile.WRITE_FAILED, trustfile.TRUST_BUSY):
+            # The rule accepted this pair - signature, key and serial against the trust file as
+            # read - and only keeping it failed. It is the newest index the receiver has seen,
+            # so it decides: the one kept earlier may still offer a version this one withdrew.
+            self.record["index_kept"] = False
+            try:
+                return trust.authenticate(index_raw, signature, self.keys)[0]
+            except trust.Refused as refused:
+                raise Fail("bad_index", detail=refused.reason) from None
+        return None
 
     def choose(self):
         """The signed entry of the target, after every rule of the index; else Fail."""
@@ -1208,14 +1290,38 @@ class Transaction:
         if problem is not None:
             reason, detail = problem
             raise Fail(reason, version=target, detail=detail)
-        lower = version_key(target) < version_key(request["from"]["version"])
-        if lower and not (request["downgrade"] and request["started_by"] in DOWNGRADE_ORIGINS):
+        self.lower = version_key(target) < version_key(request["from"]["version"])
+        if self.lower and not (request["downgrade"]
+                               and request["started_by"] in DOWNGRADE_ORIGINS):
             raise Fail("downgrade")
         if request.get("sha256") is not None and request["sha256"] != entry["sha256"]:
             raise Fail("checksum")
         return entry
 
     # -------------------------------------------------------------- the package --
+
+    def check_relay(self):
+        """The relay address as the plugin checked it, judged again: Fail("relay") otherwise.
+
+        The request file is the boundary between two programs, so the helper asks what the
+        plugin asked: Home Assistant's relay shape - `http` or `https`, a host name or IPv4
+        address with no user part, a port if any, the fixed path and a 43-character token, no
+        query - and an `expires` that has not passed by this receiver's clock. The host itself
+        is whatever the message named: a broker client can choose it, and the bytes it serves
+        are verified against the signed entry before `opkg` sees them. A receiver whose clock
+        still stands in 1970 cannot tell an old address from a new one; Home Assistant's own
+        expiry of the token then bounds it.
+        """
+        relay = self.request.get("relay")
+        if relay is None:
+            return
+        match = RELAY_URL.fullmatch(relay["url"])
+        expires = relay.get("expires")
+        if (match is None
+                or (match.group(1) is not None and not 0 < int(match.group(1)) < 65536)
+                or not isinstance(expires, int) or isinstance(expires, bool)
+                or expires <= self.receiver.now()):
+            raise Fail("relay")
 
     def download(self, entry):
         relay = self.request.get("relay")
@@ -1300,12 +1406,20 @@ class Transaction:
             "started": self.status.get("started"),
         }
         value.update(changes)
-        write_json(self.receiver.path(MARKER), value)
+        try:
+            write_json(self.receiver.path(MARKER), value)
+        except OSError as error:
+            # Once the package manager has run, a marker that cannot be written (a full flash)
+            # changes nothing about how this transaction ends; it is only noted. The one that
+            # must exist - before the package manager runs - is required by the caller.
+            self.record["marker"] = "failed at " + str(value.get("phase")) + ": " + str(error)
+            return False
+        return True
 
     # ------------------------------------------------------------------ run it --
 
     def run(self):
-        """The whole transaction. Its result code; never raises."""
+        """The whole transaction. Its result code; raises only what is not an `Exception`."""
         try:
             self.load_request()
         except Fail as failure:
@@ -1321,6 +1435,12 @@ class Transaction:
         try:
             self.claim()
         except Fail as failure:
+            if failure.reason == "busy" and not self.owned_by_another():
+                # The lock is this transaction's own - a second copy of its helper - or its
+                # owner cannot be read yet: this directory's `status.json` belongs to the
+                # helper that holds it, and a `finished` written into it would open the
+                # plugin's doors in the middle of an install. So nothing is written.
+                return 1
             self.finish("failed", failure)
             return 1
         except OSError as error:
@@ -1330,18 +1450,45 @@ class Transaction:
         try:
             return self.forward()
         except LockLost:
-            self.finish("interrupted", Fail("interrupted", detail="the lock was taken"))
+            if not self.ended:
+                self.finish("interrupted", Fail("interrupted", detail="the lock was taken"))
             return 1
-        except BaseException as error:  # the last net: never leave the lock with nobody
-            self.finish("failed", Fail("internal_error", detail=type(error).__name__))
-            raise
+        except BaseException as error:  # the last net: never leave unproven code, or the lock
+            failure = Fail("internal_error", detail=type(error).__name__)
+            self.record["internal_error"] = (type(error).__name__ + ": " + str(error))[:200]
+            try:
+                self.recover(failure)
+            except BaseException as again:  # the end below must still be written
+                self.record["recovery"] = "failed: " + type(again).__name__
+            if not self.ended:
+                self.finish("failed", failure)
+            if not isinstance(error, Exception):
+                raise
+            return 1
         finally:
             self.release()
+
+    def recover(self, failure):
+        """After an error nothing expected: leave the receiver as a planned end would.
+
+        Committed, the new version proved itself and stays. Inside R2, its own `finally` has
+        started the interface again, and a second R2 would only stop it again. Otherwise, once
+        the package manager has run, the files go back - under the interface that asked, or by
+        R2 when it restarted (`undo`); before that, only the unused rollback point goes.
+        """
+        if self.committed or self.rolling_back or self.ended:
+            return
+        if self.files_changed:
+            self.undo(failure, "failed")
+        elif self.snapshot is not None:
+            shutil.rmtree(self.snapshot, ignore_errors=True)
+            self.snapshot = None
 
     def forward(self):
         request = self.request
         try:
             self.phase("downloading")
+            self.check_relay()
             self.entry = entry = self.choose()
             self.check()
             package = self.download(entry)
@@ -1363,11 +1510,22 @@ class Transaction:
             self.snapshot = backup
             self.phase("installing")
             ipk = self.path(entry["filename"])
-            atomic_write(ipk, package)
+            try:
+                atomic_write(ipk, package)
+            except OSError as error:
+                raise Fail("internal_error",
+                           detail="the package could not be written: " + str(error)) from None
             argv = [self.receiver.opkg, "install", "--force-reinstall"]
-            if request["downgrade"]:
+            # Only for a version that really is lower, and only where `choose` admits one.
+            if self.lower and request["downgrade"] and request["started_by"] in DOWNGRADE_ORIGINS:
                 argv.append("--force-downgrade")
             argv.append(ipk)
+            # The marker goes first: a power loss, an OOM kill or a SIGKILL while the package
+            # manager unpacks leaves a tree that is neither version, and the marker is then the
+            # only thing that says so at the next start. No marker, no package manager.
+            if not self.marker(phase="installing"):
+                raise Fail("internal_error", detail="the marker could not be written")
+            self.check()
             self.files_changed = True
             code = self.receiver.run(argv, max(1, self.deadline - self.receiver.clock()))
             self.receiver.pause("opkg_done")
@@ -1382,6 +1540,15 @@ class Transaction:
         # R2's record is what plays when a rollback begins; this one, taken before the
         # restart, stands in when the new interface does not answer then.
         self.before = self.statusinfo()
+        running = self.receiver.enigma2_pids()
+        self.restart_pids = running | {self.old_pid}
+        if self.old_pid not in running:
+            # The interface restarted by itself once the package manager had started: the
+            # process running now may hold the old code, the new or a mix, and nobody asked for
+            # it. It is stopped and the old files go back (R2), never proved.
+            self.restarted_at = self.receiver.clock()
+            return self.rollback(Fail("interrupted", detail="the receiver's interface restarted "
+                                                            "while the update was installed"))
         self.write_status(phase="restarting")
         self.marker(phase="restarting")
         self.receiver.pause("restarting")
@@ -1391,19 +1558,40 @@ class Transaction:
         return self.prove()
 
     def before_restart_failed(self, failure):
-        """Nothing restarted yet: put the files back if the package manager ran, and end."""
+        """Nothing restarted on request: put the files back if the package manager ran, and end."""
         result = "interrupted" if failure.reason in ("interrupted",) else "failed"
         if self.files_changed:
-            try:
-                restore_snapshot(self.receiver, self.snapshot, settings=False)
-            except (OSError, ValueError, OpkgBusy) as error:
-                self.record["restore"] = "failed: " + str(error)
-            else:
-                self.record["restore"] = "done"
-        elif self.snapshot is not None:
+            return self.undo(failure, result)
+        if self.snapshot is not None:
             # A rollback point of a transaction that changed nothing would only push a real one
             # out of the two that are kept.
             shutil.rmtree(self.snapshot, ignore_errors=True)
+            self.snapshot = None
+        self.finish(result, failure)
+        return 1
+
+    def undo(self, failure, result):
+        """The package manager ran and the transaction ends early: files and interface agree.
+
+        While the interface that asked still runs, the old files go back under it, as the
+        withdraw puts them (no settings block, no restart). Once it has gone - a restart asked
+        for, or one nobody asked for - the process running may hold either version, so R2.
+        A restart that lands while the files go back goes to R2 as well.
+        """
+        if self.restarted_at is not None or not self.original_running():
+            if self.restarted_at is None:
+                self.restarted_at = self.receiver.clock()
+            return self.rollback(failure)
+        try:
+            restore_snapshot(self.receiver, self.snapshot, settings=False)
+        except (OSError, ValueError, OpkgBusy) as error:
+            self.record["restore"] = "failed: " + str(error)
+            result = "failed"
+        else:
+            self.record["restore"] = "done"
+        if not self.original_running():
+            self.restarted_at = self.receiver.clock()
+            return self.rollback(failure)
         self.finish(result, failure)
         return 1
 
@@ -1416,13 +1604,20 @@ class Transaction:
         return False
 
     def await_restart(self):
-        """The plugin's word after `restarting`: `restarted`, `withdraw`, `timeout`, `signal`."""
+        """The plugin's word after `restarting`: `restarted`, `withdraw`, `timeout`, `signal`.
+
+        A restart is the process that asked gone **and** an enigma2 running that was not seen
+        beside it: a child enigma2 forks keeps the name `enigma2` until it runs something else,
+        and one seen on a single poll is not the interface coming back.
+        """
         receiver = self.receiver
         limit = receiver.clock() + PLUGIN_WAIT
         asked = False
         while True:
             pids = receiver.enigma2_pids()
-            if pids - {self.old_pid}:
+            if self.old_pid in pids:
+                self.restart_pids |= pids
+            elif pids - self.restart_pids:
                 self.restarted_at = receiver.clock()
                 return "restarted"
             if os.path.exists(self.path("withdraw")):
@@ -1453,8 +1648,7 @@ class Transaction:
             restored = False
             self.record["restore"] = "failed: " + str(error)
         self.receiver.pause("withdrawn")
-        pids = self.receiver.enigma2_pids()
-        if (pids - {self.old_pid}) or self.old_pid not in pids:
+        if not self.original_running():
             # A restart happened while the files went back: the new process may have read
             # either version, so the files and the process are made to agree by R2 (A9).
             self.restarted_at = self.receiver.clock()
@@ -1486,9 +1680,12 @@ class Transaction:
         window = receiver.clock() + PROOF_WINDOW
         wanted = {os.path.realpath(receiver.path(p)) for p in LOG_PATHS} | \
             {receiver.path(p) for p in LOG_PATHS}
+        # Only a process that was not running beside the one that asked: a child of the old
+        # interface inherited its descriptors, the old plugin's log among them.
+        before = self.restart_pids | {self.old_pid}
         fd_seen = False
         while True:
-            pids = receiver.enigma2_pids() - {self.old_pid}
+            pids = receiver.enigma2_pids() - before
             for pid in pids:
                 if receiver.open_files(pid) & wanted:
                     fd_seen = True
@@ -1510,6 +1707,7 @@ class Transaction:
         return self.rollback(Fail("not_started", previous=self.request["from"]["version"]))
 
     def commit(self, proof, fd_seen):
+        self.committed = True
         self.record.update(proof=proof, fd_seen=fd_seen, restart="clean")
         self.receiver.pause("committing")
         self.release()
@@ -1520,33 +1718,48 @@ class Transaction:
     # ----------------------------------------------------------------- rollback --
 
     def rollback(self, failure):
-        """R2 as one unit: record, stop, restore, write the channel, start, verify (R3)."""
+        """R2 as one unit: record, stop, restore, write the channel, start, verify (R3).
+
+        Once `init 4` has been sent, `init 3` follows whatever happens in between: the handled
+        failures are recorded and the unit carries on, and anything else still meets the
+        `finally` that starts the interface before it goes further.
+        """
         receiver = self.receiver
+        self.rolling_back = True
         self.write_status(phase="rolling_back")
         self.marker(phase="rolling_back")
         limit = receiver.clock() + ROLLBACK_LIMIT
         recorded = self.statusinfo() or self.before
         self.record.update(restart="stopped")
         receiver.pause("rollback_recorded")
-        receiver.run([receiver.init, "4"], STOP_WAIT)
-        stopped = self.wait(lambda: not receiver.enigma2_pids(), STOP_WAIT)
-        receiver.pause("rollback_stopped")
+        starting = False
         try:
-            restore_snapshot(receiver, self.snapshot, settings=stopped)
-            self.record["restore"] = "done"
-        except (OSError, ValueError, OpkgBusy) as error:
-            self.record["restore"] = "failed: " + str(error)
-        receiver.pause("rollback_restored")
-        service = recorded.get("service") if recorded else None
-        if stopped and service:
+            receiver.run([receiver.init, "4"], STOP_WAIT)
+            stopped = self.wait(lambda: not receiver.enigma2_pids(), STOP_WAIT)
+            receiver.pause("rollback_stopped")
             try:
-                write_lastservice(receiver.root, service)
-                self.record["lastservice"] = "written"
-            except (OSError, ValueError):
-                self.record["lastservice"] = "failed"
-        receiver.run([receiver.init, "3"], STOP_WAIT)
+                restore_snapshot(receiver, self.snapshot, settings=stopped)
+                self.record["restore"] = "done"
+            except Exception as error:  # whatever it was, init 3 comes next
+                self.record["restore"] = "failed: " + (str(error) or type(error).__name__)
+            receiver.pause("rollback_restored")
+            service = recorded.get("service") if recorded else None
+            if stopped and service:
+                try:
+                    write_lastservice(receiver.root, service)
+                    self.record["lastservice"] = "written"
+                except Exception:  # a channel not kept, never a stopped GUI
+                    self.record["lastservice"] = "failed"
+            starting = True
+            receiver.run([receiver.init, "3"], STOP_WAIT)
+        finally:
+            if not starting:
+                self.record.setdefault("restore", "interrupted")
+                receiver.run([receiver.init, "3"], STOP_WAIT)
         receiver.pause("rollback_started")
         started = self.wait(lambda: bool(receiver.enigma2_pids()), START_WAIT)
+        if not started:
+            self.record["interface"] = "not started"
         if started and recorded and receiver.clock() < limit:
             self.verify(recorded)
         else:
@@ -1624,6 +1837,7 @@ class Transaction:
 
     def finish(self, result, failure):
         """Write the end: status, the last-transaction record and the marker, then let go."""
+        self.ended = True
         now = self.receiver.now()
         reason = failure.reason if failure is not None else None
         error = str(failure) if failure is not None else None
@@ -1633,6 +1847,11 @@ class Transaction:
             "id", "started_by", "target", "from", "started", "finished", "result", "reason",
             "error")}
         summary["phase"] = "finished"
+        # `finished` is the wall clock, which on a receiver without a battery-backed clock
+        # starts in 1970 and jumps when NTP answers. The boot and the uptime at the end let the
+        # ten-minute limit between transactions measure on a clock that never jumps.
+        summary["boot_id"] = self.receiver.boot_id()
+        summary["uptime"] = self.receiver.uptime()
         if not self.claimed:
             # Never held the lock (busy, or a request it could not read): the transaction that
             # does hold it owns the last-transaction record and the transaction directories.
