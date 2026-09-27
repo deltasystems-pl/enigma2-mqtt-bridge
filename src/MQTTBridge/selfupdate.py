@@ -40,10 +40,10 @@ records naming the new version (`restore_failed`, `restore_incomplete`), or the 
 stopped once the package manager had started, perhaps leaving it running as an orphan - the
 doors stay closed for good and say to install the plugin again; that is judged from what the
 helper left behind, so a failure that fell between two polls closes them too. After a rollback
-that put the old files back under an interface it could not stop (`not_stopped`), the process
-reading the end is that interface: its files are the previous version's now, so its doors stay
-closed as well - the repair is a restart of the interface, and `restart_gui` is the one command
-they let through.
+that put the old files back under an interface it could not stop (`not_stopped`), a process
+whose pid the helper lists as left running (`record.unstopped`) is that interface: its files are
+the previous version's now, so its doors stay closed as well - the repair is a restart of the
+interface, and `restart_gui` is the one command they let through.
 
 The restart itself waits for the helper's `restarting`: for a downgrade chosen at the television
 or on the page, every retained topic the node owns except `availability` is first retracted at
@@ -1275,14 +1275,15 @@ class SelfUpdater:
                 # but not all of opkg's records or the settings block).
                 unrestored = isinstance(restore, str) and restore != "done"
                 self._origin_failed(record)
-                # Review round 3: after `not_stopped` (`record.interface` `not restarted`) no
-                # process started on the old files, so whichever reads the end - the one that
-                # asked, or the one that follows - is the one R2 could not stop, and its files
-                # changed under it: to the previous version's, or with a restore that did not
-                # complete to a mix. A restore that did complete does not make it safe. Keyed
-                # on the reason and the record both, so neither alone reopens the doors.
-                unstopped = record.get("reason") == UNSTOPPED or \
-                    details.get("interface") == "not restarted"
+                # Review round 3: after `not_stopped` (`record.interface` `not restarted`) the
+                # process R2 could not stop runs on over files that changed under it: to the
+                # previous version's, or with a restore that did not complete to a mix. A
+                # restore that did complete does not make it safe. Keyed on the reason and the
+                # record both, so neither alone reopens the doors - and, since round 4, only for
+                # a process that is one of those R2 left running (`_left_running`).
+                unstopped = (record.get("reason") == UNSTOPPED
+                             or details.get("interface") == "not restarted") \
+                    and self._left_running(current, record, details)
                 stuck = None
                 if unrestored and (current["ours"] or unstopped):
                     stuck = STUCK_PARTIAL if restore.startswith("partial") else STUCK
@@ -1304,6 +1305,48 @@ class SelfUpdater:
             self._current = None
             self._poll_ticker.stop()
             self._remove_marker(current["id"])
+
+    def _left_running(self, current, record, details):
+        """Whether this process is one R2 could not stop (TRANSACTION.md 7, review round 4).
+
+        The helper lists them as `record.unstopped`, from its last look at /proc that answered:
+        this process is held when its own pid is listed, and not otherwise - a process that
+        started since (after the repair, or while the helper was still finishing) runs the files
+        on disk. With no list - no look answered - the pid proves nothing either way, and the
+        version this process runs decides, as for a marker that outlived its helper: running
+        the transaction's `from`, it runs the files that were put back.
+        """
+        listed = details.get("unstopped")
+        if isinstance(listed, list):
+            held = os.getpid() in [pid for pid in listed if _whole(pid) is not None]
+            if not held:
+                LOG.info("update %s: R2 could not stop %s; this process (%d) is not one of them",
+                         current["id"], listed, os.getpid())
+            return held
+        return not self._runs_the_previous(current, record)
+
+    def _runs_the_previous(self, current, record):
+        """Whether this process runs the transaction's `from` build - the files R2 put back.
+
+        `from` with its commit, from the marker or the transaction's own request; the status
+        file has only the number, and a `from` without a commit is judged by the number, as
+        `_verdict` does.
+        """
+        before = None
+        for path in (self._path(updatehelper.MARKER),
+                     os.path.join(current["directory"], REQUEST)):
+            source = updatehelper.read_json(path)
+            if isinstance(source, dict) and source.get("id") == current["id"] \
+                    and isinstance(source.get("from"), dict):
+                before = source["from"]
+                break
+        if before is None and isinstance(record.get("from"), str):
+            before = {"version": record["from"]}
+        if before is None:
+            return False
+        running = self._running()
+        return running["version"] == before.get("version") and \
+            running["commit"] == (before.get("commit") or running["commit"])
 
     def _helper_gone(self, current):
         """Whether the helper that `start-stop-daemon` recorded has stopped running.
