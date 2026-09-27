@@ -192,6 +192,20 @@ PLAUSIBLE_SINCE = 1767225600
 FILES_PHASES = ("installing", "restarting", "proving", "rolling_back")
 
 
+def older(version):
+    """Whether installing `version` is a downgrade of the running plugin (spec ae.8).
+
+    The one rule for the dispatcher, which refuses a downgrade without its consent, and for the
+    question the television and the page ask first: if the two ever judged differently, a person
+    would be asked the plain question and then refused as a downgrade. Anything that is not a
+    version is not older.
+    """
+    try:
+        return trust.version_key(version) < trust.version_key(__version__)
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
 def household_doors(updater=None):
     """What the setup screen and the page say while the doors are closed."""
     if getattr(updater, "stuck", False):
@@ -563,7 +577,7 @@ class SelfUpdater:
         if refusal:
             return refusal
         version = entry["version"]
-        lower = trust.version_key(version) < trust.version_key(__version__)
+        lower = older(version)
         allowed_downgrade = lower and downgrade and origin in (SCREEN, PAGE)
         if lower and not allowed_downgrade:
             return _refusal("downgrade")
@@ -675,6 +689,27 @@ class SelfUpdater:
             reason, detail = problem
             return None, _refusal(reason, version=version, detail=detail)
         return entry, None
+
+    def runs_release(self, version):
+        """Whether this process runs the signed release `version` itself: its release build.
+
+        What the television and the page mark as installed (spec ae.5). A release build is clean,
+        of the `release` flavour and made from the index entry's commit; a development build of
+        the same number is never that release, whichever of the two is newer code (v5.5), so it
+        is not shown as installed next to it. A copy nobody built - every plugin up to 0.3.x -
+        has no commit and compares by its number only.
+        """
+        if version != __version__:
+            return False
+        build = self.bridge.build or {}
+        if not build.get("commit"):
+            return True
+        if build.get("flavour") != buildid.RELEASE or build.get("dirty") is not False:
+            return False
+        index = self._index()
+        entry = next((e for e in index["releases"] if e["version"] == version), None) \
+            if index is not None else None
+        return entry is not None and entry.get("commit") == build["commit"]
 
     def _current_release(self, entry):
         """That release runs, and the build on disk is that release too."""

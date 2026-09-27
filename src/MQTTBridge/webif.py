@@ -32,7 +32,12 @@ own handler with the origin `page` (`origin.py`), which answers the box-side
 permission and nothing else: every household-safety guard still applies.
 
 The page is script-free (`default-src 'none'`), so every confirmation is a
-second page rendered by the server, never a dialog.
+second page rendered by the server, never a dialog. It is bound to the session,
+the action and the exact payload, is used up by its first answer, and expires
+after `CONFIRM_SECONDS`.
+
+**Behind an update's closed doors** (`selfupdate.py`) the page is one sentence,
+and so is the answer to every POST: nothing is asked, saved or kept.
 
 **Installing a release of the plugin** is `cmd/update` with the origin `page`
 (spec ae.4, ae.6): OpenWebif has admitted whoever is here, so neither
@@ -106,6 +111,10 @@ CSRF_KEY = "mqttbridge_csrf"
 RETIRED_KEY = "mqttbridge_csrf_retired"
 MAX_RETIRED_TOKENS = 8
 CONFIRM_KEY = "mqttbridge_confirm"
+# How long a confirmation page may be answered. The session lives until OpenWebif's idle
+# timeout, and a question left in a background tab for an evening is not a decision about
+# the receiver as it is now; every guard would run again, but the question is the consent.
+CONFIRM_SECONDS = 600
 # `Misdirected Request`: the request reached a server that will not answer for
 # the name it asked for. Not in every Twisted's constants, so spelled here.
 MISDIRECTED_REQUEST = 421
@@ -192,6 +201,10 @@ _HOST_CHARACTERS = re.compile(r"^[A-Za-z0-9.:\[\]-]+$")
 
 class _NotRunning(Exception):
     """An action asked of a bridge that is idle; the message says why it is."""
+
+
+class _Expired(Exception):
+    """A confirmation answered more than `CONFIRM_SECONDS` after it was asked."""
 
 
 def _bridge():
@@ -1058,7 +1071,7 @@ def _ask(request, key, payload, label, sentence, detail="", changes=None, consen
     add one.
     """
     token = secrets.token_urlsafe(32)
-    pending = {"token": token, "action": key, "payload": payload}
+    pending = {"token": token, "action": key, "payload": payload, "asked": time.monotonic()}
     if changes is not None:
         pending["changes"] = dict(changes)
     if consents:
@@ -1085,6 +1098,9 @@ def _confirmed(request):
         or not hmac.compare_digest(supplied, pending["token"])
     ):
         raise PermissionError
+    asked = pending.get("asked")
+    if not isinstance(asked, float) or not 0 <= time.monotonic() - asked <= CONFIRM_SECONDS:
+        raise _Expired
     _exact(request, ("csrf", "form", "action", "payload"))
     key = _single_arg(request, "action")
     payload = _single_arg(request, "payload", MAX_CONFIRM_BYTES)
@@ -1461,6 +1477,14 @@ def _updating(bridge):
         return False
 
 
+def _doors_closed():
+    try:
+        return _updating(_bridge())
+    except Exception:
+        LOG.exception("the plugin could not be asked whether an update runs")
+        return False
+
+
 def _page(request, message=""):
     bridge = _bridge()
     if bridge is not None and _updating(bridge):
@@ -1622,6 +1646,14 @@ class MQTTBridgeWebResource(resource.Resource):
         content_type = (request.getHeader("content-type") or "").split(";", 1)[0].lower()
         if content_type != "application/x-www-form-urlencoded" or not _same_origin(request):
             return _answer(request, _("Request rejected."), http.FORBIDDEN)
+        if _doors_closed():
+            # Every form - an install, any other action, a settings save, the answer to a
+            # confirmation asked before - gets the sentence alone (spec ae.6 step 3). No
+            # question: its answer could only meet the doors, and asking it tells the
+            # household something can still be done. Nothing kept: a confirmation asked
+            # before the doors closed is dropped, not left to be answered once they reopen.
+            _session(request).pop(CONFIRM_KEY, None)
+            return _answer(request, code=http.CONFLICT)
         try:
             form = _single_arg(request, "form")
             if form == "confirm":
@@ -1643,6 +1675,15 @@ class MQTTBridgeWebResource(resource.Resource):
             )
         except PermissionError:
             return _answer(request, _("Request rejected."), http.FORBIDDEN)
+        except _Expired:
+            return _answer(
+                request,
+                _(
+                    "This confirmation was asked for more than ten minutes ago and has "
+                    "expired. Nothing was changed; start again."
+                ),
+                http.FORBIDDEN,
+            )
         except _NotRunning as error:
             return _answer(
                 request, _("Commands need a running bridge: %s") % error, http.CONFLICT

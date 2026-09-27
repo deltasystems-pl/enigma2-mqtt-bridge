@@ -10,7 +10,10 @@ draw it, so the two never tell the same household two different things.
 publishes, judged by the one rule (`updatecheck.offer`); an install is `cmd/update` through the
 dispatcher with the origin `screen` or `page` (`selfupdate.py` does every guard). The only
 judgement made here is which question to ask first: a version below the running one is a
-downgrade, and the question says what it takes away (spec ae.6, ae.8).
+downgrade, and the question says what it takes away (spec ae.6, ae.8). What counts as older,
+and whether the running build is the release it is listed beside, `selfupdate.py` says - the
+dispatcher judges a downgrade by the same function, so the question and the answer cannot
+disagree.
 
 **Every string is built when it is asked for**, never at import, so the language is the one the
 receiver shows now. The refusal sentences are keyed by the reason codes `cmd/update` and
@@ -29,14 +32,27 @@ from . import buildid, trust
 from .i18n import _
 from .log import get_logger
 from .origin import PAGE, SCREEN
-from .selfupdate import household_doors
+from .selfupdate import household_doors, older
 from .version import __version__
 
 LOG = get_logger("updateview")
 
 INSTALLED = "installed"
+# The release of the running number while a development build of it runs (spec ae.5, v5.5).
+SAME_NUMBER = "same_number"
 NEWER = "newer"
 OLDER = "older"
+
+# `check_error` codes (`updatecheck.py`, TOPICS.md) by what they mean to the household. The
+# rule's own verdicts - `trust.REASONS`, and a relayed payload that is not an index - all say
+# "this list is not to be believed", which is spec ae.10's sentence.
+_UNREACHABLE = ("unreachable",)
+_NOT_DOWNLOADED = ("redirect", "http_error")
+_NOT_SAVED_FULL = ("write_failed",)
+_NOT_SAVED_BUSY = ("trust_busy",)
+_UNREADABLE = ("bad_memory", "bad_keys")
+_INTERNAL = ("internal_error",)
+_REFUSED = trust.REASONS + ("malformed_relay", "too_large")
 
 
 def _phase(phase):
@@ -65,7 +81,7 @@ def _result(result):
     return {
         "installed": _("installed"),
         "withdrawn_before_restart": _("withdrawn before the restart; the previous version runs"),
-        "rolled_back": _("the new version did not start; the previous version was put back"),
+        "rolled_back": _("the new version did not start; the previous one is back"),
         "failed": _("failed; the previous version runs"),
         "interrupted": _("interrupted"),
     }.get(result, result or "-")
@@ -79,12 +95,25 @@ def _reason(reason):
     }.get(reason, reason or "-")
 
 
-def older(version):
-    """Whether installing `version` is a downgrade of the running plugin."""
-    try:
-        return trust.version_key(version) < trust.version_key(__version__)
-    except (AttributeError, TypeError, ValueError):
-        return False
+def _check_problem(code):
+    """The last check's `check_error` in the household's words; an unknown code is named."""
+    for codes, sentence in (
+        (_UNREACHABLE, lambda: _("The last check could not reach the list of versions on the "
+                                 "internet.")),
+        (_NOT_DOWNLOADED, lambda: _("The last check could not download the list of versions.")),
+        (_REFUSED, lambda: _("The plugin's list of versions has an invalid signature or is "
+                             "older than the one already known. Nothing was changed.")),
+        (_NOT_SAVED_FULL, lambda: _("The last check could not save the list of versions; the "
+                                    "receiver's memory may be full.")),
+        (_NOT_SAVED_BUSY, lambda: _("The last check could not save the list of versions. Try "
+                                    "again in a moment.")),
+        (_UNREADABLE, lambda: _("The receiver's record of the list of versions cannot be read, "
+                                "so no list is checked.")),
+        (_INTERNAL, lambda: _("The last check failed; the plugin log says why.")),
+    ):
+        if code in codes:
+            return sentence()
+    return _("The last check failed (%s).") % code
 
 
 def _payload(bridge):
@@ -101,8 +130,9 @@ def _payload(bridge):
 def rows(bridge):
     """`(version, relation, reason)` for every version the signed index offers, newest first.
 
-    `relation` is `installed`, `newer` or `older` than the running plugin; `reason` is None for
-    a version that can be installed and the rule's reason code for one that cannot.
+    `relation` is `installed`, `newer` or `older` than the running plugin - or `same_number`, the
+    release of the running number while a development build of it runs; `reason` is None for a
+    version that can be installed and the rule's reason code for one that cannot.
     """
     found = []
     for entry in _payload(bridge).get("available") or []:
@@ -110,7 +140,7 @@ def rows(bridge):
         if not trust.is_version(version):
             continue
         if version == __version__:
-            relation = INSTALLED
+            relation = INSTALLED if _runs_release(bridge, version) else SAME_NUMBER
         elif older(version):
             relation = OLDER
         else:
@@ -120,6 +150,17 @@ def rows(bridge):
     return found
 
 
+def _runs_release(bridge, version):
+    updater = getattr(bridge, "self_update", None)
+    if updater is None:
+        return True
+    try:
+        return updater.runs_release(version)
+    except Exception:
+        LOG.exception("the running build could not be compared with the release")
+        return False
+
+
 def row_label(row):
     version, relation, reason = row
     if reason is not None:
@@ -127,6 +168,8 @@ def row_label(row):
             "version": version, "reason": _reason(reason)}
     if relation == INSTALLED:
         return _("%s - installed") % version
+    if relation == SAME_NUMBER:
+        return _("%s - release; a development build of it runs") % version
     if relation == OLDER:
         return _("%s - older version") % version
     return _("%s - newer version") % version
@@ -145,7 +188,8 @@ def header(bridge):
     payload = _payload(bridge)
     index = payload.get("index")
     if isinstance(index, dict) and isinstance(index.get("issued"), int):
-        source = _("from Home Assistant") if index.get("source") == "relay" \
+        # "via", never "from": that is who started an update, and a language may need two words.
+        source = _("via Home Assistant") if index.get("source") == "relay" \
             else _("from the internet")
         lines.append(_("List of versions no. %(serial)s of %(date)s, %(source)s") % {
             "serial": index.get("serial"),
@@ -155,10 +199,8 @@ def header(bridge):
     else:
         lines.append(_("No list of versions is known yet. Check for updates first."))
     problem = payload.get("check_error")
-    if problem == "unreachable":
-        lines.append(_("The last check could not reach the list of versions on the internet."))
-    elif problem:
-        lines.append(_("The last check failed (%s).") % problem)
+    if problem:
+        lines.append(_check_problem(problem))
     return lines
 
 
@@ -200,8 +242,9 @@ def question(version):
 
 
 def _restart_note():
-    return _("When the new version is in place the receiver's user interface restarts; the "
-             "picture stops for about half a minute.")
+    # No duration and no promise about the channel: neither is measured on a receiver yet.
+    return _("When the new version is in place the receiver's user interface restarts, and the "
+             "picture stops while it does.")
 
 
 def household_refusal(refusal, version=None):

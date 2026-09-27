@@ -736,10 +736,6 @@ msgid "The update to version %s has started."
 msgstr "Rozpoczęto aktualizację do wersji %s."
 
 #: src/MQTTBridge/updateview.py
-msgid "When the new version is in place the receiver's user interface restarts; the picture stops for about half a minute."
-msgstr "Gdy nowa wersja będzie gotowa, interfejs dekodera uruchomi się ponownie; obraz zniknie na mniej więcej pół minuty."
-
-#: src/MQTTBridge/updateview.py
 msgid "%s - newer version"
 msgstr "%s - nowsza wersja"
 
@@ -900,10 +896,6 @@ msgid "withdrawn before the restart; the previous version runs"
 msgstr "wycofano przed ponownym uruchomieniem; działa poprzednia wersja"
 
 #: src/MQTTBridge/updateview.py
-msgid "the new version did not start; the previous version was put back"
-msgstr "nowa wersja się nie uruchomiła; przywrócono poprzednią wersję"
-
-#: src/MQTTBridge/updateview.py
 msgid "failed; the previous version runs"
 msgstr "nie powiodła się; działa poprzednia wersja"
 
@@ -938,3 +930,47 @@ msgstr "Zainstalować starszą wersję %s? Nowsze funkcje wtyczki znikną do cza
 #: src/MQTTBridge/webif.py
 msgid "Install a plugin version"
 msgstr "Zainstaluj wersję wtyczki"
+
+#: src/MQTTBridge/updateview.py
+msgid "the new version did not start; the previous one is back"
+msgstr "nowa wersja się nie uruchomiła; wróciła poprzednia"
+
+#: src/MQTTBridge/updateview.py
+msgid "The last check could not download the list of versions."
+msgstr "Ostatnie sprawdzenie nie pobrało listy wersji."
+
+#: src/MQTTBridge/updateview.py
+msgid "The plugin's list of versions has an invalid signature or is older than the one already known. Nothing was changed."
+msgstr "Lista wersji wtyczki ma nieprawidłowy podpis albo jest starsza od już znanej. Nic nie zmieniono."
+
+#: src/MQTTBridge/updateview.py
+msgid "The last check could not save the list of versions; the receiver's memory may be full."
+msgstr "Ostatnie sprawdzenie nie zapisało listy wersji; pamięć dekodera może być pełna."
+
+#: src/MQTTBridge/updateview.py
+msgid "The last check could not save the list of versions. Try again in a moment."
+msgstr "Ostatnie sprawdzenie nie zapisało listy wersji. Spróbuj ponownie za chwilę."
+
+#: src/MQTTBridge/updateview.py
+msgid "The receiver's record of the list of versions cannot be read, so no list is checked."
+msgstr "Nie można odczytać zapisu listy wersji na dekoderze, więc lista nie jest sprawdzana."
+
+#: src/MQTTBridge/updateview.py
+msgid "The last check failed; the plugin log says why."
+msgstr "Ostatnie sprawdzenie nie powiodło się; przyczyna jest w dzienniku wtyczki."
+
+#: src/MQTTBridge/updateview.py
+msgid "%s - release; a development build of it runs"
+msgstr "%s - wydanie; działa jego wersja rozwojowa"
+
+#: src/MQTTBridge/updateview.py
+msgid "via Home Assistant"
+msgstr "przez Home Assistant"
+
+#: src/MQTTBridge/updateview.py
+msgid "When the new version is in place the receiver's user interface restarts, and the picture stops while it does."
+msgstr "Gdy nowa wersja będzie gotowa, interfejs dekodera uruchomi się ponownie, a obraz na ten czas zniknie."
+
+#: src/MQTTBridge/webif.py
+msgid "This confirmation was asked for more than ten minutes ago and has expired. Nothing was changed; start again."
+msgstr "To potwierdzenie wyświetlono ponad dziesięć minut temu i wygasło. Nic nie zmieniono; zacznij od nowa."

@@ -18,7 +18,8 @@ a restart of the user interface, so OK alone never starts one; the question defa
 version below the running one is a downgrade, which only this screen and the page may start
 (spec ae.8), and its question names what it takes away: the newer features, until the next
 update. Only a "yes" to *that* question carries the downgrade consent down the call - the
-question asked is recorded when it is asked, not guessed again from the answer.
+version and the consent are bound into the question's own callback when it is asked, so an
+answer acts on nothing but the question it answers and is never judged again from the list.
 
 **The doors.** From the helper's `installing` on, the plugin's files are being replaced under
 this process (`selfupdate.py`). The screen may stay open - the image's restart question opens on
@@ -32,6 +33,7 @@ catches and leaves the screen as it was.
 """
 
 import json
+from functools import partial
 
 from Components.ActionMap import ActionMap
 from Components.Label import Label
@@ -52,12 +54,16 @@ REFRESH_MILLISECONDS = 1000
 
 
 class MQTTBridgeUpdates(Screen):
+    # Five lines of text above the list and five below it, at 22 px: what runs, which list and
+    # the last check, plus why commands cannot run; then a finished update's line and the
+    # longest refusal (standby, three lines in German). `test_the_words_fit_the_screen` holds
+    # every sentence in all three languages to these boxes; the list keeps seven rows.
     skin = """
         <screen name="MQTTBridgeUpdates" position="center,center" size="900,600"
                 title="Plugin updates">
-            <widget name="info" position="20,20" size="860,110" font="Regular;22" />
-            <widget name="list" position="20,140" size="860,300" scrollbarMode="showOnDemand" />
-            <widget name="status" position="20,450" size="860,90" font="Regular;22" />
+            <widget name="info" position="20,20" size="860,130" font="Regular;22" />
+            <widget name="list" position="20,160" size="860,230" scrollbarMode="showOnDemand" />
+            <widget name="status" position="20,400" size="860,130" font="Regular;22" />
             <widget name="key_red" position="20,550" size="200,30" font="Regular;22"
                     foregroundColor="red" />
             <widget name="key_green" position="230,550" size="200,30" font="Regular;22"
@@ -73,7 +79,6 @@ class MQTTBridgeUpdates(Screen):
         # module later would be a lookup behind closed doors.
         self._bridge = bridge if bridge is not None else plugin_module.get_bridge()
         self._rows = None
-        self._asked = None
         self._said = ""
         self["info"] = Label("")
         self["list"] = MenuList([])
@@ -132,9 +137,15 @@ class MQTTBridgeUpdates(Screen):
         rows = updateview.rows(bridge)
         if rows != self._rows:
             # Only when the list changed: setting it again every second would move the
-            # selection back to the top under the person choosing.
+            # selection back to the top under the person choosing. And the cursor stays on the
+            # version it was on, not on the row number: a check that adds a release at the top
+            # would otherwise move it to another version under the person's eyes.
+            chosen = self._chosen()
             self._rows = rows
             self["list"].setList([(updateview.row_label(row), row) for row in rows])
+            versions = [row[0] for row in rows]
+            if chosen is not None and chosen[0] in versions:
+                self["list"].moveToIndex(versions.index(chosen[0]))
         status = [line for line in (updateview.transaction_line(bridge), self._said) if line]
         self["status"].setText("\n".join(status))
 
@@ -152,6 +163,11 @@ class MQTTBridgeUpdates(Screen):
         self._said = text or ""
         self.refresh()
 
+    def _chosen(self):
+        """The row under the cursor: `(version, relation, reason)`, or None."""
+        chosen = self["list"].getCurrent()
+        return chosen[1] if isinstance(chosen, tuple) and len(chosen) > 1 else None
+
     # --------------------------------------------------------------------- keys --
 
     def keyInstall(self):
@@ -163,8 +179,7 @@ class MQTTBridgeUpdates(Screen):
     def _install(self):
         if updateview.doors(self._bridge) is not None:
             return
-        chosen = self["list"].getCurrent()
-        row = chosen[1] if isinstance(chosen, tuple) and len(chosen) > 1 else None
+        row = self._chosen()
         if row is None:
             return
         version, _relation, reason = row
@@ -175,23 +190,23 @@ class MQTTBridgeUpdates(Screen):
         if idle:
             self._say(idle)
             return
-        # What is asked is what the answer consents to: a "yes" to the plain question is
-        # never a downgrade, whatever the version turns out to be.
-        self._asked = (version, updateview.older(version))
+        # What is asked is what the answer consents to, bound into this question's callback:
+        # a "yes" to the plain question is never a downgrade, whatever the version turns out
+        # to be, and no other question's answer can reach this one's version or consent.
+        downgrade = updateview.older(version)
         self.session.openWithCallback(
-            self._answered,
+            partial(self._answered, version, downgrade),
             MessageBox,
             updateview.question(version),
             getattr(MessageBox, "TYPE_YESNO", 0),
             default=False,
         )
 
-    def _answered(self, answer=None, *_rest):
+    def _answered(self, version, downgrade, answer=None, *_rest):
         try:
-            asked, self._asked = self._asked, None
-            if answer is not True or asked is None:
+            if answer is not True:
                 return
-            self._request(*asked)
+            self._request(version, downgrade)
         except Exception:
             LOG.exception("the answer to the install question could not be handled")
 

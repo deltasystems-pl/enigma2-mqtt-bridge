@@ -737,10 +737,6 @@ msgid "The update to version %s has started."
 msgstr "Die Aktualisierung auf Version %s wurde gestartet."
 
 #: src/MQTTBridge/updateview.py
-msgid "When the new version is in place the receiver's user interface restarts; the picture stops for about half a minute."
-msgstr "Sobald die neue Version bereitsteht, startet die Benutzeroberfläche des Receivers neu; das Bild verschwindet für etwa eine halbe Minute."
-
-#: src/MQTTBridge/updateview.py
 msgid "%s - newer version"
 msgstr "%s - neuere Version"
 
@@ -762,7 +758,7 @@ msgstr "Die Paketverwaltung des Receivers ist beschäftigt. Versuchen Sie es gle
 
 #: src/MQTTBridge/updateview.py
 msgid "The receiver is in standby. An update restarts the receiver's user interface, which wakes it and may switch the television on. Switch the receiver on and try again."
-msgstr "Der Receiver ist im Standby. Eine Aktualisierung startet die Benutzeroberfläche des Receivers neu, was ihn aufweckt und den Fernseher einschalten kann. Schalten Sie den Receiver ein und versuchen Sie es erneut."
+msgstr "Der Receiver ist im Standby. Eine Aktualisierung startet seine Benutzeroberfläche neu, weckt ihn und kann den Fernseher einschalten. Schalten Sie ihn ein und versuchen Sie es erneut."
 
 #: src/MQTTBridge/updateview.py
 msgid "The receiver is recording or is about to start a recording. Try again when the recording has finished."
@@ -814,7 +810,7 @@ msgstr "aus dem Internet"
 
 #: src/MQTTBridge/updateview.py
 msgid "No list of versions is known yet. Check for updates first."
-msgstr "Es ist noch keine Versionsliste bekannt. Suchen Sie zuerst nach Aktualisierungen."
+msgstr "Noch keine Versionsliste. Suchen Sie zuerst nach Aktualisierungen."
 
 #: src/MQTTBridge/updateview.py
 msgid "The last check could not reach the list of versions on the internet."
@@ -901,10 +897,6 @@ msgid "withdrawn before the restart; the previous version runs"
 msgstr "vor dem Neustart zurückgenommen; die vorherige Version läuft"
 
 #: src/MQTTBridge/updateview.py
-msgid "the new version did not start; the previous version was put back"
-msgstr "die neue Version ist nicht gestartet; die vorherige Version wurde wiederhergestellt"
-
-#: src/MQTTBridge/updateview.py
 msgid "failed; the previous version runs"
 msgstr "fehlgeschlagen; die vorherige Version läuft"
 
@@ -939,3 +931,47 @@ msgstr "Die ältere Version %s installieren? Die neueren Funktionen des Plugins 
 #: src/MQTTBridge/webif.py
 msgid "Install a plugin version"
 msgstr "Eine Plugin-Version installieren"
+
+#: src/MQTTBridge/updateview.py
+msgid "the new version did not start; the previous one is back"
+msgstr "die neue Version startete nicht; die vorherige ist zurück"
+
+#: src/MQTTBridge/updateview.py
+msgid "The last check could not download the list of versions."
+msgstr "Die letzte Prüfung konnte die Versionsliste nicht herunterladen."
+
+#: src/MQTTBridge/updateview.py
+msgid "The plugin's list of versions has an invalid signature or is older than the one already known. Nothing was changed."
+msgstr "Die Versionsliste des Plugins hat eine ungültige Signatur oder ist älter als die bereits bekannte. Es wurde nichts geändert."
+
+#: src/MQTTBridge/updateview.py
+msgid "The last check could not save the list of versions; the receiver's memory may be full."
+msgstr "Die letzte Prüfung konnte die Versionsliste nicht speichern; der Speicher des Receivers ist vielleicht voll."
+
+#: src/MQTTBridge/updateview.py
+msgid "The last check could not save the list of versions. Try again in a moment."
+msgstr "Die letzte Prüfung konnte die Versionsliste nicht speichern. Versuchen Sie es gleich noch einmal."
+
+#: src/MQTTBridge/updateview.py
+msgid "The receiver's record of the list of versions cannot be read, so no list is checked."
+msgstr "Die gespeicherte Versionsliste ist nicht lesbar, daher wird keine Liste geprüft."
+
+#: src/MQTTBridge/updateview.py
+msgid "The last check failed; the plugin log says why."
+msgstr "Die letzte Prüfung ist fehlgeschlagen; der Grund steht im Protokoll des Plugins."
+
+#: src/MQTTBridge/updateview.py
+msgid "%s - release; a development build of it runs"
+msgstr "%s - Release; ein Entwicklungs-Build davon läuft"
+
+#: src/MQTTBridge/updateview.py
+msgid "via Home Assistant"
+msgstr "über Home Assistant"
+
+#: src/MQTTBridge/updateview.py
+msgid "When the new version is in place the receiver's user interface restarts, and the picture stops while it does."
+msgstr "Sobald die neue Version bereitsteht, startet die Benutzeroberfläche des Receivers neu; so lange verschwindet das Bild."
+
+#: src/MQTTBridge/webif.py
+msgid "This confirmation was asked for more than ten minutes ago and has expired. Nothing was changed; start again."
+msgstr "Diese Bestätigung wurde vor mehr als zehn Minuten angefordert und ist abgelaufen. Es wurde nichts geändert; beginnen Sie erneut."

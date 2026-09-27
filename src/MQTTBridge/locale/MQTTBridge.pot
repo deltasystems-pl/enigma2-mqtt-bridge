@@ -736,10 +736,6 @@ msgid "The update to version %s has started."
 msgstr ""
 
 #: src/MQTTBridge/updateview.py
-msgid "When the new version is in place the receiver's user interface restarts; the picture stops for about half a minute."
-msgstr ""
-
-#: src/MQTTBridge/updateview.py
 msgid "%s - newer version"
 msgstr ""
 
@@ -900,10 +896,6 @@ msgid "withdrawn before the restart; the previous version runs"
 msgstr ""
 
 #: src/MQTTBridge/updateview.py
-msgid "the new version did not start; the previous version was put back"
-msgstr ""
-
-#: src/MQTTBridge/updateview.py
 msgid "failed; the previous version runs"
 msgstr ""
 
@@ -937,4 +929,48 @@ msgstr ""
 
 #: src/MQTTBridge/webif.py
 msgid "Install a plugin version"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "the new version did not start; the previous one is back"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "The last check could not download the list of versions."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "The plugin's list of versions has an invalid signature or is older than the one already known. Nothing was changed."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "The last check could not save the list of versions; the receiver's memory may be full."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "The last check could not save the list of versions. Try again in a moment."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "The receiver's record of the list of versions cannot be read, so no list is checked."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "The last check failed; the plugin log says why."
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "%s - release; a development build of it runs"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "via Home Assistant"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
+msgid "When the new version is in place the receiver's user interface restarts, and the picture stops while it does."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "This confirmation was asked for more than ten minutes ago and has expired. Nothing was changed; start again."
 msgstr ""

@@ -132,6 +132,9 @@ def _updating(bridge):
 
 
 class MQTTBridgeSetup(Screen, ConfigListScreen):
+    # The blue key is wider than the others because its label is the spec's own words,
+    # "Aktualizacje wtyczki" and "Plugin-Aktualisierungen": this screen has no yellow key, so it
+    # takes that room rather than a shorter name (`test_the_words_fit_the_screen`).
     skin = """
         <screen name="MQTTBridgeSetup" position="center,center" size="900,600" title="MQTT Bridge">
             <widget name="config" position="20,20" size="860,470" scrollbarMode="showOnDemand" />
@@ -140,7 +143,7 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
                     foregroundColor="red" />
             <widget name="key_green" position="230,550" size="200,30" font="Regular;22"
                     foregroundColor="green" />
-            <widget name="key_blue" position="650,550" size="230,30" font="Regular;22"
+            <widget name="key_blue" position="540,550" size="340,30" font="Regular;22"
                     foregroundColor="blue" />
         </screen>
     """

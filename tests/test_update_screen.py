@@ -16,11 +16,14 @@ import os
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ElementTree
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from conftest import MainLoop, MessageBox, RecordTimerEntry
 from test_selfupdate import (
+    BUILD,
     NOW,
     ROOT,
     accepted,
@@ -34,10 +37,27 @@ from test_selfupdate import (
     tree,
 )
 from test_setup_screen import FakeSession
-from test_webif import _Request, action_fields, confirmation, new_session, post, token
+from test_webif import (
+    _Request,
+    action_fields,
+    confirmation,
+    new_session,
+    post,
+    settings_fields,
+    token,
+)
 from updatelab import TEST_KEYS, FakeOrigin, release, signed
 
-from MQTTBridge import selfupdate, trust, updatehelper, updatescreen, updateview, webif
+from MQTTBridge import (
+    selfupdate,
+    trust,
+    trustfile,
+    updatecheck,
+    updatehelper,
+    updatescreen,
+    updateview,
+    webif,
+)
 from MQTTBridge import setup as setup_screen
 from MQTTBridge.origin import MQTT, PAGE, SCREEN
 from MQTTBridge.publisher import Refusal
@@ -47,8 +67,9 @@ from MQTTBridge.updatescreen import MQTTBridgeUpdates
 FIXTURES = (box, mono, tree)
 
 PACKAGE_DIR = Path(updatescreen.__file__).resolve().parent
-LISTED = ["0.4.0 - newer version", "0.3.0 - installed", "0.2.5 - older version",
-          "0.2.0 - older version"]
+# The tests' receiver runs a development build of 0.3.0, so its release is not "installed".
+RUNNING = "0.3.0 - release; a development build of it runs"
+LISTED = ["0.4.0 - newer version", RUNNING, "0.2.5 - older version", "0.2.0 - older version"]
 
 
 # ---------------------------------------------------------------------- helpers --
@@ -133,7 +154,7 @@ def test_the_screen_lists_the_offered_versions_with_the_running_one_marked(box):
     assert labels(screen) == LISTED
     info = screen["info"].text
     assert "Installed version: 0.3.0+gcdcdcdc" in info
-    assert "List of versions no. 1 of 2026-09-2" in info and "from Home Assistant" in info
+    assert "List of versions no. 1 of 2026-09-2" in info and "via Home Assistant" in info
     assert screen.title == "Plugin updates"
 
 
@@ -147,9 +168,9 @@ def test_a_version_that_cannot_be_installed_says_why_and_is_not_offered(box):
         "0.5.0 - cannot be installed: does not work with this plugin or with the Home "
         "Assistant integration",
         "0.4.0 - cannot be installed: needs a package that is not installed on this receiver",
-        "0.3.0 - installed",
+        RUNNING,
     ]
-    assert updateview.installable(bridge) == [("0.3.0", "0.3.0 - installed")]
+    assert updateview.installable(bridge) == [("0.3.0", RUNNING)]
     screen.keyInstall()
     assert screen.session.questions == []
     assert "does not work with this plugin" in screen["status"].text
@@ -222,8 +243,7 @@ def test_nothing_the_screen_does_raises_into_the_main_loop(box, monkeypatch):
     monkeypatch.setattr(bridge, "run_command", broken)
     screen.keyInstall()
     screen.keyCheck()
-    screen._asked = ("0.4.0", False)
-    screen._answered(True)
+    screen._answered("0.4.0", False, True)
 
 
 # -------------------------------------------------------------------- check now --
@@ -305,8 +325,7 @@ def test_the_yes_to_the_plain_question_is_never_a_downgrade(box, factory):
     """What is asked is what is consented to: the answer does not re-judge the version."""
     bridge = box()
     screen = screen_of(bridge)
-    screen._asked = ("0.2.5", False)
-    screen._answered(True)
+    screen._answered("0.2.5", False, True)
     assert directories(bridge.root) == []
     assert refusal(factory.client)[0] == "downgrade"
 
@@ -730,3 +749,286 @@ def test_the_polish_screen_uses_the_specs_words():
                    "until it is updated again."] == (
         "Zainstalować starszą wersję %s? Nowsze funkcje wtyczki znikną do czasu ponownej "
         "aktualizacji.")
+    # Spec ae.10, "bad signature / older index".
+    assert entries["The plugin's list of versions has an invalid signature or is older than "
+                   "the one already known. Nothing was changed."] == (
+        "Lista wersji wtyczki ma nieprawidłowy podpis albo jest starsza od już znanej. Nic nie "
+        "zmieniono.")
+
+
+# ------------------------------------------------------------ review round 1 --
+
+
+@pytest.mark.parametrize("form", ["install", "downgrade", "restart_gui", "confirm", "identity"])
+def test_behind_closed_doors_the_page_answers_only_the_sentence(form, box, page, factory):
+    """Spec ae.6 step 3: from `installing` on, every form gets the sentence and nothing is kept.
+
+    Not a question page, not a pending confirmation: an answer to either would meet the doors
+    anyway, and a page that asks what it cannot do tells the household the wrong thing.
+    """
+    bridge = box()
+    resource = page(bridge)
+    session = new_session()
+    token(session)
+    fields, csrf = None, True
+    if form == "confirm":
+        # Asked before the doors closed, answered after.
+        _request, body = post(resource, session, install_fields("0.4.0"))
+        fields, csrf = confirmation(body), None
+    directory = accepted(bridge, factory)
+    helper_says(directory, phase="installing")
+    tick()
+    assert bridge.self_update.closed
+    if form == "install":
+        fields = install_fields("0.4.0")
+    elif form == "downgrade":
+        fields = install_fields("0.2.5")
+    elif form == "restart_gui":
+        fields = action_fields("restart_gui")
+    elif form == "identity":
+        fields = settings_fields(bridge.settings, node_id="vuuno4kse_005302")
+    published = len(factory.client.published)
+    request, body = post(resource, session, fields, csrf=csrf)
+    text = body.decode("utf-8")
+    assert request.response_code == 409
+    assert selfupdate.household_doors(bridge.self_update) in text
+    assert "<form" not in text
+    assert webif.CONFIRM_KEY not in session.sessionNamespaces
+    assert factory.client.published[published:] == []
+    assert len(directories(bridge.root)) == 1
+
+
+def test_each_answer_acts_on_its_own_question(box):
+    """The answer carries what was asked; nothing another question asked can reach it."""
+    bridge = box()
+    screen = screen_of(bridge)
+    choose(screen, "0.4.0")
+    screen.keyInstall()
+    choose(screen, "0.2.5")
+    screen.keyInstall()
+    upgrade, _downgrade = screen.session.questions
+    assert upgrade[2][0].startswith("Install version 0.4.0 of the plugin?")
+    upgrade[0](True)
+    made = directories(bridge.root)
+    assert len(made) == 1
+    request = request_of(made[0])
+    assert (request["target"], request["downgrade"]) == ("0.4.0", False)
+
+
+def test_the_refresh_stops_however_the_screen_is_closed(box, monkeypatch):
+    """Closed by the session - a standby, another plugin - and not by its own keys."""
+    screen = screen_of(box())
+    timer = screen._ticker.timer
+    drawn = []
+    monkeypatch.setattr(MQTTBridgeUpdates, "_draw", lambda self: drawn.append(1))
+    screen.doClose()
+    MainLoop.advance(updatescreen.REFRESH_MILLISECONDS * 5)
+    assert not timer.running
+    assert drawn == []
+
+
+CHECK_ERRORS = sorted(set(trust.REASONS) | {
+    updatecheck.ERROR_UNREACHABLE, updatecheck.ERROR_REDIRECT, updatecheck.ERROR_HTTP,
+    updatecheck.ERROR_INTERNAL, updatecheck.MALFORMED_RELAY, updatecheck.TOO_LARGE,
+    trustfile.WRITE_FAILED, trustfile.TRUST_BUSY, trustfile.ERROR_BAD_MEMORY,
+    trustfile.ERROR_BAD_KEYS,
+})
+
+
+@pytest.mark.parametrize("code", CHECK_ERRORS)
+def test_every_check_error_is_a_household_sentence(code, box):
+    """Spec ae.10: the television says what went wrong, never the code (review S4)."""
+    bridge = box()
+    bridge.updates._check_error = code
+    said = updateview.header(bridge)[-1]
+    assert code not in said and "(" not in said and said.endswith("."), said
+
+
+def test_a_check_error_nobody_knows_yet_is_named():
+    bridge = SimpleNamespace(build=None, updates=SimpleNamespace(
+        payload=lambda: {"check_error": "later_code"}))
+    assert updateview.header(bridge)[-1] == "The last check failed (later_code)."
+
+
+def test_the_selection_follows_its_version_when_the_list_changes(box):
+    bridge = box()
+    screen = screen_of(bridge)
+    choose(screen, "0.2.5")
+    hold(bridge, [release("0.5.0"), release("0.4.0"), release("0.3.0"), release("0.2.5"),
+                  release("0.2.0")])
+    screen.refresh()
+    assert labels(screen)[0] == "0.5.0 - newer version"
+    assert screen["list"].getCurrent()[1][0] == "0.2.5"
+    hold(bridge, [release("0.4.0"), release("0.3.0")])
+    screen.refresh()
+    # Gone: the cursor stays within the list, on whatever is there.
+    assert screen["list"].getCurrent() is not None
+
+
+def test_a_confirmation_left_for_ten_minutes_has_expired(box, page):
+    bridge = box()
+    resource = page(bridge)
+    session = new_session()
+    _request, body = post(resource, session, install_fields("0.4.0"))
+    session.sessionNamespaces[webif.CONFIRM_KEY]["asked"] -= webif.CONFIRM_SECONDS + 1
+    request, body = post(resource, session, confirmation(body), csrf=None)
+    assert request.response_code == 403
+    assert b"more than ten minutes ago" in body
+    assert webif.CONFIRM_KEY not in session.sessionNamespaces
+    assert directories(bridge.root) == []
+
+
+def test_a_development_build_is_never_shown_as_the_installed_release(box):
+    """Spec ae.5 (v5.5): a development build of the same number is never the current release."""
+    bridge = box()
+    # The tests' receiver runs a development build made from the release's own commit.
+    assert "0.3.0 - release; a development build of it runs" in labels(screen_of(bridge))
+    for build, installed in (
+        (dict(BUILD, flavour="release"), True),
+        (dict(BUILD, flavour="release", commit="ef" * 20), False),
+        (dict(BUILD, flavour="release", dirty=True), False),
+        (dict(BUILD, flavour="acceptance"), False),
+        # A copy nobody built compares by its number (every plugin up to 0.3.x).
+        (dict(BUILD, commit=None), True),
+    ):
+        bridge._build = build
+        assert ("0.3.0 - installed" in labels(screen_of(bridge))) is installed, build
+
+
+def test_one_rule_says_what_is_older():
+    """The question and the dispatcher judge a downgrade by the same function (review N4)."""
+    assert updateview.older is selfupdate.older
+    assert selfupdate.older("0.2.5") and not selfupdate.older("0.3.0")
+    assert not selfupdate.older("not a version")
+
+
+def test_the_list_source_has_its_own_words(box):
+    """The words for who started an update are not the words for where the list came from."""
+    info = screen_of(box())["info"].text
+    assert "List of versions no. 1 of 2026-09-2" in info and "via Home Assistant" in info
+
+
+# The skins' text boxes, judged by a character budget (review S3): a character is taken as 0.55 of
+# the font size wide - the stub's `eLabel` model uses 0.5, and the margin is for capitals and
+# German compounds - a line as 1.2 of it tall, and text wraps at spaces. A model, not the image's
+# font renderer (the spike looks at the real screen), but enough to stop a sentence that cannot
+# fit whatever the font: at `Regular;22` a line holds 71 characters and a 200 px key 16.
+GLYPH = 0.55
+LINE = 1.2
+LONG = "0.10.10"
+PHASES = ("downloading", "verifying", "snapshot", "installing", "restarting", "proving",
+          "rolling_back")
+RESULTS = ("installed", "withdrawn_before_restart", "rolled_back", "failed", "interrupted")
+STARTERS = ("mqtt", "home_assistant", "screen", "page", "ssh")
+REFUSALS = ("no_capability", "busy", "opkg_busy", "standby", "recording", "recording_due",
+            "recording_unknown", "epg_import", "cannot_restart", "unknown_version", "withdrawn",
+            "below_floor", "incompatible", "depends", "current", "no_space", "rate_limited",
+            "internal_error")
+# The longest reason a bridge goes idle with, in English as it is kept.
+IDLE = "the bridge failed to start"
+
+
+def budget(skin):
+    """`name -> (characters per line, lines)` for every widget of `skin` that has a font."""
+    found = {}
+    for widget in ElementTree.fromstring(skin).iter("widget"):
+        if "font" not in widget.attrib:
+            continue
+        width, height = (int(value) for value in widget.get("size").split(","))
+        size = int(widget.get("font").split(";")[1])
+        found[widget.get("name")] = (int(width // (size * GLYPH)), height // int(size * LINE))
+    return found
+
+
+def wrapped(text, per_line):
+    """How many lines `text` takes when it wraps at spaces."""
+    total = 0
+    for paragraph in text.split("\n"):
+        rows, used = 1, None
+        for word in paragraph.split():
+            if used is None:
+                used = len(word)
+            elif used + 1 + len(word) <= per_line:
+                used += 1 + len(word)
+            else:
+                rows, used = rows + 1, len(word)
+            while used > per_line:
+                rows, used = rows + 1, used - per_line
+        total += rows
+    return total
+
+
+def translator(language):
+    from test_locale import LOCALE, catalogue
+
+    if language == "en":
+        return lambda text: text
+    entries = catalogue(LOCALE / language / "LC_MESSAGES" / "MQTTBridge.po")
+    return lambda text: entries.get(text) or text
+
+
+def speak(language, monkeypatch):
+    translate = translator(language)
+    for module in (updateview, updatescreen, selfupdate, setup_screen):
+        monkeypatch.setattr(module, "_", translate)
+    return translate
+
+
+def transaction_lines():
+    records = [{"target": LONG, "started_by": who, "phase": phase}
+               for who in STARTERS for phase in PHASES]
+    records += [{"target": LONG, "started_by": who, "phase": "finished", "result": result}
+                for who in STARTERS for result in RESULTS]
+    return [updateview.transaction_line(SimpleNamespace(
+        self_update=SimpleNamespace(transaction_payload=lambda record=record: record)))
+        for record in records]
+
+
+def said_lines(translate):
+    said = [updateview.household_refusal(Refusal("contract sentence", reason), LONG)
+            for reason in REFUSALS]
+    said += [updateview.row_label((LONG, updateview.NEWER, reason))
+             for reason in ("incompatible", "depends")]
+    said += [translate("The update to version %s has started.") % LONG,
+             translate("Asked for the list of versions; it is shown here as soon as it arrives."),
+             translate("Commands need a running bridge: %s") % translate(
+                 "the plugin did not start"),
+             translate("Commands need a running bridge: %s") % IDLE]
+    return said
+
+
+def header_lines(translate):
+    build = dict(BUILD, dirty=True)
+    found = []
+    for index in (None, {"serial": 1000000, "issued": 1790500000, "source": "relay"},
+                  {"serial": 1000000, "issued": 1790500000, "source": "origin"}):
+        for code in [None, "later_code"] + CHECK_ERRORS:
+            payload = {"index": index, "check_error": code}
+            bridge = SimpleNamespace(build=build, updates=SimpleNamespace(
+                payload=lambda payload=payload: payload))
+            found.append(updateview.header(bridge)
+                         + [translate("Commands need a running bridge: %s") % IDLE])
+    return found
+
+
+@pytest.mark.parametrize("language", ["en", "pl", "de"])
+def test_the_words_fit_the_screen(language, box, settings, monkeypatch):
+    translate = speak(language, monkeypatch)
+    room = budget(MQTTBridgeUpdates.skin)
+    per_line, status_lines = room["status"]
+    # The status box holds what runs or how the last update ended, and what a key just said.
+    longest = max(wrapped(line, per_line) for line in transaction_lines())
+    said = max(wrapped(line, per_line) for line in said_lines(translate))
+    assert longest + said <= status_lines, (language, longest, said, status_lines)
+    per_line, info_lines = room["info"]
+    for lines in header_lines(translate):
+        assert wrapped("\n".join(lines), per_line) <= info_lines, (language, lines)
+    # Every key label on one line, on this screen and on the setup screen that opens it.
+    bridge = box()
+    for screen, skin in ((screen_of(bridge), MQTTBridgeUpdates.skin),
+                         (setup_screen.MQTTBridgeSetup(FakeSession(), settings=settings,
+                                                       bridge=bridge),
+                          setup_screen.MQTTBridgeSetup.skin)):
+        for name, (per_line, _lines) in budget(skin).items():
+            if name.startswith("key_"):
+                assert len(screen[name].text) <= per_line, (language, name, screen[name].text)
