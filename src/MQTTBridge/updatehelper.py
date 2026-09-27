@@ -91,8 +91,9 @@ once. A tree left half installed that cannot start the plugin at all is for the 
 integration's forced reinstall over SSH (TRANSACTION.md section 4).
 
 **Bounds.** The forward path gives up at 15 minutes and the rollback's waits add up to less than
-five, so the lock is held at most 20 minutes - under the released installer's 30-minute stale
-rule even if the heartbeat were never written.
+seven - that is with every `init 3` running into its timeout twice, and the interface given its
+second chance - so the lock is held at most 22 minutes: under the released installer's
+30-minute stale rule even if the heartbeat were never written.
 """
 
 import errno
@@ -172,6 +173,11 @@ POLL = 1
 PROOF_POLL = 2
 STOP_WAIT = 30
 START_WAIT = 120
+# `init 3` that did not answer 0 is sent once more after a short pause; nothing seen starting
+# after a stop within START_WAIT, it is sent again and given START_AGAIN_WAIT.
+INIT_3_TRIES = 2
+INIT_3_PAUSE = 2
+START_AGAIN_WAIT = 60
 SERVICE_WAIT = 60
 EFFECT_WAIT = 10
 INDEX_TIMEOUT = 10
@@ -326,9 +332,9 @@ class Receiver:
             return 127
         except Exception as error:
             # Anything else - a MemoryError while the child is set up, say - is a program that
-            # did not run, the same as one that could not be found. Its callers decide on the
-            # status: `init 3` in R2 above all, which must never be skipped because of how
-            # the start of a program failed.
+            # did not run, the same as one that could not be found: exit status 127, and the
+            # caller decides on it. R2 sends `init 3` again on any status but 0. Only what is
+            # not an Exception (KeyboardInterrupt, SystemExit) goes on up.
             self.last_output = type(error).__name__ + ": " + str(error)
             return 127
         self.last_output = completed.stdout.decode("utf-8", "replace")
@@ -1843,10 +1849,13 @@ class Transaction:
         failures are recorded and the unit carries on, and anything else still meets the
         `finally`, which first runs the steps the unit had not reached - the restore, the
         channel - each guarded, records `rollback: cut short`, and then starts the interface.
-        That includes an escape from the `init 3` call itself: the `finally` sends it again,
-        because starting a runlevel that is already running changes nothing. R3 comes after
-        the start and checks a rollback that is already done, so an error in it is noted
-        (`channel` / `standby` `unconfirmed`) and never changes the result.
+        `init 3` is safe to repeat - starting a runlevel that is already running changes
+        nothing - so it is repeated wherever a start is in doubt: once more after a pause when
+        the call does not answer 0 (127 when the program could not even be started, None when
+        it did not answer in time), again from the `finally` when the call itself raised, and
+        once more when nothing was seen starting after a stop. R3 comes after the start and
+        checks a rollback that is already done, so an error in it is noted (`channel` /
+        `standby` `unconfirmed`) and never changes the result.
 
         The result says what runs, not only what is on disk: `rolled_back` only when the old
         files are back and an enigma2 R2 had not seen before started on them. With the files
@@ -1892,9 +1901,9 @@ class Transaction:
             receiver.pause("rollback_restored")
             self.put_lastservice(stopped, service)
             starting = True
-            receiver.run([receiver.init, "3"], STOP_WAIT)
-            # Only once it has returned: an escape from the call itself - the program could not
-            # even be started - must still meet the `init 3` below, which is safe to repeat.
+            self.start_interface()
+            # Only once it has returned: an escape from the call itself must still meet the
+            # `init 3` below.
             sent = True
         finally:
             if not sent:
@@ -1925,11 +1934,18 @@ class Transaction:
                             self.record["lastservice"] = "failed"
             self.record["stop"] = "seen" if stopped else "not seen"
             if not sent:
-                receiver.run([receiver.init, "3"], STOP_WAIT)
+                self.start_interface()
         receiver.pause("rollback_started")
         # Not stopped, `init 3` asks for a runlevel that never left and starts nothing: the
         # process R2 could not stop runs on, with whatever code it had, over the old files.
         started = self.wait(lambda: bool(receiver.enigma2_pids() - survivors), START_WAIT)
+        if not started and stopped:
+            # Stopped, and nothing came: an `init 3` that answered and took no effect, or never
+            # got through at all. The interface is down either way; asking again costs nothing.
+            self.record["start"] = "again"
+            self.start_interface()
+            started = self.wait(lambda: bool(receiver.enigma2_pids() - survivors),
+                                START_AGAIN_WAIT)
         if not started:
             self.record["interface"] = "not started" if stopped else "not restarted"
         if started and recorded and receiver.clock() < limit:
@@ -1956,6 +1972,24 @@ class Transaction:
                        previous=self.request["from"]["version"])
         self.finish("rolled_back" if back and started else "failed", end)
         return 1
+
+    def start_interface(self):
+        """`init 3`, and once more after a short pause when it does not answer 0.
+
+        127 is a program that could not even be started - `Receiver.run` turns any error in
+        starting it into that - and None one that did not answer in time; neither says the
+        runlevel was asked for. Every status but a first 0 goes on the record as `init_3`.
+        """
+        receiver = self.receiver
+        codes = []
+        for attempt in range(INIT_3_TRIES):
+            if attempt:
+                receiver.sleep(INIT_3_PAUSE)
+            codes.append(receiver.run([receiver.init, "3"], STOP_WAIT))
+            if codes[-1] == 0:
+                break
+        if codes != [0]:
+            self.record.setdefault("init_3", []).extend(codes)
 
     def put_lastservice(self, stopped, service):
         """The recorded channel as `config.tv.lastservice`, only while enigma2 is stopped."""

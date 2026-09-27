@@ -8,6 +8,7 @@ word - at exactly one step of the sequence. The last tests run the helper as the
 a copy in its own directory, a separate process, a real signal while it waits at a FIFO.
 """
 
+import errno
 import hashlib
 import io
 import json
@@ -2519,3 +2520,68 @@ def test_an_interruption_at_any_step_of_r2_ends_as_the_unit_would(
     assert f"Version: {OLD}\n" in Path(status).read_text()
     assert scene.box.setting("config.plugins.mqttbridge.enabled") == "true"
     assert scene.box.lastservice_at_start == TVP1
+
+
+# ------------------------------------ `init 3` that does not get through (review 5) --
+
+
+def init_3_fails_once(scene, monkeypatch, failure):
+    """The first `init 3` goes through the helper's own `Receiver.run`, whose child fails."""
+    real = scene.box.run
+    failed = []
+
+    def cannot_start(*_args, **_kwargs):
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(["init", "3"], 30)
+        raise {"memory": MemoryError(), "fork": OSError(errno.ENOMEM, "Cannot allocate memory"),
+               "error": RuntimeError("no child")}[failure]
+
+    def run(argv, timeout):
+        if argv[0] == scene.box.init and argv[1] == "3" and not failed:
+            failed.append(argv)
+            scene.box.argv.append(list(argv))
+            with monkeypatch.context() as patch:
+                patch.setattr(updatehelper.subprocess, "run", cannot_start)
+                return updatehelper.Receiver.run(scene.box, argv, timeout)
+        return real(argv, timeout)
+    scene.box.run = run
+    return failed
+
+
+@pytest.mark.parametrize("failure", ["memory", "fork", "error", "timeout"])
+def test_an_init_3_that_could_not_be_started_is_sent_again(tmp_path, monkeypatch, failure):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    failed = init_3_fails_once(scene, monkeypatch, failure)
+    assert scene.run() == 1
+    assert failed and scene.init_calls() == ["4", "3", "3"] and scene.box.pids == {300}
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    assert scene.status()["record"]["init_3"] == [None if failure == "timeout" else 127, 0]
+    assert scene.box.lastservice_at_start == TVP1
+
+
+def test_an_init_3_that_took_no_effect_after_a_stop_is_sent_again(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    real = scene.box.run
+
+    def the_first_start_is_lost(argv, timeout):
+        if argv[0] == scene.box.init and argv[1] == "3" and "3" not in scene.init_calls():
+            scene.box.argv.append(list(argv))
+            return 0
+        return real(argv, timeout)
+    scene.box.run = the_first_start_is_lost
+    assert scene.run() == 1
+    assert scene.init_calls() == ["4", "3", "3"] and scene.box.pids == {300}
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    assert scene.status()["record"]["start"] == "again"
+
+
+@pytest.mark.parametrize("error", [KeyboardInterrupt, SystemExit])
+def test_receiver_run_lets_what_is_not_an_exception_through(tmp_path, monkeypatch, error):
+    def interrupted(*_args, **_kwargs):
+        raise error()
+    monkeypatch.setattr(updatehelper.subprocess, "run", interrupted)
+    with pytest.raises(error):
+        updatehelper.Receiver(root=str(tmp_path)).run(["/sbin/init", "3"], 5)
