@@ -2931,7 +2931,9 @@ def test_a_second_init_3_that_brings_the_interface_up_late_is_waited_for(tmp_pat
     scene = Scene(tmp_path)
     scene.plugin_word(started=False)
     real = scene.box.run
-    late = updatehelper.START_AGAIN_WAIT - 5
+    # Five seconds inside the 60 s the second chance is given - a number, not the constant,
+    # so that a shorter wait fails here.
+    late = 55
 
     def the_first_start_is_lost_the_second_slow(argv, timeout):
         if argv[0] == scene.box.init and argv[1] == "3":
@@ -2945,3 +2947,39 @@ def test_a_second_init_3_that_brings_the_interface_up_late_is_waited_for(tmp_pat
     assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
     assert scene.status()["record"]["start"] == "again" and scene.box.pids == {300}
     assert scene.box.lastservice_at_start == TVP1
+
+
+def test_a_restart_in_good_time_gets_the_whole_proof_window_and_no_more(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    marks = {}
+    scene.box.pauses["proving"] = lambda: marks.setdefault("proving", scene.box.t)
+    scene.box.pauses["rollback_recorded"] = lambda: marks.setdefault("r2", scene.box.t)
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    # Far from the deadline, the cap changes nothing: 120 s, then R2.
+    waited = marks["r2"] - marks["proving"]
+    window, poll = updatehelper.PROOF_WINDOW, updatehelper.PROOF_POLL
+    assert window <= waited <= window + poll
+
+
+def test_a_start_waits_for_every_process_r2_could_not_stop(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    scene.box.pauses["rollback_recorded"] = lambda: setattr(scene.box, "pids", {200, 201})
+    real = scene.box.run
+
+    def one_of_two_quits_beside_a_new_one(argv, timeout):
+        if argv[0] == scene.box.init and argv[1] == "3":
+            scene.box.argv.append(list(argv))
+            scene.box.pids = scene.box.pids | {300}
+            scene.box.at(40, lambda: setattr(scene.box, "pids", scene.box.pids - {201}))
+            return 0
+        return real(argv, timeout)
+    scene.box.run = one_of_two_quits_beside_a_new_one
+    assert scene.run() == 1
+    # 200 still runs with the code it had: one of the two gone is not enough.
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "not_stopped")
+    assert scene.status()["record"]["unstopped"] == [200, 201]
+    assert scene.box.pids == {200, 300}
