@@ -2439,3 +2439,55 @@ def test_the_helpers_new_record_fields_change_nothing_here(result, reason, recor
     assert not updater.closed and not updater.stuck and updater._current is None
     assert refusal(factory.client) == (reason, error)
     assert transaction(factory.client)["result"] == result
+
+
+def following_from(starting, factory, receiver, frm):
+    """A follower of a transaction whose `from` is `frm`; it runs 0.3.0 at `COMMIT`."""
+    made = {}
+    bridge = starting(prepare=lambda root: made.update(dir=marker(
+        root, phase="rolling_back", to=("0.4.0", "ab" * 20), frm=frm)),
+        session=receiver.session)
+    factory.client.fire_connect()
+    helper_process(bridge, made["dir"])
+    return bridge, made["dir"]
+
+
+@pytest.mark.parametrize("frm, held", [
+    (("0.3.0", COMMIT), False),
+    # A release built again under the same number is another build (spike S1).
+    (("0.3.0", "ef" * 20), True),
+    (("0.2.0", COMMIT), True),
+    # A `from` without a commit is judged by its number, as after a power loss.
+    (("0.3.0", None), False),
+])
+def test_with_no_list_the_version_and_the_commit_decide(frm, held, starting, factory, receiver):
+    bridge, directory = following_from(starting, factory, receiver, frm)
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped",
+                error=str(updatehelper.Fail("not_stopped", previous=frm[0])),
+                finished=NOW + 200, record=unstopped_record("no_list"), **{"from": frm[0]})
+    tick()
+    assert bridge.self_update.stuck is held
+
+
+@pytest.mark.parametrize("case", ["another_transactions_marker", "nothing_says_from"])
+def test_with_no_list_and_no_from_of_this_transaction_the_process_is_held(case, starting,
+                                                                          factory, receiver):
+    """What cannot be shown to run the files put back is not opened over them."""
+    bridge, directory = following_from(starting, factory, receiver, ("0.2.0", "ef" * 20))
+    marker_path = bridge.root / updatehelper.MARKER
+    if case == "another_transactions_marker":
+        # Another transaction's `from` is this very build: it says nothing about this one.
+        updatehelper.write_json(str(marker_path), {
+            "id": "0123456789ab", "phase": "finished",
+            "from": {"version": "0.3.0", "commit": COMMIT}})
+        status_from = "0.2.0"
+    else:
+        os.remove(marker_path)
+        status_from = None
+    updatehelper.write_json(str(directory / "request.json"),
+                            {"id": "a1b2c3d4e5f6", "enigma2_pid": 1})
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped",
+                error=str(updatehelper.Fail("not_stopped", previous="0.2.0")),
+                finished=NOW + 200, record=unstopped_record("no_list"), **{"from": status_from})
+    tick()
+    assert bridge.self_update.stuck
