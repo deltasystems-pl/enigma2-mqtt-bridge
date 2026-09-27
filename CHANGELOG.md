@@ -46,10 +46,13 @@ version that has no section here.
   the consent - and every household guard still applies. Every install is asked first, and only
   here can an older version be installed, after a question that says the newer features disappear
   until the next update; on the page that consent stays on the receiver with the confirmation step
-  and is never sent by the browser. While the doors are closed both show only the doors sentence;
-  the screen may stay open under the restart question and imports nothing new. Refusals on the
-  television are said in the household's language. Polish and German catalogues carry every new
-  string. Not yet tried on a receiver.
+  and is never sent by the browser; a confirmation expires after ten minutes, and the television's
+  answer acts only on the question it answers. While the doors are closed both show only the doors
+  sentence, and the page answers every form with it, asking and keeping nothing; the screen may
+  stay open under the restart question and imports nothing new. Refusals and a failed check are
+  said on the television in the household's language. A development build is never shown as the
+  installed release of the same number. Polish and German catalogues carry every new string. Not
+  yet tried on a receiver.
 
 - **Every package says which build it is.** `info` gains `build` - the commit the package was
   built from, the commit's time, whether the tracked files matched it, the flavour, and the commit

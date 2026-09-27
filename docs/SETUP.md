@@ -255,8 +255,10 @@ checked in `/etc/enigma2/mqttbridge-check.json`, both
 The setup screen's **blue** key opens *Plugin updates*: the running version and build, which
 signed list of versions the receiver holds and how old it is, the versions that list offers - the
 running one marked, older and newer ones named, and for the ones that cannot be installed the
-reason - and an update in progress, with who started it and how far it is. **Yellow**
-checks for updates; **OK** or **green** installs the chosen version. The
+reason - and an update in progress, with who started it and how far it is. The same number as the
+running one is marked *installed* only when the running build is that release; a development build
+of it is never shown as the release. **Yellow** checks for updates, and a failed check says why in
+words; **OK** or **green** installs the chosen version. The
 [OpenWebif page](#the-openwebif-page) has the same: a *Plugin updates* section and the action
 *Install a plugin version*.
 
@@ -264,15 +266,19 @@ Neither needs `update_check` or `update_allowed`: whoever holds the remote contr
 by OpenWebif, could switch both on, so the act of pressing is the consent. Every guard that
 protects the household still applies - a recording, a running EPG import, standby, an update
 already running, the ten-minute limits - and says so, on the television in the household's
-language. Every install is asked first, because it ends in a restart of the user interface (the
-picture stops for about half a minute; the receiver comes back on the channel it was showing).
-**Only here can a version older than the running one be installed**, and its question says what
-that costs: the plugin's newer features disappear until it is updated again. The release still
-has to be on the signed list, at or above its floor, and not withdrawn.
+language. Every install is asked first, because it ends in a restart of the user interface: the
+picture stops while it restarts, and the restart is the image's clean one, which is meant to bring
+the receiver back on the channel it was showing. How long the picture stops, and that the channel
+comes back, have not yet been measured on a receiver. **Only here can a version older than the
+running one be installed**, and its question says what that costs: the plugin's newer features
+disappear until it is updated again. The release still has to be on the signed list, at or above
+its floor, and not withdrawn. The answer on the television acts only on the question it answers,
+and a confirmation on the page expires after ten minutes.
 
 From the moment the package manager starts until the restart, the screen - which may stay open
 under the image's restart question - and the page show only "An update of the plugin is being
-applied on this receiver. Please wait." If the update fails and the plugin's previous files cannot
+applied on this receiver. Please wait." A form sent from a page opened earlier gets the same
+sentence and nothing else: no question, and nothing saved or kept for later. If the update fails and the plugin's previous files cannot
 be put back, they say to install the plugin again instead. A receiver without internet cannot yet
 download a release this way; installing through Home Assistant relays it.
 
