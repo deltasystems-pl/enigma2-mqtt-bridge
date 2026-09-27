@@ -2862,3 +2862,37 @@ def test_the_lock_is_held_no_longer_than_transaction_md_says(
     assert scene.box.t - marks["r2"] <= R2_BOUND
     assert marks["release"] - marks["claim"] <= LOCK_BOUND
     assert scene.box.t - begun <= LOCK_BOUND
+
+
+# ------------------------------ a second enigma2 beside one R2 could not stop --
+
+
+@pytest.mark.parametrize("survivor", ["stays", "quits"])
+def test_an_enigma2_started_beside_one_r2_could_not_stop_is_no_start(tmp_path, survivor):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    real = scene.box.run
+
+    def a_second_interface_beside_the_first(argv, timeout):
+        if argv[0] == scene.box.init and argv[1] == "3":
+            scene.box.argv.append(list(argv))
+            # The image's start launches a new enigma2 while the one `init 4` did not stop runs.
+            scene.box.pids = scene.box.pids | {300}
+            if survivor == "quits":
+                scene.box.at(40, lambda: setattr(scene.box, "pids", scene.box.pids - {200}))
+            return 0
+        return real(argv, timeout)
+    scene.box.run = a_second_interface_beside_the_first
+    assert scene.run() == 1
+    record = scene.status()["record"]
+    assert (record["stop"], record["unstopped"]) == ("not seen", [200])
+    if survivor == "stays":
+        # 200 runs on with the code it had: the end must not tell it the old version runs.
+        assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "not_stopped")
+        assert record["interface"] == "not restarted" and record["cause"] == "not_started"
+        assert scene.box.pids == {200, 300}
+    else:
+        # Once every process R2 could not stop has gone, the new one is the start.
+        assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+        assert scene.box.pids == {300} and "interface" not in record

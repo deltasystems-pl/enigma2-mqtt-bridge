@@ -555,7 +555,8 @@ So:
   a look that fails, goes without them. A `/proc` that cannot be listed at all (`EMFILE`,
   `ENOMEM`) is such a look: R2 reads it as unknown, never as "no enigma2", so it is never taken
   for the stop, and a process is counted as the interface starting again only when a look that
-  did answer during the stop says it was not among those still running then.
+  did answer during the stop says it was not among those still running then, and none of those
+  still runs beside it.
   `init 3` is safe to repeat - starting a runlevel that is already running changes nothing - so
   the helper repeats it wherever the start is in doubt. The helper's own way of running a
   program turns any error in starting it (a `MemoryError` or a failed fork while the child is
@@ -654,7 +655,7 @@ renamed into place.
 |---|---|---|
 | `request.json` (0600) | the plugin, before it starts the helper | `id`; `target` (a release number - `latest` is resolved by the plugin); `sha256` or `null`; `relay` `{"url", "expires"}` or `null`; `started_by`; `downgrade` (true only for a lower version chosen at the television or on the page); `from` `{"version", "commit"}`; `enigma2_pid` (the plugin's own process - the one whose end §5's restart rule waits for); `keys`, `acceptance` and `origin` - the index keys, lineage and origin of the build that asks, so the helper judges by what the running build trusts; `contract`; `integration` (`enigma2mqtt/integration/<node>` as read, or `null`) and `integration_mode`. A request the helper cannot read ends as `failed`, reason `bad_request` |
 | `helper.py`, `trust.py`, `ed25519.py`, `trustfile.py`, `netfetch.py` | the plugin | The helper and the four standard-library modules it imports, copied from the plugin directory, so the package manager replacing that directory takes nothing from under it |
-| `status.json` (0600) | the helper that holds the lock | `id`, `started_by`, `target`, `from`, `phase`, `started`, `finished`, `result`, `reason`, `error` - the shape of `update.transaction` plus `reason` - a `heartbeat` stamp, `restart` once the plugin asked, and at the end `record`: which proof passed (`marker`, `log_fd`, `webif_hook` or `none`), `restart` (`clean` or `stopped`), `rollback: cut short` when something no handler expects cut R2 short after `init 4` and its `finally` finished the steps, `init_3` (every status of R2's `init 3` calls when one did not answer 0: 127 for a program that could not be started, `null` for one that did not answer in time), `start: again` when `init 3` was sent once more because nothing started after the stop, `stop` (`seen` when R2 saw no enigma2 running after its `init 4`, else `not seen`), `unstopped` (when the stop was not seen: the pids R2 could not stop, from its last look at `/proc` that answered - a plugin compares its own pid with them), `channel` and `standby` (`unconfirmed` when R3 itself failed, and `channel` `unconfirmed` when the interface was not restarted and R3 did not run), `bouquet`, `restore` (`done`; `partial: <what is missing>` when the code is back and opkg's records or the settings block are not; `failed: <error>` when the code is not back; `interrupted`), `cause` (the reason the end had before `restore_failed`, `restore_incomplete`, `not_stopped` or `interface_not_started` replaced it), `lastservice`, `digest` (`matched`, `unavailable` or `not_checked`), `index_verdict` and `index_kept` when the helper fetched the index, `interface` - `not started` when no enigma2 came back after R2's stop and `init 3`, `not restarted` when the stop was never seen, no enigma2 other than the ones still running appeared after `init 3`, and something still runs (or `/proc` could not say) - `marker` when a marker write after the package manager failed, and `internal_error` for an error nothing expected. A second helper started for the same `id` that finds the lock held by its own `id` - or cannot read the owner yet - writes nothing here; one refused by another transaction's lock writes its `busy` |
+| `status.json` (0600) | the helper that holds the lock | `id`, `started_by`, `target`, `from`, `phase`, `started`, `finished`, `result`, `reason`, `error` - the shape of `update.transaction` plus `reason` - a `heartbeat` stamp, `restart` once the plugin asked, and at the end `record`: which proof passed (`marker`, `log_fd`, `webif_hook` or `none`), `restart` (`clean` or `stopped`), `rollback: cut short` when something no handler expects cut R2 short after `init 4` and its `finally` finished the steps, `init_3` (every status of R2's `init 3` calls when one did not answer 0: 127 for a program that could not be started, `null` for one that did not answer in time), `start: again` when `init 3` was sent once more because nothing started after the stop, `stop` (`seen` when R2 saw no enigma2 running after its `init 4`, else `not seen`), `unstopped` (when the stop was not seen: the pids R2 could not stop, from its last look at `/proc` that answered - a plugin compares its own pid with them), `channel` and `standby` (`unconfirmed` when R3 itself failed, and `channel` `unconfirmed` when the interface was not restarted and R3 did not run), `bouquet`, `restore` (`done`; `partial: <what is missing>` when the code is back and opkg's records or the settings block are not; `failed: <error>` when the code is not back; `interrupted`), `cause` (the reason the end had before `restore_failed`, `restore_incomplete`, `not_stopped` or `interface_not_started` replaced it), `lastservice`, `digest` (`matched`, `unavailable` or `not_checked`), `index_verdict` and `index_kept` when the helper fetched the index, `interface` - `not started` when no enigma2 came back after R2's stop and `init 3`, `not restarted` when the stop was never seen, no start was counted after `init 3` - no enigma2 other than the ones still running appeared, or one appeared while one of them still ran - and something still runs (or `/proc` could not say) - `marker` when a marker write after the package manager failed, and `internal_error` for an error nothing expected. A second helper started for the same `id` that finds the lock held by its own `id` - or cannot read the owner yet - writes nothing here; one refused by another transaction's lock writes its `busy` |
 | `<filename>.ipk` | the helper | The package, after its size and sha256 matched the signed entry |
 | `restart.json` | the plugin | It has asked the image to restart (R1); `{"pid"}`. From here the helper waits 180 s for a new enigma2 |
 | `withdraw` | the plugin | The image's question was answered "no" or timed out: put the old files back |
@@ -687,18 +688,19 @@ undo still goes to R2 when the interface restarted meanwhile. The second is `int
 the lock was taken, after which the helper touches nothing of the receiver.
 
 **R2's end says what runs, not only what is on disk.** `rolled_back` means the old files are back
-**and** an enigma2 that R2 had not seen before started on them. With the files back
-(`record.restore` `done`) and no such process, R2 ends `failed`, the reason it had kept as
-`record.cause`:
+**and** an enigma2 that R2 had not seen before started on them, **with every process R2 could not
+stop gone**. With the files back (`record.restore` `done`) and no such start, R2 ends `failed`, the
+reason it had kept as `record.cause`:
 
 - `not_stopped` (`record.stop` `not seen`, `record.interface` `not restarted`): `init 4` had no
-  effect that R2 could see within its 30 s, `init 3` then started nothing, because the runlevel
-  never left, and at the end something still runs - or `/proc` could not be read to say it does
-  not. `record.unstopped` lists the pids R2 could not stop, from its last look that answered.
-  That process - the one started by the forward restart, holding the new code, or a mix - runs
-  on over the previous version's files until the interface restarts. The settings block and the
-  channel were left alone, because a running interface writes its own settings over them when it
-  quits.
+  effect that R2 could see within its 30 s, and at the end something still runs - or `/proc` could
+  not be read to say it does not. Either `init 3` started nothing, because the runlevel never left,
+  or it started a second enigma2 beside the one R2 could not stop; that second process is never
+  counted as the start while one of those still runs. `record.unstopped` lists the pids R2 could
+  not stop, from its last look that answered. That process - the one started by the forward
+  restart, holding the new code, or a mix - runs on over the previous version's files until the
+  interface restarts. The settings block and the channel were left alone, because a running
+  interface writes its own settings over them when it quits.
 - `interface_not_started` (`record.interface` `not started`): the old files went back and no
   enigma2 runs at the end - after the stop was seen (`record.stop` `seen`), or after the process
   R2 could not stop quit by itself (`record.stop` `not seen`, `record.unstopped` set) - although
@@ -706,10 +708,10 @@ the lock was taken, after which the helper touches nothing of the receiver.
   the helper ends.
 
 A restore that did not complete keeps its own reason (`restore_failed`, `restore_incomplete`)
-over both. When the stop was not seen but an enigma2 other than the ones still running appeared
-after `init 3` - the old process quit late and the start took, at once or after the second
-`init 3` - the end is `rolled_back`, with `record.stop` `not seen` saying that the settings block
-and the channel were not put back.
+over both. When the stop was not seen but the processes R2 could not stop had all gone and an
+enigma2 other than them appeared after `init 3` - the old process quit late and the start took, at
+once or after the second `init 3` - the end is `rolled_back`, with `record.stop` `not seen` saying
+that the settings block and the channel were not put back.
 
 **What the plugin does with these ends** (the plugin's side, for the branch that follows the
 transaction; not built here). Neither end may be read as "the previous version is running":
@@ -724,8 +726,8 @@ transaction; not built here). Neither end may be read as "the previous version i
     The repair is a restart of the interface, not a reinstall: the files and opkg's records agree
     on the previous version, so the sentence says to restart the receiver's interface, and a
     `restart_gui` should stay possible through the closed doors, since it is exactly that repair.
-  - **Not listed** (a process started since, after the repair or a reboot, or `unstopped`
-    missing because no look answered - then judged by the version it runs, as for a marker that
+  - **Not listed** (a process started since - by R2's own `init 3` beside the one it could not
+    stop, after the repair or a reboot - or `unstopped` missing because no look answered - then judged by the version it runs, as for a marker that
     outlived its helper): it started on the files on disk, which agree with opkg's records, so it
     reports the end on `last_error` and opens as after any end.
 - After `interface_not_started`, no plugin is running to read it. Whatever starts the interface

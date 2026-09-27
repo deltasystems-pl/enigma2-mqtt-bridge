@@ -1874,12 +1874,13 @@ class Transaction:
         `standby` `unconfirmed`) and never changes the result.
 
         The result says what runs, not only what is on disk: `rolled_back` only when the old
-        files are back and an enigma2 R2 had not seen before started on them. With the files
-        back and none, it is `failed`: `not_stopped` when the stop was never seen and something
-        still runs - `init 3` then starts nothing, and the process R2 could not stop runs on
-        with the code it had; `unstopped` names it - or `interface_not_started` when nothing
-        runs even after `init 3` was sent once more. The first reason stays as `cause`. A
-        restore that did not complete keeps its own reason before either.
+        files are back and an enigma2 R2 had not seen before started on them, with every
+        process R2 could not stop gone. With the files back and no such start, it is `failed`:
+        `not_stopped` when the stop was never seen and something still runs - `init 3` then
+        starts nothing, or starts a second interface beside the process R2 could not stop,
+        which runs on with the code it had; `unstopped` names it - or `interface_not_started`
+        when nothing runs even after `init 3` was sent once more. The first reason stays as
+        `cause`. A restore that did not complete keeps its own reason before either.
 
         Before `init 4` nothing has been stopped, so this is not yet the unit: the record is
         best effort (an error in it leaves the one taken before the restart), and only once the
@@ -1917,9 +1918,12 @@ class Transaction:
             return not look
 
         def came_back():
+            # A start is a new enigma2 with none of the survivors left beside it: a second
+            # interface started next to one R2 could not stop is not the old version running,
+            # because the one R2 could not stop still runs with the code it had.
             look = receiver.enigma2_look()
             return (look is not None and (stopped or bool(looked))
-                    and bool(look - survivors))
+                    and not look & survivors and bool(look - survivors))
         self.rolling_back = True
         try:
             receiver.run([receiver.init, "4"], STOP_WAIT)
