@@ -2190,3 +2190,48 @@ def test_r2_takes_the_channel_recorded_before_the_restart_when_openwebif_is_sile
     assert scene.last()["result"] == "rolled_back"
     assert scene.box.lastservice_at_start == TVP1
     assert scene.status()["record"]["channel"] == "kept"
+
+
+# ---------------------------------------- R2's own start, its stop and its verdict --
+
+
+@pytest.mark.parametrize("error", [Escape, RuntimeError, MemoryError],
+                         ids=["escape", "error", "memory"])
+def test_an_escape_from_the_init_3_call_itself_still_starts_the_interface(tmp_path, error):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    real = scene.box.run
+    refused = []
+
+    def init_3_cannot_be_started_once(argv, timeout):
+        if argv[0] == scene.box.init and argv[1] == "3" and not refused:
+            refused.append(argv[1])
+            raise error("init 3")
+        return real(argv, timeout)
+    scene.box.run = init_3_cannot_be_started_once
+    if issubclass(error, Exception):
+        assert scene.run() == 1
+    else:
+        with pytest.raises(error):
+            scene.run()
+    # `init 3` is safe to repeat, so the `finally` sends it again: the picture comes back on the
+    # old version, with everything R2 did before the call kept.
+    assert refused == ["3"] and scene.init_calls() == ["4", "3"] and scene.box.pids
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    assert scene.box.lastservice_at_start == TVP1 and not scene.locked()
+    record = scene.status()["record"]
+    assert (record["rollback"], record["restore"], record["lastservice"]) == (
+        "cut short", "done", "written")
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "internal_error")
+
+
+@pytest.mark.parametrize("error", [RuntimeError("no child"), MemoryError()],
+                         ids=["error", "memory"])
+def test_a_program_that_cannot_be_started_is_an_exit_status_never_an_escape(
+        tmp_path, monkeypatch, error):
+    def fake(argv, **kwargs):
+        raise error
+    monkeypatch.setattr(updatehelper.subprocess, "run", fake)
+    receiver = updatehelper.Receiver(root=str(tmp_path))
+    assert receiver.run(["/sbin/init", "3"], 5) == 127
+    assert receiver.last_output.startswith(type(error).__name__)

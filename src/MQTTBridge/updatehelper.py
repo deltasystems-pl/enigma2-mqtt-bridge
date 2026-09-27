@@ -316,6 +316,13 @@ class Receiver:
         except OSError as error:
             self.last_output = str(error)
             return 127
+        except Exception as error:
+            # Anything else - a MemoryError while the child is set up, say - is a program that
+            # did not run, the same as one that could not be found. Its callers decide on the
+            # status: `init 3` in R2 above all, which must never be skipped because of how
+            # the start of a program failed.
+            self.last_output = type(error).__name__ + ": " + str(error)
+            return 127
         self.last_output = completed.stdout.decode("utf-8", "replace")
         return completed.returncode
 
@@ -1828,8 +1835,10 @@ class Transaction:
         failures are recorded and the unit carries on, and anything else still meets the
         `finally`, which first runs the steps the unit had not reached - the restore, the
         channel - each guarded, records `rollback: cut short`, and then starts the interface.
-        R3 comes after the start and checks a rollback that is already done, so an error in it
-        is noted (`channel` / `standby` `unconfirmed`) and never changes the result.
+        That includes an escape from the `init 3` call itself: the `finally` sends it again,
+        because starting a runlevel that is already running changes nothing. R3 comes after
+        the start and checks a rollback that is already done, so an error in it is noted
+        (`channel` / `standby` `unconfirmed`) and never changes the result.
 
         Before `init 4` nothing has been stopped, so this is not yet the unit: the record is
         best effort (an error in it leaves the one taken before the restart), and only once the
@@ -1849,7 +1858,7 @@ class Transaction:
         self.record.update(restart="stopped")
         receiver.pause("rollback_recorded")
         service = recorded.get("service") if recorded else None
-        starting = stopped = restored = False
+        starting = stopped = restored = sent = False
         self.rolling_back = True
         try:
             receiver.run([receiver.init, "4"], STOP_WAIT)
@@ -1861,22 +1870,27 @@ class Transaction:
             self.put_lastservice(stopped, service)
             starting = True
             receiver.run([receiver.init, "3"], STOP_WAIT)
+            # Only once it has returned: an escape from the call itself - the program could not
+            # even be started - must still meet the `init 3` below, which is safe to repeat.
+            sent = True
         finally:
-            if not starting:
-                # Something no handler expects cut the unit short. Its remaining steps still
-                # run - each guarded, so none can keep the next from running - before the
-                # interface starts: never over a tree that could still have been put back.
+            if not sent:
+                # Something no handler expects cut the unit short, anywhere from `init 4` to the
+                # `init 3` call itself. The steps it had not reached still run - each guarded,
+                # so none can keep the next from running - before the interface starts: never
+                # over a tree that could still have been put back.
                 self.record["rollback"] = "cut short"
-                if not restored:
-                    try:
-                        self.put_back(settings=stopped)
-                    except BaseException:
-                        self.record["restore"] = "interrupted"
-                if "lastservice" not in self.record:
-                    try:
-                        self.put_lastservice(stopped, service)
-                    except BaseException:
-                        self.record["lastservice"] = "failed"
+                if not starting:
+                    if not restored:
+                        try:
+                            self.put_back(settings=stopped)
+                        except BaseException:
+                            self.record["restore"] = "interrupted"
+                    if "lastservice" not in self.record:
+                        try:
+                            self.put_lastservice(stopped, service)
+                        except BaseException:
+                            self.record["lastservice"] = "failed"
                 receiver.run([receiver.init, "3"], STOP_WAIT)
         receiver.pause("rollback_started")
         started = self.wait(lambda: bool(receiver.enigma2_pids()), START_WAIT)

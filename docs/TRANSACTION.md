@@ -520,9 +520,15 @@ So:
   step below: it first runs the steps the unit had not reached, the restore and the `lastservice`
   write, each guarded so that none can keep the next from running, records `rollback: cut short`,
   and then runs `init 3` - so the interface is never started over a tree that could still have
-  been put back. R3, after the start, is best effort: the rollback it checks is done, so an error
-  in it leaves `channel` and `standby` at `unconfirmed` (the error noted as `internal_error`)
-  and the result stays `rolled_back`. Before `init 4` nothing is
+  been put back. That covers an escape from the `init 3` call itself: the unit counts `init 3`
+  as sent only once the call has returned, and the `finally` sends it again otherwise, which is
+  safe because starting a runlevel that is already running changes nothing. The helper's own
+  way of running a program also turns any error in starting it (a `MemoryError` while the child
+  is set up, say) into an exit status, as it already did for a program it could not find, so
+  only something that is not an `Exception` can escape from it at all. R3, after the start, is
+  best effort: the rollback it checks is done, so an error in it leaves `channel` and `standby`
+  at `unconfirmed` (the error noted as `internal_error`) and the result stays `rolled_back`.
+  Before `init 4` nothing is
   stopped yet, so the record step is best effort - an error there leaves the record taken before
   the restart, noted as `internal_error` - and anything that escapes before the stop is sent
   reaches the helper's last net, which runs R2 again rather than end over the new, unproven code.
