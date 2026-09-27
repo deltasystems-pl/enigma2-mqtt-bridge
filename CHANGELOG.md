@@ -97,7 +97,12 @@ version that has no section here.
   was accepted is kept in `/etc/enigma2/mqttbridge-index.json` (0600), written only when it
   changes and verified again at every start; when the receiver last checked is kept apart, in
   `/etc/enigma2/mqttbridge-check.json`. An index that could not be kept is reported as
-  `write_failed`, and the timeout bounds the whole answer, headers included.
+  `write_failed`, and the timeout bounds the whole answer, headers and a slow connection
+  included. Every write of the trust file takes its own short lock
+  (`/etc/enigma2/mqttbridge-index.lock`), reads the file again and judges the index against
+  that fresh read before writing, so a second writer is never rolled back; a lock held too
+  long is reported as `trust_busy`. Removing the trust file on purpose also forgets the check
+  that found the index.
 - **Only an acceptance build may carry a test origin or test index keys.** `tools/build-ipk.sh`
   takes `MQTTBRIDGE_BUILD_ORIGIN` and `MQTTBRIDGE_BUILD_INDEX_KEYS` for an `acceptance` build and
   refuses either for any other flavour; the plugin honours them in no other flavour; and the

@@ -771,6 +771,9 @@ class FakeConnection:
         self.requests = []
         FakeConnection.made.append(self)
 
+    def connect(self):
+        pass
+
     def request(self, method, path, headers=None):
         self.requests.append((method, path))
 
@@ -1334,3 +1337,164 @@ def test_a_real_certificate_for_another_name_is_refused(fed_box, factory, feed, 
     assert (state["origin"], state["check_error"]) == ("unreachable", "unreachable")
     assert state["index"] is None
     assert feed.hits == []
+
+
+# ------------------------------------------------------------- review round 2 --
+
+
+class SlowToConnect:
+    """A connection that takes 1.5 s to be made - several addresses each timing out - and then
+    meets a peer that trickles its answer."""
+
+    def __new__(cls, host, port, timeout=None, context=None):
+        import http.client
+        import time
+
+        class Slow(http.client.HTTPConnection):
+            def connect(self):
+                time.sleep(1.5)
+                super().connect()
+
+        return Slow(host, port, timeout=timeout)
+
+
+def test_a_slow_connection_still_ends_at_the_timeout():
+    import time
+
+    from MQTTBridge import updatecheck
+
+    port = _trickling_peer(b"HTTP/1.1 200 OK\r\n", b"X-Slow: yes\r\n", pieces=80, interval=0.1)
+    started = time.monotonic()
+    with pytest.raises(updatecheck.Unreachable):
+        updatecheck.https_get(f"https://localhost:{port}/releases.json", 65536, 1,
+                              connection_factory=SlowToConnect)
+    assert time.monotonic() - started < 3
+
+
+OTHER_WRITER = """
+import fcntl, os, sys, time
+lock, target, source, hold = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4])
+descriptor = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+fcntl.flock(descriptor, fcntl.LOCK_EX)
+print("locked", flush=True)
+time.sleep(hold)
+if source != "-":
+    with open(source, "rb") as handle:
+        data = handle.read()
+    with open(target + ".other", "wb") as handle:
+        handle.write(data)
+    os.replace(target + ".other", target)
+fcntl.flock(descriptor, fcntl.LOCK_UN)
+"""
+
+
+def _other_writer(tmp_path, path, source, hold):
+    """Another process - the self-update's helper, one day - holding the trust file's lock."""
+    import subprocess
+    import sys
+
+    script = tmp_path / "other_writer.py"
+    script.write_text(OTHER_WRITER, encoding="ascii")
+    lock = path[: -len(".json")] + ".lock"
+    process = subprocess.Popen([sys.executable, str(script), lock, path, source, str(hold)],
+                               stdout=subprocess.PIPE, text=True)
+    assert process.stdout.readline().strip() == "locked"
+    return process
+
+
+def test_a_writer_holding_the_trust_lock_is_waited_for_and_its_serial_kept(tmp_path):
+    """The other writer accepted serial 7 while this reader was about to write serial 5: the
+    write is judged again against what is on disk now, and 7 is never rolled back."""
+    import shutil
+
+    from MQTTBridge import updatecheck
+
+    path = str(tmp_path / "mqttbridge-index.json")
+    checker = updatecheck.UpdateChecker(None, path=path, keys=TEST_KEYS, acceptance=False)
+    checker.start()
+    checker.on_release_index(relay_payload(*signed(1)), True)
+
+    ahead = str(tmp_path / "ahead" / "mqttbridge-index.json")
+    (tmp_path / "ahead").mkdir()
+    shutil.copy(path, ahead)
+    other = updatecheck.UpdateChecker(None, path=ahead, keys=TEST_KEYS, acceptance=False,
+                                      check_path=str(tmp_path / "ahead" / "check.json"))
+    other.start()
+    other.on_release_index(relay_payload(*signed(7)), True)
+    assert other.last_relay_verdict == "accept"
+
+    process = _other_writer(tmp_path, path, ahead, hold=0.5)
+    checker.on_release_index(relay_payload(*signed(5)), True)
+    process.wait(timeout=10)
+    assert checker.last_relay_verdict == "replay"
+    again = updatecheck.UpdateChecker(None, path=path, keys=TEST_KEYS, acceptance=False)
+    again.start()
+    assert again.payload()["index"]["serial"] == 7
+    lock = path[: -len(".json")] + ".lock"
+    assert stat.S_IMODE(os.stat(lock).st_mode) == 0o600
+
+
+def test_a_trust_lock_held_too_long_is_reported_and_never_waited_out(
+        box, factory, settings, origin, tmp_path, monkeypatch):
+    import time
+
+    from MQTTBridge import updatecheck
+
+    monkeypatch.setattr(updatecheck, "LOCK_WAIT", 0.3)
+    process = _other_writer(tmp_path, box.updates.path, "-", hold=3)
+    try:
+        started = time.monotonic()
+        relay(factory, relay_payload(*signed(1)))
+        assert box.updates.last_relay_verdict == "trust_busy"
+        settings.update_check.value = True
+        origin.serve(*signed(1))
+        check(factory)
+        state = update_state(factory)
+        assert (state["check_error"], state["index"]) == ("trust_busy", None)
+        assert time.monotonic() - started < 2
+    finally:
+        process.wait(timeout=10)
+    relay(factory, relay_payload(*signed(1)))
+    assert box.updates.last_relay_verdict == "accept"
+
+
+def test_a_trust_file_removed_on_purpose_is_not_read_as_a_check_that_found_nothing(
+        box, factory, settings, origin, make_bridge, clock):
+    settings.update_check.value = True
+    origin.serve(*signed(1))
+    check(factory)
+    box.stop()
+    os.remove(box.updates.path)
+
+    again = make_bridge()
+    again.updates.keys = TEST_KEYS
+    fresh = FakeOrigin()
+    fresh.serve(*signed(1))
+    again.updates.fetch = fresh
+    again.updates.clock = clock
+    again.start()
+    factory.client.fire_connect()
+    clock.now = NOW + 60
+    check(factory)
+    assert len(fresh.calls) == 2
+    assert update_state(factory)["index"]["serial"] == 1
+
+
+def test_the_check_reads_the_installed_packages_again(box, factory, settings, origin, clock,
+                                                      tmp_path):
+    database = tmp_path / "root" / "var" / "lib" / "opkg"
+    database.mkdir(parents=True)
+    status = database / "status"
+    status.write_text("Package: python3-core\nStatus: install ok installed\n", encoding="utf-8")
+    box.updates.opkg_root = str(tmp_path / "root")
+    settings.update_check.value = True
+    needs = [release("0.4.0", depends=("python3-core", "python3-json"))]
+    origin.serve(*signed(1, needs))
+    check(factory)
+    assert update_state(factory)["available"][0]["reason"] == "depends"
+    status.write_text("Package: python3-core\nStatus: install ok installed\n\n"
+                      "Package: python3-json\nStatus: install ok installed\n", encoding="utf-8")
+    origin.serve(*signed(2, needs))
+    clock.now = NOW + 600
+    check(factory)
+    assert update_state(factory)["available"][0]["compatible"] is True
