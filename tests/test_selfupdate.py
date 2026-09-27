@@ -2865,3 +2865,37 @@ def test_a_helper_that_stopped_before_the_package_manager_under_another_build_ho
     tick()
     assert_held_for_a_restart(bridge, factory, clients)
     assert refusal(factory.client)[0] == "interrupted"
+
+
+def test_a_rebuild_of_the_same_commit_from_a_changed_tree_is_another_build(box, factory,
+                                                                          receiver):
+    """The whole build id is compared, not the commit alone: `dirty` says the trees differ."""
+    bridge, directory = asking(box, factory, receiver)
+    disk_build(bridge, text=f'COMMIT = "{COMMIT}"\nCOMMIT_TIME = {BUILD["time"]}\n'
+                            f'DIRTY = True\nFLAVOUR = "{BUILD["flavour"]}"\n')
+    clients = len(factory.clients)
+    helper_says(directory, phase="finished", result="rolled_back", reason="not_started",
+                error=str(updatehelper.Fail("not_started", previous="0.3.0")),
+                finished=NOW + 200, record={"restore": "done", "stop": "seen"})
+    tick()
+    assert_held_for_a_restart(bridge, factory, clients)
+
+
+def test_a_followers_helper_dead_after_the_package_manager_under_another_build_says_reinstall(
+        starting, factory, receiver):
+    """Before `rolling_back` a follower runs the files it started on - unless they are another
+    build now: then an orphaned package manager may be writing them, and a restart is no repair."""
+    made = {}
+    bridge = starting(prepare=lambda root: made.update(dir=marker(root, phase="proving")),
+                      session=receiver.session)
+    factory.client.fire_connect()
+    helper_process(bridge, made["dir"])
+    helper_says(made["dir"], phase="proving")
+    tick()
+    assert not bridge.self_update.closed
+    disk_build(bridge)
+    helper_process(bridge, made["dir"], running=False)
+    tick()
+    updater = bridge.self_update
+    assert updater.closed and updater.stuck
+    assert updater.doors_refusal() == selfupdate.STUCK_STOPPED and updater.repair() is None
