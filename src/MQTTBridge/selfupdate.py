@@ -39,7 +39,11 @@ open again with a fresh session. When nothing put them back - the restore failed
 records naming the new version (`restore_failed`, `restore_incomplete`), or the helper
 stopped once the package manager had started, perhaps leaving it running as an orphan - the
 doors stay closed for good and say to install the plugin again; that is judged from what the
-helper left behind, so a failure that fell between two polls closes them too.
+helper left behind, so a failure that fell between two polls closes them too. After a rollback
+that put the old files back under an interface it could not stop (`not_stopped`), the process
+reading the end is that interface: its files are the previous version's now, so its doors stay
+closed as well - the repair is a restart of the interface, and `restart_gui` is the one command
+they let through.
 
 The restart itself waits for the helper's `restarting`: for a downgrade chosen at the television
 or on the page, every retained topic the node owns except `availability` is first retracted at
@@ -182,6 +186,19 @@ STUCK_PARTIAL = ("an update failed; the plugin's previous version is back, but n
 # The helper's own reasons for a restore that did not complete; their sentence already names
 # the reinstall, so `last_error` carries it alone.
 RESTORE_REASONS = ("restore_failed", "restore_incomplete")
+# ... and after `not_stopped` (TRANSACTION.md section 7, review round 3): R2 put the previous
+# version's files back, but saw no stop and no new interface, so the process reading the end is
+# the one it could not stop - running the code it had over files that are no longer it. The files
+# and opkg's records agree, so the repair is a restart of the interface, not a reinstall.
+STUCK_UNSTOPPED = ("an update was rolled back while the receiver's interface kept running, so "
+                   "the plugin's files are no longer the ones it runs; restart the receiver's "
+                   "interface")
+UNSTOPPED = "not_stopped"
+# The one command doors closed for good let through, by the sentence they say: the repair
+# itself. It keeps its own guards - a recording, an EPG import, a job that holds the quit.
+REPAIRS = {STUCK_UNSTOPPED: "restart_gui"}
+# The ends whose own sentence names the repair already: `last_error` carries it alone.
+SAID_BY_THE_HELPER = RESTORE_REASONS + (UNSTOPPED,)
 
 # The wall clock is believed only from here on: no update helper wrote an end before
 # 2026-01-01 (UTC), and a receiver that booted without a clock says a time in 1970.
@@ -195,7 +212,12 @@ FILES_PHASES = ("installing", "restarting", "proving", "rolling_back")
 def household_doors(updater=None):
     """What the setup screen and the page say while the doors are closed."""
     if getattr(updater, "stuck", False):
-        if getattr(updater, "_stuck_sentence", STUCK) == STUCK:
+        sentence = getattr(updater, "_stuck_sentence", STUCK)
+        if sentence == STUCK_UNSTOPPED:
+            # The files are the previous version's and whole; only the process is not.
+            return _("The update of the plugin was undone, but the receiver's user interface "
+                     "did not restart. Please restart the user interface.")
+        if sentence == STUCK:
             return _("The update of the plugin failed and its previous version could not be "
                      "put back. Please install the plugin again, for example from Home "
                      "Assistant.")
@@ -378,11 +400,21 @@ class SelfUpdater:
     def transaction_payload(self):
         return dict(self._transaction) if self._transaction is not None else None
 
-    def doors_refusal(self):
-        """The sentence every command gets while the doors are closed, or None."""
+    def doors_refusal(self, command=None):
+        """The sentence `command` gets while the doors are closed, or None.
+
+        None also for the one command that is the repair the closed doors name (`repair`):
+        refusing the restart that ends this process would keep it stuck for no reason.
+        """
         if not self.closed:
             return None
+        if command is not None and command == self.repair():
+            return None
         return self._stuck_sentence if self.stuck else DOORS
+
+    def repair(self):
+        """The command let through doors closed for good, or None."""
+        return REPAIRS.get(self._stuck_sentence) if self.closed and self.stuck else None
 
     def _publish(self):
         if not self.silent:
@@ -943,9 +975,19 @@ class SelfUpdater:
                 # the code not back) and `restore_incomplete` (`partial: ...`, the code back
                 # but not all of opkg's records or the settings block).
                 unrestored = isinstance(restore, str) and restore != "done"
+                # Review round 3: after `not_stopped` (`record.interface` `not restarted`) no
+                # process started on the old files, so whichever reads the end - the one that
+                # asked, or the one that follows - is the one R2 could not stop, and its files
+                # changed under it: to the previous version's, or with a restore that did not
+                # complete to a mix. A restore that did complete does not make it safe. Keyed
+                # on the reason and the record both, so neither alone reopens the doors.
+                unstopped = record.get("reason") == UNSTOPPED or \
+                    details.get("interface") == "not restarted"
                 stuck = None
-                if unrestored and current["ours"]:
+                if unrestored and (current["ours"] or unstopped):
                     stuck = STUCK_PARTIAL if restore.startswith("partial") else STUCK
+                elif unstopped:
+                    stuck = STUCK_UNSTOPPED
                 self._end(payload, record.get("reason"), followed=not current["ours"],
                           stuck=stuck)
             return
@@ -1029,6 +1071,9 @@ class SelfUpdater:
         a mix, and the fresh session a reopening starts would import them. The doors close if
         no poll had closed them yet, stay closed and say so, and the repair is a reinstall from
         outside this process - Home Assistant's forced reinstall over SSH (delta review D2).
+        Nor after `not_stopped`: the files are the previous version's, whole, under a process
+        that holds the other one's code, so the doors stay closed the same way, and the repair
+        is the restart that ends this process (`STUCK_UNSTOPPED`, review round 3).
         """
         if payload is not None:
             self._transaction = payload
@@ -1051,13 +1096,18 @@ class SelfUpdater:
             self._retraction_ticker.stop()
             self._queue = []
             self._outstanding = []
-            LOG.error("update %s: the plugin's files changed and were not put back; the doors "
-                      "stay closed until the plugin is installed again", ident)
+            if stuck == STUCK_UNSTOPPED:
+                LOG.error("update %s: the previous version's files are back under this process, "
+                          "which still runs the other one; the doors stay closed until the "
+                          "interface restarts", ident)
+            else:
+                LOG.error("update %s: the plugin's files changed and were not put back; the "
+                          "doors stay closed until the plugin is installed again", ident)
             # Said on `update` and `last_error` - unless a downgrade's retraction made this
             # process silent, which it stays: the page and the setup screen still say it.
             self._publish()
             text = error or result or "failed"
-            if reason not in RESTORE_REASONS:
+            if reason not in SAID_BY_THE_HELPER:
                 text += "; " + stuck
             said = Refusal(text, reason or result or "failed")
             if self.bridge.connected:

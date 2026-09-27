@@ -1230,7 +1230,15 @@ previous version is back, but not all of its package records; install the plugin
 Home Assistant: force plugin reinstall)". After `restore_failed` and `restore_incomplete`,
 `last_error` carries the helper's own sentence, which names the reinstall. So do they when the update helper stops once the package manager has started
 (it may still be running): "an update stopped part-way, so the plugin's files may not be the
-running version's; install the plugin again (from Home Assistant: force plugin reinstall)". At
+running version's; install the plugin again (from Home Assistant: force plugin reinstall)". When
+a rollback put the previous version's files back under an interface that was never seen to stop
+(`reason` `not_stopped`), the process still running is the one they changed under: the doors
+stay closed with "an update was rolled back while the receiver's interface kept running, so the
+plugin's files are no longer the ones it runs; restart the receiver's interface", `last_error`
+carries the helper's sentence, and `cmd/restart_gui` - the repair - is the one command still
+accepted, with its own guards; the page offers it under the sentence. After
+`interface_not_started` nothing runs to read the end: the plugin that starts next reports it
+(`result: failed`) and opens as after any other. At
 `restarting` the standby, recording and
 EPG-import guards are asked again, and when one holds the update is withdrawn
 (`withdrawn_before_restart`, `reason` `standby`, `recording` or `epg_import`) rather than

@@ -1381,13 +1381,30 @@ def _updating(bridge):
         return False
 
 
+def _repair_form(request, bridge):
+    """The form of the command closed doors let through (`SelfUpdater.repair`), or nothing."""
+    try:
+        key = bridge.self_update.repair()
+        if key is None:
+            return ""
+        return _action_form(_action(key, bridge), _csrf_token(request), bool(bridge.running))
+    except Exception:
+        LOG.exception("the repair form could not be rendered")
+        return ""
+
+
 def _page(request, message=""):
     bridge = _bridge()
     if bridge is not None and _updating(bridge):
         # The new release is on disk under this process: nothing but the sentence, and no
-        # form that could post a change into it (`selfupdate.py`).
+        # form that could post a change into it (`selfupdate.py`) - except the one command
+        # that is the repair the sentence names, when it names one. An answer to a command
+        # posted here (the doors' own refusal, or the repair's) is said above it.
+        notice = f"<p class='notice'>{_e(message)}</p>" if message else ""
         return _document(request,
-                         f"<p class='notice'>{_e(household_doors(bridge.self_update))}</p>")
+                         notice
+                         + f"<p class='notice'>{_e(household_doors(bridge.self_update))}</p>"
+                         + _repair_form(request, bridge))
     section = _section(bridge)
     token = _csrf_token(request)
     notice = f"<p class='notice'>{_e(message)}</p>" if message else ""

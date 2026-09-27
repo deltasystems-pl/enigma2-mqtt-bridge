@@ -698,7 +698,9 @@ stay closed and every command, the page and the setup screen say to install the 
 (the companion integration's forced reinstall over SSH). `last_error` carries the helper's
 sentence as it is, since it names that repair already. That is decided from the end's record alone - the
 helper tries a restore only once the package manager has run - so an end the plugin reads
-without having seen `installing` (the whole failure between two reads) closes the doors then. The request's `acceptance`, `keys` and `origin` are
+without having seen `installing` (the whole failure between two reads) closes the doors then.
+A `not_stopped` end keeps them closed too, whichever process reads it - see "What the plugin
+does with these ends" below. The request's `acceptance`, `keys` and `origin` are
 the running build's own, never anything a command, the page or the integration's topic says. At `restarting` it asks the standby, recording and EPG-import guards again and,
 when one holds, writes `withdraw` with that reason instead of asking; otherwise it retracts first
 for a downgrade, writes `restart.json` and asks the image to restart. When the helper stops
@@ -719,8 +721,8 @@ transaction past the marker's deadline is let go. The plugin that starts after a
 `started.json` - never the process whose pid is the request's `enigma2_pid` - and follows the
 marker to the end.
 
-**What the plugin does with these ends** (the plugin's side, for the branch that follows the
-transaction; not built here). Neither end may be read as "the previous version is running":
+**What the plugin does with these ends.** Neither end may be read as "the previous version is
+running":
 
 - After `not_stopped`, the process reading the end is the one R2 could not stop, and its files
   changed under it: they are the previous version's now. That is the case the plugin's doors
@@ -729,16 +731,22 @@ transaction; not built here). Neither end may be read as "the previous version i
   which is the case for a process that only followed the transaction - never reloads, and never
   reports itself as the previous version. The repair is a restart of the interface, not a
   reinstall: the files and opkg's records agree on the previous version, so the sentence says to
-  restart the receiver's interface, and a `restart_gui` should stay possible through the closed
-  doors, since it is exactly that repair. After the restart the previous version starts and
-  reads the end from the last-transaction record like any other.
+  restart the receiver's interface, and `restart_gui` stays possible through the closed doors,
+  since it is exactly that repair: over MQTT and from the page - which offers it under the
+  sentence - with its own guards (a recording, an EPG import, a job that holds the quit), while
+  every other command, the settings and the setup screen answer the sentence. The image's own
+  restart from the television was never the plugin's to refuse. `last_error` carries the
+  helper's sentence as it is. After the restart the previous version starts and reads the end
+  from the last-transaction record like any other.
 - After `interface_not_started`, no plugin is running to read it. Whatever starts the interface
   next starts the previous version, which reads the finished marker at its start, reports the end
   on `last_error` and opens as after any end: its files and its process agree, so nothing stays
   closed. Home Assistant says the sentence and does not announce a rollback that runs.
 - So "`record.restore` is `done`" alone does not mean nothing is stuck: a plugin that opens its
   doors on every such end reopens them over changed files after `not_stopped`. The check is the
-  reason, or `record.interface` `not restarted`.
+  reason, or `record.interface` `not restarted` - the plugin takes either, in the process that
+  asked and in one that follows alike. With a restore that did not complete as well, the
+  reinstall stays the repair and the doors say so.
 
 **What it re-judges**: the index is read again - fetched from the origin only when the request
 carries no relay address (an install Home Assistant drives needs no internet on the receiver and
