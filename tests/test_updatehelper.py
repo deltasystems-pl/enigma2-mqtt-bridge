@@ -134,6 +134,10 @@ class Box(updatehelper.Receiver):
                 self.pids = set()
                 self.webif_up = False
             elif argv[1] == "3":
+                if self.pids and not self.stops:
+                    # An `init 4` that took no effect left the runlevel where it was: `init 3`
+                    # starts nothing, and the interface that never stopped runs on.
+                    return 0
                 self.lastservice_at_start = self.setting("config.tv.lastservice")
                 if self.start_fails:
                     return 1
@@ -2292,3 +2296,50 @@ def test_r2_cut_short_in_an_init_4_that_stopped_nothing_writes_no_settings(tmp_p
     assert scene.box.setting("config.tv.lastservice") == TVN
     assert scene.plugin_py() == f"# plugin {OLD}\n" and scene.init_calls() == ["4", "3"]
     assert scene.status()["record"]["restore"] == "done"
+
+
+def test_an_interface_that_never_stopped_is_not_reported_rolled_back(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    assert scene.run() == 1
+    last = scene.last()
+    assert (last["result"], last["reason"]) == ("failed", "not_stopped")
+    assert OLD in last["error"] and scene.marker()["result"] == "failed"
+    record = scene.status()["record"]
+    assert (record["restore"], record["stop"], record["interface"], record["cause"]) == (
+        "done", "not seen", "not restarted", "not_started")
+    # The old files are on disk, but the process that runs is the one R2 could not stop.
+    assert scene.plugin_py() == f"# plugin {OLD}\n" and scene.box.pids == {200}
+    assert record["channel"] == "unconfirmed" and scene.box.zaps == []
+
+
+def test_an_interface_that_did_not_come_back_is_not_reported_rolled_back(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.start_fails = True
+    assert scene.run() == 1
+    last = scene.last()
+    assert (last["result"], last["reason"]) == ("failed", "interface_not_started")
+    assert OLD in last["error"]
+    record = scene.status()["record"]
+    assert (record["restore"], record["stop"], record["interface"], record["cause"]) == (
+        "done", "seen", "not started", "not_started")
+    assert scene.plugin_py() == f"# plugin {OLD}\n" and not scene.box.pids
+
+
+def test_an_interface_that_quit_late_and_came_back_is_rolled_back(tmp_path):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.stops = False
+    scene.box.pauses["proving"] = lambda: household_changes_a_plugin_setting(scene)
+    # Not seen stopped within the wait; gone by the time `init 3` is sent, which then starts.
+    scene.box.pauses["rollback_restored"] = lambda: setattr(scene.box, "pids", set())
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "not_started")
+    record = scene.status()["record"]
+    assert (record["restore"], record["stop"]) == ("done", "not seen")
+    assert "interface" not in record and "cause" not in record
+    assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n") and scene.box.pids == {300}
+    # Not seen stopped, so nothing was written into its settings.
+    assert scene.box.setting("config.plugins.mqttbridge.enabled") == "false"

@@ -532,8 +532,9 @@ So:
   is set up, say) into an exit status, as it already did for a program it could not find, so
   only something that is not an `Exception` can escape from it at all. R3, after the start, is
   best effort: the rollback it checks is done, so an error in it leaves `channel` and `standby`
-  at `unconfirmed` (the error noted as `internal_error`) and the result stays `rolled_back`.
-  Before `init 4` nothing is
+  at `unconfirmed` (the error noted as `internal_error`) and never changes the result - which is
+  `rolled_back` only when an interface was seen starting on the old files (§7: `not_stopped`,
+  `interface_not_started`). Before `init 4` nothing is
   stopped yet, so the record step is best effort - an error there leaves the record taken before
   the restart, noted as `internal_error` - and anything that escapes before the stop is sent
   reaches the helper's last net, which runs R2 again rather than end over the new, unproven code.
@@ -615,7 +616,7 @@ renamed into place.
 |---|---|---|
 | `request.json` (0600) | the plugin, before it starts the helper | `id`; `target` (a release number - `latest` is resolved by the plugin); `sha256` or `null`; `relay` `{"url", "expires"}` or `null`; `started_by`; `downgrade` (true only for a lower version chosen at the television or on the page); `from` `{"version", "commit"}`; `enigma2_pid` (the plugin's own process - the one whose end §5's restart rule waits for); `keys`, `acceptance` and `origin` - the index keys, lineage and origin of the build that asks, so the helper judges by what the running build trusts; `contract`; `integration` (`enigma2mqtt/integration/<node>` as read, or `null`) and `integration_mode`. A request the helper cannot read ends as `failed`, reason `bad_request` |
 | `helper.py`, `trust.py`, `ed25519.py`, `trustfile.py`, `netfetch.py` | the plugin | The helper and the four standard-library modules it imports, copied from the plugin directory, so the package manager replacing that directory takes nothing from under it |
-| `status.json` (0600) | the helper that holds the lock | `id`, `started_by`, `target`, `from`, `phase`, `started`, `finished`, `result`, `reason`, `error` - the shape of `update.transaction` plus `reason` - a `heartbeat` stamp, `restart` once the plugin asked, and at the end `record`: which proof passed (`marker`, `log_fd`, `webif_hook` or `none`), `restart` (`clean` or `stopped`), `rollback: cut short` when something no handler expects cut R2 short after `init 4` and its `finally` finished the steps, `channel` and `standby` (`unconfirmed` when R3 itself failed), `bouquet`, `restore` (`done`; `partial: <what is missing>` when the code is back and opkg's records or the settings block are not; `failed: <error>` when the code is not back; `interrupted`), `cause` (the reason the end had before a restore that did not complete replaced it), `lastservice`, `digest` (`matched`, `unavailable` or `not_checked`), `index_verdict` and `index_kept` when the helper fetched the index, `interface: not started` when no enigma2 came back after R2's `init 3`, `marker` when a marker write after the package manager failed, and `internal_error` for an error nothing expected. A second helper started for the same `id` that finds the lock held by its own `id` - or cannot read the owner yet - writes nothing here; one refused by another transaction's lock writes its `busy` |
+| `status.json` (0600) | the helper that holds the lock | `id`, `started_by`, `target`, `from`, `phase`, `started`, `finished`, `result`, `reason`, `error` - the shape of `update.transaction` plus `reason` - a `heartbeat` stamp, `restart` once the plugin asked, and at the end `record`: which proof passed (`marker`, `log_fd`, `webif_hook` or `none`), `restart` (`clean` or `stopped`), `rollback: cut short` when something no handler expects cut R2 short after `init 4` and its `finally` finished the steps, `stop` (`seen` when R2 saw no enigma2 running after its `init 4`, else `not seen`), `channel` and `standby` (`unconfirmed` when R3 itself failed, and `channel` `unconfirmed` when the interface was not restarted and R3 did not run), `bouquet`, `restore` (`done`; `partial: <what is missing>` when the code is back and opkg's records or the settings block are not; `failed: <error>` when the code is not back; `interrupted`), `cause` (the reason the end had before `restore_failed`, `restore_incomplete`, `not_stopped` or `interface_not_started` replaced it), `lastservice`, `digest` (`matched`, `unavailable` or `not_checked`), `index_verdict` and `index_kept` when the helper fetched the index, `interface` - `not started` when no enigma2 came back after R2's stop and `init 3`, `not restarted` when the stop was never seen and no enigma2 other than the ones still running appeared after `init 3` - `marker` when a marker write after the package manager failed, and `internal_error` for an error nothing expected. A second helper started for the same `id` that finds the lock held by its own `id` - or cannot read the owner yet - writes nothing here; one refused by another transaction's lock writes its `busy` |
 | `<filename>.ipk` | the helper | The package, after its size and sha256 matched the signed entry |
 | `restart.json` | the plugin | It has asked the image to restart (R1); `{"pid"}`. From here the helper waits 180 s for a new enigma2 |
 | `withdraw` | the plugin | The image's question was answered "no" or timed out: put the old files back |
@@ -633,7 +634,8 @@ before the package manager ran) with `interrupted`, and with `rolled_back` when 
 restarted after the package manager started and before `restarting`; `internal_error` (an error nothing expected, the package
 or the first marker not written) with `failed`, or with `rolled_back` when it came after the
 restart and R2 put the old version back; `drill` with `rolled_back`, only for an acceptance
-build (below); `restore_failed` and `restore_incomplete` with `failed`, below. After the package
+build (below); `restore_failed` and `restore_incomplete` with `failed`, below; `not_stopped` and
+`interface_not_started` with `failed`, below. After the package
 manager ran, `installed` comes only after the proof, and every other result only once the old
 files are back - with two exceptions that say so. The first is a restore that did not complete,
 which replaces the end's reason (the first one is kept as `record.cause`) and whose sentence names
@@ -645,6 +647,47 @@ is back but opkg's records or the settings block are not: a full flash, or an I/
 status file. After either, the plugin is to keep its doors closed (planned), and a withdraw or an
 undo still goes to R2 when the interface restarted meanwhile. The second is `interrupted` because
 the lock was taken, after which the helper touches nothing of the receiver.
+
+**R2's end says what runs, not only what is on disk.** `rolled_back` means the old files are back
+**and** an enigma2 that R2 had not seen before started on them. With the files back
+(`record.restore` `done`) and no such process, R2 ends `failed`, the reason it had kept as
+`record.cause`:
+
+- `not_stopped` (`record.stop` `not seen`, `record.interface` `not restarted`): `init 4` had no
+  effect that R2 could see within its 30 s, and `init 3` then starts nothing, because the runlevel
+  never left. The process R2 could not stop - the one started by the forward restart, holding the
+  new code, or a mix - runs on over the previous version's files until the interface restarts. The
+  settings block and the channel were left alone, because a running interface writes its own
+  settings over them when it quits.
+- `interface_not_started` (`record.stop` `seen`, `record.interface` `not started`): the stop was
+  seen, the old files went back, and no enigma2 appeared within 120 s of `init 3`. Nothing runs
+  when the helper ends.
+
+A restore that did not complete keeps its own reason (`restore_failed`, `restore_incomplete`)
+over both. When the stop was not seen but an enigma2 other than the ones still running appeared
+after `init 3` - the old process quit late and the start took - the end is `rolled_back`, with
+`record.stop` `not seen` saying that the settings block and the channel were not put back.
+
+**What the plugin does with these ends** (the plugin's side, for the branch that follows the
+transaction; not built here). Neither end may be read as "the previous version is running":
+
+- After `not_stopped`, the process reading the end is the one R2 could not stop, and its files
+  changed under it: they are the previous version's now. That is the case the plugin's doors
+  exist for: a fresh session would import the previous version's modules into a process
+  holding the new one's. So the plugin keeps the doors closed - it closes them if no poll had,
+  which is the case for a process that only followed the transaction - never reloads, and never
+  reports itself as the previous version. The repair is a restart of the interface, not a
+  reinstall: the files and opkg's records agree on the previous version, so the sentence says to
+  restart the receiver's interface, and a `restart_gui` should stay possible through the closed
+  doors, since it is exactly that repair. After the restart the previous version starts and
+  reads the end from the last-transaction record like any other.
+- After `interface_not_started`, no plugin is running to read it. Whatever starts the interface
+  next starts the previous version, which reads the finished marker at its start, reports the end
+  on `last_error` and opens as after any end: its files and its process agree, so nothing stays
+  closed. Home Assistant says the sentence and does not announce a rollback that runs.
+- So "`record.restore` is `done`" alone does not mean nothing is stuck: a plugin that opens its
+  doors on every such end reopens them over changed files after `not_stopped`. The check is the
+  reason, or `record.interface` `not restarted`.
 **What it re-judges**: the index is read again - fetched from the origin only when the request
 carries no relay address (an install Home Assistant drives needs no internet on the receiver and
 asks for none), otherwise the index the receiver already holds - and every rule of the index is

@@ -74,7 +74,10 @@ an I/O error on opkg's status file cannot keep the old code from coming back. A 
 did not complete ends `failed` with a reason of its own - `restore_failed`, or
 `restore_incomplete` when the code is back and only the records are not - whose sentence names
 the forced reinstall that repairs both. And the `finally` after `init 4` first puts back
-what R2 had not yet put back, before it starts the interface.
+what R2 had not yet put back, before it starts the interface. `rolled_back` also needs an
+interface seen starting on the old files: an interface that never stopped (`not_stopped`) or
+never came back (`interface_not_started`) ends `failed`, because the old version is on disk but
+nothing says it runs.
 
 **Signals.** `HUP`, `INT`, `TERM` and `PIPE` only set a flag, read at the next step. Before the
 package manager has run they end the transaction with nothing changed; from then until the
@@ -214,6 +217,11 @@ SENTENCES = {
     "opkg_failed": "the package manager could not install version {version}: {detail}",
     "manifest": "the installed files do not match version {version}: {detail}",
     "not_started": "the new plugin did not start; the previous version {previous} is back",
+    "not_stopped": "the receiver's interface did not stop for the rollback: the previous "
+                   "version {previous} is back on disk, but the interface still runs the code it "
+                   "had; restart the receiver's interface",
+    "interface_not_started": "the previous version {previous} is back, but the receiver's "
+                             "interface did not start again after the rollback",
     "time_limit": "the update did not finish within its time limit",
     "interrupted": "the update was interrupted: {detail}",
     "question": "the receiver did not restart its interface (the question on the television was "
@@ -1840,6 +1848,13 @@ class Transaction:
         the start and checks a rollback that is already done, so an error in it is noted
         (`channel` / `standby` `unconfirmed`) and never changes the result.
 
+        The result says what runs, not only what is on disk: `rolled_back` only when the old
+        files are back and an enigma2 R2 had not seen before started on them. With the files
+        back and none, it is `failed`: `not_stopped` when the stop was never seen - `init 3`
+        then starts nothing, and the process R2 could not stop runs on with the code it had -
+        or `interface_not_started` when nothing came after a stop. The first reason stays as
+        `cause`. A restore that did not complete keeps its own reason before either.
+
         Before `init 4` nothing has been stopped, so this is not yet the unit: the record is
         best effort (an error in it leaves the one taken before the restart), and only once the
         stop is sent does `rolling_back` tell the last net that R2 owns the end. Anything that
@@ -1859,10 +1874,18 @@ class Transaction:
         receiver.pause("rollback_recorded")
         service = recorded.get("service") if recorded else None
         starting = stopped = restored = sent = False
+        # The enigma2 processes still running at the last look for the stop: none once it was
+        # seen. After `init 3` only a process not among them is the interface starting again.
+        survivors = set()
+
+        def gone():
+            survivors.clear()
+            survivors.update(receiver.enigma2_pids())
+            return not survivors
         self.rolling_back = True
         try:
             receiver.run([receiver.init, "4"], STOP_WAIT)
-            stopped = self.wait(lambda: not receiver.enigma2_pids(), STOP_WAIT)
+            stopped = self.wait(gone, STOP_WAIT)
             receiver.pause("rollback_stopped")
             self.put_back(settings=stopped)  # recorded, whatever it was: init 3 comes next
             restored = True
@@ -1887,7 +1910,7 @@ class Transaction:
                         # so that a stopped interface still gets its settings block and its
                         # channel back; only a running one - or no answer - goes without.
                         try:
-                            stopped = not receiver.enigma2_pids()
+                            stopped = gone()
                         except BaseException:
                             stopped = False
                     if not restored:
@@ -1900,11 +1923,15 @@ class Transaction:
                             self.put_lastservice(stopped, service)
                         except BaseException:
                             self.record["lastservice"] = "failed"
+            self.record["stop"] = "seen" if stopped else "not seen"
+            if not sent:
                 receiver.run([receiver.init, "3"], STOP_WAIT)
         receiver.pause("rollback_started")
-        started = self.wait(lambda: bool(receiver.enigma2_pids()), START_WAIT)
+        # Not stopped, `init 3` asks for a runlevel that never left and starts nothing: the
+        # process R2 could not stop runs on, with whatever code it had, over the old files.
+        started = self.wait(lambda: bool(receiver.enigma2_pids() - survivors), START_WAIT)
         if not started:
-            self.record["interface"] = "not started"
+            self.record["interface"] = "not started" if stopped else "not restarted"
         if started and recorded and receiver.clock() < limit:
             try:
                 self.verify(recorded)
@@ -1913,10 +1940,21 @@ class Transaction:
                     "internal_error", (type(error).__name__ + ": " + str(error))[:200])
                 self.record.setdefault("channel", "unconfirmed")
                 self.record.setdefault("standby", "unconfirmed")
+        elif not recorded:
+            self.record["channel"] = "not recorded"
         else:
-            self.record.update(channel="not recorded" if not recorded else "lost")
-        self.finish("rolled_back" if self.record.get("restore") == "done" else "failed",
-                    self.restore_failure(failure))
+            # Not restarted, the channel was never touched; not started, there is none.
+            self.record["channel"] = "lost" if stopped else "unconfirmed"
+        end = self.restore_failure(failure)
+        back = self.record.get("restore") == "done"
+        if back and not started:
+            # The old files are back, but no interface was seen starting on them, so nothing
+            # says the old version runs: never `rolled_back`, which the plugin and Home
+            # Assistant read as exactly that. The first reason stays, as `cause`.
+            self.record["cause"] = failure.reason
+            end = Fail("interface_not_started" if stopped else "not_stopped",
+                       previous=self.request["from"]["version"])
+        self.finish("rolled_back" if back and started else "failed", end)
         return 1
 
     def put_lastservice(self, stopped, service):
