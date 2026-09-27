@@ -483,6 +483,26 @@ def floor_of(index, integration):
     return floor
 
 
+def relay_ok(relay, now):
+    """Whether `relay` is an address Home Assistant hands out for a package, still ahead of `now`.
+
+    The one rule, asked by the helper before it downloads (`check_relay`) and by the plugin
+    before it starts the helper (`cmd/update`) or takes Home Assistant's answer to its own
+    `relay_request` (`cmd/relay`): three places that must never disagree, so none of them has a
+    copy of it. An object whose `url` is `RELAY_URL` exactly - `http` or `https`, a host name or
+    an IPv4 address with no user part, a port from 1 to 65535 if any, the fixed path and a
+    43-character token, nothing after it - and whose `expires` is a whole number of epoch
+    seconds after `now`. A bool is not a number here, although Python says it is one.
+    """
+    if not isinstance(relay, dict):
+        return False
+    url, expires = relay.get("url"), relay.get("expires")
+    match = RELAY_URL.fullmatch(url) if isinstance(url, str) else None
+    if match is None or (match.group(1) is not None and not 0 < int(match.group(1)) < 65536):
+        return False
+    return isinstance(expires, int) and not isinstance(expires, bool) and expires > now
+
+
 # ------------------------------------------------------------------------ opkg --
 
 
@@ -1380,14 +1400,7 @@ class Transaction:
         expiry of the token then bounds it.
         """
         relay = self.request.get("relay")
-        if relay is None:
-            return
-        match = RELAY_URL.fullmatch(relay["url"])
-        expires = relay.get("expires")
-        if (match is None
-                or (match.group(1) is not None and not 0 < int(match.group(1)) < 65536)
-                or not isinstance(expires, int) or isinstance(expires, bool)
-                or expires <= self.receiver.now()):
+        if relay is not None and not relay_ok(relay, self.receiver.now()):
             raise Fail("relay")
 
     def download(self, entry):

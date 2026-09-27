@@ -68,6 +68,22 @@ back at all. So a callback, whatever it carries, means the interface is still ru
 helper is told to withdraw. Nothing here reads the dialog stack - a receiver with a
 session-start screen (the HbbTV plugin's zero-size `VBMain`) stacks every dialog one deeper.
 
+**A receiver without internet (the relay handshake, OD 2).** An install asked for at the
+television or on the page carries no download address: the receiver fetches the release itself,
+which the person asking consents to. When the last look at the release origin found it
+unreachable (`update.origin`, the check's probe - nothing is probed again here), the plugin asks
+the companion integration instead: once every refusal has been passed, it publishes
+`relay_request` (QoS 1, never retained) with a fresh id, the version and the serial of the index
+it holds, and waits at most 120 s for `cmd/relay` naming that id. The answer is transport, not an
+instruction: it is taken only for the id and the version this receiver asked for, with an address
+of Home Assistant's one shape that has not expired - the rule `updatehelper.relay_ok`, the same
+the helper asks again before it downloads - and anything else is logged and dropped, so an answer
+somebody else sent first cannot end the wait for the real one. Up to two minutes have passed by
+then, so the whole refusal table is asked again before the helper starts, and the transaction is
+still the television's or the page's: a downgrade chosen there stays one. With no answer, or no
+broker to ask, the install is refused (`no_relay`); nothing was changed. A command over MQTT
+brings its own address or asks the receiver to fetch (spec ae.4), so it never asks back.
+
 **The marker.** A plugin that starts reads `/etc/enigma2/mqttbridge-update.json` right after its
 logging is configured - before the provisioning file and before it asks whether it is switched
 on - so a new release that is switched off still confirms that it started (`started.json`, the
@@ -80,7 +96,6 @@ died says how the transaction ended.
 import json
 import math
 import os
-import re
 import secrets
 import shutil
 import time
@@ -93,7 +108,7 @@ from .mqttclient import MAX_QUEUED_MESSAGES
 from .origin import MQTT, PAGE, SCREEN, granted
 from .publisher import Refusal
 from .uninstall import _attach, installed_by_package_manager
-from .updatecheck import offer
+from .updatecheck import UNREACHABLE, offer
 from .version import CONTRACT, __version__
 
 LOG = get_logger("selfupdate")
@@ -139,11 +154,13 @@ PUBLIC_KEYS = ("id", "started_by", "target", "from", "phase", "started", "finish
                "error")
 MAX_TEXT = 512
 
-RELAY_URL = re.compile(
-    r"https?://(?:\[[0-9A-Fa-f:.]{2,45}\]|[A-Za-z0-9.-]{1,253})(?::[0-9]{1,5})?"
-    r"/api/enigma2_mqtt/relay/[A-Za-z0-9_-]{43}",
-    re.ASCII,
-)
+# The relay handshake (see the module): Home Assistant's answer is `cmd/relay`, the question
+# `relay_request`, an event - QoS 1 so the broker takes it, never retained so nobody answers a
+# leftover after a reconnect.
+RELAY_COMMAND = "relay"
+RELAY_REQUEST = "relay_request"
+RELAY_QOS = 1
+RELAY_WAIT_SECONDS = 120
 
 NOT_PERMITTED = "updates over MQTT are switched off in the plugin's settings"
 NOT_PACKAGED = "this plugin was not installed by the package manager, so it cannot update itself"
@@ -155,6 +172,10 @@ STANDBY = (
 EPG_IMPORT_RUNNING = "an EPG import is running"
 CURRENT = "version {version} is already installed and running"
 RELAY = "the download address from Home Assistant is not valid"
+# An install at the television or on the page, with the origin unreachable and no answer to the
+# relay handshake (or no broker to ask); the screen says it in the household's language.
+NO_RELAY = ("the receiver cannot reach the plugin's release origin and Home Assistant did not "
+            "answer, so the update cannot be installed")
 NO_SPACE = updatehelper.SENTENCES["no_space"]
 RATE_LIMITED = "an update ran less than ten minutes ago"
 DOORS = "an update is being applied on the receiver"
@@ -299,6 +320,11 @@ class SelfUpdater:
         self._poll_ticker = Ticker(self._poll, "self-update status")
         self._retraction_ticker = Ticker(self._retraction_poll, "self-update retraction")
         self._collapse_ticker = Ticker(self._collapse, "self-update softcam collapse")
+        # The relay handshake: the request waiting for Home Assistant's answer, and what ended
+        # the last wait when it was not a launch (for the screen and the page that asked).
+        self._relay_wait = None
+        self.relay_refusal = None
+        self._relay_ticker = Ticker(self._relay_unanswered, "self-update relay wait")
         self._queue = []
         self._outstanding = []
         self._retraction_deadline = None
@@ -530,8 +556,14 @@ class SelfUpdater:
         """`cmd/update`: the refusal, or None once the helper has been started.
 
         `downgrade` is the television's or the page's confirmed question; over MQTT there is
-        none, and a lower version is always refused.
+        none, and a lower version is always refused. None also when the receiver, without
+        internet, is waiting for Home Assistant's answer to its `relay_request` (`relay_wait`);
+        how that wait ended, when it was not a launch, is `relay_refusal`.
         """
+        self.relay_refusal = None
+        return self._request(text, origin, downgrade)
+
+    def _request(self, text, origin, downgrade):
         bridge = self.bridge
         if not granted(bridge.value, PERMISSION, origin):
             return Refusal(NOT_PERMITTED, "not_permitted")
@@ -579,6 +611,8 @@ class SelfUpdater:
             return Refusal(NO_SPACE, "no_space")
         if self._rate_limited():
             return Refusal(RATE_LIMITED, "rate_limited")
+        if relay is None and origin in (SCREEN, PAGE) and self._origin_unreachable():
+            return self._ask_for_relay(entry, sha, origin, allowed_downgrade)
         if origin in (SCREEN, PAGE):
             started_by = origin
         else:
@@ -591,7 +625,7 @@ class SelfUpdater:
         Asked by `cmd/update` and by `cmd/uninstall` (review M1): both end in the package
         manager and a restart, and two of them side by side end in whichever ran last.
         """
-        if self._current is not None:
+        if self._current is not None or self._relay_wait is not None:
             return _refusal("busy")
         if not os.path.isdir(self.lock_dir):
             return None
@@ -686,13 +720,7 @@ class SelfUpdater:
             on_disk.get("commit") == entry["commit"]
 
     def _relay_valid(self, relay):
-        if not isinstance(relay, dict):
-            return False
-        url = relay.get("url")
-        expires = _whole(relay.get("expires"))
-        if not isinstance(url, str) or not RELAY_URL.fullmatch(url) or expires is None:
-            return False
-        return expires > int(self.clock())
+        return updatehelper.relay_ok(relay, self.clock())
 
     def _enough_space(self, entry):
         total = 0
@@ -771,6 +799,108 @@ class SelfUpdater:
         if _whole(issued) is not None:
             floor = max(floor, issued)
         return floor
+
+    # -------------------------------------------------------- the relay handshake --
+
+    def _origin_unreachable(self):
+        """What the last look at the release origin found - never a new look (spec ae.4)."""
+        return getattr(self.bridge.updates, "reachability", None) == UNREACHABLE
+
+    def _ask_for_relay(self, entry, sha, origin, downgrade):
+        """Ask Home Assistant for the package on `relay_request`; None while the answer is due."""
+        bridge = self.bridge
+        if not bridge.connected:
+            LOG.warning("update to %s: the release origin is unreachable and there is no broker "
+                        "to ask Home Assistant on", entry["version"])
+            return Refusal(NO_RELAY, "no_relay")
+        ident = secrets.token_hex(6)
+        index = self._index()
+        question = json.dumps({"id": ident, "version": entry["version"],
+                               "serial": index["serial"]}, sort_keys=True)
+        try:
+            info = bridge.client.publish(bridge.topic(RELAY_REQUEST), question, qos=RELAY_QOS,
+                                         retain=False)
+        except Exception:
+            LOG.exception("could not publish relay_request")
+            info = None
+        if info is None or getattr(info, "rc", 0) != 0:
+            return Refusal(NO_RELAY, "no_relay")
+        self._relay_wait = {"id": ident, "version": entry["version"], "sha256": sha,
+                            "origin": origin, "downgrade": bool(downgrade),
+                            "asked": self.monotonic()}
+        self._relay_ticker.start(RELAY_WAIT_SECONDS * 1000, single=True)
+        LOG.warning("update to %s from the %s: the release origin is unreachable; asked Home "
+                    "Assistant for the package (request %s)", entry["version"], origin, ident)
+        return None
+
+    def relay_wait(self):
+        """`{"version", "seconds_left"}` while Home Assistant's answer is awaited, else None."""
+        wait = self._relay_wait
+        if wait is None:
+            return None
+        left = RELAY_WAIT_SECONDS - (self.monotonic() - wait["asked"])
+        return {"version": wait["version"], "seconds_left": max(0, int(math.ceil(left)))}
+
+    def on_relay(self, text):
+        """`cmd/relay`: Home Assistant's answer to this receiver's `relay_request`. Never raises.
+
+        Only the awaited id, for the awaited version, with an address of the one shape that has
+        not expired, and only inside the wait. Anything else is a line in the log and changes
+        nothing - above all it does not end the wait, so a broker client that answers first
+        with something else cannot take the real answer's place. What comes of an answer that
+        is taken - the helper started, or a refusal of the table asked again - is said the way
+        `cmd/update` says it, on `last_error`.
+        """
+        try:
+            self._on_relay(text)
+        except Exception:
+            LOG.exception("could not take cmd/relay")
+
+    def _on_relay(self, text):
+        try:
+            answer = json.loads(str(text or ""))
+        except ValueError:
+            answer = None
+        if not isinstance(answer, dict):
+            LOG.info("dropping cmd/relay: not a JSON object")
+            return
+        wait = self._relay_wait
+        if wait is None or answer.get("id") != wait["id"]:
+            LOG.info("dropping cmd/relay: this receiver is not waiting for an answer with that id")
+            return
+        if self.monotonic() - wait["asked"] >= RELAY_WAIT_SECONDS:
+            # The wait's own timer has not had its turn yet; the answer is late all the same.
+            self._relay_unanswered()
+            return
+        if answer.get("version") != wait["version"]:
+            LOG.warning("dropping cmd/relay for request %s: it names another version", wait["id"])
+            return
+        relay = {"url": answer.get("url"), "expires": answer.get("expires")}
+        if not updatehelper.relay_ok(relay, self.clock()):
+            LOG.warning("dropping cmd/relay for request %s: not an address Home Assistant hands "
+                        "out, or expired", wait["id"])
+            return
+        self._relay_wait = None
+        self._relay_ticker.stop()
+        LOG.info("update to %s: Home Assistant answered request %s", wait["version"], wait["id"])
+        refusal = self._request(json.dumps({"version": wait["version"], "sha256": wait["sha256"],
+                                            "relay": relay}),
+                                wait["origin"], wait["downgrade"])
+        if refusal:
+            self.relay_refusal = refusal
+            self.bridge.publish_last_error(COMMAND, refusal)
+        else:
+            self.bridge.clear_last_error()
+
+    def _relay_unanswered(self):
+        wait, self._relay_wait = self._relay_wait, None
+        self._relay_ticker.stop()
+        if wait is None:
+            return
+        LOG.warning("update to %s: Home Assistant did not answer request %s within %d s",
+                    wait["version"], wait["id"], RELAY_WAIT_SECONDS)
+        self.relay_refusal = Refusal(NO_RELAY, "no_relay")
+        self.bridge.publish_last_error(COMMAND, self.relay_refusal)
 
     # ----------------------------------------------------------------- launch --
 
@@ -1270,6 +1400,11 @@ class SelfUpdater:
 
     def abandon(self):
         """The interface is going away; nothing more is started from this process."""
+        if self._relay_wait is not None:
+            LOG.info("no longer waiting for Home Assistant's answer to request %s",
+                     self._relay_wait["id"])
+        self._relay_wait = None
+        self._relay_ticker.stop()
         self._retraction_ticker.stop()
         self._collapse_ticker.stop()
         self._poll_ticker.stop()

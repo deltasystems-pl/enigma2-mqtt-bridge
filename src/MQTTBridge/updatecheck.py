@@ -298,6 +298,11 @@ class UpdateChecker:
         self.last_relay_verdict = None
 
     @property
+    def reachability(self):
+        """`update.origin`: what the last probe of the release origin found, never a new probe."""
+        return self._origin
+
+    @property
     def lineage(self):
         return trust.LINEAGES[1] if self.acceptance else trust.LINEAGES[0]
 
