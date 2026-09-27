@@ -2343,3 +2343,56 @@ def test_an_interface_that_quit_late_and_came_back_is_rolled_back(tmp_path):
     assert scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n") and scene.box.pids == {300}
     # Not seen stopped, so nothing was written into its settings.
     assert scene.box.setting("config.plugins.mqttbridge.enabled") == "false"
+
+
+def test_an_error_in_r3_after_the_channel_was_measured_keeps_the_measurement(
+        tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.plugin_word(started=False)
+    scene.box.pauses["proving"] = lambda: setattr(scene.box, "standby", True)
+    real = updatehelper.Transaction.statusinfo
+    looks = []
+
+    def the_second_look_after_the_start_breaks(self):
+        if scene.box.init_log and scene.box.init_log[-1][0] == "3":
+            looks.append(True)
+            if len(looks) > 1:
+                raise RuntimeError("OpenWebif went away")
+        return real(self)
+    monkeypatch.setattr(updatehelper.Transaction, "statusinfo",
+                        the_second_look_after_the_start_breaks)
+    assert scene.run() == 1
+    assert scene.last()["result"] == "rolled_back"
+    record = scene.status()["record"]
+    # The channel had been measured before the error: only what was not stays unconfirmed.
+    assert (record["channel"], record["standby"]) == ("kept", "unconfirmed")
+
+
+def test_a_partial_withdraw_then_an_r2_cut_short_still_restores_in_r2(tmp_path, monkeypatch):
+    scene = Scene(tmp_path)
+    scene.box.pauses["restarting"] = lambda: (scene.directory / "withdraw").write_text("")
+    real = updatehelper._restore_records
+    calls = []
+
+    def records_fail_once(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            raise OSError(5, "Input/output error")
+        return real(*args, **kwargs)
+    monkeypatch.setattr(updatehelper, "_restore_records", records_fail_once)
+    # The withdraw leaves `restore: partial`, a restart lands meanwhile, and R2 is cut short
+    # before its own restore: the `finally` still restores, keyed on R2's own step.
+    scene.box.pauses["withdrawn"] = scene.box.restart
+
+    def escapes():
+        scene.box.pauses.pop("rollback_stopped")
+        raise Escape()
+    scene.box.pauses["rollback_stopped"] = escapes
+    with pytest.raises(Escape):
+        scene.run()
+    record = scene.status()["record"]
+    assert (record["rollback"], record["restore"]) == ("cut short", "done")
+    assert len(calls) == 2 and scene.box.init_log[-1] == ("3", f"# plugin {OLD}\n")
+    status, _info = updatehelper.opkg_paths(scene.box.root)
+    assert f"Version: {OLD}\n" in Path(status).read_text()
+    assert scene.init_calls() == ["4", "3"] and not scene.locked()
