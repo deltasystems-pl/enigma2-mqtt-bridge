@@ -47,6 +47,33 @@ version that has no section here.
   in a hardware spike (TRANSACTION.md section 8); the acceptance together with the integration is
   still to come.
 
+- **A receiver without internet installs through Home Assistant: `relay_request` and `cmd/relay`**
+  ([TOPICS.md](docs/TOPICS.md) §1, §2). An install started at the television or on the OpenWebif
+  page decides who fetches the package on a fresh word about the release origin: a probe of the
+  last ten minutes, or - on a receiver that has never checked, which is the default, or whose word
+  is older - the check's own five-second probe, run once first because starting the install is the
+  consent to it (nothing else probes, and a command over MQTT never does). Origin reachable: the
+  update helper fetches it. Unreachable: the plugin asks the companion integration on the new event
+  topic `relay_request` (QoS 1, never retained) and waits at most 120 s for its answer on the new
+  command `relay` - at once refused `no_relay` instead when no integration has said on
+  `enigma2mqtt/integration/<node>` that it is there. A helper whose own download got no answer from
+  the origin marks it unreachable for the ten-minute limit its failed end starts and ten minutes
+  more, so the next install the limit lets through asks Home Assistant without probing. Only an
+  answer to the id asked with, for the version asked for, with an unexpired address of Home
+  Assistant's one shape, is taken; anything else is logged and dropped, and the wait goes on. The
+  first answer that passes is taken, whoever sent it: a broker client that answers first with an
+  address of its own can deny and delay the install - the helper refuses what that address serves
+  (size and sha256 against the signed entry) with nothing changed, and the ten-minute limit between
+  updates starts - but cannot install anything. The refusals are asked once more before the update
+  helper starts, and the install stays the television's or the page's. No answer: refused with
+  `reason` `no_relay`, nothing changed; only answers that this receiver's clock calls expired:
+  `clock_skew`, with a sentence that says an answer came and asks to check the receiver's clock -
+  not that Home Assistant answered, since any broker client may have. A wait whose timer could
+  not start still ends by its age. A request that carries an address never contacts the origin. The address rule is now one function shared by the plugin and
+  the helper, and it no longer takes a bracketed IPv6 host or a port outside 1-65535 in
+  `cmd/update`. That is a rule about how the address is written: a host name may resolve to any
+  address, IPv6 included, and the bytes are verified whatever answers.
+
 - **Every package says which build it is.** `info` gains `build` - the commit the package was
   built from, the commit's time, whether the tracked files matched it, the flavour, and the commit
   of another build waiting on disk after the files were replaced and before the interface restarts

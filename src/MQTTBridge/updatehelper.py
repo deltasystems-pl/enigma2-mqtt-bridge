@@ -543,6 +543,26 @@ def floor_of(index, integration):
     return floor
 
 
+def relay_ok(relay, now):
+    """Whether `relay` is an address Home Assistant hands out for a package, still ahead of `now`.
+
+    The one rule, asked by the helper before it downloads (`check_relay`) and by the plugin
+    before it starts the helper (`cmd/update`) or takes Home Assistant's answer to its own
+    `relay_request` (`cmd/relay`): three places that must never disagree, so none of them has a
+    copy of it. An object whose `url` is `RELAY_URL` exactly - `http` or `https`, a host name or
+    an IPv4 address with no user part, a port from 1 to 65535 if any, the fixed path and a
+    43-character token, nothing after it - and whose `expires` is a whole number of epoch
+    seconds after `now`. A bool is not a number here, although Python says it is one.
+    """
+    if not isinstance(relay, dict):
+        return False
+    url, expires = relay.get("url"), relay.get("expires")
+    match = RELAY_URL.fullmatch(url) if isinstance(url, str) else None
+    if match is None or (match.group(1) is not None and not 0 < int(match.group(1)) < 65536):
+        return False
+    return isinstance(expires, int) and not isinstance(expires, bool) and expires > now
+
+
 # ------------------------------------------------------------------------ opkg --
 
 
@@ -1369,7 +1389,11 @@ class Transaction:
                 origin + trust.INDEX_FILE, trust.MAX_INDEX_BYTES, INDEX_TIMEOUT)
             if status != 200:
                 return None
-        except (netfetch.Unreachable, ValueError):
+        except netfetch.Unreachable:
+            # Said in the record for the plugin: the origin's word for the next install.
+            self.record["origin"] = "unreachable"
+            return None
+        except ValueError:
             return None
         self.record["index_fetched"] = True
         verdict, held = trustfile.keep(self.receiver.path(TRUST_FILE), self.keys,
@@ -1440,14 +1464,7 @@ class Transaction:
         expiry of the token then bounds it.
         """
         relay = self.request.get("relay")
-        if relay is None:
-            return
-        match = RELAY_URL.fullmatch(relay["url"])
-        expires = relay.get("expires")
-        if (match is None
-                or (match.group(1) is not None and not 0 < int(match.group(1)) < 65536)
-                or not isinstance(expires, int) or isinstance(expires, bool)
-                or expires <= self.receiver.now()):
+        if relay is not None and not relay_ok(relay, self.receiver.now()):
             raise Fail("relay")
 
     def download(self, entry):
@@ -1458,9 +1475,17 @@ class Transaction:
                 status, body = self.receiver.fetch_relay(relay["url"], trust.MAX_PACKAGE_BYTES,
                                                          PACKAGE_TIMEOUT)
             else:
-                status, body = self.receiver.fetch_origin(
-                    self.request["origin"] + entry["filename"], trust.MAX_PACKAGE_BYTES,
-                    PACKAGE_TIMEOUT)
+                try:
+                    status, body = self.receiver.fetch_origin(
+                        self.request["origin"] + entry["filename"], trust.MAX_PACKAGE_BYTES,
+                        PACKAGE_TIMEOUT)
+                except netfetch.Unreachable:
+                    # No answer at all - not a refused or a wrong one: the plugin keeps it as
+                    # the origin's word, so the next install at the television asks Home
+                    # Assistant for the package instead (`selfupdate.py`).
+                    self.record["origin"] = "unreachable"
+                    raise
+                self.record["origin"] = "reachable"
         except (netfetch.Unreachable, ValueError) as error:
             raise Fail("download", version=version, detail=str(error)) from None
         if status != 200:

@@ -1209,8 +1209,9 @@ def test_every_command_the_dispatcher_knows_has_a_page_action():
     covered = {action.command for action in webif.actions()}
     # `config` is the settings form itself. `update` is started on the page by the receiver's
     # own install flow, which asks before a downgrade; until that form exists the page offers
-    # no install at all.
-    assert handlers == covered | {"config", "update"}
+    # no install at all. `relay` is Home Assistant's answer to the receiver's own question,
+    # nobody's action (`selfupdate.py`).
+    assert handlers == covered | {"config", "update", "relay"}
 
 
 def test_the_origin_answers_the_permission_and_nothing_else():
