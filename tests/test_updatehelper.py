@@ -2892,7 +2892,7 @@ def test_a_late_restart_that_r2_cannot_stop_keeps_time_limit_as_its_cause(tmp_pa
 @pytest.mark.parametrize("respawned", [False, True],
                          ids=["interface_that_asked_runs", "interface_restarted_by_itself"])
 def test_a_deadline_that_passes_while_opkg_runs_says_how_it_ended(tmp_path, respawned):
-    """The 15 minutes run out during the install (review SF1).
+    """The 15 minutes run out during the install.
 
     With the interface that asked still running, the old files go back under it and nothing new
     ever ran: `failed`, with the forward sentence. With an interface that restarted by itself in
