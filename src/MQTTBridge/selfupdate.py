@@ -290,6 +290,20 @@ PLAUSIBLE_SINCE = 1767225600
 FILES_PHASES = ("installing", "restarting", "proving", "rolling_back")
 
 
+def older(version):
+    """Whether installing `version` is a downgrade of the running plugin (spec ae.8).
+
+    The one rule for the dispatcher, which refuses a downgrade without its consent, and for the
+    question the television and the page ask first: if the two ever judged differently, a person
+    would be asked the plain question and then refused as a downgrade. Anything that is not a
+    version is not older.
+    """
+    try:
+        return trust.version_key(version) < trust.version_key(__version__)
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
 def household_doors(updater=None):
     """What the setup screen and the page say while the doors are closed."""
     if getattr(updater, "stuck", False):
@@ -418,6 +432,11 @@ class SelfUpdater:
         self._probe_ticker = Ticker(self._probe_overdue, "self-update origin probe")
         self._relay_wait = None
         self.relay_refusal = None
+        # The version that wait was for, so a sentence that names it can (`updateview.py`), and
+        # when it ended on the monotonic clock, so a page read long after does not say it as
+        # news (`updateview.RELAY_OUTCOME_SECONDS`).
+        self.relay_version = None
+        self.relay_ended = None
         self._relay_ticker = Ticker(self._relay_unanswered, "self-update relay wait")
         self._queue = []
         self._outstanding = []
@@ -668,6 +687,8 @@ class SelfUpdater:
         wait ended, when it was not a launch, is `relay_refusal`.
         """
         self.relay_refusal = None
+        self.relay_version = None
+        self.relay_ended = None
         return self._request(text, origin, downgrade)
 
     def _request(self, text, origin, downgrade, probed=False):
@@ -702,7 +723,7 @@ class SelfUpdater:
         if refusal:
             return refusal
         version = entry["version"]
-        lower = trust.version_key(version) < trust.version_key(__version__)
+        lower = older(version)
         allowed_downgrade = lower and downgrade and origin in (SCREEN, PAGE)
         if lower and not allowed_downgrade:
             return _refusal("downgrade")
@@ -825,6 +846,27 @@ class SelfUpdater:
             reason, detail = problem
             return None, _refusal(reason, version=version, detail=detail)
         return entry, None
+
+    def runs_release(self, version):
+        """Whether this process runs the signed release `version` itself: its release build.
+
+        What the television and the page mark as installed (spec ae.5). A release build is clean,
+        of the `release` flavour and made from the index entry's commit; a development build of
+        the same number is never that release, whichever of the two is newer code (v5.5), so it
+        is not shown as installed next to it. A copy nobody built - every plugin up to 0.3.x -
+        has no commit and compares by its number only.
+        """
+        if version != __version__:
+            return False
+        build = self.bridge.build or {}
+        if not build.get("commit"):
+            return True
+        if build.get("flavour") != buildid.RELEASE or build.get("dirty") is not False:
+            return False
+        index = self._index()
+        entry = next((e for e in index["releases"] if e["version"] == version), None) \
+            if index is not None else None
+        return entry is not None and entry.get("commit") == build["commit"]
 
     def _current_release(self, entry):
         """That release runs, and the build on disk is that release too."""
@@ -963,8 +1005,7 @@ class SelfUpdater:
             wait["done"], wait["outcome"] = True, outcome
             return
         if outcome:
-            self.relay_refusal = outcome
-            self.bridge.publish_last_error(COMMAND, outcome)
+            self._relay_refused(outcome, wait["version"])
         else:
             self.bridge.clear_last_error()
 
@@ -1093,8 +1134,7 @@ class SelfUpdater:
                                             "relay": relay}),
                                 wait["origin"], wait["downgrade"])
         if refusal:
-            self.relay_refusal = refusal
-            self.bridge.publish_last_error(COMMAND, refusal)
+            self._relay_refused(refusal, wait["version"])
         else:
             self.bridge.clear_last_error()
 
@@ -1106,12 +1146,19 @@ class SelfUpdater:
         if wait.get("expired"):
             LOG.warning("update to %s: request %s was answered only with an address this "
                         "receiver's clock calls expired", wait["version"], wait["id"])
-            self.relay_refusal = Refusal(CLOCK_SKEW, "clock_skew")
+            refusal = Refusal(CLOCK_SKEW, "clock_skew")
         else:
             LOG.warning("update to %s: Home Assistant did not answer request %s within %d s",
                         wait["version"], wait["id"], RELAY_WAIT_SECONDS)
-            self.relay_refusal = Refusal(NO_RELAY, "no_relay")
-        self.bridge.publish_last_error(COMMAND, self.relay_refusal)
+            refusal = Refusal(NO_RELAY, "no_relay")
+        self._relay_refused(refusal, wait["version"])
+
+    def _relay_refused(self, refusal, version):
+        """A wait ended without an update: kept for the screen and the page, and on last_error."""
+        self.relay_refusal = refusal
+        self.relay_version = version
+        self.relay_ended = self.monotonic()
+        self.bridge.publish_last_error(COMMAND, refusal)
 
     def _origin_failed(self, record):
         """The helper could not reach the origin to download: that is the origin's word now."""

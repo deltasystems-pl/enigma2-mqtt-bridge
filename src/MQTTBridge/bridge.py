@@ -319,16 +319,18 @@ class Bridge:
         LOG.warning("settings saved during an uninstall; not applying them now")
         return None
 
-    def run_command(self, name, text, origin):
+    def run_command(self, name, text, origin, **consents):
         """A command from somewhere other than the broker - the dispatcher's refusal, or None.
 
         Nothing runs while the plugin is removing itself, and the refusal is not
         published: `last_error` would be a retained topic created after the
         retraction, which is the one thing the removal must not leave behind.
+        `consents` are the television's or the page's confirmed answers
+        (`CommandDispatcher.run`).
         """
         if self._uninstaller.closed:
             return UNINSTALL_RUNNING
-        return self._commands.run(name, text, origin)
+        return self._commands.run(name, text, origin, **consents)
 
     @property
     def updates(self):

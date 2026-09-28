@@ -2185,10 +2185,15 @@ def test_the_page_offers_only_the_interface_restart_after_not_stopped(starting, 
     assert "name='action' value='restart_gui'" in body
     resource = webif.MQTTBridgeWebResource()
     session = new_session()
-    _request, body = post(resource, session, action_fields("reboot"))
-    _request, body = post(resource, session, confirmation(body), csrf=None)
-    # Said on the page, above the sentence: the answer is not lost behind the doors.
-    assert webif._e("Refused: " + unstopped_sentence()).encode("utf-8") in body
+    # Any other form gets the sentence alone, with no question (the page's rule behind closed
+    # doors) - and the repair's form is still there under it.
+    request, body = post(resource, session, action_fields("reboot"))
+    text = body.decode("utf-8")
+    assert request.response_code == 409
+    assert webif._e(selfupdate.household_doors(bridge.self_update)) in text
+    assert "name='form' value='confirm'" not in text
+    assert text.count("<form") == 1 and "name='action' value='restart_gui'" in text
+    assert webif.CONFIRM_KEY not in session.sessionNamespaces
     assert restarts(receiver) == [] and receiver.session.opened == []
     _request, body = post(resource, session, action_fields("restart_gui"))
     request, body = post(resource, session, confirmation(body), csrf=None)
@@ -2205,6 +2210,61 @@ def test_the_page_offers_only_the_interface_restart_after_not_stopped(starting, 
     screen.keySave()
     assert len(factory.clients) == clients
     assert bridge.self_update.closed
+
+
+def test_behind_the_doors_only_the_repairs_own_confirmation_is_answered(starting, factory,
+                                                                         receiver, monkeypatch):
+    """A confirmation asked before the doors closed is answered only when it is the repair's;
+    any other gets the sentence, and nothing it asked for runs."""
+    from test_webif import action_fields, confirmation, new_session, post
+
+    bridge, directory = following(starting, factory, receiver)
+    monkeypatch.setattr(webif, "_bridge", lambda: bridge)
+    resource = webif.MQTTBridgeWebResource()
+    other, repair = new_session(), new_session()
+    _request, asked_reboot = post(resource, other, action_fields("reboot"))
+    _request, asked_restart = post(resource, repair, action_fields("restart_gui"))
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped",
+                error=str(updatehelper.Fail("not_stopped", previous="0.2.0")),
+                finished=NOW + 200, record={"restore": "done", "interface": "not restarted"})
+    tick()
+    assert bridge.self_update.repair() == "restart_gui"
+    request, body = post(resource, other, confirmation(asked_reboot), csrf=None)
+    assert request.response_code == 409
+    assert webif.CONFIRM_KEY not in other.sessionNamespaces
+    assert receiver.session.opened == []
+    request, body = post(resource, repair, confirmation(asked_restart), csrf=None)
+    assert request.response_code == 200
+    assert len(restarts(receiver)) == 1
+
+
+@pytest.mark.parametrize("csrf", [None, "A" * 43])
+def test_the_repair_through_closed_doors_still_needs_its_token(csrf, starting, factory,
+                                                                receiver, monkeypatch):
+    """The doors let the repair's form on to the page's own checks, not past them: without the
+    session's token it is refused like any other form, and nothing is asked or restarted."""
+    from test_webif import action_fields, new_session, post, token
+
+    bridge, directory = following(starting, factory, receiver)
+    monkeypatch.setattr(webif, "_bridge", lambda: bridge)
+    helper_says(directory, phase="finished", result="failed", reason="not_stopped",
+                error=str(updatehelper.Fail("not_stopped", previous="0.2.0")),
+                finished=NOW + 200, record={"restore": "done", "interface": "not restarted"})
+    tick()
+    assert bridge.self_update.repair() == "restart_gui"
+    resource = webif.MQTTBridgeWebResource()
+    session = new_session()
+    # The session has a token; the form does not carry it, or carries another.
+    token(session)
+    request, _body = post(resource, session, action_fields("restart_gui"), csrf=csrf)
+    assert request.response_code == 403
+    assert webif.CONFIRM_KEY not in session.sessionNamespaces
+    assert restarts(receiver) == [] and receiver.session.opened == []
+    # With its token the same form asks its question: the refusal above was the token's.
+    request, body = post(resource, session, action_fields("restart_gui"))
+    assert request.response_code == 200
+    assert "name='form' value='confirm'" in body.decode("utf-8")
+    assert restarts(receiver) == []
 
 
 def test_a_followed_failed_restore_under_a_process_r2_could_not_stop_is_stuck(starting,

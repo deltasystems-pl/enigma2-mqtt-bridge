@@ -236,18 +236,64 @@ It learns of an index in two ways:
 
 - **From the internet**, only with `update_check` on: once a day, once its clock has been set, and
   when `cmd/update_check` asks - or, whatever the setting says, when you press *Check for plugin
-  updates now* on the [OpenWebif page](#the-openwebif-page). Asking again within ten minutes
+  updates now* on the [OpenWebif page](#the-openwebif-page) or *Check now* (yellow) on the
+  receiver's *Plugin updates* screen. Asking again within ten minutes
   answers with the last result and fetches nothing. The receiver asks one fixed address over HTTPS,
   checks its certificate, and follows no redirect.
 - **From Home Assistant**, with no setting at all: the companion integration publishes the index it
   verified on the retained topic `enigma2mqtt/release_index`, and the receiver verifies it again
   itself. This is how a receiver with no internet learns of releases, and it makes no connection.
 
-With `update_check` off and nobody pressing the page's button, the receiver makes no connection
-other than the broker's. Checking installs nothing: installing an update from the index is not part
-of this release. What the receiver has learned is kept in `/etc/enigma2/mqttbridge-index.json`, when it last
+With `update_check` off and nobody pressing the page's or the screen's button, the receiver makes
+no connection other than the broker's. Checking installs nothing; installing is below. What the
+receiver has learned is kept in `/etc/enigma2/mqttbridge-index.json`, when it last
 checked in `/etc/enigma2/mqttbridge-check.json`, both
 (0600), which a removal leaves in place on purpose.
+
+### Installing a release from the receiver
+
+The setup screen's **blue** key opens *Plugin updates*: the running version and build, which
+signed list of versions the receiver holds and how old it is, the versions that list offers - the
+running one marked, older and newer ones named, the ones that cannot be installed marked so (**OK**
+on such a row says why; the page lists the reason with it) - and an update in progress, with who
+started it and how far it is. The same number as the
+running one is marked *installed* only when the running build is that release; a development build
+of it is never shown as the release. **Yellow** checks for updates, and a failed check says why in
+words; **OK** or **green** installs the chosen version. The
+[OpenWebif page](#the-openwebif-page) has the same: a *Plugin updates* section and the action
+*Install a plugin version*.
+
+Neither needs `update_check` or `update_allowed`: whoever holds the remote control, or is admitted
+by OpenWebif, could switch both on, so the act of pressing is the consent. Every guard that
+protects the household still applies - a recording, a running EPG import, standby, an update
+already running, the ten-minute limits - and says so, on the television in the household's
+language. Every install is asked first, because it ends in a restart of the user interface: the
+picture stops while it restarts, and the restart is the image's clean one, which is meant to bring
+the receiver back on the channel it was showing. How long the picture stops, and that the channel
+comes back, have not yet been measured on a receiver. **Only here can a version older than the
+running one be installed**, and its question says what that costs: the plugin's newer features
+disappear until it is updated again. The release still has to be on the signed list, at or above
+its floor, and not withdrawn. The answer on the television acts only on the question it answers,
+and a confirmation on the page expires after ten minutes.
+
+From the moment the package manager starts until the restart, the screen - which may stay open
+under the image's restart question - and the page show only "An update of the plugin is being
+applied on this receiver. Please wait." A form sent from a page opened earlier gets the same
+sentence and nothing else: no question, and nothing saved or kept for later - all but the interface
+restart, when the sentence names it as the repair. If the update fails and the plugin's previous
+files cannot be put back, they say to install the plugin again instead.
+
+**A receiver without internet** installs through Home Assistant (TOPICS.md, `relay_request`). An
+install asked for here may therefore wait before it starts, and the screen and the page say for
+what: first "Checking whether the receiver can reach the internet to download version ...", then,
+when it cannot, that it has asked Home Assistant, with the seconds left of the two minutes. When
+Home Assistant does not answer, they say "The receiver has no access to the internet, and Home
+Assistant did not answer. The installation is not possible.", in the receiver's language; when
+the only answer carried a download address the receiver's clock calls expired, they say so and
+ask to set the clock if it is wrong. Nothing on the receiver has changed in either case. The
+screen that asked keeps saying how the wait ended until it is closed; the page says it for an
+hour after the wait ended, so an old answer is not read as news, and the Status section's last
+error keeps the refusal until a command next succeeds.
 
 ### What a screenshot costs
 
@@ -323,9 +369,13 @@ softcam, clearing the list of recently watched channels (which also switches to 
 receiver's 0 key does), changing the Home Assistant mode, resetting the retained topics and
 removing the plugin each ask for a confirmation that says what the household loses; for the removal
 the page fills in the node id itself. Going back to a recently watched channel offers the channels
-of the last `zap_history` the plugin published, by reference, as a consumer would send them. The one difference from MQTT: a command from this
-page **does not need** `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed` or
-`uninstall_allowed`. While the bridge is idle
+of the last `zap_history` the plugin published, by reference, as a consumer would send them.
+Installing a plugin version always asks first, and asks in its own words before an older version
+([above](#installing-a-release-from-the-receiver)); only that confirmation can start a downgrade -
+it is kept on the receiver with the confirmation step, never sent by the browser. The one
+difference from MQTT: a command from this page **does not need** `deep_standby_allowed`,
+`softcam_restart_allowed`, `epg_import_allowed`, `uninstall_allowed`, `update_check` or
+`update_allowed`. While the bridge is idle
 the commands are shown disabled, with the reason.
 
 **Who can open it.** Exactly whoever OpenWebif lets in - the page has no login of its own and reads

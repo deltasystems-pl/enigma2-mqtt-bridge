@@ -314,7 +314,11 @@ def test_the_page_its_icon_and_an_action_answer_without_any_login(connected_brid
     assert b"<form method='post' class='settings'>" in body
     for action in webif.actions():
         assert ("name='action' value='" + action.key + "'").encode() in body
-    assert b"<fieldset disabled>" not in body
+    # Every command of a running bridge can be sent - but an install needs a version to
+    # choose, and with no signed list of versions yet it says so instead
+    # (`test_update_screen.py`).
+    disabled = re.findall(r"<fieldset disabled><legend>([^<]*)</legend>", body.decode())
+    assert disabled == ["Install a plugin version"]
     icon = _Request(session=session)
     assert webif.PluginIconResource().render_GET(icon).startswith(PNG)
     assert icon.response_code == 200
@@ -1207,11 +1211,9 @@ def test_every_command_the_dispatcher_knows_has_a_page_action():
     """A command added to the dispatcher without a page action fails here."""
     handlers = set(CommandDispatcher(SimpleNamespace()).handlers)
     covered = {action.command for action in webif.actions()}
-    # `config` is the settings form itself. `update` is started on the page by the receiver's
-    # own install flow, which asks before a downgrade; until that form exists the page offers
-    # no install at all. `relay` is Home Assistant's answer to the receiver's own question,
-    # nobody's action (`selfupdate.py`).
-    assert handlers == covered | {"config", "update", "relay"}
+    # `config` is the settings form itself. `relay` is Home Assistant's answer to the
+    # receiver's own question, nobody's action (`selfupdate.py`).
+    assert handlers == covered | {"config", "relay"}
 
 
 def test_the_origin_answers_the_permission_and_nothing_else():

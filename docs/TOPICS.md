@@ -1072,11 +1072,12 @@ receiver, whatever its settings, and again when an index is accepted, when a che
 
 **When the receiver checks.** Only when asked. With `update_check` on (the read-only setting
 above), once a day - after its clock has been set - and on `cmd/update_check`; from the plugin's
-OpenWebif page ("Check for plugin updates now") whatever the setting says, because whoever the page
-admits could switch it on anyway. Manual checks share one ten-minute limit, inside which the last
+OpenWebif page ("Check for plugin updates now") and from the receiver's own "Plugin updates"
+screen whatever the setting says, because whoever the page admits, or holds the remote control,
+could switch it on anyway. Manual checks share one ten-minute limit, inside which the last
 result is the answer and nothing is fetched. With `update_check` off and nobody at the page or
-the television, the receiver makes no connection but the broker's. A check fetches the signature file first (the
-probe, 1 KiB), then the index (ten seconds, 64 KiB), from the origin built into the plugin, over
+the television, the receiver makes no connection but the broker's. A check fetches the signature
+file first (the probe, 1 KiB), then the index (ten seconds, 64 KiB), from the origin built into the plugin, over
 TLS that verifies the certificate and the host name, and never follows a redirect. An index relayed
 on `enigma2mqtt/release_index` (§3) is judged by the same rule, needs no setting and causes no
 connection.
@@ -1292,6 +1293,15 @@ other end of that code: the 15 minutes ran out before the restart, and nothing c
 A rollback can also carry `interrupted` or `internal_error`, and on an acceptance build `drill`;
 [TRANSACTION.md](TRANSACTION.md) §7 lists which end each reason comes with, and
 `update.transaction.reason` (§1) keeps it after `last_error` is cleared.
+
+**From the receiver itself.** The receiver's "Plugin updates" screen and the plugin's OpenWebif
+page run this same command, with `started_by` `screen` or `page`. They need no `update_allowed`
+(the person at the television, or admitted by OpenWebif, could switch it on), and every other
+refusal above applies to them unchanged, on `last_error` as for any command. They alone may install
+a version **below** the running one, and only after a question that names what it takes away; the
+consent to that is passed down the call by the screen or the page, never read from a payload, so no
+`cmd/update` a broker client sends can carry one. A downgrade retracts every retained topic but
+`availability` before the restart, as above.
 
 **A receiver without internet - `relay_request` and `cmd/relay`.** An install started at the
 television or on the OpenWebif page carries no download address, and the receiver fetches the

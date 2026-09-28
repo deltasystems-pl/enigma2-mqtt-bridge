@@ -47,6 +47,29 @@ version that has no section here.
   in a hardware spike (TRANSACTION.md section 8); the acceptance together with the integration is
   still to come.
 
+- **Plugin updates on the television and on the OpenWebif page.** The setup screen's blue key
+  opens *Plugin updates* ("Aktualizacje wtyczki"): the running version and build, the signed list of
+  versions the receiver holds and its age, every version it offers - the running one marked, the
+  ones that cannot be installed marked so, with the reason on OK (the page lists it) - and the
+  update in progress with who started it, or how the last one ended - by its reason, so a rollback
+  because the update ran out of time is not said as a new version that did not start. An install on a receiver without internet says what it
+  waits for - the look at the internet, then Home Assistant's answer, counted down - and how the
+  wait ended (the page for an hour after it), never "started" before it has.
+  Yellow checks for updates, OK or green installs; the OpenWebif page gains the same section and an
+  *Install a plugin version* action. Neither needs `update_check` or `update_allowed` - pressing is
+  the consent - and every household guard still applies. Every install is asked first, and only
+  here can an older version be installed, after a question that says the newer features disappear
+  until the next update; on the page that consent stays on the receiver with the confirmation step
+  and is never sent by the browser; a confirmation expires after ten minutes, and the television's
+  answer acts only on the question it answers. While the doors are closed both show only the doors
+  sentence, and the page answers every form with it, asking and keeping nothing - all but the
+  interface restart that is the repair after `not_stopped`, whose form the page offers under the
+  sentence and which keeps its confirmation and its own guards; the screen may
+  stay open under the restart question and imports nothing new. Refusals and a failed check are
+  said on the television in the household's language. A development build is never shown as the
+  installed release of the same number. Polish and German catalogues carry every new string. Not
+  yet tried on a receiver.
+
 - **A receiver without internet installs through Home Assistant: `relay_request` and `cmd/relay`**
   ([TOPICS.md](docs/TOPICS.md) §1, §2). An install started at the television or on the OpenWebif
   page decides who fetches the package on a fresh word about the release origin: a probe of the
