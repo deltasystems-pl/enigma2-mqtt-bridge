@@ -1495,7 +1495,7 @@ class Transaction:
         return body
 
     def cross_check(self, entry):
-        """OD 6: the release asset's GitHub digest, once, when the receiver fetched it itself."""
+        """The release asset's GitHub digest, once, when the receiver fetched it itself."""
         if self.request.get("relay") is not None or self.request["acceptance"]:
             self.record["digest"] = "not_checked"
             return

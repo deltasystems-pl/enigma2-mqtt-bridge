@@ -53,10 +53,9 @@ transaction closes its doors too while R2 puts the previous files back (`rolling
 The restart itself waits for the helper's `restarting`: for a downgrade chosen at the television
 or on the page, every retained topic the node owns except `availability` is first retracted at
 QoS 1, because the older release does not know the newer one's topics and would leave them on
-the broker for ever (section 11 v of the plan, B1). From
-that retraction on nothing at all is published (S-a): refusals are logged, not put on
-`last_error`, and the `update` relay stops, so nothing the older release does not know is
-re-created behind the retraction.
+the broker for ever. From that retraction on nothing at all is published (S-a): refusals are
+logged, not put on `last_error`, and the `update` relay stops, so nothing the older release does
+not know is re-created behind the retraction.
 
 **One transaction at a time.** `cmd/uninstall` runs the package manager too, and a removal next
 to an update ends in whichever the package manager did last. So an uninstall is refused while an
@@ -77,7 +76,7 @@ back at all. So a callback, whatever it carries, means the interface is still ru
 helper is told to withdraw. Nothing here reads the dialog stack - a receiver with a
 session-start screen (the HbbTV plugin's zero-size `VBMain`) stacks every dialog one deeper.
 
-**A receiver without internet (the relay handshake, OD 2).** An install asked for at the
+**A receiver without internet (the relay handshake).** An install asked for at the
 television or on the page carries no download address: the receiver fetches the release itself,
 which the person asking consents to - and whether it can is what decides who fetches. So once
 every refusal has been passed, the install looks at the origin's word (`update.origin`). A word
@@ -85,13 +84,14 @@ of the last ten minutes is taken as it is. Any other - `unknown` on a receiver t
 checked, which is the default, or a word read back after a restart or grown old - is asked for
 again first: the check's own five-second probe, on the check's worker, while the install waits
 (`relay_wait`, phase `probe`, at most `PROBE_WAIT_SECONDS`). That is the one probe the asking
-consents to (spec ae.4, "an explicit TV/page action"); nothing else probes, and a command over
-MQTT never does. `reachable`: the helper fetches the release itself. `unreachable`: the plugin
-asks the companion integration instead. A helper whose own download could not reach the origin
-says so in its record, and that becomes the origin's word too. Its failed end starts the
-ten-minute limit between updates, so that word lasts the limit and ten minutes more
-(`HELPER_WORD_SECONDS`): the next install at the television that the limit lets through asks
-Home Assistant without looking again. After that, or after a restart, it is looked at again.
+consents to (ADR-0015 decision 4; SETUP.md, "Installing a release from the receiver"); nothing
+else probes, and a command over MQTT never does. `reachable`: the helper fetches the release
+itself. `unreachable`: the plugin asks the companion integration instead. A helper whose own
+download could not reach the origin says so in its record, and that becomes the origin's word
+too. Its failed end starts the ten-minute limit between updates, so that word lasts the limit
+and ten minutes more (`HELPER_WORD_SECONDS`): the next install at the television that the limit
+lets through asks Home Assistant without looking again. After that, or after a restart, it is
+looked at again.
 
 To ask, the plugin publishes `relay_request` (QoS 1, never retained) with a fresh id, the version
 and the serial of the index it holds, and waits at most 120 s for `cmd/relay` naming that id -
@@ -107,7 +107,7 @@ that answers first with an address of its own is therefore taken, and Home Assis
 after it is dropped as stale; what that client can do with it is deny and delay, not install -
 the helper verifies the bytes it serves against the signed entry (size and sha256), refuses
 them with nothing changed, and the failed transaction starts the ten-minute limit between
-updates. The spec's threat table accepts exactly that ("can only deny or delay"). Up to two
+updates. ADR-0015 accepts exactly that: the relay is a courier, not an authority. Up to two
 minutes have passed by the time an answer is taken, so the whole refusal table is asked again
 before the helper starts, and the transaction is still the television's or the page's: a
 downgrade chosen there stays one. With no answer, or no broker or integration to ask, the install
@@ -117,8 +117,8 @@ lives - ends the wait with `clock_skew` instead, because "Home Assistant did not
 send the household looking for the wrong fault. Its sentence says only what the receiver knows:
 an answer came whose address its clock calls expired. It does not say that Home Assistant sent
 it - any broker client may have (review round 2) - and setting a wrong clock is harmless either
-way. A command over MQTT brings its own address or
-asks the receiver to fetch (spec ae.4), so it never asks back.
+way. A command over MQTT brings its own address or asks the receiver to fetch, so it never asks
+back.
 
 Every wait has a timer, and every wait also ends by its age on the monotonic clock whenever it is
 looked at (`busy`, `relay_wait`), so a timer that could not be started cannot leave the receiver
@@ -244,7 +244,8 @@ STOPPED = ("the previous update stopped without finishing; a new one is possible
            "{minutes} minutes, when its lock on the receiver expires")
 UNINSTALLING = "the plugin is being removed from the receiver"
 # After a `failed` end whose restore did not complete: the files may be the new release's, or a
-# mix, under this process, and only a reinstall from outside it can repair them (spec ae.7a).
+# mix, under this process, and only a reinstall from outside it can repair them
+# (TRANSACTION.md section 7).
 STUCK = ("an update failed and the plugin's previous files could not be put back; install the "
          "plugin again (from Home Assistant: force plugin reinstall)")
 # The same end after a helper that stopped once the package manager had started: nothing put
@@ -291,7 +292,7 @@ FILES_PHASES = ("installing", "restarting", "proving", "rolling_back")
 
 
 def older(version):
-    """Whether installing `version` is a downgrade of the running plugin (spec ae.8).
+    """Whether installing `version` is a downgrade of the running plugin (ADR-0015 decision 4).
 
     The one rule for the dispatcher, which refuses a downgrade without its consent, and for the
     question the television and the page ask first: if the two ever judged differently, a person
@@ -850,9 +851,9 @@ class SelfUpdater:
     def runs_release(self, version):
         """Whether this process runs the signed release `version` itself: its release build.
 
-        What the television and the page mark as installed (spec ae.5). A release build is clean,
+        What the television and the page mark as installed (SETUP.md). A release build is clean,
         of the `release` flavour and made from the index entry's commit; a development build of
-        the same number is never that release, whichever of the two is newer code (v5.5), so it
+        the same number is never that release, whichever of the two is newer code, so it
         is not shown as installed next to it. A copy nobody built - every plugin up to 0.3.x -
         has no commit and compares by its number only.
         """

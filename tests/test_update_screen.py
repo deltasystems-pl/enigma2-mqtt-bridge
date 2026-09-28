@@ -1,10 +1,10 @@
 """The two places a person installs a release from the receiver itself: the television and the page.
 
 `test_selfupdate.py` proves what `cmd/update` decides; this file proves what the "Plugin updates"
-screen and the OpenWebif page offer, ask and send. The consent rule (spec ae.4): at the
+screen and the OpenWebif page offer, ask and send. The consent rule (ADR-0015 decision 4): at the
 television or on a page OpenWebif admitted, neither `update_check` nor `update_allowed` is needed -
 to check or to install, a downgrade included - and every household guard still applies. A
-downgrade is started only by a "yes" to the question that names what it takes away (spec ae.8),
+downgrade is started only by a "yes" to the question that names what it takes away,
 and on the page that consent never travels through the browser. While an update has closed the
 plugin's doors both show only the sentence, and the screen imports nothing new.
 """
@@ -801,7 +801,7 @@ def test_the_polish_screen_uses_the_specs_words():
                    "until it is updated again."] == (
         "Zainstalować starszą wersję %s? Nowsze funkcje wtyczki znikną do czasu ponownej "
         "aktualizacji.")
-    # Spec ae.10, "bad signature / older index".
+    # A bad signature or an older index.
     assert entries["The plugin's list of versions has an invalid signature or is older than "
                    "the one already known. Nothing was changed."] == (
         "Lista wersji wtyczki ma nieprawidłowy podpis albo jest starsza od już znanej. Nic nie "
@@ -813,7 +813,7 @@ def test_the_polish_screen_uses_the_specs_words():
 
 @pytest.mark.parametrize("form", ["install", "downgrade", "restart_gui", "confirm", "identity"])
 def test_behind_closed_doors_the_page_answers_only_the_sentence(form, box, page, factory):
-    """Spec ae.6 step 3: from `installing` on, every form gets the sentence and nothing is kept.
+    """From `installing` on, every form gets the sentence and nothing is kept (TRANSACTION.md 5.3).
 
     Not a question page, not a pending confirmation: an answer to either would meet the doors
     anyway, and a page that asks what it cannot do tells the household the wrong thing.
@@ -889,7 +889,7 @@ CHECK_ERRORS = sorted(set(trust.REASONS) | {
 
 @pytest.mark.parametrize("code", CHECK_ERRORS)
 def test_every_check_error_is_a_household_sentence(code, box):
-    """Spec ae.10: the television says what went wrong, never the code (review S4)."""
+    """The television says what went wrong, never the code (review S4)."""
     bridge = box()
     bridge.updates._check_error = code
     said = updateview.header(bridge)[-1]
@@ -931,7 +931,7 @@ def test_a_confirmation_left_for_ten_minutes_has_expired(box, page):
 
 
 def test_a_development_build_is_never_shown_as_the_installed_release(box):
-    """Spec ae.5 (v5.5): a development build of the same number is never the current release."""
+    """A development build of the same number is never the current release (SETUP.md)."""
     bridge = box()
     # The tests' receiver runs a development build made from the release's own commit.
     assert "0.3.0 - release; a development build of it runs" in labels(screen_of(bridge))
@@ -1242,7 +1242,7 @@ def test_the_page_shows_the_relay_handshake(box, page, no_internet, monkeypatch)
 
 
 def test_the_polish_relay_sentences():
-    """Spec ae.6: the television's sentence when neither the internet nor Home Assistant can
+    """The television's sentence when neither the internet nor Home Assistant can
     deliver the package, word for word."""
     from test_locale import LOCALE, catalogue
 

@@ -10,9 +10,9 @@ draw it, so the two never tell the same household two different things.
 publishes, judged by the one rule (`updatecheck.offer`); an install is `cmd/update` through the
 dispatcher with the origin `screen` or `page` (`selfupdate.py` does every guard). The only
 judgement made here is which question to ask first: a version below the running one is a
-downgrade, and the question says what it takes away (spec ae.6, ae.8). What counts as older,
-and whether the running build is the release it is listed beside, `selfupdate.py` says - the
-dispatcher judges a downgrade by the same function, so the question and the answer cannot
+downgrade, and the question says what it takes away (ADR-0015 decision 4). What counts as
+older, and whether the running build is the release it is listed beside, `selfupdate.py` says -
+the dispatcher judges a downgrade by the same function, so the question and the answer cannot
 disagree.
 
 **A wait is said as a wait.** An install at the television or on the page is accepted before it
@@ -51,7 +51,8 @@ from .version import __version__
 LOG = get_logger("updateview")
 
 INSTALLED = "installed"
-# The release of the running number while a development build of it runs (spec ae.5, v5.5).
+# The release of the running number while a development build of it runs (SETUP.md,
+# "Installing a release from the receiver").
 SAME_NUMBER = "same_number"
 NEWER = "newer"
 OLDER = "older"
@@ -65,7 +66,7 @@ RELAY_OUTCOME_SECONDS = 60 * 60
 
 # `check_error` codes (`updatecheck.py`, TOPICS.md) by what they mean to the household. The
 # rule's own verdicts - `trust.REASONS`, and a relayed payload that is not an index - all say
-# "this list is not to be believed", which is spec ae.10's sentence.
+# "this list is not to be believed", and that is the sentence the household reads.
 _UNREACHABLE = ("unreachable",)
 _NOT_DOWNLOADED = ("redirect", "http_error")
 _NOT_SAVED_FULL = ("write_failed",)
@@ -375,7 +376,7 @@ def household_refusal(refusal, version=None):
         "no_space": _("There is not enough free space on the receiver."),
         "rate_limited": _("An update ran less than ten minutes ago. Try again later."),
         "internal_error": _("The update could not be started; the plugin log says why."),
-        # The relay handshake's two ends without an update (spec ae.6).
+        # The relay handshake's two ends without an update (TOPICS.md, `relay_request`).
         "no_relay": _("The receiver has no access to the internet, and Home Assistant did not "
                       "answer. The installation is not possible."),
         # Only what the receiver knows: an answer came - from whom, nothing on the broker says -
