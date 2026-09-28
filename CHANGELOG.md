@@ -50,7 +50,8 @@ version that has no section here.
   opens *Plugin updates* ("Aktualizacje wtyczki"): the running version and build, the signed list of
   versions the receiver holds and its age, every version it offers - the running one marked, the
   ones that cannot be installed marked so, with the reason on OK (the page lists it) - and the
-  update in progress with who started it. An install on a receiver without internet says what it
+  update in progress with who started it, or how the last one ended - by its reason, so a rollback
+  because the update ran out of time is not said as a new version that did not start. An install on a receiver without internet says what it
   waits for - the look at the internet, then Home Assistant's answer, counted down - and how the
   wait ended (the page for an hour after it), never "started" before it has.
   Yellow checks for updates, OK or green installs; the OpenWebif page gains the same section and an

@@ -493,6 +493,44 @@ def test_a_withdrawn_update_shows_the_list_again_and_how_it_ended(box, factory, 
            "the previous version runs" in screen["status"].text
 
 
+def test_a_rollback_the_deadline_forced_is_not_said_as_a_failed_start(box, factory, receiver):
+    """Review S1: `rolled_back` with `time_limit` - the update ran out of time, and was undone."""
+    bridge = box()
+    screen = screen_of(bridge)
+    choose(screen, "0.4.0")
+    screen.keyInstall()
+    screen.session.answer(True)
+    directory = directories(bridge.root)[0]
+    helper_says(directory, phase="proving", started_by="screen")
+    tick()
+    helper_says(directory, phase="finished", result="rolled_back", started_by="screen",
+                reason="time_limit", error="x", finished=NOW + 900)
+    tick()
+    factory.client.fire_connect()
+    hold(bridge)
+    screen.refresh()
+    status = screen["status"].text
+    assert "Last update to 0.4.0, started on the television: the update ran out of time and " \
+           "was undone; the previous one is back" in status
+    assert "did not start" not in status
+
+
+@pytest.mark.parametrize("result, reason, said", [
+    ("rolled_back", "time_limit",
+     "the update ran out of time and was undone; the previous one is back"),
+    ("rolled_back", "not_started", "the new version did not start; the previous one is back"),
+    ("rolled_back", None, "the new version did not start; the previous one is back"),
+    # The reason picks a sentence only for a rollback: a forward path out of time changed nothing.
+    ("failed", "time_limit", "failed; the previous version runs"),
+])
+def test_how_the_last_update_ended_follows_its_reason(result, reason, said):
+    record = {"target": "0.4.0", "started_by": "page", "phase": "finished", "result": result,
+              "reason": reason}
+    line = updateview.transaction_line(SimpleNamespace(
+        self_update=SimpleNamespace(transaction_payload=lambda: record)))
+    assert line == "Last update to 0.4.0, started on the OpenWebif page: " + said
+
+
 def test_the_screen_and_its_view_import_nothing_after_their_start():
     """Behind closed doors a first import could read the next release's half-written file."""
     for name in ("updatescreen.py", "updateview.py"):
@@ -987,6 +1025,9 @@ def transaction_lines():
                for who in STARTERS for phase in PHASES]
     records += [{"target": LONG, "started_by": who, "phase": "finished", "result": result}
                 for who in STARTERS for result in RESULTS]
+    # A rollback's reason picks its own sentence (review S1).
+    records += [{"target": LONG, "started_by": who, "phase": "finished",
+                 "result": "rolled_back", "reason": "time_limit"} for who in STARTERS]
     return [updateview.transaction_line(SimpleNamespace(
         self_update=SimpleNamespace(transaction_payload=lambda record=record: record)))
         for record in records]

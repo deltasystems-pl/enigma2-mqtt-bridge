@@ -97,7 +97,12 @@ def _started_by(origin):
     }.get(origin, origin or "-")
 
 
-def _result(result):
+def _result(result, reason=None):
+    # A rollback the forward deadline forced says nothing against the release: the restart came
+    # too late for its proof, and "did not start" would blame a version nobody saw fail
+    # (review S1). Only a rollback: `time_limit` with `failed` changed nothing that stays.
+    if result == "rolled_back" and reason == "time_limit":
+        return _("the update ran out of time and was undone; the previous one is back")
     return {
         "installed": _("installed"),
         "withdrawn_before_restart": _("withdrawn before the restart; the previous version runs"),
@@ -250,7 +255,7 @@ def transaction_line(bridge):
         return None
     values = {"target": record["target"], "who": _started_by(record.get("started_by"))}
     if record.get("phase") == "finished":
-        values["result"] = _result(record.get("result"))
+        values["result"] = _result(record.get("result"), record.get("reason"))
         return _("Last update to %(target)s, started %(who)s: %(result)s") % values
     values["phase"] = _phase(record.get("phase"))
     return _("Update to %(target)s, started %(who)s: %(phase)s") % values

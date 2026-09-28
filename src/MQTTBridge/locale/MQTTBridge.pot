@@ -944,6 +944,10 @@ msgid "the new version did not start; the previous one is back"
 msgstr ""
 
 #: src/MQTTBridge/updateview.py
+msgid "the update ran out of time and was undone; the previous one is back"
+msgstr ""
+
+#: src/MQTTBridge/updateview.py
 msgid "The last check could not download the list of versions."
 msgstr ""
 
