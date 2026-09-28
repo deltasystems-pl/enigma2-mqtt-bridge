@@ -26,7 +26,8 @@ from there, detached with `start-stop-daemon -S -b`, which forks, starts a new s
 the launching `eConsoleAppContainer` child exit at once. `-p` names a pid file inside the
 transaction directory, which nothing has written yet: without it busybox's `start-stop-daemon`
 looks for *any* running `/usr/bin/python3`, and finding one it answers "already running" and
-starts nothing.
+starts nothing. Busybox forks twice here, so the helper is in the new session and process group
+but not their leader; nothing relies on leadership, and `-m` writes the helper's own pid.
 
 **The doors (M3).** From the helper's phase `installing` on, the package manager is rewriting
 the files on disk under the running process, and after it they are the new release's while the
