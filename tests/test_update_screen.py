@@ -525,6 +525,11 @@ def test_a_rollback_the_deadline_forced_is_not_said_as_a_failed_start(box, facto
     ("rolled_back", "interrupted",
      "the update was interrupted and undone; the previous one is back"),
     ("rolled_back", "drill", "the update was undone; the previous one is back"),
+    # Only `not_started` blames the release: the helper's own error, or a reason this plugin
+    # does not know yet, says what happened and nothing more. A record
+    # without a reason predates the field and keeps the words it was written with.
+    ("rolled_back", "internal_error", "the update was undone; the previous one is back"),
+    ("rolled_back", "some_later_reason", "the update was undone; the previous one is back"),
     # The reason picks a sentence only for a rollback: a forward path out of time changed nothing.
     ("failed", "time_limit", "failed; the previous version runs"),
     ("interrupted", "interrupted", "interrupted"),
@@ -790,7 +795,7 @@ def test_every_placeholder_survives_translation():
             assert sorted(PLACEHOLDER.findall(entries[msgid])) == wanted, (language, msgid)
 
 
-def test_the_polish_screen_uses_the_specs_words():
+def test_the_polish_screen_uses_the_agreed_words():
     from test_locale import LOCALE, catalogue
 
     entries = catalogue(LOCALE / "pl" / "LC_MESSAGES" / "MQTTBridge.po")
