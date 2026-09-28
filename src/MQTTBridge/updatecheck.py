@@ -57,8 +57,8 @@ the trust file's own lock - a `flock` on `/etc/enigma2/mqttbridge-index.lock`, w
 most `LOCK_WAIT` - then read the trust file again, judge the candidate index against that fresh
 read, write the result whole, and let go. Never the transaction lock: the companion
 integration's installer shares that one and holds it for a whole install, and the trust file
-has nothing to do with most installs. Never across a fetch. Today this module is the only
-writer; the self-update's helper will be the second, and follows the same rule. A lock held
+has nothing to do with most installs. Never across a fetch. The rule is written once, in
+`trustfile.py`, which the update helper (`updatehelper.py`) uses too. A lock held
 past the wait is reported as `trust_busy` and nothing is written.
 
 **Threads.** Verifying a signature costs about 40 ms on an armv7 receiver, and every fetch can take
@@ -69,24 +69,30 @@ touches what is published. A job asked for while another runs waits for it; of r
 only the newest waits.
 """
 
-import base64
-import binascii
-import contextlib
-import errno
-import fcntl
-import http.client
 import json
 import os
-import socket
 import threading
 import time
-from urllib.parse import urlsplit
 
-from . import buildid, trust, uninstall
+from . import buildid, trust, trustfile, uninstall
 from .enigma2 import Ticker
 from .log import get_logger
+from .netfetch import Unreachable, https_get
 from .origin import MQTT, granted
 from .publisher import Refusal
+from .trustfile import (
+    ACCEPT,
+    ERROR_BAD_KEYS,
+    ERROR_BAD_MEMORY,
+    MAX_STATE_BYTES,
+    SOURCE_ORIGIN,
+    SOURCE_RELAY,
+    TAKEN_BACK,
+    UNCHANGED,
+    held_part,
+    read_state,
+    write_state,
+)
 from .version import CONTRACT
 
 LOG = get_logger("updatecheck")
@@ -114,123 +120,31 @@ MAX_AVAILABLE = 20
 # A 64 KiB index and a 1 KiB signature file in base64, in their JSON object, with room to spare -
 # and a hard stop before anything is parsed.
 MAX_RELAY_PAYLOAD_BYTES = 88 * 1024
-MAX_STATE_BYTES = 512 * 1024
 # How long a writer of the trust file waits for another one to finish, on the worker thread. A
 # holder does one read, one judgement (40 ms on an armv7 receiver) and one write: anything much
 # longer is a writer that is stuck, and waiting it out would stall every later job.
 LOCK_WAIT = 2.0
-LOCK_POLL = 0.05
 
 REACHABLE = "reachable"
 UNREACHABLE = "unreachable"
 UNKNOWN = "unknown"
-SOURCE_ORIGIN = "origin"
-SOURCE_RELAY = "relay"
 
 # `check_error`: these, or one of `trust.REASONS` - the codes the companion integration uses.
 ERROR_UNREACHABLE = "unreachable"
 ERROR_REDIRECT = "redirect"
 ERROR_HTTP = "http_error"
-ERROR_BAD_MEMORY = "bad_memory"
-ERROR_BAD_KEYS = "bad_keys"
 ERROR_INTERNAL = "internal_error"
 # Another writer held the trust file's lock for longer than `LOCK_WAIT`: nothing was written.
-TRUST_BUSY = "trust_busy"
 
 # What a relayed payload can come to besides the rule's own verdicts.
 MALFORMED_RELAY = "malformed_relay"
 TOO_LARGE = "too_large"
-ACCEPT = "accept"
-TAKEN_BACK = "taken_back"
 # The exact bytes already held, delivered again: nothing new, and not a failure.
-UNCHANGED = "unchanged"
-WRITE_FAILED = "write_failed"
 
 NOT_PERMITTED = "checking for updates is switched off in the plugin's settings"
 
 
-class Unreachable(Exception):
-    """The origin could not be asked: no route, no answer in time, or TLS that did not verify."""
-
-
 # ------------------------------------------------------------------------ fetching --
-
-
-def verified_context():
-    """A TLS context for one request that verifies the certificate and the host name."""
-    import ssl
-
-    context = ssl.create_default_context()
-    if context.verify_mode != ssl.CERT_REQUIRED or not context.check_hostname:
-        raise Unreachable("this Python's default TLS context does not verify certificates")
-    return context
-
-
-def https_get(url, cap, timeout, connection_factory=None):
-    """`(status, body)` of one GET of `url`, the body at most `cap + 1` bytes; or Unreachable.
-
-    Never follows a redirect: a 3xx is returned as the status it is. `timeout` bounds the whole
-    exchange - connection, request, response headers and body. A socket timeout alone bounds each
-    read, and a peer that sends one header line a second never trips it; so a watchdog shuts the
-    socket down at the deadline, whatever the exchange is waiting for, and the blocked read ends;
-    and a connection that took longer than the deadline to make is dropped before the request is
-    sent. Resolving the host name is not bounded by it: the resolver cannot be interrupted.
-    """
-    parts = urlsplit(url)
-    if parts.scheme != "https" or not parts.hostname:
-        raise ValueError("only an https address is fetched, not " + url)
-    factory = connection_factory or http.client.HTTPSConnection
-    expired = threading.Event()
-    held = {}
-
-    def expire():
-        expired.set()
-        sock = getattr(held.get("connection"), "sock", None)
-        if sock is not None:
-            try:
-                # The plain socket's shutdown, under a TLS socket too: it wakes the blocked read
-                # without the TLS layer being torn down from a second thread.
-                socket.socket.shutdown(sock, socket.SHUT_RDWR)
-            except (OSError, TypeError, ValueError):
-                pass
-
-    watchdog = threading.Timer(timeout, expire)
-    watchdog.daemon = True
-    try:
-        connection = held["connection"] = factory(
-            parts.hostname, parts.port or 443, timeout=timeout, context=verified_context()
-        )
-        watchdog.start()
-        try:
-            # Connected here, not inside `request`: a watchdog that fires while the connection is
-            # still being made has no socket to shut down, so the deadline is asked again before
-            # a byte is sent. Resolving the name is the one part nothing here can interrupt.
-            connection.connect()
-            if expired.is_set():
-                raise Unreachable(f"no connection within {timeout} s")
-            connection.request("GET", parts.path or "/", headers={
-                "User-Agent": "enigma2-mqtt-bridge",
-                "Accept-Encoding": "identity",
-            })
-            response = connection.getresponse()
-            body = b""
-            while len(body) <= cap:
-                chunk = response.read(min(8192, cap + 1 - len(body)))
-                if not chunk:
-                    break
-                body += chunk
-            if expired.is_set():
-                raise Unreachable(f"no whole answer within {timeout} s")
-            return response.status, body
-        finally:
-            watchdog.cancel()
-            connection.close()
-    except Unreachable:
-        raise
-    except (OSError, ValueError, http.client.HTTPException) as error:
-        if expired.is_set():
-            raise Unreachable(f"no whole answer within {timeout} s") from error
-        raise Unreachable(str(error)) from error
 
 
 def in_thread(job):
@@ -326,95 +240,6 @@ def offer(index, installed=None, integration_mode=False, contract=CONTRACT):
 # -------------------------------------------------------------------- stored state --
 
 
-def read_state(path):
-    """The stored state, or None when there is none; `trust.BadMemory` when it cannot be read."""
-    try:
-        with open(path, "rb") as handle:
-            raw = handle.read(MAX_STATE_BYTES + 1)
-    except FileNotFoundError:
-        return None
-    except OSError as error:
-        raise trust.BadMemory(f"the file cannot be read: {error}") from error
-    if len(raw) > MAX_STATE_BYTES:
-        raise trust.BadMemory(f"the file is over {MAX_STATE_BYTES} bytes")
-    try:
-        state = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError, RecursionError) as error:
-        raise trust.BadMemory(f"the file is not JSON: {error}") from error
-    # `trust.check_state` reads None as "never stored anything". A file that says `null` is not
-    # a file that is missing: read as nothing remembered, it would put this reader back at first
-    # sight, which is the one thing a damaged file must never do.
-    if not isinstance(state, dict):
-        raise trust.BadMemory("the file does not hold an object")
-    return trust.check_state(state)
-
-
-def write_state(path, state):
-    """Write `state` whole, 0600, renamed into place. False, logged, when it could not be.
-
-    The old file stays as it was until the new one is complete on disk: a write that fails -
-    a full flash - leaves either the old state or the new one, never half of either.
-    """
-    temporary = path + ".tmp"
-    try:
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(state, handle, sort_keys=True, separators=(",", ":"))
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, path)
-    except OSError:
-        LOG.exception("could not write %s", path)
-        try:
-            os.remove(temporary)
-        except OSError:
-            pass
-        return False
-    return True
-
-
-class TrustBusy(Exception):
-    """Another writer holds the trust file's lock and did not let go within the wait."""
-
-
-def trust_lock_path(path):
-    """The trust file's own lock: `mqttbridge-index.lock` beside `mqttbridge-index.json`."""
-    base, _extension = os.path.splitext(path)
-    return base + ".lock"
-
-
-@contextlib.contextmanager
-def trust_lock(path, wait):
-    """Hold the trust file's lock - a `flock` on its lock file - or raise TrustBusy after `wait`.
-
-    Its own lock, and a short one: never the transaction lock, which the companion
-    integration's installer shares and holds for a whole install, and never held across a
-    fetch. `flock` rather than `lockf`: it excludes another thread with its own descriptor as
-    well as another process, and it dies with its holder, so a writer killed while holding it
-    blocks nobody.
-    """
-    descriptor = os.open(trust_lock_path(path), os.O_RDWR | os.O_CREAT, 0o600)
-    try:
-        deadline = time.monotonic() + wait
-        while True:
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError as error:
-                if error.errno not in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
-                    raise
-                if time.monotonic() >= deadline:
-                    raise TrustBusy(f"the trust file stayed locked for {wait} s") from error
-                time.sleep(LOCK_POLL)
-        try:
-            yield
-        finally:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-    finally:
-        os.close(descriptor)
-
-
 def read_checks(path):
     """The check file's content - bookkeeping, never trust - or {} when it cannot be used."""
     try:
@@ -427,33 +252,6 @@ def read_checks(path):
         return {}
     return data if isinstance(data, dict) else {}
 
-
-def _held_part(state, lineage):
-    held = state.get("held") if isinstance(state, dict) else None
-    part = held.get(lineage) if isinstance(held, dict) else None
-    return part if isinstance(part, dict) else {}
-
-
-def _with_held(state, lineage, part):
-    updated = dict(state if state is not None else trust.empty_state())
-    held = updated.get("held")
-    held = dict(held) if isinstance(held, dict) else {}
-    held[lineage] = part
-    updated["held"] = held
-    return updated
-
-
-def _b64(raw):
-    return base64.b64encode(raw).decode("ascii")
-
-
-def _unb64(value):
-    if not isinstance(value, str):
-        return None
-    try:
-        return base64.b64decode(value, validate=True)
-    except (binascii.Error, ValueError):
-        return None
 
 
 def _whole_or_none(value):
@@ -694,17 +492,7 @@ class UpdateChecker:
 
     def _authentic(self, part):
         """`(index, source)` of a held index that this build's keys still sign, else None."""
-        index_raw, signature_raw = _unb64(part.get("index")), _unb64(part.get("sig"))
-        if index_raw is None or signature_raw is None or self.keys is None:
-            return None
-        try:
-            index, _key = trust.authenticate(index_raw, signature_raw, self.keys)
-        except trust.Refused as refused:
-            LOG.info("the kept release index no longer verifies (%s); not showing it",
-                     refused.reason)
-            return None
-        source = part.get("source")
-        return index, source if source in (SOURCE_ORIGIN, SOURCE_RELAY) else SOURCE_ORIGIN
+        return trustfile.authentic(part, self.keys)
 
     def _load(self):
         result = {"kind": "load", "installed": installed_packages(self.opkg_root), "held": None}
@@ -724,7 +512,7 @@ class UpdateChecker:
                         "%s", self.path, error)
             result["check_error"] = ERROR_BAD_MEMORY
             return result
-        result["held"] = self._authentic(_held_part(state, self.lineage))
+        result["held"] = self._authentic(held_part(state, self.lineage))
         if state is None and result["check_error"] is None and result["checked"] is not None:
             # A check that succeeded always left a trust file behind; with none there, it was
             # removed on purpose - the documented reset - and the check that found the index is
@@ -736,83 +524,13 @@ class UpdateChecker:
 
     def _judge(self, index_raw, signature_raw, source):
         """`(verdict, held or None for no change, state to write or None)` for one pair."""
-        if self.keys is None:
-            return ERROR_BAD_KEYS, None, None
-        try:
-            state = read_state(self.path)
-            memory = trust.memory_for(state, self.keys, acceptance=self.acceptance)
-        except trust.BadMemory as error:
-            LOG.warning("%s cannot be read, so no release index is judged until it is removed: "
-                        "%s", self.path, error)
-            return ERROR_BAD_MEMORY, None, None
-        part = _held_part(state, self.lineage)
-        try:
-            accepted = trust.accept(index_raw, signature_raw, self.keys, memory)
-        except trust.Refused as refused:
-            if refused.reason == "replay":
-                if (_unb64(part.get("index")), _unb64(part.get("sig"))) == (index_raw,
-                                                                            signature_raw):
-                    return UNCHANGED, None, state
-                taken = self._take_back(index_raw, signature_raw, part, memory, source)
-                if taken is not None:
-                    return TAKEN_BACK, taken[0], _with_held(state, self.lineage, taken[1])
-            LOG.warning("a release index from the %s was refused (%s): %s", source,
-                        refused.reason, refused.detail)
-            return refused.reason, None, state
-        stored = trust.store(state, self.keys, accepted.memory, acceptance=self.acceptance)
-        part = dict(part, index=_b64(index_raw), sig=_b64(signature_raw), source=source)
-        return ACCEPT, (accepted.index, source), _with_held(stored, self.lineage, part)
+        return trustfile.judge(self.path, self.keys, self.acceptance, index_raw, signature_raw,
+                               source)
 
     def _keep(self, index_raw, signature_raw, source):
-        """Judge a pair and keep it when it is accepted: `(verdict, held or None)`.
-
-        The first judgement reads the trust file without the lock; most pairs end there - a
-        replay on every reconnect, a refusal. An accepted one is judged again under the trust
-        file's lock, against the file as it is now, and written before the lock is let go: a
-        second writer (the self-update's helper) that accepted a newer index in between is
-        never rolled back, because the write is always of a judgement made on a fresh read.
-        """
-        verdict, held, _state = self._judge(index_raw, signature_raw, source)
-        if verdict not in (ACCEPT, TAKEN_BACK):
-            return verdict, None
-        try:
-            with trust_lock(self.path, LOCK_WAIT):
-                verdict, held, state = self._judge(index_raw, signature_raw, source)
-                if verdict not in (ACCEPT, TAKEN_BACK):
-                    return verdict, None
-                if not write_state(self.path, state):
-                    return WRITE_FAILED, None
-        except TrustBusy as error:
-            LOG.warning("a release index from the %s was not kept: %s", source, error)
-            return TRUST_BUSY, None
-        except OSError:
-            LOG.exception("could not lock %s", trust_lock_path(self.path))
-            return WRITE_FAILED, None
-        LOG.info("kept release index serial %d from the %s (%s)", held[0]["serial"], source,
-                 verdict)
-        return verdict, held
-
-    def _take_back(self, index_raw, signature_raw, part, memory, source):
-        """Hold again the very index the memory says was accepted, when none is held.
-
-        The file's index can be lost while its memory - rightly - still names the serial; the
-        same genuine index then comes back and the rule calls it a replay. Only with nothing
-        authentic held, and at a serial equal to the one remembered for its key. (A silenced key,
-        or one below the rank floor, never gets here: the rule refuses it as `rank` before it
-        looks at the serial.)
-        """
-        if self._authentic(part) is not None:
-            return None
-        try:
-            index, key = trust.authenticate(index_raw, signature_raw, self.keys)
-        except trust.Refused:
-            return None
-        if memory["serials"].get(key.key_id) != index["serial"]:
-            return None
-        LOG.info("holding release index serial %d again: accepted before, no longer held",
-                 index["serial"])
-        return (index, source), dict(part, index=_b64(index_raw), sig=_b64(signature_raw),
-                                     source=source)
+        """Judge a pair and keep it under the trust file's lock (`trustfile.keep`)."""
+        return trustfile.keep(self.path, self.keys, self.acceptance, index_raw, signature_raw,
+                              source, LOCK_WAIT)
 
     def _check(self, stamp):
         result = {"kind": "check", "checked": stamp, "check_error": None}
@@ -881,8 +599,8 @@ class UpdateChecker:
             body = json.loads(payload.decode("utf-8"))
         except (UnicodeDecodeError, ValueError, RecursionError):
             body = None
-        index_raw = _unb64(body.get("index")) if isinstance(body, dict) else None
-        signature_raw = _unb64(body.get("sig")) if isinstance(body, dict) else None
+        index_raw = trustfile.unb64(body.get("index")) if isinstance(body, dict) else None
+        signature_raw = trustfile.unb64(body.get("sig")) if isinstance(body, dict) else None
         if index_raw is None or signature_raw is None:
             LOG.warning("dropping a relayed release index that is not "
                         "{\"index\": base64, \"sig\": base64}")

@@ -15,16 +15,22 @@ hardware before the release that carries it, and is taken out again if that fail
 
 | Part | Integration's SSH installer | Plugin's self-update |
 |---|---|---|
-| The lock, its owner record and the stale rule (§2) | **released 0.3.1**; the owner record's `id` (§2.2): integration main (unreleased, 0.4.0) | planned, ADR-0015 |
-| The heartbeat (§2.4) | not used | planned |
-| The snapshot, schema 2 (§3) | **released 0.3.1** | planned, same layout |
+| The lock, its owner record and the stale rule (§2) | **released 0.3.1**; the owner record's `id` (§2.2): integration main (unreleased, 0.4.0) | helper written (`updatehelper.py`) |
+| The heartbeat (§2.4) | not used | helper written |
+| The snapshot, schema 2 (§3) | **released 0.3.1** | helper written, same layout |
 | Recovering an abandoned transaction by its id (§3.3) | integration main (unreleased, 0.4.0) | planned |
-| Restoring while the interface runs (§3.4) | integration main (unreleased, 0.4.0) | planned |
-| The marker (§4) | not used | planned |
-| The restart rule (§5) | integration main (unreleased, 0.4.0); **released 0.3.1 stops and starts the interface with `init 4` / `init 3` on every path** | planned |
-| R2 as one detached script (§5.2) | integration main (unreleased, 0.4.0) | planned |
-| Proof that the new plugin started (§6) | **released 0.3.1** (live `online`, `info` with the new version, a new enigma2 pid); unchanged on integration main | planned |
-| Tests against the other program's released code (§2.5) | - | planned |
+| Restoring while the interface runs (§3.4) | integration main (unreleased, 0.4.0) | helper written |
+| The marker (§4) | not used | helper writes it; the plugin does not read it yet |
+| The restart rule (§5) | integration main (unreleased, 0.4.0); **released 0.3.1 stops and starts the interface with `init 4` / `init 3` on every path** | helper written for R2 and R3; R1's clean quit is the plugin's, planned |
+| R2 as one unit (§5.2) | integration main (unreleased, 0.4.0): one detached script | helper written: inside the helper, which is itself detached |
+| Proof that the new plugin started (§6) | **released 0.3.1** (live `online`, `info` with the new version, a new enigma2 pid); unchanged on integration main | helper written |
+| Tests against the other program's released code (§2.5) | - | written |
+| The transaction directory (§7) | - | helper written; the plugin's side planned |
+
+"Helper written" means: the code is in the plugin's package and tested against a fake receiver,
+but **no released or merged plugin starts it yet** - the command that does, and the plugin's
+side of the conversation in §7, come in a later change - and it has run on a receiver only in the
+hardware spike of the whole self-update, which that later change records.
 
 Paths are the ones on the receiver. `<id>` is twelve lowercase hexadecimal digits
 (`secrets.token_hex(6)`), one per transaction; it names the snapshot, the self-update's transaction
@@ -40,11 +46,13 @@ directory, the marker's `id`, the lock owner's `id` and `update.transaction.id` 
 | `/home/root/mqttbridge-backups/` | both | The directory everything below lives in. Anything else a person puts here is theirs: neither program deletes a name it did not make |
 | `/home/root/mqttbridge-backups/.ha-installer.lock/` | both | **The** lock, a directory (0700). The name is historical - the installer came first - and it is kept, because every released installer looks for exactly this name |
 | `/home/root/mqttbridge-backups/ha-installer-<id>/` | the installer | Its snapshot, schema 2 (0700) |
-| `/home/root/mqttbridge-backups/self-update-<id>/` | the self-update (planned) | Its snapshot, schema 2 (0700) |
-| `/home/root/mqttbridge-backups/update-<id>/` | the self-update (planned) | The transaction directory (0700): `request.json` (0600), the copy of the helper that runs, `status.json`. Removed when the transaction commits |
-| `/etc/enigma2/mqttbridge-update.json` | the self-update (planned) | The marker (0600), §4 |
-| `/etc/enigma2/mqttbridge-index.json` | the plugin (the update check, `updatecheck.py`); the self-update's helper (planned) | What the receiver has accepted from the signed release index (0600), written whole and renamed into place: the trust memory in the shape [RELEASE-INDEX.md](RELEASE-INDEX.md) gives it, and under `held` the last accepted index and its signature file - see ADR-0015. Written only when what the receiver trusts changes (an index accepted or taken back), never by a check that learned nothing. 🔴 **Every writer** - the plugin today, the self-update's helper once it exists - follows one rule: take `mqttbridge-index.lock` (below), read this file again, judge the candidate index against that fresh read, write the result whole (temporary file, fsync, rename), let go. A judgement made on an earlier read is never written. **Not the lock of §2**: that one is shared with the integration's installer and held for a whole transaction, so a relayed index could not be kept during any install, and a plugin that died holding it would block every installer for thirty minutes. **Kept on purpose** by `cmd/uninstall` and by a downgrade to 0.2.0 or 0.3.x, which never read it; a reflash or a factory reset starts it again |
-| `/etc/enigma2/mqttbridge-index.lock` | the plugin; the self-update's helper (planned) | The trust file's own lock (0600, empty): an exclusive `flock`, taken without blocking and retried for at most two seconds, held only around read - judge - write of the trust file and never across a fetch. `flock` dies with its holder, so a writer killed while holding it blocks nobody. A writer that cannot get it in time writes nothing and says so (`update` `check_error` `trust_busy`). Left in place; its content means nothing |
+| `/home/root/mqttbridge-backups/self-update-<id>/` | the self-update's helper | Its snapshot, schema 2 (0700) |
+| `/home/root/mqttbridge-backups/update-<id>/` | the self-update (the helper is written; the plugin does not start it yet) | The transaction directory (0700), §7: `request.json` (0600), the copy of the helper that runs and the four modules it imports, `status.json`, the downloaded package, and the plugin's words `restart.json`, `withdraw` and `started.json`. Removed when the transaction commits; after any other end it is kept, and the helper keeps its own and the newest other `update-<id>` |
+| `/etc/enigma2/mqttbridge-update.json` | the self-update (written by the helper; not yet read) | The marker (0600), §4 |
+| `/home/root/mqttbridge-backups/drill-r2` | a person, for the hardware acceptance drill | An empty regular file (`touch`). Honoured only by a self-update started by an **acceptance** build, which removes it and goes from installed straight into R2 (§7); every other build ignores it and leaves it where it is, and so does an acceptance build for anything else of that name - a file with something in it, a directory, a link |
+| `/etc/enigma2/mqttbridge-update-last.json` | the self-update's helper | The last transaction's end (0600): `id`, `started_by`, `target`, `from`, `started`, `finished`, `result`, `reason`, `error`, and `boot_id` and `uptime` (seconds since boot) at the end. Written at every end by the helper that held the lock, so that the ten-minute limit between transactions and `update.transaction` outlive the transaction directory. Nothing in it decides anything else. `started` and `finished` are the wall clock, which on a receiver without a battery-backed clock starts in 1970 and jumps when NTP answers, so **the ten-minute limit is measured on the boot, never on the wall clock**: with the same `boot_id` as now, the time since the end is the uptime now minus `uptime`; with another `boot_id`, the transaction ended before this boot, so at least the uptime now has passed; with no `boot_id` (a receiver that does not report one), the limit falls back to `finished` |
+| `/etc/enigma2/mqttbridge-index.json` | the plugin (the update check, `updatecheck.py`); the self-update's helper (`updatehelper.py`), when it fetches the index itself - both through `trustfile.keep` | What the receiver has accepted from the signed release index (0600), written whole and renamed into place: the trust memory in the shape [RELEASE-INDEX.md](RELEASE-INDEX.md) gives it, and under `held` the last accepted index and its signature file - see ADR-0015. Written only when what the receiver trusts changes (an index accepted or taken back), never by a check that learned nothing. 🔴 **Every writer** - the plugin today, the self-update's helper once it exists - follows one rule: take `mqttbridge-index.lock` (below), read this file again, judge the candidate index against that fresh read, write the result whole (temporary file, fsync, rename), let go. A judgement made on an earlier read is never written. **Not the lock of §2**: that one is shared with the integration's installer and held for a whole transaction, so a relayed index could not be kept during any install, and a plugin that died holding it would block every installer for thirty minutes. **Kept on purpose** by `cmd/uninstall` and by a downgrade to 0.2.0 or 0.3.x, which never read it; a reflash or a factory reset starts it again |
+| `/etc/enigma2/mqttbridge-index.lock` | the plugin; the self-update's helper | The trust file's own lock (0600, empty - a lock file found with another mode is made 0600 by whoever opens it next): an exclusive `flock`, taken without blocking and retried for at most two seconds, held only around read - judge - write of the trust file and never across a fetch. `flock` dies with its holder, so a writer killed while holding it blocks nobody. A writer that cannot get it in time writes nothing and says so (`update` `check_error` `trust_busy`). Left in place; its content means nothing |
 | `/etc/enigma2/mqttbridge-check.json` | the plugin (the update check) | The check's bookkeeping (0600): per lineage, when it last asked, what went wrong and whether the origin answered. Written after every check; nothing in it decides what is trusted, and a damaged one is started again. Kept by `cmd/uninstall` like the file above |
 | `/etc/enigma2/mqttbridge-state.json` | the plugin | The state file ([TOPICS.md §4](TOPICS.md#the-state-file)). 🔴 Its key `retained_topics` is read by name by every loader since 0.1.0 and is **never renamed**: a downgrade relies on the older plugin finding it |
 | `/home/root/mqttbridge.log`, else `/tmp/mqttbridge.log` | the plugin | The plugin's log. The proof of §6 reads which of them the new enigma2 process holds open |
@@ -122,7 +130,7 @@ as `started_by: ssh`.
 Every implementation uses this rule, and a later one may only lengthen the threshold: a released
 installer in the field keeps judging every lock with 30 minutes.
 
-### 2.4 The heartbeat (planned)
+### 2.4 The heartbeat (helper written)
 
 The self-update can hold the lock longer than an SSH install does: a download, the package
 manager, a question on the television, the restart, the proof, and perhaps a rollback. So its
@@ -135,14 +143,42 @@ helper keeps the lock visibly alive:
 - **It writes only a lock it still holds.** Before each rewrite the helper reads `owner.json`; if
   the `id` there is not its own, the lock was taken from it, it writes nothing, and the transaction
   stops touching the receiver and ends with `result: interrupted`.
-- **It is the second line, not the first.** The helper bounds itself: the forward path aborts at
-  **15 minutes** and then rolls back, and the rollback aborts at **5 minutes**, so the lock is held
-  at most **20 minutes** - under the released 30-minute rule even with no heartbeat at all. The
-  expected worst case is shorter: forward 617 s (index and download 70, verify 1, release digest
-  check 10, free space 1, snapshot 30, opkg 120, manifest 10, downgrade retraction 15, the
+- **It is the second line, not the first.** The helper bounds itself, so that the lock is held
+  at most **1353 s (22.6 minutes)** - under the released 30-minute rule even with no heartbeat at
+  all:
+  - **The forward path ends at its 15-minute deadline**, measured from the helper's start. The
+    wait for the restart ends there, and so does the proof window: a restart that lands late gets
+    what is left of the 15 minutes, never 120 s past them (§6). A withdraw or an undo that begins
+    on the deadline adds at most **45 s** - one OpenWebif call (5 s) and the restore's wait for
+    opkg's lock (40 s, §2.6) - so R2, when it follows, begins at most **945 s** after the start.
+  - **R2 takes at most 409 s (6.8 minutes)**, with every wait at its worst: each `init` call
+    running into its 30 s timeout, each OpenWebif call into its 5 s, the restore waiting the whole
+    40 s for opkg's lock, the interface given its second chance (§5.2), and R3's zap back and
+    standby never taking.
+  - These are measured, not added up: `tests/test_updatehelper.py` runs the whole transaction on
+    a clock that moves only when the helper waits, entering R2 every way the forward path can
+    reach it at its deadline (a restart just before it; a withdraw on it; a withdraw after an
+    `opkg` that ran up to it; an undo after one that ran past it), with the interface stopping
+    at once, late, not at all or quitting after `init 3`, and the new interface appearing early,
+    late or never - and fails when any of the three numbers is exceeded. Not included: the time
+    the restores take to copy the plugin's files, which was not measured on a receiver.
+
+  The expected worst case is shorter: forward 617 s (index and download 70, verify 1, release
+  digest check 10, free space 1, snapshot 30, opkg 120, manifest 10, downgrade retraction 15, the
   television's question 60, waiting for the new interface 180, proof 120), rollback 246 s (record 5,
   stop 30, restore 60, settings write 1, start and wait 120, verify and zap 20, standby 10) - **863 s
-  (14.4 min)** in all. The companion integration waits 21 minutes for a transaction it follows.
+  (14.4 min)** in all. Even entered at the latest point, 945 s after the start, that rollback
+  ends by about 1191 s (19.9 minutes).
+
+  **What a follower needs.** The companion integration's 21 minutes is enough for every expected
+  end, but not for an R2 whose waits run to their bounds after a late restart, which can end at
+  22.6 minutes. So a follower that judges a transaction by its `started` stamp - the integration
+  following one it asked for, or deciding when a receiver-started transaction is stale - keeps
+  following for at least **1353 s plus the clock skew it allows** (60 s: 1413 s, 23.6 minutes),
+  and should use **25 minutes**, which leaves room for the copying the measurement leaves out.
+  Until then a transaction that has not `finished` may still be running; one still not
+  `finished` after that has lost its helper (a `SIGKILL`, or power), and its lock goes stale 30
+  minutes after the last heartbeat (§2.3).
 
 ### 2.5 The two implementations meeting
 
@@ -153,11 +189,12 @@ helper keeps the lock visibly alive:
 | an SSH install (no heartbeat) | a self-update | busy, unless stale by the same rule |
 | anybody, before a reboot | anybody | reclaimed at once (§2.3 rule 3) |
 
-**Planned, not yet written:** these are to be tested against the **released** code, not a
-description of it. The self-update's pull request adds to the plugin's tests a copy of the
-integration's released `installer_helper.py`, with its MIT licence header, and asserts that a lock
-with a fresh heartbeat is not stale for it at 31 minutes - also while a fake `opkg` blocks the
-helper - and that a lock with no heartbeat is. No such test or copy exists yet.
+These are tested against the **released** code, not a description of it:
+`tests/released_installer_0_3_1.py` is the stale rule of the integration's `installer_helper.py`
+at its tag `v0.3.1`, copied verbatim with its MIT licence, and `tests/test_updatehelper.py`
+asserts that a lock whose helper has beaten is not stale for it 31 minutes after the claim, and
+that the same lock with no beat is - also while a fake `opkg` blocks the helper, with the
+heartbeat running on its own thread.
 
 ### 2.6 opkg's own lock (released)
 
@@ -188,7 +225,13 @@ never be mistaken for a rollback point.
 | `webif-cache/` | Its compiled bytecode, in either of the two places images put it |
 
 A restore replaces the package's status stanza, its info files, the plugin directory, the hook and
-its bytecode; the settings lines and the provisioning file only when asked to.
+its bytecode; the settings lines and the provisioning file only when asked to. The order differs
+between the two programs, and either is safe to repeat (§3.3): the integration's installer writes
+opkg's records first; the self-update's helper puts **the code back first** - the plugin
+directory, the hook and its bytecode, which decide what runs at the next start - and opkg's records
+and the settings lines after it, each tried whatever became of the other. A full flash or an I/O
+error on opkg's status file then leaves the old code in place and only the records naming the new
+version, which the helper reports as such (§7), instead of stopping before the tree went back.
 
 ### 3.2 Pruning (released)
 
@@ -207,7 +250,7 @@ safe** - a restore replaces the package's status stanza, its info files, the plu
 the hook wholesale - so the recovery restores the interrupted transaction's snapshot again whenever
 that transaction had begun to restore, or cannot say:
 
-- **the self-update** (planned) says where it was: its marker and its `status.json` carry the
+- **the self-update** says where it was: its marker and its `status.json` carry the
   phase (§4);
 - **the SSH installer** writes no phase record, so an interrupted installer transaction is treated
   as "cannot say", and its snapshot is restored again. **Which** snapshot is not decided by
@@ -263,8 +306,10 @@ there, R2's included, swaps the plugin directory in as below. Then:
   a plugin tree, the restore compares the two directories' filesystems before it takes opkg's lock
   or changes anything, and refuses when they differ. A snapshot without one - the rollback of a
   first install, which takes the live tree away - skips that check: on an image whose plugin
-  directory sits on another filesystem than `/usr/lib/enigma2/python/`, such a restore replaces
-  opkg's records and then fails at the rename that sets the live tree aside.
+  directory sits on another filesystem than `/usr/lib/enigma2/python/`, the installer's restore
+  replaces opkg's records and then fails at the rename that sets the live tree aside (the
+  self-update's helper, which puts the tree back first, would fail there before touching opkg's
+  records).
 - Then the enigma2 pid is read again - on integration main for up to 60 s, and compared with the
   pid read **before the restart was requested**, never with a later reading, so a restart that
   began after the last look is still a restart. If it changed - somebody answered the question - the
@@ -276,18 +321,24 @@ there, R2's included, swaps the plugin directory in as below. Then:
 
 ---
 
-## 4. The marker (planned)
+## 4. The marker (the helper writes it; the plugin does not read it yet)
 
-`/etc/enigma2/mqttbridge-update.json`, 0600, written by the self-update's helper once the new
-package is installed and verified:
+`/etc/enigma2/mqttbridge-update.json`, 0600, written by the self-update's helper **before the
+package manager runs** (phase `installing`), and again at every later phase and at the end. The
+first write is required - a helper that cannot write it runs no package manager and ends
+`failed`, `internal_error`, with nothing changed; the later ones are best effort, because by then
+the files have changed and a full flash must not decide how the transaction ends (the helper
+notes a failed write in its record and carries on):
 
 | Key | Meaning |
 |---|---|
 | `id` | The transaction's `<id>` |
-| `from`, `to` | `{"version", "commit"}` of the plugin before and after |
+| `from`, `to` | `{"version", "commit"}` of the plugin before and after; `to.commit` is the signed index entry's |
 | `boot_id` | This boot's id |
 | `deadline` | Uptime in seconds, 15 minutes after the marker was written |
-| `phase` | The transaction's phase, as in the `update` topic |
+| `phase` | The transaction's phase, as in the `update` topic: `installing`, `restarting`, `proving`, `rolling_back`, `finished` |
+| `started_by`, `started` | Who started the transaction, and when (epoch seconds) |
+| `result`, `reason`, `error`, `finished` | Only with `phase: finished`: the end, its reason code and sentence, and when |
 
 - A plugin that knows the marker reads it **right after its logging is configured**, before the
   provisioning file is imported and before it checks whether it is switched on - so a new plugin
@@ -295,7 +346,18 @@ package is installed and verified:
 - It is **ignored** when its boot id differs and no lock with its `id` exists, or when its deadline
   has passed.
 - After a power loss, the plugin that starts reports `installed` when it is `to`, `rolled_back`
-  when it is `from`, `interrupted` otherwise - and removes the marker.
+  when it is `from`, `interrupted` otherwise - and removes the marker. A marker still at
+  `installing` is `interrupted` whatever version runs: the package manager may have stopped
+  part-way, so the files on disk can be a mix of both versions, which no version check can see.
+- **A half-installed tree** - a `SIGKILL`, an out-of-memory kill or a power loss while `opkg`
+  unpacks - is the residual the marker cannot repair. When the plugin still starts from it, the
+  marker says `interrupted`. When it cannot start the plugin at all, nothing on the receiver
+  reports anything, and the recovery is the companion integration's **Force plugin reinstall
+  (SSH)**, which needs nothing from the plugin - SSH and the package bundled with the integration
+  (planned; the integration's ADR-0008, section 8). It needs the shared lock like any install:
+  the self-update's lock goes stale 30 minutes after its last heartbeat, or at once after the
+  reboot that a power loss is. The snapshot `self-update-<id>` is kept for a person to restore
+  from, and pruned like any other.
 - 0.2.0 and 0.3.x never read it; the next plugin that knows it discards a stale one by these rules.
 
 ---
@@ -340,7 +402,15 @@ answer costs a zap, not a lost channel:
 - **A restart is judged by the enigma2 pid changing**, never by the exit status of the call that
   asked for it: the quit can reset the HTTP connection that asked. On integration main a new pid
   means one that was not running before the request; the old pid gone with none new at the 60 s
-  bound also counts as a restart - a failed one, which the proof then finds.
+  bound also counts as a restart - a failed one, which the proof then finds. The plugin's helper
+  (written) keeps the same rule with its own starting point: the pid in its request - the process
+  that asked - must be gone, and a new enigma2 must run that was never seen beside it; every pid
+  seen while the one that asked was still running (enigma2 forks children that keep its name
+  until they run something else) is never the restart, and is ignored by the proof. The one that
+  asked gone before the package manager ran ends the transaction `interrupted`, with nothing
+  changed; gone once it had started, before the helper handed the restart to the plugin, the
+  process running now may hold either version or a mix, so it goes to R2 and is never proved. A new process after `restarting` - asked for or not - found the
+  whole new tree, so it goes to the proof.
 - **Once the restart has been requested, nothing the installer cannot see ends in R2** (integration
   main). From the power-state request until a new enigma2 pid is seen, no rollback runs, because the
   image may be keeping the interface up on purpose. A connection that drops while the installer
@@ -466,8 +536,47 @@ So:
   started, so a missing one means it never started. A script that never started stopped nothing:
   the lock is released and the uploaded helper removed, but a directory is never removed on the
   strength of its absence.
-- **The plugin's helper** (planned) runs R2 inside itself - detached from enigma2 and from any SSH
-  session - with handlers for `HUP`, `INT`, `TERM` and `PIPE` that do the same as the trap below.
+- **The plugin's helper** (written; not yet started by the plugin) runs R2 inside itself - detached
+  from enigma2 and from any SSH session - and does not start a child for the restore at all: the
+  restore is a function call in the helper's own process. Its handlers for `HUP`, `INT`, `TERM`
+  and `PIPE` only set a flag, which R2 does not read: once `init 4` has been sent, the unit always
+  runs on - wait for the stop, restore, write `lastservice`, `init 3`, R3 - so a signal can neither
+  cut the restore short nor start the interface over a tree that is half put back, or not put
+  back at all. (The script below has to wait for its restore child for the same reason; the helper
+  has no child to wait for, so it has no window between starting one and knowing it.) A failed
+  restore or `lastservice` write is recorded and the unit carries on, and anything else that
+  escapes after `init 4` still meets a `finally` - the helper's form of the script's finishing
+  step below: it first runs the steps the unit had not reached, the restore and the `lastservice`
+  write, each guarded so that none can keep the next from running, records `rollback: cut short`,
+  and then runs `init 3` - so the interface is never started over a tree that could still have
+  been put back. Cut short before it had seen enigma2 stop - in `init 4` or in the wait for the
+  stop - the `finally` does not take "not seen stopped yet" for "running": it looks at `/proc`
+  once more, by process name as the wait does, and with no enigma2 running it puts the settings
+  block back and writes the channel as the unit would have; only an interface still running, or
+  a look that fails, goes without them. A `/proc` that cannot be listed at all (`EMFILE`,
+  `ENOMEM`), or a process whose name cannot be read for any reason but its exit, is such a look:
+  R2 reads it as unknown, never as "no enigma2", so it is never taken for the stop, and a
+  process is counted as the interface starting again only when a look that did answer during the
+  stop says it was not among those still running then, and none of those still runs beside it.
+  `init 3` is safe to repeat - starting a runlevel that is already running changes nothing - so
+  the helper repeats it wherever the start is in doubt. The helper's own way of running a
+  program turns any error in starting it (a `MemoryError` or a failed fork while the child is
+  set up) into exit status 127, as it did for a program it could not find, and a program that
+  does not answer within 30 s into no status at all; either, or any status but 0, from
+  `init 3` sends it once more after a 2 s pause (`record.init_3` lists the statuses). Something
+  that is not an `Exception` escaping the call itself meets the `finally`, which counts `init 3`
+  as sent only once the call has returned and sends it again otherwise. And when enigma2 was
+  seen stopped and nothing started within 120 s of `init 3` - a start that answered 0 and took
+  no effect, or one that never got through - `init 3` is sent once more (`record.start`
+  `again`) and the interface given another 60 s. R3, after the start, is
+  best effort: the rollback it checks is done, so an error in it leaves `channel` and `standby`
+  at `unconfirmed` (the error noted as `internal_error`) and never changes the result - which is
+  `rolled_back` only when an interface was seen starting on the old files (§7: `not_stopped`,
+  `interface_not_started`). Before `init 4` nothing is
+  stopped yet, so the record step is best effort - an error there leaves the record taken before
+  the restart, noted as `internal_error` - and anything that escapes before the stop is sent
+  reaches the helper's last net, which runs R2 again rather than end over the new, unproven code.
+  A `SIGKILL` or power between `init 4` and `init 3` is the residual stated below.
 - **The trap is still there**, set **before** `init 4`: on `HUP INT TERM PIPE` it runs the finishing
   step and exits, and on `EXIT` it runs the finishing step. That step first ignores further `HUP`,
   `INT`, `TERM` and `PIPE`, so a second signal cannot cut the first short. It **waits for a restore
@@ -527,7 +636,148 @@ the receiver" until the restart or the withdrawal.
 | Path | Proof |
 |---|---|
 | SSH installer (released 0.3.1, unchanged on integration main) | Within 120 s of the restart: the plugin's `availability` back `online` as a live message (a retained replay does not count) - preceded by a live `offline` only when the plugin was running before the install; then a live `info` with the expected `info.plugin` and `ha_mode: integration`. After that, a new SSH connection must find an enigma2 pid that was not running before the restart. Planned: `info.build.commit` too, when the target publishes one |
-| Self-update, a target that knows the marker (planned) | The new plugin writes `started`, with its version and build commit, into the transaction's `status.json`; both must match the request |
-| Self-update, a target that does not (0.2.0, 0.3.x - planned) | The **new** enigma2 pid holds the plugin's log file open (`/proc/<pid>/fd`), polled every 2 s through the whole window, because a log rotation closes the file for a moment. Both released plugins configure logging before anything else at start, whether or not they are switched on and whether or not the broker answers. When neither log path was writable before the restart, those plugins hold no file, and the proof is the OpenWebif hook answering anything but 404 after the pid change. The transaction's record says which proof it used. A log line is corroboration only, read from the byte offset recorded at the pid change - never matched by its timestamp, which a broker client can forge into the log |
+| Self-update, a target that knows the marker - one whose signed index entry says `self_update: true` (helper written; the plugin's half planned) | The new plugin writes `started.json` (§7), with its version and build commit, into the transaction directory; both must be the signed entry's. Whether the new process also held the log open is recorded beside it, and decides nothing |
+| Self-update, a target that does not (0.2.0, 0.3.x - helper written) | The **new** enigma2 pid holds the plugin's log file open (`/proc/<pid>/fd`), polled every 2 s through the whole window, because a log rotation closes the file for a moment. Both released plugins configure logging before anything else at start, whether or not they are switched on and whether or not the broker answers. When neither log path was writable before the restart, those plugins hold no file, and the proof is the OpenWebif hook answering anything but 404 after the pid change. The transaction's record says which proof it used. The helper does not read the log's lines at all: a line is something a broker client can put there, and a timestamp it can forge |
 
 No proof within the window: R2 (§5.1), and the restored plugin puts the reason on `last_error`.
+For the self-update the window is 120 s from the restart, and ends earlier when the forward
+path's 15-minute deadline comes first (§2.4): a restart that lands late is given what is left.
+The reason then says which it was: `not_started` after a whole window, `time_limit` when the
+deadline cut it short - the forward path's time ran out, which says nothing against the release.
+Both are `rolled_back`, and both sentences say the previous version is back; only `not_started`
+says the new one did not start. `time_limit` has a second sentence, with `failed`, for a forward
+path that ran out before any restart: nothing it changed stays, and nothing is said to be back.
+
+---
+
+## 7. The self-update's transaction directory (helper written; the plugin's side planned)
+
+The plugin and its helper talk through files in `/home/root/mqttbridge-backups/update-<id>/`
+(0700) and nothing else: the helper outlives the plugin's process, and a file is the one thing both
+sides of a restart can read. Each file has **one writer**, and every file is written whole and
+renamed into place.
+
+| File | Writer | What |
+|---|---|---|
+| `request.json` (0600) | the plugin, before it starts the helper | `id`; `target` (a release number - `latest` is resolved by the plugin); `sha256` or `null`; `relay` `{"url", "expires"}` or `null`; `started_by`; `downgrade` (true only for a lower version chosen at the television or on the page); `from` `{"version", "commit"}`; `enigma2_pid` (the plugin's own process - the one whose end §5's restart rule waits for); `keys`, `acceptance` and `origin` - the index keys, lineage and origin of the build that asks, so the helper judges by what the running build trusts; `contract`; `integration` (`enigma2mqtt/integration/<node>` as read, or `null`) and `integration_mode`. A request the helper cannot read ends as `failed`, reason `bad_request` |
+| `helper.py`, `trust.py`, `ed25519.py`, `trustfile.py`, `netfetch.py` | the plugin | The helper and the four standard-library modules it imports, copied from the plugin directory, so the package manager replacing that directory takes nothing from under it |
+| `status.json` (0600) | the helper that holds the lock | `id`, `started_by`, `target`, `from`, `phase`, `started`, `finished`, `result`, `reason`, `error` - the shape of `update.transaction` plus `reason` - a `heartbeat` stamp, `restart` once the plugin asked, and at the end `record`: which proof passed (`marker`, `log_fd`, `webif_hook` or `none`), `restart` (`clean` or `stopped`), `rollback: cut short` when something no handler expects cut R2 short after `init 4` and its `finally` finished the steps, `init_3` (every status of R2's `init 3` calls when one did not answer 0: 127 for a program that could not be started, `null` for one that did not answer in time), `start: again` when `init 3` was sent once more because nothing started after the stop, `stop` (`seen` when R2 saw no enigma2 running after its `init 4`, else `not seen`), `unstopped` (when the stop was not seen: the pids R2 could not stop, from its last look at `/proc` that answered - a plugin compares its own pid with them), `channel` and `standby` (`unconfirmed` when R3 itself failed, and `channel` `unconfirmed` when the interface was not restarted and R3 did not run), `bouquet`, `restore` (`done`; `partial: <what is missing>` when the code is back and opkg's records or the settings block are not; `failed: <error>` when the code is not back; `interrupted`), `cause` (the reason the end had before `restore_failed`, `restore_incomplete`, `not_stopped` or `interface_not_started` replaced it), `lastservice`, `digest` (`matched`, `unavailable` or `not_checked`), `index_verdict` and `index_kept` when the helper fetched the index, `interface` - `not started` when no enigma2 came back after R2's stop and `init 3`, `not restarted` when the stop was never seen, no start was counted after `init 3` - no enigma2 other than the ones still running appeared, or one appeared while one of them still ran - and something still runs (or `/proc` could not say) - `marker` when a marker write after the package manager failed, and `internal_error` for an error nothing expected. A second helper started for the same `id` that finds the lock held by its own `id` - or cannot read the owner yet - writes nothing here; one refused by another transaction's lock writes its `busy` |
+| `<filename>.ipk` | the helper | The package, after its size and sha256 matched the signed entry |
+| `restart.json` | the plugin | It has asked the image to restart (R1); `{"pid"}`. From here the helper waits 180 s for a new enigma2, or until the forward path's 15-minute deadline when that comes first (§2.4) |
+| `withdraw` | the plugin | The image's question was answered "no" or timed out: put the old files back |
+| `started.json` | the new plugin, at its start | `{"version", "commit", "pid"}` - the tier-1 proof; both must be the target's signed ones |
+
+**The helper's reason codes** (with `result: failed` unless named): `busy`, `bad_request`,
+`unreachable` (no index could be fetched and none is kept), the rule's own `unknown_version`,
+`withdrawn`, `below_floor`, `incompatible`, `depends`, `downgrade`, `checksum`, `relay`, then
+`download`, `bad_package` (size, sha256, the `ar` layout, the control file, anything in the
+payload other than a directory or a regular file - a link, a device, a pipe - a path outside the
+plugin, or the release page's digest), `no_space`, `opkg_busy`, `snapshot_failed`, `opkg_failed`,
+`manifest`, `time_limit`; `question` with `withdrawn_before_restart`; `not_started` with
+`rolled_back`, and `time_limit` with `rolled_back` when the forward deadline cut the proof window
+short (§6); `interrupted` (a signal, the lock taken, or the interface that asked restarting
+before the package manager ran) with `interrupted`, and with `rolled_back` when the interface
+restarted after the package manager started and before `restarting`; `internal_error` (an error nothing expected, the package
+or the first marker not written) with `failed`, or with `rolled_back` when it came after the
+restart and R2 put the old version back; `drill` with `rolled_back`, only for an acceptance
+build (below); `restore_failed` and `restore_incomplete` with `failed`, below; `not_stopped` and
+`interface_not_started` with `failed`, below. After the package
+manager ran, `installed` comes only after the proof, and every other result only once the old
+files are back - with two exceptions that say so. The first is a restore that did not complete,
+which replaces the end's reason (the first one is kept as `record.cause`) and whose sentence names
+the integration's **Force plugin reinstall (SSH)**, the repair for both: `restore_failed`
+(`record.restore` `failed: ...`) when the old code could not be put back - the new files, or a
+mix, are on disk, and opkg's records still name the new version, because the helper puts the code
+back first (§3.1) - and `restore_incomplete` (`record.restore` `partial: ...`) when the old code
+is back but opkg's records or the settings block are not: a full flash, or an I/O error on opkg's
+status file. After either, the plugin is to keep its doors closed (planned), and a withdraw or an
+undo still goes to R2 when the interface restarted meanwhile. The second is `interrupted` because
+the lock was taken, after which the helper touches nothing of the receiver.
+
+**R2's end says what runs, not only what is on disk.** `rolled_back` means the old files are back
+**and** an enigma2 that R2 had not seen before started on them, **with every process R2 could not
+stop gone**. With the files back (`record.restore` `done`) and no such start, R2 ends `failed`, the
+reason it had kept as `record.cause`:
+
+- `not_stopped` (`record.stop` `not seen`, `record.interface` `not restarted`): `init 4` had no
+  effect that R2 could see within its 30 s, and at the end something still runs - or `/proc` could
+  not be read to say it does not. Either `init 3` started nothing, because the runlevel never left,
+  or it started a second enigma2 beside the one R2 could not stop; that second process is never
+  counted as the start while one of those still runs. `record.unstopped` lists the pids R2 could
+  not stop, from its last look that answered. That process - the one started by the forward
+  restart, holding the new code, or a mix - runs on over the previous version's files until the
+  interface restarts. The settings block and the channel were left alone, because a running
+  interface writes its own settings over them when it quits.
+- `interface_not_started` (`record.interface` `not started`): the old files went back and no
+  enigma2 runs at the end - after the stop was seen (`record.stop` `seen`), or after the process
+  R2 could not stop quit by itself (`record.stop` `not seen`, `record.unstopped` set) - although
+  `init 3` was sent once more (`record.start` `again`) and given another 60 s. Nothing runs when
+  the helper ends.
+
+A restore that did not complete keeps its own reason (`restore_failed`, `restore_incomplete`)
+over both. When the stop was not seen but the processes R2 could not stop had all gone and an
+enigma2 other than them appeared after `init 3` - the old process quit late and the start took, at
+once or after the second `init 3` - the end is `rolled_back`, with `record.stop` `not seen` saying
+that the settings block and the channel were not put back.
+
+**What the plugin does with these ends** (the plugin's side, for the branch that follows the
+transaction; not built here). Neither end may be read as "the previous version is running":
+
+- After `not_stopped`, a plugin first compares its own pid - the enigma2 process it runs in,
+  `os.getpid()` - with `record.unstopped`.
+  - **Listed**: it is the process R2 could not stop, and its files changed under it: they are the
+    previous version's now. That is the case the plugin's doors exist for: a fresh session would
+    import the previous version's modules into a process holding the new one's. So it keeps the
+    doors closed - closing them if no poll had, which is the case for a process that only
+    followed the transaction - never reloads, and never reports itself as the previous version.
+    The repair is a restart of the interface, not a reinstall: the files and opkg's records agree
+    on the previous version, so the sentence says to restart the receiver's interface, and a
+    `restart_gui` should stay possible through the closed doors, since it is exactly that repair.
+  - **Not listed** (a process started since - by R2's own `init 3` beside the one it could not
+    stop, after the repair or a reboot - or `unstopped` missing because no look answered - then judged by the version it runs, as for a marker that
+    outlived its helper): it started on the files on disk, which agree with opkg's records, so it
+    reports the end on `last_error` and opens as after any end.
+- After `interface_not_started`, no plugin is running to read it. Whatever starts the interface
+  next starts the previous version, which reads the finished marker at its start, reports the end
+  on `last_error` and opens as after any end: its files and its process agree, so nothing stays
+  closed. Home Assistant says the sentence and does not announce a rollback that runs.
+- So "`record.restore` is `done`" alone does not mean nothing is stuck: a plugin that opens its
+  doors on every such end reopens them over changed files after `not_stopped`. The check is the
+  reason, or `record.interface` `not restarted`, together with the plugin's own pid in
+  `record.unstopped`.
+
+**What it re-judges**: the index is read again - fetched from the origin only when the request
+carries no relay address (an install Home Assistant drives needs no internet on the receiver and
+asks for none), otherwise the index the receiver already holds - and every rule of the index is
+applied again, whatever the plugin already checked. An index fetched from the origin that the
+rule accepts but that cannot be kept (`index_verdict` `write_failed` or `trust_busy`,
+`index_kept: false`) still decides: it is the newest the receiver has seen, and the one kept
+earlier may offer a version it has since withdrawn. `--force-downgrade` is added only when the
+target is lower than the version installed and the television or the page started it - never
+because the request says `downgrade`. The relay address is judged again as well, before anything
+is fetched: `http` or `https`, a host name or IPv4 address without a user part, a port if any,
+exactly the path `/api/enigma2_mqtt/relay/` and a 43-character URL-safe token, nothing after it,
+and an integer `expires` that has not passed by the receiver's clock - otherwise `relay`. The
+relay is **IPv4 only**, on both sides: the integration binds each relay address to the receiver's
+IPv4 address, offers one only to a receiver that reported such an address, and names its own IPv4
+address on the receiver's subnet, else its internal URL - so a host written as an IPv6 literal
+(an internal URL configured that way) is refused as `relay` here, before a download the
+integration's binding would refuse anyway. The
+host is not checked against anything else: a broker client can name any host, and what it serves is
+verified against the signed entry before `opkg` sees it. A receiver whose clock still stands in
+1970 cannot tell an expired address from a fresh one; Home Assistant's own expiry of the token
+bounds that case.
+
+**The acceptance drill's hook.** The hardware acceptance has to prove R2's stop, restore and
+`lastservice` write on a receiver in one restart, without a forward restart and a failed proof
+first. The plan's acceptance section (§ae.12) proves R2 with a deliberately broken build; this
+hook is an **acceptance-only addition** to it, for the same proof without building one, and it
+exists only in the `acceptance` flavour. So a helper whose request says `acceptance: true` - which
+only an `acceptance`-flavour build writes; release and development builds always write `false` -
+looks, once the package is installed and verified and before it hands the restart to the plugin,
+for the empty regular file `/home/root/mqttbridge-backups/drill-r2`. When it is there, the helper
+removes it and goes straight into R2: the result is `rolled_back`, reason `drill`, and the record
+says `drill: r2`. Only an empty regular file counts: a link is never followed, and a directory or
+a file with something in it is ignored and left where it is. Any other build ignores the file and
+leaves it in place, and it changes nothing else: an acceptance build without the file runs the
+transaction as any other.
