@@ -1086,7 +1086,7 @@ connection.
 ```json
 {"id": "a1b2c3d4e5f6", "started_by": "home_assistant", "target": "0.4.1",
  "from": "0.4.0", "phase": "installing", "started": 1790410100,
- "finished": null, "result": null, "error": null}
+ "finished": null, "result": null, "reason": null, "error": null}
 ```
 
 | Field | Type | Meaning |
@@ -1097,6 +1097,7 @@ connection.
 | `phase` | string | `downloading`, `verifying`, `snapshot`, `installing`, `restarting`, `proving`, `rolling_back` or `finished` |
 | `started`, `finished` | int or `null` | Epoch seconds; `finished` only once the phase is `finished` |
 | `result` | string or `null` | Only with `finished`: `installed`, `withdrawn_before_restart`, `rolled_back`, `failed` or `interrupted` |
+| `reason` | string or `null` | Only with a `result` other than `installed`: the end's reason code - the helper's ([TRANSACTION.md](TRANSACTION.md) §7), or `interrupted` / `internal_error` when the plugin judged the end itself. The same code goes on `last_error`, which the next successful command clears; this one stays with the transaction. A consumer says a `result` by its `reason`: `rolled_back` with `not_started` means the new release did not start, with `time_limit` that the update ran out of time and was undone - both put the previous version back. An open enumeration |
 | `error` | string or `null` | Why it did not end `installed`, in English; the same sentence and its `reason` go on `last_error` for `cmd/update` |
 
 The phases come from the update helper, which runs outside enigma2, polled once a second. From
@@ -1282,7 +1283,15 @@ comes back on the channel it was showing. When the image asks on the television 
 a stream, timeshift) and nobody says yes within 60 s, the update is withdrawn -
 `result: withdrawn_before_restart`, `reason` `question` - and the plugin opens a fresh session,
 republishing everything. A new release that does not start within two minutes is rolled back
-(`rolled_back`, `reason` `not_started`), and the channel and standby state are put back.
+(`rolled_back`, `reason` `not_started`), and the channel and standby state are put back. A
+rollback is not always that: when the restart comes so late that the update's 15 minutes run out
+before the new release has had its two minutes, it is rolled back the same way with `reason`
+`time_limit` - the update ran out of time and was undone, which says nothing against the release,
+and `last_error` says the previous version is back. (`time_limit` with `result: failed` is the
+other end of that code: the 15 minutes ran out before the restart, and nothing changed stays.)
+A rollback can also carry `interrupted` or `internal_error`, and on an acceptance build `drill`;
+[TRANSACTION.md](TRANSACTION.md) §7 lists which end each reason comes with, and
+`update.transaction.reason` (§1) keeps it after `last_error` is cleared.
 
 **A receiver without internet - `relay_request` and `cmd/relay`.** An install started at the
 television or on the OpenWebif page carries no download address, and the receiver fetches the

@@ -1034,6 +1034,64 @@ def test_a_finished_marker_is_reported_once_and_removed(starting, factory):
     assert not (bridge.root / updatehelper.MARKER).exists()
 
 
+# `update.transaction.reason` (review S1): `last_error` is cleared by the next command that
+# succeeds, so the reason that says why a rollback happened has to stay with the transaction.
+
+@pytest.mark.parametrize("reason", ["time_limit", "not_started"])
+def test_a_finished_markers_reason_stays_with_the_transaction(reason, starting, factory):
+    starting(prepare=lambda root: marker(
+        root, phase="finished", result="rolled_back", reason=reason, error="x", finished=NOW))
+    factory.client.fire_connect()
+    assert transaction(factory.client)["reason"] == reason
+
+
+def test_the_last_updates_reason_is_reported_after_a_restart(starting, factory):
+    starting(prepare=lambda root: updatehelper.write_json(str(root / updatehelper.LAST), {
+        "id": "a1b2c3d4e5f6", "started_by": "mqtt", "target": "0.3.0", "from": "0.2.0",
+        "phase": "finished", "started": NOW - 900, "finished": NOW - 600,
+        "result": "rolled_back", "reason": "time_limit", "error": "x"}))
+    factory.client.fire_connect()
+    ended = transaction(factory.client)
+    assert (ended["result"], ended["reason"]) == ("rolled_back", "time_limit")
+
+
+def test_a_followed_end_carries_the_helpers_reason(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_says(directory, phase="proving")
+    tick()
+    assert transaction(factory.client)["reason"] is None
+    helper_says(directory, phase="finished", result="rolled_back", reason="time_limit",
+                error="x", finished=NOW + 5)
+    tick()
+    ended = bridge.self_update.transaction_payload()
+    assert (ended["result"], ended["reason"]) == ("rolled_back", "time_limit")
+
+
+def test_an_end_the_plugin_judged_itself_carries_its_reason(starting, factory):
+    """The power-loss verdict: no helper wrote a reason, the plugin's own goes in."""
+    def prepare(root):
+        marker(root, boot=OTHER_BOOT, to=("0.4.0", "ab" * 20), frm=("0.3.0", COMMIT))
+        lock(root, "a1b2c3d4e5f6", boot=OTHER_BOOT)
+
+    starting(prepare=prepare)
+    factory.client.fire_connect()
+    ended = transaction(factory.client)
+    assert (ended["result"], ended["reason"]) == ("rolled_back", "interrupted")
+
+
+@pytest.mark.parametrize("result, reason", [
+    ("installed", "time_limit"),
+    ("rolled_back", "Not a code"),
+    ("rolled_back", "x" * 41),
+    ("rolled_back", 7),
+])
+def test_a_transactions_reason_is_a_code_or_nothing(result, reason):
+    record = {"id": "a1b2c3d4e5f6", "phase": "finished", "result": result, "reason": reason}
+    assert selfupdate.public(record)["reason"] is None
+    assert selfupdate.public(dict(record, phase="proving"))["reason"] is None
+
+
 def test_the_last_update_is_reported_after_a_restart(starting, factory):
     starting(prepare=lambda root: updatehelper.write_json(str(root / updatehelper.LAST), {
         "id": "a1b2c3d4e5f6", "started_by": "mqtt", "target": "0.3.0", "from": "0.2.0",
