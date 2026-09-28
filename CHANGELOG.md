@@ -21,7 +21,9 @@ version that has no section here.
   standby, the recording guard, an EPG import, an image that cannot restart, then the index's own
   rules, the running release, the checksum, Home Assistant's relay address, free space and ten
   minutes since the last update. The work is done by the update helper outside enigma2; the plugin
-  follows it on `update.transaction`. From the moment the package manager starts until the restart
+  follows it on `update.transaction`, which keeps the end's `reason` code after `last_error` is
+  cleared - a rollback because the update ran out of time (`time_limit`) is told apart from one
+  because the new release did not start (`not_started`). From the moment the package manager starts until the restart
   the plugin's doors are closed: every command, the OpenWebif page and the setup screen say "an
   update is being applied". A question on the television that nobody answers within 60 s withdraws
   the update. A downgrade chosen on the receiver first retracts every retained topic but
