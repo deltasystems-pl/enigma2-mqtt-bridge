@@ -33,9 +33,10 @@ schema-2 snapshot `self-update-<id>`; the marker, phase `installing`, so that a 
 `SIGKILL` while the package manager unpacks is known at the next start; `opkg install
 --force-reinstall` (with `--force-downgrade` only for a version that is lower, and only when the
 television or the page started it); the installed files against the package's manifest; then the
-phase `restarting`, which is the plugin's cue to close its doors and ask the image for a clean
-restart (rule R1). The plugin answers through the transaction directory: `restart.json` when it
-has asked, `withdraw` when the question on the television was answered "no" or timed out, and -
+phase `restarting`, which is the plugin's cue - its doors closed since `installing` - to ask the
+image for a clean restart (rule R1). The plugin answers through the transaction directory:
+`restart.json` when it has asked, `withdraw` when the question on the television was answered
+"no" or timed out, or a guard of the household holds again right before the restart, and -
 from the new plugin, once it has started - `started.json` with its version and build commit.
 
 **Which process is the restart.** The request names the enigma2 that asked (`enigma2_pid`). A
@@ -205,6 +206,8 @@ PHASES = ("downloading", "verifying", "snapshot", "installing", "restarting", "p
 RESULTS = ("installed", "withdrawn_before_restart", "rolled_back", "failed", "interrupted")
 STARTED_BY = ("mqtt", "home_assistant", "screen", "page", "ssh")
 DOWNGRADE_ORIGINS = ("screen", "page")
+# What the plugin may name in `withdraw` (TRANSACTION.md section 7); anything else is the question.
+WITHDRAW_REASONS = ("question", "retraction", "standby", "recording", "epg_import")
 
 # The helper's sentences, English: they reach `last_error` through the plugin that reports the
 # end, and Home Assistant says them in the household's language by their reason code.
@@ -239,6 +242,15 @@ SENTENCES = {
     "interrupted": "the update was interrupted: {detail}",
     "question": "the receiver did not restart its interface (the question on the television was "
                 "answered no, or nobody answered); the update was withdrawn",
+    "retraction": "the downgrade was withdrawn before the restart: the broker did not confirm "
+                  "that this receiver's topics were retracted",
+    # The plugin asks the household's guards again right before the restart.
+    "standby": "the receiver went into standby before its interface was restarted; the update "
+               "was withdrawn, so as not to wake it",
+    "recording": "a recording was running or due when the interface was to be restarted; the "
+                 "update was withdrawn",
+    "epg_import": "an EPG import started before the interface was restarted; the update was "
+                  "withdrawn",
     "internal_error": "the update helper failed: {detail}",
     "drill": "an acceptance drill sent the update straight into its rollback; the previous "
              "version is back",
@@ -1825,7 +1837,10 @@ class Transaction:
             failure = Fail("time_limit")
             result = "failed"
         else:
-            failure = Fail("question")
+            # The plugin may say why it withdrew; anything it does not say is the question.
+            said = read_json(self.path("withdraw"))
+            reason = said.get("reason") if isinstance(said, dict) else None
+            failure = Fail(reason if reason in WITHDRAW_REASONS else "question")
             result = "withdrawn_before_restart"
         if self.record["restore"] != "done":
             result = "failed"

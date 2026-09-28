@@ -84,6 +84,7 @@ from . import config as settings_module
 from . import log as log_module
 from .i18n import _
 from .origin import PAGE
+from .selfupdate import household_doors
 from .version import __version__
 
 LOG = log_module.get_logger("webif")
@@ -155,6 +156,7 @@ SETTING_GROUPS = (
             "epg_import_allowed",
             "uninstall_allowed",
             "update_check",
+            "update_allowed",
             "cec_standby_workaround",
             "osd_toast",
         ),
@@ -1371,8 +1373,38 @@ def _document(request, body, head=""):
     return document.encode("utf-8")
 
 
+def _updating(bridge):
+    """Whether an update has closed the plugin's doors. Anything unreadable is "no"."""
+    try:
+        return bool(bridge.self_update.closed)
+    except Exception:
+        return False
+
+
+def _repair_form(request, bridge):
+    """The form of the command closed doors let through (`SelfUpdater.repair`), or nothing."""
+    try:
+        key = bridge.self_update.repair()
+        if key is None:
+            return ""
+        return _action_form(_action(key, bridge), _csrf_token(request), bool(bridge.running))
+    except Exception:
+        LOG.exception("the repair form could not be rendered")
+        return ""
+
+
 def _page(request, message=""):
     bridge = _bridge()
+    if bridge is not None and _updating(bridge):
+        # The new release is on disk under this process: nothing but the sentence, and no
+        # form that could post a change into it (`selfupdate.py`) - except the one command
+        # that is the repair the sentence names, when it names one. An answer to a command
+        # posted here (the doors' own refusal, or the repair's) is said above it.
+        notice = f"<p class='notice'>{_e(message)}</p>" if message else ""
+        return _document(request,
+                         notice
+                         + f"<p class='notice'>{_e(household_doors(bridge.self_update))}</p>"
+                         + _repair_form(request, bridge))
     section = _section(bridge)
     token = _csrf_token(request)
     notice = f"<p class='notice'>{_e(message)}</p>" if message else ""

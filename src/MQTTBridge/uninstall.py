@@ -322,6 +322,14 @@ class Uninstaller:
         node = bridge.node_id
         if not node or str(text or "").strip() != node:
             return WRONG_NODE
+        # A self-update, or an SSH install holding the shared lock, is running the package
+        # manager too: a removal next to it ends in whichever ran last - the plugin the
+        # household removed installed again, or an update silently lost. The self-update's
+        # own `busy`, with its reason code (`selfupdate.py`).
+        updater = getattr(bridge, "self_update", None)
+        busy = updater.busy() if updater is not None else None
+        if busy:
+            return busy
         if not self.claimed:
             return NOT_PACKAGED
         # Exactly `cmd/restart_gui`'s check: the publisher knows when the block

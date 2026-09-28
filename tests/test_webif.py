@@ -795,7 +795,8 @@ def test_the_permissions_and_kill_switches_are_one_group():
     groups = dict(webif.SETTING_GROUPS)
     assert set(groups["permissions"]) == {
         "deep_standby_allowed", "wol_arm", "softcam_restart_allowed", "epg_import_allowed",
-        "uninstall_allowed", "update_check", "cec_standby_workaround", "osd_toast",
+        "uninstall_allowed", "update_check", "update_allowed", "cec_standby_workaround",
+        "osd_toast",
     }
 
 
@@ -1206,8 +1207,10 @@ def test_every_command_the_dispatcher_knows_has_a_page_action():
     """A command added to the dispatcher without a page action fails here."""
     handlers = set(CommandDispatcher(SimpleNamespace()).handlers)
     covered = {action.command for action in webif.actions()}
-    # `config` is the settings form itself.
-    assert handlers == covered | {"config"}
+    # `config` is the settings form itself. `update` is started on the page by the receiver's
+    # own install flow, which asks before a downgrade; until that form exists the page offers
+    # no install at all.
+    assert handlers == covered | {"config", "update"}
 
 
 def test_the_origin_answers_the_permission_and_nothing_else():

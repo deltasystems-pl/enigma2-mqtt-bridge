@@ -19,6 +19,7 @@ from Screens.Screen import Screen
 
 from .i18n import _
 from .log import get_logger
+from .selfupdate import household_doors
 
 LOG = get_logger("setup")
 
@@ -76,6 +77,7 @@ def setting_labels():
         ("epg_import_allowed", _("Allow starting an EPG import")),
         ("uninstall_allowed", _("Allow removing the plugin remotely")),
         ("update_check", _("Check daily for plugin updates")),
+        ("update_allowed", _("Allow plugin updates over MQTT")),
         ("log_level", _("Log level")),
         ("epg_grid_events", _("EPG grid events per channel")),
     )
@@ -111,6 +113,14 @@ def _uninstalling(bridge):
     """Whether `cmd/uninstall` is under way on this bridge. Anything unreadable is „no"."""
     try:
         return bool(bridge.uninstaller.underway)
+    except Exception:
+        return False
+
+
+def _updating(bridge):
+    """Whether an update has closed the plugin's doors. Anything unreadable is "no"."""
+    try:
+        return bool(bridge.self_update.closed)
     except Exception:
         return False
 
@@ -212,6 +222,13 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
             LOG.exception("could not write enigma2's settings file")
 
         bridge = self._bridge_or_running()
+        if bridge is not None and _updating(bridge):
+            # Kept, not applied, for the uninstall's reason below: a reload would open a
+            # session under the update's closed doors. The update ends in a restart, which
+            # starts from them.
+            LOG.warning("settings saved during an update; not reloading the bridge")
+            self._tell_and_close(household_doors(bridge.self_update))
+            return
         if bridge is not None and _uninstalling(bridge):
             # 🔴 A reload now would open a fresh session and republish
             # everything underneath a removal that has just retracted it. The

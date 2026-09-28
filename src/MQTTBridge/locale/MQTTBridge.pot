@@ -667,6 +667,30 @@ msgstr ""
 msgid "Check daily for plugin updates"
 msgstr ""
 
+#: src/MQTTBridge/setup.py
+msgid "Allow plugin updates over MQTT"
+msgstr ""
+
+#: src/MQTTBridge/selfupdate.py
+msgid "An update of the plugin is being applied on this receiver. Please wait."
+msgstr ""
+
+#: src/MQTTBridge/selfupdate.py
+msgid "The update of the plugin failed and its previous version could not be put back. Please install the plugin again, for example from Home Assistant."
+msgstr ""
+
+#: src/MQTTBridge/selfupdate.py
+msgid "The update of the plugin did not finish cleanly. Please install the plugin again, for example from Home Assistant."
+msgstr ""
+
+#: src/MQTTBridge/selfupdate.py
+msgid "The update of the plugin was undone, but the receiver's user interface did not restart. Please restart the user interface."
+msgstr ""
+
+#: src/MQTTBridge/selfupdate.py
+msgid "The receiver's user interface is running a different version of the plugin than the one now installed. Please restart the user interface."
+msgstr ""
+
 #: src/MQTTBridge/webif.py
 msgid "Check for plugin updates now"
 msgstr ""

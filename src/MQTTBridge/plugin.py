@@ -65,6 +65,17 @@ def autostart(reason, **kwargs):
 
 def open_setup(session, **kwargs):
     try:
+        updater = getattr(_bridge, "self_update", None)
+        if updater is not None and updater.closed:
+            # An update has put the new release on disk under this process: the setup
+            # screen would be a first import of new code, and a save would reopen a session.
+            from Screens.MessageBox import MessageBox
+
+            from .selfupdate import household_doors
+
+            session.open(MessageBox, household_doors(updater),
+                         getattr(MessageBox, "TYPE_INFO", 1))
+            return
         from .setup import MQTTBridgeSetup
 
         session.open(MQTTBridgeSetup)

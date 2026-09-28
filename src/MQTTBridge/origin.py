@@ -27,6 +27,10 @@ they apply to the page exactly as they apply to the broker.
 
 MQTT = "mqtt"
 PAGE = "page"
+# The receiver's own setup screen, on the television. Granted for the page's reason: the
+# person holding the remote control can open the same screen and switch any permission on.
+# Only the self-update names it today (`selfupdate.py`); nothing from the broker can.
+SCREEN = "screen"
 
 
 def granted(read, permission, origin):
@@ -37,6 +41,6 @@ def granted(read, permission, origin):
     is on, with anything falsy (an element that did not build on this image
     included) read as a refusal.
     """
-    if origin == PAGE:
+    if origin in (PAGE, SCREEN):
         return True
     return bool(read(permission))

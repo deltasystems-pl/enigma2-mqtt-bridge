@@ -141,6 +141,7 @@ def test_config_persists_all_values_rebinds_hooks_and_publishes_info(
         "epg_import_allowed": False,
         "uninstall_allowed": False,
         "update_check": False,
+        "update_allowed": False,
     }
 
 

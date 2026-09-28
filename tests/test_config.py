@@ -41,6 +41,7 @@ EXPECTED_DEFAULTS = {
     "epg_import_allowed": False,
     "uninstall_allowed": False,
     "update_check": False,
+    "update_allowed": False,
     "log_level": "info",
     "epg_grid_events": 4,
 }

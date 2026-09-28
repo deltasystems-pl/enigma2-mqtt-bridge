@@ -41,10 +41,11 @@ and settings survive a plugin upgrade.
 | `epg_import_allowed` | `off` | Gate for `cmd/epg_import`, which starts the image's EPG importer now. Off by default because the end of every import freezes the menus for two or three seconds; see below |
 | `uninstall_allowed` | `off` | Gate for `cmd/uninstall`, which removes the plugin from the receiver. Off by default because it is a one-way door: afterwards only the receiver's own plugin menu or SSH can put the plugin back. See below |
 | `update_check` | `off` | Let the receiver ask the plugin's release origin on the internet which releases exist - once a day, and when `cmd/update_check` asks - and publish what it found on the `update` topic. Off by default because the receiver then makes no connection but the broker's. A receiver without internet learns of releases from Home Assistant instead, which needs no setting. It only checks; nothing is installed. See below |
+| `update_allowed` | `off` | Gate for `cmd/update`, which installs a signed release of the plugin over MQTT and restarts the interface to run it. Off by default because it replaces the code that takes the commands. The receiver's own screens and the OpenWebif page do not need it |
 | `log_level` | `info` | `error` / `warning` / `info` / `debug` |
 
 🔴 **`deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`,
-`uninstall_allowed` and `update_check` are never writable over MQTT.** They are
+`uninstall_allowed`, `update_check` and `update_allowed` are never writable over MQTT.** They are
 set on the receiver - here, in the provisioning file, or on the [OpenWebif page](#the-openwebif-page)
 - and published in `info.settings` so that a consumer can hide a control the box would always
 refuse, but `cmd/config` rejects them like any other key outside its allowlist. The rule is the
@@ -393,7 +394,8 @@ For headless installs - and for the companion integration's guided installer - w
   "softcam_restart_allowed": false,
   "epg_import_allowed": false,
   "uninstall_allowed": false,
-  "update_check": false
+  "update_check": false,
+  "update_allowed": false
 }
 ```
 

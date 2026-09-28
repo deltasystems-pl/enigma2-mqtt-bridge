@@ -141,7 +141,8 @@
     "uninstall": {
       "since": "0.3.0"
     },
-    "update_check": {}
+    "update_check": {},
+    "update": {}
   },
   "info_members": {
     "image": "string",
@@ -228,6 +229,11 @@
       "type": "bool",
       "writable": false,
       "since": "unreleased"
+    },
+    "update_allowed": {
+      "type": "bool",
+      "writable": false,
+      "since": "unreleased"
     }
   },
   "capabilities": [
@@ -247,6 +253,7 @@
     "process",
     "recording",
     "screenshot",
+    "self_update",
     "service",
     "softcam",
     "timers",
@@ -258,6 +265,7 @@
   ],
   "other_topics": [
     "enigma2mqtt/discovery/<node>/config",
+    "enigma2mqtt/integration/<node>",
     "enigma2mqtt/release_index",
     "homeassistant/device/<node>/config",
     "homeassistant/device_automation/<node>/<colour>_<press>/config"
@@ -282,28 +290,12 @@
   ],
   "planned": [
     {
-      "kind": "setting",
-      "name": "update_allowed"
-    },
-    {
-      "kind": "capability",
-      "name": "self_update"
-    },
-    {
-      "kind": "command",
-      "name": "update"
-    },
-    {
       "kind": "command",
       "name": "relay"
     },
     {
       "kind": "event topic",
       "name": "relay_request"
-    },
-    {
-      "kind": "consumer topic",
-      "name": "enigma2mqtt/integration/<node>"
     }
   ]
 }

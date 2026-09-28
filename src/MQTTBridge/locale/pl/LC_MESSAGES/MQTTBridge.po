@@ -667,6 +667,30 @@ msgstr "Zezwalaj na zdalne usunięcie wtyczki"
 msgid "Check daily for plugin updates"
 msgstr "Codziennie sprawdzaj aktualizacje wtyczki"
 
+#: src/MQTTBridge/setup.py
+msgid "Allow plugin updates over MQTT"
+msgstr "Zezwalaj na aktualizacje wtyczki przez MQTT"
+
+#: src/MQTTBridge/selfupdate.py
+msgid "An update of the plugin is being applied on this receiver. Please wait."
+msgstr "Na tym dekoderze trwa aktualizacja wtyczki. Proszę czekać."
+
+#: src/MQTTBridge/selfupdate.py
+msgid "The update of the plugin failed and its previous version could not be put back. Please install the plugin again, for example from Home Assistant."
+msgstr "Aktualizacja wtyczki nie powiodła się i nie udało się przywrócić jej poprzedniej wersji. Zainstaluj wtyczkę ponownie, na przykład z Home Assistant."
+
+#: src/MQTTBridge/selfupdate.py
+msgid "The update of the plugin did not finish cleanly. Please install the plugin again, for example from Home Assistant."
+msgstr "Aktualizacja wtyczki nie zakończyła się poprawnie. Zainstaluj wtyczkę ponownie, na przykład z Home Assistant."
+
+#: src/MQTTBridge/selfupdate.py
+msgid "The update of the plugin was undone, but the receiver's user interface did not restart. Please restart the user interface."
+msgstr "Aktualizacja wtyczki została wycofana, ale interfejs dekodera nie został ponownie uruchomiony. Uruchom ponownie interfejs."
+
+#: src/MQTTBridge/selfupdate.py
+msgid "The receiver's user interface is running a different version of the plugin than the one now installed. Please restart the user interface."
+msgstr "Interfejs dekodera korzysta z innej wersji wtyczki niż obecnie zainstalowana. Uruchom ponownie interfejs."
+
 #: src/MQTTBridge/webif.py
 msgid "Check for plugin updates now"
 msgstr "Sprawdź teraz aktualizacje wtyczki"

@@ -711,6 +711,25 @@ def test_a_min_integration_is_unmet_in_integration_mode_and_met_otherwise():
     assert latest == "0.4.0"
 
 
+def test_the_integrations_word_judges_its_contract_its_version_and_raises_the_floor():
+    releases = [release("0.5.0", min_integration="0.5.0"), release("0.4.0"),
+                release("0.3.0"), release("0.2.0")]
+    word = {"integration": "0.4.0", "contract": 1, "plugin_min": "0.3.0"}
+    latest, available = offer(releases, installed=None, integration_mode=True, contract=1,
+                              integration=word)
+    assert [entry["version"] for entry in available] == ["0.5.0", "0.4.0", "0.3.0"]
+    assert available[0]["reason"] == "incompatible"
+    assert latest == "0.4.0"
+    # A newer integration meets the release's need, which integration mode alone never does.
+    latest, _available = offer(releases, installed=None, integration_mode=True, contract=1,
+                               integration=dict(word, integration="0.5.0"))
+    assert latest == "0.5.0"
+    # Another contract major on the integration's side: nothing it could use.
+    latest, available = offer(releases, installed=None, integration_mode=True, contract=1,
+                              integration=dict(word, contract=2))
+    assert latest is None and all(e["reason"] == "incompatible" for e in available)
+
+
 def test_a_missing_dependency_is_named_and_unknown_packages_are_not_judged():
     releases = [release("0.4.0", depends=("python3-core", "python3-json"))]
     latest, available = offer(releases, installed=frozenset({"python3-core"}),

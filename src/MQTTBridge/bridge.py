@@ -49,6 +49,8 @@ from .log import configure as configure_logging
 from .log import get_logger, register_secret
 from .mqttclient import BrokerSettings, MqttClient
 from .publisher import Publisher
+from .selfupdate import CAPABILITY as SELF_UPDATE_CAPABILITY
+from .selfupdate import SelfUpdater
 from .uninstall import DEFERRED as UNINSTALL_DEFERRED
 from .uninstall import RUNNING as UNINSTALL_RUNNING
 from .uninstall import Uninstaller
@@ -175,6 +177,10 @@ class Bridge:
         # judged is the receiver's, not the session's, and its ten-minute limit
         # must not reset with every settings save.
         self._updates = UpdateChecker(self)
+        # Built with the bridge, and kept across reloads, for both reasons above: a
+        # transaction outlives every session opened while it runs, and nothing it runs
+        # after the new files are on disk may be a first import.
+        self._self_update = SelfUpdater(self)
         # A refusal that has to wait for a session to be published on: the
         # reason a removal failed, reported once the fresh session is up.
         self._pending_error = None
@@ -258,6 +264,8 @@ class Bridge:
             return error or UNINSTALL_DEFERRED
         if self._uninstaller.closed:
             return UNINSTALL_RUNNING
+        if self._self_update.closed:
+            return self._self_update.doors_refusal()
         if not settings_module.save_remote_settings(values, self.settings):
             return "could not persist the plugin settings"
 
@@ -288,6 +296,9 @@ class Bridge:
             return self.defer_settings(values)
         if self._uninstaller.closed:
             return UNINSTALL_RUNNING
+        if self._self_update.closed:
+            # A reload would open a session under the update's closed doors.
+            return self._self_update.doors_refusal()
         if not settings_module.save_settings(values, self.settings):
             return "could not persist the plugin settings"
         self.reload()
@@ -327,6 +338,11 @@ class Bridge:
     @property
     def uninstaller(self):
         return self._uninstaller
+
+    @property
+    def self_update(self):
+        """`cmd/update`: the guards, the helper's launch, the doors and the restart question."""
+        return self._self_update
 
     def discarded_retained_commands(self):
         """This node's command topics somebody left a retained message on, this session."""
@@ -480,6 +496,9 @@ class Bridge:
             return
 
         configure_logging(self.value("log_level"), self._log_path)
+        # Before the provisioning file and before `enabled` (S-h): a new release that is
+        # switched off still confirms to its update helper that it started.
+        self._self_update.on_start()
 
         # Before anything connects: an installer may have written the broker in.
         settings_module.import_provisioning(self._provisioning_path, self.settings)
@@ -540,6 +559,7 @@ class Bridge:
         self.register_default_publishers()
         self._start_publishers()
         self._uninstaller.probe()
+        self._self_update.probe()
 
         self.idle_reason = None
         self.running = True
@@ -563,11 +583,16 @@ class Bridge:
         try:
             self.running = False
             self._uninstaller.abandon()
+            self._self_update.abandon()
             self._stop_timers()
             if self.client is None:
                 self._stop_publishers()
                 return
-            if self.client.connected:
+            if self._self_update.silent:
+                # S-a: a downgrade's retraction is done and nothing more goes out. The clean
+                # disconnect keeps the will unsent; the release that starts says `online`.
+                LOG.info("not publishing offline: an update has retracted this node's topics")
+            elif self.client.connected:
                 info = self.client.publish(
                     self.topic("availability"), OFFLINE, qos=STATE_QOS, retain=True
                 )
@@ -712,7 +737,7 @@ class Bridge:
         about to publish again is not stale - see `_stale_topics`.
         """
         stale = self._stale_topics()
-        if not stale or self.client is None:
+        if not stale or self.client is None or self._self_update.silent:
             return 0
         LOG.info("retracting %d retained topic(s) this node no longer owns", len(stale))
         for topic in stale:
@@ -815,6 +840,8 @@ class Bridge:
                 names.append(MESSAGE_CAPABILITY)
         if self._uninstaller.claimed:
             names.append(UNINSTALL_CAPABILITY)
+        if self._self_update.claimed:
+            names.append(SELF_UPDATE_CAPABILITY)
         return names
 
     def announce_capabilities(self):
@@ -874,6 +901,11 @@ class Bridge:
         # receiver without internet. Retained, so a fresh session is handed it at
         # once; judged like any fetched index, and never obeyed as a command.
         self.client.subscribe(RELEASE_INDEX_TOPIC, qos=COMMAND_QOS)
+        # The companion integration's version, contract and plugin floor, retained: what
+        # the rule of `update.available` and of `cmd/update` judges against once it is known.
+        integration = self._self_update.integration_topic()
+        if integration:
+            self.client.subscribe(integration, qos=COMMAND_QOS)
         self.state.save()
         if self._pending_error is not None:
             command, message = self._pending_error
@@ -885,7 +917,13 @@ class Bridge:
             # Asked first: from here on nothing may re-create a topic.
             LOG.info("discarding a message on %s: the plugin is removing itself", topic)
             return
+        if topic == self._self_update.integration_topic():
+            self._self_update.on_integration(payload)
+            return
         if topic == RELEASE_INDEX_TOPIC:
+            if self._self_update.closed:
+                LOG.info("not judging a relayed index now: an update is being applied")
+                return
             self._updates.on_release_index(payload, retain)
             return
         self._commands.handle(topic, payload, retain)
@@ -896,7 +934,7 @@ class Bridge:
     # ----------------------------------------------------------------- publishing --
 
     def publish_raw(self, topic, payload, retain=True, change_key=None):
-        if self.client is None or self._uninstaller.closed:
+        if self.client is None or self._uninstaller.closed or self._self_update.silent:
             # Closed: a publisher's timer or event that fires after the
             # retraction would re-create a retained topic for good.
             return None
@@ -986,7 +1024,7 @@ class Bridge:
             # Whether or not the broker can be told: switching screenshots off
             # means the page must not keep showing the last one either.
             self._screenshot = None
-        if self.client is None or self._uninstaller.closed:
+        if self.client is None or self._uninstaller.closed or self._self_update.silent:
             return None
         info = self.client.publish(topic, "", qos=STATE_QOS, retain=True)
         self.state.forget(topic)

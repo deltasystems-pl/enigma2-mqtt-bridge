@@ -74,7 +74,7 @@ import os
 import threading
 import time
 
-from . import buildid, trust, trustfile, uninstall
+from . import buildid, trust, trustfile, uninstall, updatehelper
 from .enigma2 import Ticker
 from .log import get_logger
 from .netfetch import Unreachable, https_get
@@ -197,31 +197,18 @@ def installed_packages(root="/"):
     return frozenset(names)
 
 
-def _unmet(release, installed, integration_mode, contract):
-    """Why this receiver could not install `release`, as a reason code, or None."""
-    if release["contract"] != contract:
-        return "incompatible"
-    # Without the integration's own word (`enigma2mqtt/integration/<node>`, which a later
-    # release reads), a release that needs a newer integration is taken to be unmet where one
-    # is in use, and met where none is.
-    if release["min_integration"] is not None and integration_mode:
-        return "incompatible"
-    if installed is not None:
-        for name in release["depends"]:
-            if name not in installed:
-                return "depends"
-    return None
-
-
-def offer(index, installed=None, integration_mode=False, contract=CONTRACT):
+def offer(index, installed=None, integration_mode=False, contract=CONTRACT, integration=None):
     """`(latest_compatible, available)` for an accepted index.
 
-    `available` is the newest twenty releases at or above the index's floor that are not
-    withdrawn, newest first, each with the reason it is not compatible. `installed` is what
-    `installed_packages` read, None when it could not: a dependency nobody can check is not
-    judged here, and the install checks it again.
+    `available` is the newest twenty releases at or above the floor that are not withdrawn,
+    newest first, each with the reason it is not compatible. The rule is `updatehelper.unmet`,
+    the one the install applies too: `integration` is what the companion integration said on
+    `enigma2mqtt/integration/<node>` - its contract major, its version and a floor of its own -
+    and without it a release that needs a newer integration is unmet where one is in use and
+    met where none is. `installed` is what `installed_packages` read, None when it could not: a
+    dependency nobody can check is not judged here, and the install checks it again.
     """
-    floor = trust.version_key(index["floor"])
+    floor = trust.version_key(updatehelper.floor_of(index, integration))
     candidates = sorted(
         (entry for entry in index["releases"]
          if entry["withdrawn"] is None and trust.version_key(entry["version"]) >= floor),
@@ -230,7 +217,8 @@ def offer(index, installed=None, integration_mode=False, contract=CONTRACT):
     )
     available = []
     for entry in candidates[:MAX_AVAILABLE]:
-        reason = _unmet(entry, installed, integration_mode, contract)
+        problem = updatehelper.unmet(entry, contract, integration, integration_mode, installed)
+        reason = problem[0] if problem is not None else None
         available.append({"version": entry["version"], "compatible": reason is None,
                           "reason": reason})
     latest = next((entry["version"] for entry in available if entry["compatible"]), None)
@@ -331,9 +319,11 @@ class UpdateChecker:
     def payload(self):
         index = self._held[0] if self._held else None
         latest, available = None, []
+        updater = getattr(self.bridge, "self_update", None)
         if index is not None:
             latest, available = offer(index, self._installed,
-                                      self._value("ha_mode") == "integration", CONTRACT)
+                                      self._value("ha_mode") == "integration", CONTRACT,
+                                      getattr(updater, "integration", None))
         return {
             "origin": self._origin,
             "checked": self._checked,
@@ -343,8 +333,8 @@ class UpdateChecker:
             },
             "latest_compatible": latest,
             "available": available,
-            # The install is a later release's; until then there is never one to report.
-            "transaction": None,
+            # An update in progress, or the last one that ended (`selfupdate.py`).
+            "transaction": updater.transaction_payload() if updater is not None else None,
         }
 
     def publish(self):
