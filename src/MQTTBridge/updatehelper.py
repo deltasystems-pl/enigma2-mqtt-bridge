@@ -261,13 +261,27 @@ SENTENCES = {
                           "in Home Assistant",
 }
 
+# One reason code, two ends. `time_limit` on the forward path ends `failed` with nothing new left
+# running; after a proof window the deadline cut short it ends `rolled_back`, and the sentence
+# for that end has to say what the household reads it for: the update was undone and the
+# previous version is back - not that the new one failed, which nothing showed (review S1).
+ROLLED_BACK_SENTENCES = {
+    "time_limit": "the update ran out of time before the new version confirmed that it started, "
+                  "so it was undone; the previous version {previous} is back",
+}
+
 
 class Fail(Exception):
-    """End the transaction with a reason code and its sentence."""
+    """End the transaction with a reason code and its sentence.
 
-    def __init__(self, reason, **details):
+    `rolled_back` picks the sentence for a rollback where a reason has one of its own
+    (`ROLLED_BACK_SENTENCES`); every other reason keeps its only sentence.
+    """
+
+    def __init__(self, reason, rolled_back=False, **details):
         self.reason = reason
-        text = SENTENCES.get(reason, reason)
+        text = (ROLLED_BACK_SENTENCES.get(reason) if rolled_back else None) or \
+            SENTENCES.get(reason, reason)
         try:
             text = text.format(**details)
         except (KeyError, IndexError, ValueError):
@@ -1876,7 +1890,8 @@ class Transaction:
             receiver.sleep(PROOF_POLL)
         self.record["proof"] = "none"
         if cut:
-            return self.rollback(Fail("time_limit"))
+            return self.rollback(Fail("time_limit", rolled_back=True,
+                                      previous=self.request["from"]["version"]))
         return self.rollback(Fail("not_started", previous=self.request["from"]["version"]))
 
     def commit(self, proof, fd_seen):
