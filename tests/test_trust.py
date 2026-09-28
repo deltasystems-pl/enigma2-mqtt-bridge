@@ -383,7 +383,7 @@ def test_the_signature_file_is_one_line_in_a_fixed_order():
 
 
 def test_which_part_of_the_state_is_meant_is_never_a_default():
-    # PR 7 and the integration must say it: `trust.configured` answers it.
+    # The self-update and the integration must say it: `trust.configured` answers it.
     test = _keysets()["test"]
     with pytest.raises(TypeError):
         trust.memory_for(None, test)

@@ -36,15 +36,15 @@ them. A pair that fails twice is judged.
 **The probe on its own.** An install asked for at the television or on the page carries no
 download address, and whether the receiver fetches the package itself or asks the companion
 integration for it depends on whether the origin answers (`selfupdate.py`, the relay handshake).
-The asking is the consent (ADR-0015 decision 4), so when the last word on the origin is
-`unknown`, or older than `ORIGIN_FRESH_SECONDS`, the install asks for the probe alone: the
-check's own first request, the signature file with five seconds and a 1 KiB cap, on the same
-worker, its body discarded. Nothing else ever asks for it - not a timer, not a command over
-MQTT - so a receiver nobody asks still makes no connection but the broker's. An update helper
-that could not reach the origin says so in its record, and that is kept as the origin's word too
-(`note_unreachable`) - for the ten-minute limit between updates that its own failed end starts,
-and ten minutes more - so the next install at the television that the limit lets through asks
-Home Assistant without probing.
+The asking is the consent (SETUP.md, "Installing a release from the receiver"; ADR-0015
+decision 4), so when the last word on the origin is `unknown`, or older than
+`ORIGIN_FRESH_SECONDS`, the install asks for the probe alone: the check's own first request, the
+signature file with five seconds and a 1 KiB cap, on the same worker, its body discarded.
+Nothing else ever asks for it - not a timer, not a command over MQTT - so a receiver nobody asks
+still makes no connection but the broker's. An update helper that could not reach the origin says
+so in its record, and that is kept as the origin's word too (`note_unreachable`) - for the
+ten-minute limit between updates that its own failed end starts, and ten minutes more - so the
+next install at the television that the limit lets through asks Home Assistant without probing.
 
 **Limits.** Manual checks - `cmd/update_check`, from the broker or the page - share one
 ten-minute limit (the origin's own cache lifetime); inside it the answer is the stored result and
@@ -339,10 +339,10 @@ class UpdateChecker:
     def probe(self, callback):
         """Probe the origin now, for an install asked for at the television or on the page.
 
-        Only that asks: the act is the consent (ADR-0015 decision 4). The probe runs on the
-        worker, after any job already there, and `callback()` is called on the main loop once
-        `reachability` holds its answer - or holds nothing new, when the probe could not be run.
-        Never raises.
+        Only that asks: the act is the consent (SETUP.md, "Installing a release from the
+        receiver"). The probe runs on the worker, after any job already there, and `callback()`
+        is called on the main loop once `reachability` holds its answer - or holds nothing new,
+        when the probe could not be run. Never raises.
         """
         self._probe_waiters.append(callback)
         self._enqueue(("probe",))

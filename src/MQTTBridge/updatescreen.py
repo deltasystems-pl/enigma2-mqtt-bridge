@@ -6,12 +6,13 @@ the running one marked, the ones that cannot be installed with the reason - and 
 progress with who started it. Yellow asks for the list again; OK or green installs the chosen
 version.
 
-**The person at the television is the consent** (ADR-0015 decision 4). Neither `update_check`
-nor `update_allowed` is asked: whoever holds the remote control can open the setup screen and
-switch either on, so refusing them here would protect nothing. Both requests go through the
-dispatcher with the origin `screen`, so every guard that protects the household - a recording, a
-running EPG import, standby, an update already running, the ten-minute limits - applies exactly
-as it does over MQTT, and `last_error` says what it says for any other origin.
+**The person at the television is the consent** (SETUP.md, "Installing a release from the
+receiver"; ADR-0015 decision 4). Neither `update_check` nor `update_allowed` is asked: whoever
+holds the remote control can open the setup screen and switch either on, so refusing them here
+would protect nothing. Both requests go through the dispatcher with the origin `screen`, so
+every guard that protects the household - a recording, a running EPG import, standby, an update
+already running, the ten-minute limits - applies exactly as it does over MQTT, and `last_error`
+says what it says for any other origin.
 
 **Every install is asked first, and a downgrade is asked in its own words.** An install ends in
 a restart of the user interface, so OK alone never starts one; the question defaults to "no". A

@@ -73,15 +73,17 @@ grep '"version": "0.3.0"' releases.json
 
 `releases.json` is the plugin's signed list of releases ([RELEASE-INDEX.md](RELEASE-INDEX.md)), one
 line per version. The checksum `sha256sum` prints must be the `sha256` on that version's line; if
-they differ, stop and delete the file. Then install exactly that file, and restart the interface
-as in [Activate](#activate):
+they differ, stop and delete the file. Then install exactly that file:
 
 ```sh
 opkg install ./enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk
 ```
 
 Add `--force-reinstall` when that version is already installed, and `--force-downgrade` for an
-older one. **This catches a damaged or truncated download, not a compromised origin**: the list
+older one - and restart the receiver's interface from its menu. That is the image's clean
+restart, which saves its settings and so comes back on the channel it was showing. Use
+`init 4 && sleep 3 && init 3` over SSH only when the menu cannot be reached: it stops the
+interface without that save, so the receiver may come back on an older channel. **This catches a damaged or truncated download, not a compromised origin**: the list
 comes from the same place as the package, and its signature, `releases.json.sig`, is checked by the
 plugin and by Home Assistant, not by these commands.
 

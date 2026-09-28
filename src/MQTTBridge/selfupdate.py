@@ -53,7 +53,7 @@ transaction closes its doors too while R2 puts the previous files back (`rolling
 The restart itself waits for the helper's `restarting`: for a downgrade chosen at the television
 or on the page, every retained topic the node owns except `availability` is first retracted at
 QoS 1, because the older release does not know the newer one's topics and would leave them on
-the broker for ever. From that retraction on nothing at all is published (S-a): refusals are
+the broker for ever. From that retraction on nothing at all is published: refusals are
 logged, not put on `last_error`, and the `update` relay stops, so nothing the older release does
 not know is re-created behind the retraction.
 

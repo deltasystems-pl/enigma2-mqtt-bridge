@@ -2,11 +2,11 @@
 
 Two programs change the plugin on a receiver: the companion Home Assistant integration's installer,
 which works over SSH, and - decided in [ADR-0015](adr/0015-signed-self-update.md), merged and not
-yet released - the plugin's own update helper. They must never run at the same time, they must be able to undo each other's
-unfinished work, and whichever restarts the receiver's interface must leave the household on the
-channel it was watching. This file is the contract between the two: the names on the receiver's
-disk, the lock and how it goes stale, the snapshot, the marker, and the restart rule. A change to
-any name or rule here is a change to both repositories.
+yet released - the plugin's own update helper. They must never run at the same time, they must
+be able to undo each other's unfinished work, and whichever restarts the receiver's interface
+must leave the household on the channel it was watching. This file is the contract between the
+two: the names on the receiver's disk, the lock and how it goes stale, the snapshot, the marker,
+and the restart rule. A change to any name or rule here is a change to both repositories.
 
 What is built and what is not. For the integration there are two states: **released 0.3.1**, which
 is what every installer in the field does, and **integration main (unreleased, 0.4.0)**, which is
@@ -361,10 +361,10 @@ notes a failed write in its record and carries on):
   marker says `interrupted`. When it cannot start the plugin at all, nothing on the receiver
   reports anything, and the recovery is the companion integration's **Force plugin reinstall
   (SSH)**, which needs nothing from the plugin - SSH and the package bundled with the integration
-  (planned; the integration's ADR-0008, section 8). It needs the shared lock like any install:
-  the self-update's lock goes stale 30 minutes after its last heartbeat, or at once after the
-  reboot that a power loss is. The snapshot `self-update-<id>` is kept for a person to restore
-  from, and pruned like any other.
+  (integration main, unreleased; the integration's ADR-0008, section 8). It needs the shared lock
+  like any install: the self-update's lock goes stale 30 minutes after its last heartbeat, or at
+  once after the reboot that a power loss is. The snapshot `self-update-<id>` is kept for a person
+  to restore from, and pruned like any other.
 - 0.2.0 and 0.3.x never read it; the next plugin that knows it discards a stale one by these rules.
 - The plugin removes it once it has reported the end - read from the marker, from `status.json`,
   or from the last-transaction record - and when it gives up on a transaction whose helper has
@@ -411,7 +411,7 @@ so that a wrong answer costs a zap, not a lost channel:
 |---|---|---|
 | **R1 - restart**: the interface is running and healthy, and only the plugin's files changed | The plugin: `TryQuitMainloop(session, 3, timeout=60, default_yes=False)`, opened with a callback; any call back means the interface is still running (the image's own "no" closes it with `True`), and the plugin writes `withdraw`. The SSH installer (integration main): the preflight refuses while recording, streaming, in standby, or with a timer due within 10 minutes, and is measured again immediately before the restart; then OpenWebif's power state 3, called on the receiver itself, and **at most 60 s** for a new enigma2 pid, read every 2 s | A clean quit runs `configfile.save()` |
 | R1, no new pid within 60 s | The image asked a question on the television (timeshift, a background job). The installer **does not force it**: it restores the plugin's files and opkg metadata as in §3.4, reads the pid again, releases the lock and says so - that the receiver asked whether to restart, that the update was withdrawn and the previous plugin is running, and that the question may still be on the television, where either answer is safe. The outcomes are in the table below | Nothing was stopped |
-| **R2 - stop**: the interface must not run - a rollback that puts the settings block back, or (planned) a forced reinstall into an interface that keeps crashing | Record the playing service and the standby state (below); `init 4`; wait for enigma2 to stop; do the work; write the recorded service into `config.tv.lastservice` while enigma2 is stopped; `init 3`; wait for a new pid. The SSH installer's form of it, with its bounds, is §5.2 | Hypothesis H2: the image reads `lastservice` when it starts. R3 covers it being wrong |
+| **R2 - stop**: the interface must not run - a rollback that puts the settings block back, or a forced reinstall into an interface that keeps crashing (integration main, unreleased) | Record the playing service and the standby state (below); `init 4`; wait for enigma2 to stop; do the work; write the recorded service into `config.tv.lastservice` while enigma2 is stopped; `init 3`; wait for a new pid. The SSH installer's form of it, with its bounds, is §5.2 | Hypothesis H2: the image reads `lastservice` when it starts. R3 covers it being wrong |
 | **R3 - verify**, after every restart on every path | Compare the playing service and the standby state with the record. A different service: zap back to the recorded one through OpenWebif, once, and compare again. Standby recorded: enter it through OpenWebif (power state 5) | By effect, not by assumption |
 
 - **A restart is judged by the enigma2 pid changing**, never by the exit status of the call that
@@ -698,9 +698,10 @@ path's 15-minute deadline comes first (§2.4): a restart that lands late is give
 The reason then says which it was: `not_started` after a whole window, `time_limit` when the
 deadline cut it short - the forward path's time ran out, which says nothing against the release.
 Both are `rolled_back`, and both sentences say the previous version is back; only `not_started`
-says the new one did not start. So does every other `time_limit` that ends in R2 - the deadline
-passing while the package manager ran, with the interface restarting on its own in the meantime.
-`time_limit` has a second sentence, with `failed`, for a forward path that ran out before any
+says the new one did not start. Every other `time_limit` that ends `rolled_back` - the deadline
+passing while the package manager ran, with the interface restarting on its own in the meantime -
+says the same as the cut window: the previous version is back. An R2 that ends `failed` keeps its
+own sentence, with `time_limit` as its `cause`. `time_limit` has a second sentence, with `failed`, for a forward path that ran out before any
 restart: nothing it changed stays, and nothing is said to be back.
 
 ---
