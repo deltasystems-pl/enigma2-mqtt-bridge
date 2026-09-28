@@ -2897,7 +2897,7 @@ def test_a_deadline_that_passes_while_opkg_runs_says_how_it_ended(tmp_path, resp
     With the interface that asked still running, the old files go back under it and nothing new
     ever ran: `failed`, with the forward sentence. With an interface that restarted by itself in
     the meantime, R2 undoes the update: `rolled_back`, and the sentence has to say that the
-    previous version is back, as every `rolled_back` end does.
+    previous version is back, as it does for a proof window the deadline cut short.
     """
     scene = Scene(tmp_path)
 

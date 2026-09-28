@@ -30,8 +30,16 @@ from conftest import (
 from Screens import Standby as standby_module
 from updatelab import index_bytes, release
 
-from MQTTBridge import (epgimport, power, recording, selfupdate, trust, updatehelper, updateview,
-                        webif)
+from MQTTBridge import (
+    epgimport,
+    power,
+    recording,
+    selfupdate,
+    trust,
+    updatehelper,
+    updateview,
+    webif,
+)
 from MQTTBridge.origin import MQTT, PAGE, SCREEN
 from MQTTBridge.selfupdate import SelfUpdater
 from MQTTBridge.uninstall import Uninstaller
