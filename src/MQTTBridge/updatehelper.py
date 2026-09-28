@@ -1960,6 +1960,13 @@ class Transaction:
         escapes before then meets the net as any other error after the package manager, and
         the net runs R2 again - never a `failed` over the new, unproven code.
         """
+        if failure.reason == "time_limit":
+            # However the deadline brought the update here - a proof window it cut short, or the
+            # 15 minutes running out while the package manager ran and the interface restarted
+            # on its own - a `rolled_back` end has to say that the previous version is back,
+            # not the forward path's "did not finish" (review SF1). An end that is not
+            # `rolled_back` takes its own reason below and keeps only the code as `cause`.
+            failure = Fail("time_limit", rolled_back=True, previous=self.request["from"]["version"])
         receiver = self.receiver
         limit = receiver.clock() + ROLLBACK_LIMIT
         recorded = self.before
