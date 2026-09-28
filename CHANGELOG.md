@@ -43,8 +43,9 @@ version that has no section here.
   build stays closed, says so, and lets the same restart through; a plugin started by the update's
   restart also closes its doors while the old files go back. A helper that stops without an end is
   reported `interrupted`; the next `cmd/update` says when its lock lets a new one start, and the
-  start after a restart says how it ended, by the build that runs. Nothing of this has run on a
-  receiver yet.
+  start after a restart says how it ended, by the build that runs. It has run on a receiver once,
+  in a hardware spike (TRANSACTION.md section 8); the acceptance together with the integration is
+  still to come.
 
 - **A receiver without internet installs through Home Assistant: `relay_request` and `cmd/relay`**
   ([TOPICS.md](docs/TOPICS.md) §1, §2). An install started at the television or on the OpenWebif
