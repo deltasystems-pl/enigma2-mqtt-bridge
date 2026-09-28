@@ -1,12 +1,12 @@
 # The install transaction
 
 Two programs change the plugin on a receiver: the companion Home Assistant integration's installer,
-which works over SSH, and - planned in [ADR-0015](adr/0015-signed-self-update.md) - the plugin's own
-update helper. They must never run at the same time, they must be able to undo each other's
-unfinished work, and whichever restarts the receiver's interface must leave the household on the
-channel it was watching. This file is the contract between the two: the names on the receiver's
-disk, the lock and how it goes stale, the snapshot, the marker, and the restart rule. A change to
-any name or rule here is a change to both repositories.
+which works over SSH, and - decided in [ADR-0015](adr/0015-signed-self-update.md), merged and not
+yet released - the plugin's own update helper. They must never run at the same time, they must
+be able to undo each other's unfinished work, and whichever restarts the receiver's interface
+must leave the household on the channel it was watching. This file is the contract between the
+two: the names on the receiver's disk, the lock and how it goes stale, the snapshot, the marker,
+and the restart rule. A change to any name or rule here is a change to both repositories.
 
 What is built and what is not. For the integration there are two states: **released 0.3.1**, which
 is what every installer in the field does, and **integration main (unreleased, 0.4.0)**, which is
@@ -20,18 +20,18 @@ hardware before the release that carries it, and is taken out again if that fail
 | The snapshot, schema 2 (§3) | **released 0.3.1** | helper written, same layout |
 | Recovering an abandoned transaction by its id (§3.3) | integration main (unreleased, 0.4.0) | planned |
 | Restoring while the interface runs (§3.4) | integration main (unreleased, 0.4.0) | helper written |
-| The marker (§4) | not used | helper writes it; the plugin reads it at start (written, not merged) |
-| The restart rule (§5) | integration main (unreleased, 0.4.0); **released 0.3.1 stops and starts the interface with `init 4` / `init 3` on every path** | helper written for R2 and R3; R1's clean quit is the plugin's (written, not merged) |
+| The marker (§4) | not used | helper writes it; the plugin reads it at start |
+| The restart rule (§5) | integration main (unreleased, 0.4.0); **released 0.3.1 stops and starts the interface with `init 4` / `init 3` on every path** | helper written for R2 and R3; R1's clean quit is the plugin's |
 | R2 as one unit (§5.2) | integration main (unreleased, 0.4.0): one detached script | helper written: inside the helper, which is itself detached |
 | Proof that the new plugin started (§6) | **released 0.3.1** (live `online`, `info` with the new version, a new enigma2 pid); unchanged on integration main | helper written |
 | Tests against the other program's released code (§2.5) | - | written |
-| The transaction directory (§7) | - | helper written; the plugin's side written, not merged |
+| The transaction directory (§7) | - | helper written, and the plugin's side |
 
-"Helper written" means: the code is in the plugin's package and tested against a fake receiver,
-but **no released or merged plugin starts it yet**; the only runs on a receiver are the hardware
-spike's (§8). "Written, not merged" is the plugin's side - `cmd/update`, which starts the helper
-(`selfupdate.py`), and its half of §4 and §7 - in the same state, one change behind the helper; the
-spike its merge waited for has run (§8), and what it left for the joint acceptance is listed there.
+"Helper written" means: the helper and the plugin's side that starts it - `cmd/update`, the
+television and the OpenWebif page (`selfupdate.py`), and its half of §4 and §7 - are merged on the
+plugin's `main` branch, **not released**, and tested against a fake receiver; the only runs on a
+receiver are the hardware spike's (§8), before the merge. The acceptance together with the
+integration comes before a release, and §8 lists what the spike left for it.
 
 Paths are the ones on the receiver. `<id>` is twelve lowercase hexadecimal digits
 (`secrets.token_hex(6)`), one per transaction; it names the snapshot, the self-update's transaction
@@ -100,9 +100,9 @@ fresh random twelve-digit id, which matches nothing already there.
 | `started` | int | yes | Epoch seconds when the record was written |
 | `boot_id` | string | yes | `/proc/sys/kernel/random/boot_id` at that moment, or empty |
 | `uptime` | number or `null` | yes | Seconds since boot at that moment, from `/proc/uptime` |
-| `origin` | string | planned | Who started the self-update: `mqtt`, `home_assistant`, `screen`, `page` |
-| `id` | string | integration main (unreleased, 0.4.0) for the SSH installer; planned for the self-update | The transaction's `<id>` |
-| `target` | string | planned | The version being installed |
+| `origin` | string | no; the self-update's helper writes it (plugin main, unreleased) | Who started the self-update: `mqtt`, `home_assistant`, `screen`, `page` |
+| `id` | string | integration main (unreleased, 0.4.0) for the SSH installer; the self-update's helper (plugin main, unreleased) | The transaction's `<id>` |
+| `target` | string | no; the self-update's helper writes it (plugin main, unreleased) | The version being installed |
 
 A reader ignores keys it does not know. The helper of released 0.3.1 reads only `boot_id`,
 `uptime` and `started`, so `origin`, `id` and `target` change nothing for it. The helper on
@@ -276,7 +276,7 @@ Either way the recovery first needs the lock, and the two programs' locks age di
 self-update's lock is stale 30 minutes after its last heartbeat, but the SSH installer's lock has
 no heartbeat and stays fresh for **30 minutes from its claim** - the residual named in §5.2.
 
-### 3.4 Restoring while the interface runs (integration main, unreleased 0.4.0; planned for the self-update)
+### 3.4 Restoring while the interface runs (integration main, unreleased 0.4.0; the self-update's helper, plugin main, unreleased)
 
 When a restart is withdrawn (§5, R1 with a question), the old enigma2 is still the running process
 and the old files go back underneath it. On integration main the same restore also serves the
@@ -361,10 +361,10 @@ notes a failed write in its record and carries on):
   marker says `interrupted`. When it cannot start the plugin at all, nothing on the receiver
   reports anything, and the recovery is the companion integration's **Force plugin reinstall
   (SSH)**, which needs nothing from the plugin - SSH and the package bundled with the integration
-  (planned; the integration's ADR-0008, section 8). It needs the shared lock like any install:
-  the self-update's lock goes stale 30 minutes after its last heartbeat, or at once after the
-  reboot that a power loss is. The snapshot `self-update-<id>` is kept for a person to restore
-  from, and pruned like any other.
+  (integration main, unreleased; the integration's ADR-0008, section 8). It needs the shared lock
+  like any install: the self-update's lock goes stale 30 minutes after its last heartbeat, or at
+  once after the reboot that a power loss is. The snapshot `self-update-<id>` is kept for a person
+  to restore from, and pruned like any other.
 - 0.2.0 and 0.3.x never read it; the next plugin that knows it discards a stale one by these rules.
 - The plugin removes it once it has reported the end - read from the marker, from `status.json`,
   or from the last-transaction record - and when it gives up on a transaction whose helper has
@@ -377,7 +377,7 @@ notes a failed write in its record and carries on):
 
 <a id="5-the-restart-rule-planned-for-040-both-programs"></a>
 
-## 5. The restart rule (integration main, unreleased 0.4.0; planned for the self-update)
+## 5. The restart rule (integration main, unreleased 0.4.0; the self-update, plugin main, unreleased)
 
 **Why.** The image saves its settings - the channel being watched among them, as
 `config.tv.lastservice` - only on a **clean** quit: `StartEnigma.py` runs `stopService()`,
@@ -390,17 +390,19 @@ steps of its rollback - is `init 4` then `init 3`, with nothing recorded and not
 Integration main (unreleased, 0.4.0) follows this section: an install or update restarts only by R1,
 and `init 4` is left to the rollback that is R2. It has not yet been run on a receiver.
 
-**Two hypotheses this rule rests on, not yet measured.** The integration's code that relies on them
-is merged on its main branch without that measurement; both are measured on a receiver in the
-hardware acceptance before a release carries the code (spike S2 in the plan), and the code is taken
-out again if that fails. Until then they are hypotheses, and the rule is built so that a wrong
-answer costs a zap, not a lost channel:
+**Two hypotheses this rule rests on.** The integration's code that relies on them is merged on its
+main branch without their measurement; both are measured on a receiver in the hardware acceptance
+before a release carries the code, and the code is taken out again if that fails. The rule is built
+so that a wrong answer costs a zap, not a lost channel:
 
 - **H1 - `init 4` loses unsaved settings like any signal stop.** Expected from the above: init stops
-  the respawn entry by signal, so the image's save never runs. Not measured. On integration main
+  the respawn entry by signal, so the image's save never runs. **Not measured.** On integration main
   only R2 uses `init 4`, and it writes the recorded channel after the stop either way.
 - **H2 - the image reads `config.tv.lastservice` at start**, so a service written into the settings
-  while enigma2 is stopped is the one it comes back on. Not measured. If it is wrong, R3's zap back
+  while enigma2 is stopped is the one it comes back on. **Observed once**, in the hardware spike's
+  drill (§8): the self-update's R2 wrote a channel other than the one the image had saved, and the
+  image came up on the written one, so R3's zap back was not needed. One receiver and one image;
+  the joint acceptance measures it again for the integration's R2. If it is wrong, R3's zap back
   restores the channel instead.
 
 ### 5.1 The three cases
@@ -409,7 +411,7 @@ answer costs a zap, not a lost channel:
 |---|---|---|
 | **R1 - restart**: the interface is running and healthy, and only the plugin's files changed | The plugin: `TryQuitMainloop(session, 3, timeout=60, default_yes=False)`, opened with a callback; any call back means the interface is still running (the image's own "no" closes it with `True`), and the plugin writes `withdraw`. The SSH installer (integration main): the preflight refuses while recording, streaming, in standby, or with a timer due within 10 minutes, and is measured again immediately before the restart; then OpenWebif's power state 3, called on the receiver itself, and **at most 60 s** for a new enigma2 pid, read every 2 s | A clean quit runs `configfile.save()` |
 | R1, no new pid within 60 s | The image asked a question on the television (timeshift, a background job). The installer **does not force it**: it restores the plugin's files and opkg metadata as in §3.4, reads the pid again, releases the lock and says so - that the receiver asked whether to restart, that the update was withdrawn and the previous plugin is running, and that the question may still be on the television, where either answer is safe. The outcomes are in the table below | Nothing was stopped |
-| **R2 - stop**: the interface must not run - a rollback that puts the settings block back, or (planned) a forced reinstall into an interface that keeps crashing | Record the playing service and the standby state (below); `init 4`; wait for enigma2 to stop; do the work; write the recorded service into `config.tv.lastservice` while enigma2 is stopped; `init 3`; wait for a new pid. The SSH installer's form of it, with its bounds, is §5.2 | Hypothesis H2: the image reads `lastservice` when it starts. R3 covers it being wrong |
+| **R2 - stop**: the interface must not run - a rollback that puts the settings block back, or a forced reinstall into an interface that keeps crashing (integration main, unreleased) | Record the playing service and the standby state (below); `init 4`; wait for enigma2 to stop; do the work; write the recorded service into `config.tv.lastservice` while enigma2 is stopped; `init 3`; wait for a new pid. The SSH installer's form of it, with its bounds, is §5.2 | Hypothesis H2: the image reads `lastservice` when it starts. R3 covers it being wrong |
 | **R3 - verify**, after every restart on every path | Compare the playing service and the standby state with the record. A different service: zap back to the recorded one through OpenWebif, once, and compare again. Standby recorded: enter it through OpenWebif (power state 5) | By effect, not by assumption |
 
 - **A restart is judged by the enigma2 pid changing**, never by the exit status of the call that
@@ -485,7 +487,7 @@ Home Assistant stopping in either of the last two windows leaves the receiver an
 same way, with no sentence shown. When the lock cannot be released after a withdrawal, the outcome
 is `rollback_lock_failed` instead.
 
-### 5.2 R2 runs as one unit, and an interruption ends with the interface running (integration main, unreleased 0.4.0; planned for the self-update)
+### 5.2 R2 runs as one unit, and an interruption ends with the interface running (integration main, unreleased 0.4.0; the self-update's helper, plugin main, unreleased)
 
 Between `init 4` and `init 3` the household has no picture. Nothing that can be interrupted from
 outside the receiver may sit between the two. What a shell does when it is interrupted was
@@ -499,6 +501,16 @@ process:
 | `HUP` or `TERM` to the shell while the restore child ran | the trap ran **at once, while the child was still running**; the child finished after the shell had exited | the same |
 | `HUP` or `TERM` to the whole process group | the child was killed too - the restore cut off - and then the trap ran | the same |
 | After a signal trap that does not end in `exit` | the script **carried on** with its next step, and the `EXIT` trap ran a second time | the same |
+
+Measured again for the integration's fix that made the trap only record a signal - busybox 1.36.1
+`sh`, `dash`, and bash 5.2.21 run as `sh` and as bash, on a development machine, not on a
+receiver:
+
+| What happened to the script | Observed | So |
+|---|---|---|
+| `INT` and a second trapped signal (`TERM` or `HUP`) during one foreground command, all trapped | bash, as `sh` or not: a later `wait` for a background child returned 128+n within about 2 ms while the child still ran - even with the signals ignored by then. dash and busybox: not seen | the restore reports its own exit status; `wait` is not used for it |
+| A caught signal while busybox runs `sleep` | busybox runs `sleep` itself and ends it at once | the stop wait is measured in time (`/proc/uptime`), not counted in sleeps |
+| A signal as the shell enters the fork of the restore (strace syscall injection) | every shell: the handler ran before the pid was kept | the trap only records; the pid is kept under the deferral |
 
 So:
 
@@ -517,26 +529,34 @@ So:
   helper, so nothing the installer tidies up can take a file from under it.
 - **The status lines**, each appended to `status` as its step happens, in this order: `begun <pid>`
   (the script's own pid), `stopping <rc>` (`init 4`'s exit status), `stopped` or `stop_timeout`,
-  `restored <rc>` (the restore's exit status), `written <rc>` or `not_written`, `started <rc>`
-  (`init 3`'s exit status), `done`. `not_written` means enigma2 was not seen stopped, or no channel
-  was recorded. A signal ends the script through its trap after `started`, without `done`; one that
-  arrives before the restore began leaves out `restored`.
-- **The bounds.** After `init 4` the script waits up to **30 s** for enigma2 to stop. If it is still
-  running then, the script says `stop_timeout` and puts back the files and opkg's metadata only -
-  no settings block and no channel, because the running interface writes its own settings over
-  them on its next clean quit - and still runs `init 3`. The restore is bounded at **90 s** by a
-  watchdog that sends it `TERM`, so the picture comes back even from a restore that hangs.
+  `restored <rc>`, `written <rc>` or `not_written`, `started <rc>` (`init 3`'s exit status) or
+  `started shutdown`, `done`. `restored` carries the exit status the restore wrote itself, or `lost`
+  when the restore is gone without writing one (killed - by the watchdog, or by a signal to the
+  whole process group). `not_written` means enigma2 was not seen stopped, or no channel was
+  recorded. `restored` is always present once `started` is. A signal that arrived before the
+  finishing step began ends the script with exit status 1 after `started`, without `done`; one
+  during the finishing step is ignored and `done` is written.
+- **The bounds.** After `init 4` the script waits up to **30 s** for enigma2 to stop, measured in
+  elapsed time from `/proc/uptime` rather than counted in sleeps. If it is still running then, the
+  script says `stop_timeout` and puts back the files and opkg's metadata only - no settings block
+  and no channel, because the running interface writes its own settings over them on its next
+  clean quit - and still runs `init 3`. The restore is bounded at **90 s** by a watchdog that sends
+  it `TERM`, and the finishing step sends it `KILL` ten seconds after that, so the picture comes
+  back even from a restore that hangs or ignores the watchdog.
 - **How the installer follows it.** It reads `status` every 2 s, connecting again after a dropped
   connection, for at most 180 s (the 30 s stop wait, the 90 s restore bound and a 60 s margin).
   Reading `started` ends the following. Unless the status says `stop_timeout` or `started` is not
   0, the installer then waits up to 120 s for a new enigma2 pid and runs R3; in every case it then
   releases the lock, and only after that removes `/tmp/enigma2-mqtt-r2-<id>/` and its uploaded
   helper. `restored` other than 0 is reported as `rollback_failed` (or, for the helper's two opkg
-  exit statuses, `rollback_opkg_busy` and `rollback_opkg_overlap`), `stop_timeout` as
-  `rollback_failed` saying that only the files went back, and `started` other than 0 - or no new
-  pid within the 120 s - as `rollback_restart_failed`. When the restore and the restart both
-  failed, the restore's code is the one reported, with a note that the interface did not come back
-  either.
+  exit statuses, `rollback_opkg_busy` and `rollback_opkg_overlap`); `restored lost` is
+  `rollback_failed`. With `stop_timeout`, "only the plugin's files were put back" is reported only
+  for `restored 0`; a failed restore keeps its own verdict with a note that the settings were not
+  restored either, except the opkg overlap, whose sentence says the receiver was put back as it
+  was - false without the settings - so it becomes `rollback_failed` with the overlap in its
+  detail. `started` other than 0, `started shutdown` included - or no new pid within the 120 s -
+  is `rollback_restart_failed`. When the restore and the restart both failed, the restore's code
+  is the one reported, with a note that the interface did not come back either.
 - **The lock is held until the script's end is seen.** From the moment `r2-start` is sent until
   `started` is read, the installer neither releases the lock nor deletes anything of the script's.
   When the following ends without `started` - its bound passed, or Home Assistant stopped - the lock
@@ -549,14 +569,16 @@ So:
   started, so a missing one means it never started. A script that never started stopped nothing:
   the lock is released and the uploaded helper removed, but a directory is never removed on the
   strength of its absence.
-- **The plugin's helper** (written; not yet started by the plugin) runs R2 inside itself - detached
-  from enigma2 and from any SSH session - and does not start a child for the restore at all: the
-  restore is a function call in the helper's own process. Its handlers for `HUP`, `INT`, `TERM`
-  and `PIPE` only set a flag, which R2 does not read: once `init 4` has been sent, the unit always
-  runs on - wait for the stop, restore, write `lastservice`, `init 3`, R3 - so a signal can neither
-  cut the restore short nor start the interface over a tree that is half put back, or not put
-  back at all. (The script below has to wait for its restore child for the same reason; the helper
-  has no child to wait for, so it has no window between starting one and knowing it.) A failed
+- **The plugin's helper** (plugin main, unreleased) runs R2 inside itself - detached from enigma2
+  and from any SSH session - and does not start a child for the restore at all: the restore is a
+  function call in the helper's own process, and its result is the call's own, never a wait that
+  a signal can cut short. Its handlers for `HUP`, `INT`, `TERM` and `PIPE` only record the signal,
+  which R2 does not read, and never run the finishing step: once `init 4` has been sent, the unit
+  always runs on - wait for the stop, restore, write `lastservice`, `init 3`, R3 - so a signal can
+  neither cut the restore short nor start the interface over a tree that is half put back, or not
+  put back at all. (The integration's script takes its restore's result from a file the restore
+  writes itself, for the same reason; the helper has no child to wait for, so it has no window
+  between starting one and knowing it.) A failed
   restore or `lastservice` write is recorded and the unit carries on, and anything else that
   escapes after `init 4` still meets a `finally` - the helper's form of the script's finishing
   step below: it first runs the steps the unit had not reached, the restore and the `lastservice`
@@ -590,16 +612,19 @@ So:
   the restart, noted as `internal_error` - and anything that escapes before the stop is sent
   reaches the helper's last net, which runs R2 again rather than end over the new, unproven code.
   A `SIGKILL` or power between `init 4` and `init 3` is the residual stated below.
-- **The trap is still there**, set **before** `init 4`: on `HUP INT TERM PIPE` it runs the finishing
-  step and exits, and on `EXIT` it runs the finishing step. That step first ignores further `HUP`,
-  `INT`, `TERM` and `PIPE`, so a second signal cannot cut the first short. It **waits for a restore
-  still running** (the script starts the restore as a child and keeps its pid), stops the watchdog,
-  writes the recorded `lastservice` if enigma2 was seen stopped and a channel was recorded, and runs
-  `init 3`. It is idempotent, because the `EXIT` trap runs it again.
+- **The trap only records.** Set before `init 4`, the trap on `HUP`, `INT`, `TERM` and `PIPE` does
+  nothing but note that a signal arrived. The script goes on exactly as without it: the stop is
+  waited for, the restore runs to its end or its limit, the channel is written and the interface
+  started. The finishing step runs once, on the main path, with those four signals ignored. The
+  `EXIT` trap is there only for an exit nobody planned. Other signals keep their default action;
+  nothing on a receiver sends them to a detached session.
+- **The restore's result is never read from `wait`.** The restore writes its own exit status to a
+  file in the script's directory as its last act (a finished file renamed into place). The
+  finishing step waits until that file exists or the restore is gone - `kill -0`, and not a zombie
+  in `/proc/<pid>/stat` - and reads the verdict from the file.
 - **Order inside**: the settings block is restored first and `lastservice` written after it, each
-  by an atomic rename, so a restore can never overwrite the channel, and waiting for the restore
-  keeps the trap from writing the channel under a restore that then renames the settings file over
-  it.
+  by an atomic rename, so a restore can never overwrite the channel; the finishing step writes the
+  channel only after the restore has written its exit status or is gone.
 - **Not measured**: which signal, if any, dropbear sends a command without a terminal when its
   connection closes. The detached start makes the answer not matter; the trap list covers each
   possibility that was measured.
@@ -609,24 +634,37 @@ So:
   again**: nothing on the receiver starts the interface by itself, and the next install cannot help,
   because its preflight needs OpenWebif, which runs only while the interface does. The R2 script
   does not keep the lock alive - the installer holds it, with no heartbeat - so the lock goes stale
-  30 minutes after its claim, or at once with that power cycle. Planned, not built: a forced
-  reinstall that recognises runlevel 4 with a lock, a marker or a transaction directory of this
+  30 minutes after its claim, or at once with that power cycle. Integration main (unreleased)
+  adds a forced reinstall that recognises runlevel 4 left by an interrupted stop of this
   project's as "ours" and recovers it with `init 3` and R3; in runlevel 4 **without** anything of
   ours it refuses, because somebody stopped the interface on purpose.
-- An interruption the trap does cover, arriving before the restore has begun, starts the interface
-  on the plugin as it was: the picture comes first. The status then has `started` without
-  `restored`, which integration main reports as `rollback_failed`, and it releases the lock; the
-  snapshot stays for a person to restore from - the sentence names the backups directory, the log
-  the exact snapshot - and §3.3's recovery does not run, because no lock is left behind.
+- **A shutdown** (sysvinit's rc 0 or rc 6: `TERM` to every process, then `KILL`) cannot be held up
+  by the script: `KILL` ends it. Before it sends `init 3`, the script asks `runlevel`; when that
+  prints runlevel 0 or 6 as the current level it says `started shutdown` and does not ask for
+  runlevel 3 - the next start reads the restored files and the channel. Any other answer,
+  including none, starts the interface as before. That `runlevel` works on the receiver is
+  measured (it read `4 3` after an `init 4` / `init 3`); that it reads 0 or 6 while rc 0 or rc 6
+  runs follows from sysvinit writing its utmp runlevel record on every change and is **not
+  measured on a receiver**, nor is the effect of a `telinit 3` that does reach init in the middle
+  of a shutdown. A drill on a receiver is outstanding.
+- A signal delays the picture by at most the bounds of a run without one - the 30 s stop wait and
+  the 90 s restore limit, plus 10 s before a restore that ignores the watchdog is killed - and
+  never starts the interface over a tree the restore has not finished with. `started` without
+  `restored` is no longer reachable; integration main still reports it as `rollback_failed`.
 - A restore cut off part-way - by the 90 s watchdog, or by a signal to the whole process group,
-  which the detached start is there to prevent - leaves a partial restore. The trap still starts
-  the interface, and integration main reports `rollback_failed` and releases the lock, as above.
-  Restoring the same snapshot again by hand is safe.
-- **Test**: **close the SSH connection** between `init 4` and `init 3` - not a signal delivered by
-  the test - and the receiver ends in runlevel 3, with the restore complete and the recorded
-  `lastservice` written. Integration main has this test, with stand-ins for `init` and `pidof`,
-  under the host's `sh`, busybox `sh` where installed, bash run as `sh`, and bash; it has not been
-  run on a receiver.
+  which the detached start is there to prevent - says `restored lost` (or its own non-zero
+  status). The interface is still started, integration main reports `rollback_failed` and
+  releases the lock. Restoring the same snapshot again by hand is safe.
+- **Tests**, integration main, with stand-ins for `init`, `pidof`, `runlevel` and the restore,
+  under the host's `sh`, busybox `sh` where installed, bash run as `sh`, and bash: the connection
+  closed between `init 4` and `init 3`; each of `HUP`, `INT`, `TERM`, `PIPE` sent from inside the
+  command the script runs at each step (`init 4`, the stop wait, the last look before the stop is
+  recorded, the restore, the channel, `init 3`); `INT` with `TERM` or `HUP` during one foreground
+  command; a random flood of the four; signals every 0.3 s during the stop wait; the fork of the
+  restore hit by an `LD_PRELOAD` shim (dynamically linked shells) and by strace syscall injection
+  (every shell, skipped where strace is missing); a shutdown in runlevel 0 and 6; the script's exit
+  status; a restore that hangs and one that ignores the watchdog. None of it has run on a
+  receiver.
 
 ### 5.3 The SSH path has no doors - a bounded residual (R1)
 
@@ -651,7 +689,7 @@ process whose build is not the one on disk.
 | Path | Proof |
 |---|---|
 | SSH installer (released 0.3.1, unchanged on integration main) | Within 120 s of the restart: the plugin's `availability` back `online` as a live message (a retained replay does not count) - preceded by a live `offline` only when the plugin was running before the install; then a live `info` with the expected `info.plugin` and `ha_mode: integration`. After that, a new SSH connection must find an enigma2 pid that was not running before the restart. Planned: `info.build.commit` too, when the target publishes one |
-| Self-update, a target that knows the marker - one whose signed index entry says `self_update: true` (helper written; the plugin's half written, not merged) | The new plugin writes `started.json` (§7), with its version and build commit, into the transaction directory; both must be the signed entry's. Whether the new process also held the log open is recorded beside it, and decides nothing |
+| Self-update, a target that knows the marker - one whose signed index entry says `self_update: true` (helper written, and the plugin's half) | The new plugin writes `started.json` (§7), with its version and build commit, into the transaction directory; both must be the signed entry's. Whether the new process also held the log open is recorded beside it, and decides nothing |
 | Self-update, a target that does not (0.2.0, 0.3.x - helper written) | The **new** enigma2 pid holds the plugin's log file open (`/proc/<pid>/fd`), polled every 2 s through the whole window, because a log rotation closes the file for a moment. Both released plugins configure logging before anything else at start, whether or not they are switched on and whether or not the broker answers. When neither log path was writable before the restart, those plugins hold no file, and the proof is the OpenWebif hook answering anything but 404 after the pid change. The transaction's record says which proof it used. The helper does not read the log's lines at all: a line is something a broker client can put there, and a timestamp it can forge |
 
 No proof within the window: R2 (§5.1), and the restored plugin puts the reason on `last_error`.
@@ -660,12 +698,15 @@ path's 15-minute deadline comes first (§2.4): a restart that lands late is give
 The reason then says which it was: `not_started` after a whole window, `time_limit` when the
 deadline cut it short - the forward path's time ran out, which says nothing against the release.
 Both are `rolled_back`, and both sentences say the previous version is back; only `not_started`
-says the new one did not start. `time_limit` has a second sentence, with `failed`, for a forward
-path that ran out before any restart: nothing it changed stays, and nothing is said to be back.
+says the new one did not start. Every other `time_limit` that ends `rolled_back` - the deadline
+passing while the package manager ran, with the interface restarting on its own in the meantime -
+says the same as the cut window: the previous version is back. An R2 that ends `failed` keeps its
+own sentence, with `time_limit` as its `cause`. `time_limit` has a second sentence, with `failed`, for a forward path that ran out before any
+restart: nothing it changed stays, and nothing is said to be back.
 
 ---
 
-## 7. The self-update's transaction directory (helper written; the plugin's side written, not merged)
+## 7. The self-update's transaction directory (helper and plugin written, plugin main, unreleased)
 
 The plugin and its helper talk through files in `/home/root/mqttbridge-backups/update-<id>/`
 (0700) and nothing else: the helper outlives the plugin's process, and a file is the one thing both
@@ -886,8 +927,8 @@ bounds that case.
 
 **The acceptance drill's hook.** The hardware acceptance has to prove R2's stop, restore and
 `lastservice` write on a receiver in one restart, without a forward restart and a failed proof
-first. The plan's acceptance section (§ae.12) proves R2 with a deliberately broken build; this
-hook is an **acceptance-only addition** to it, for the same proof without building one, and it
+first. The planned hardware acceptance proves R2 with a deliberately broken build; this hook is
+an **acceptance-only addition** to it, for the same proof without building one, and it
 exists only in the `acceptance` flavour. So a helper whose request says `acceptance: true` - which
 only an `acceptance`-flavour build writes; release and development builds always write `false` -
 looks, once the package is installed and verified and before it hands the restart to the plugin,
@@ -904,8 +945,11 @@ transaction as any other.
 
 The self-update ran on a receiver once before its merge: a Vu+ Uno 4K SE with OpenViX 6.6
 (Python 3.12, BusyBox 1.36.1), with acceptance builds signed by throwaway test keys, the test
-index delivered over MQTT and the package served by a relay running on the receiver itself. What
-it showed:
+index delivered over MQTT and the package served by a relay running on the receiver itself. The
+builds were made from the self-update's branches as they stood before their last pre-merge
+follow-up, so what that follow-up added - `update.transaction`'s `reason` and the sentences for a
+`time_limit` rollback - and what changed after the merge have not run on a receiver. What it
+showed:
 
 - A self-update over MQTT to a build of the same version and another commit ended `installed`:
   the helper survived the interface restart, the new start confirmed itself (tier 1, §6) and was
@@ -918,8 +962,8 @@ it showed:
   (`withdrawn_before_restart`, `question`) with the files put back and no restart.
 - The acceptance drill (§7) sent an update straight into R2: enigma2 stopped, the files restored,
   `lastservice` written while it was stopped, the interface started once; the image came up on
-  the written service (`rolled_back`, `drill`, channel kept). There were never two interface
-  processes at once.
+  the written service (`rolled_back`, `drill`, channel kept) although it had saved another one -
+  hypothesis H2 of §5, observed. There were never two interface processes at once.
 - BusyBox's `start-stop-daemon -b` forks twice: the helper runs in a new session and process
   group, not as its leader (§7, `helper.pid`); nothing in the plugin depends on leadership.
 - The helper's command line carries the script path as one argument followed by the transaction
@@ -930,5 +974,6 @@ it showed:
 Not covered by this run, and left for the joint acceptance with the integration: the checks on
 the television screen, the integration-side relay (Home Assistant's part was played by scripts),
 a power loss, the rollback of a release that does not start (`not_started`, and `time_limit`),
-and a downgrade. The owner record's heartbeat was seen advancing every 60 s while the question
-waited, but no beat fell inside the few seconds of a clean restart.
+and a downgrade. The owner record's heartbeat was seen advancing once, 60 s after the record was
+written, while the question waited, but no beat fell inside the few seconds of a clean restart.
+H1 of §5 was not measured.

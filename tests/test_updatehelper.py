@@ -2889,6 +2889,52 @@ def test_a_late_restart_that_r2_cannot_stop_keeps_time_limit_as_its_cause(tmp_pa
     assert scene.status()["record"]["cause"] == "time_limit"
 
 
+@pytest.mark.parametrize("respawned", [False, True],
+                         ids=["interface_that_asked_runs", "interface_restarted_by_itself"])
+def test_a_deadline_that_passes_while_opkg_runs_says_how_it_ended(tmp_path, respawned):
+    """The 15 minutes run out during the install.
+
+    With the interface that asked still running, the old files go back under it and nothing new
+    ever ran: `failed`, with the forward sentence. With an interface that restarted by itself in
+    the meantime, R2 undoes the update: `rolled_back`, and the sentence has to say that the
+    previous version is back, as it does for a proof window the deadline cut short.
+    """
+    scene = Scene(tmp_path)
+
+    def late():
+        scene.box.t = scene.transaction.deadline + 1
+        if respawned:
+            scene.box.restart()
+    scene.box.pauses["opkg_done"] = late
+    assert scene.run() == 1
+    assert scene.plugin_py() == f"# plugin {OLD}\n"
+    last = scene.last()
+    if respawned:
+        assert scene.init_calls() == ["4", "3"]
+        assert (last["result"], last["reason"]) == ("rolled_back", "time_limit")
+        assert last["error"] == TIME_LIMIT_ROLLED_BACK
+    else:
+        assert scene.init_calls() == []
+        assert (last["result"], last["reason"]) == ("failed", "time_limit")
+        assert last["error"] == "the update did not finish within its time limit"
+
+
+def test_a_time_limit_r2_could_not_finish_keeps_its_own_sentence(tmp_path):
+    """The rollback sentence belongs to a `rolled_back` end only: R2 that could not stop the
+    interface ends `failed`/`not_stopped`, with `time_limit` kept as the cause."""
+    scene = Scene(tmp_path)
+    scene.box.stops = False
+
+    def late_and_respawned():
+        scene.box.t = scene.transaction.deadline + 1
+        scene.box.restart()
+    scene.box.pauses["opkg_done"] = late_and_respawned
+    assert scene.run() == 1
+    assert (scene.last()["result"], scene.last()["reason"]) == ("failed", "not_stopped")
+    assert scene.status()["record"]["cause"] == "time_limit"
+    assert "ran out of time" not in scene.last()["error"]
+
+
 # What TRANSACTION.md section 2.4 states, in seconds from the helper's start.
 FORWARD_BOUND = updatehelper.FORWARD_LIMIT + 45
 R2_BOUND = 409

@@ -1,11 +1,12 @@
 """The relay handshake: an install asked for at the television or on the page, with no internet.
 
-Spec ae.6 "Relay handshake": when the origin is unreachable, the plugin asks Home Assistant on
-`relay_request` and takes `cmd/relay` only for the id it is waiting for, within 120 s; anything
-else is logged and dropped. Spec ae.4: a request that carries a relay never fetches from the
-origin; an install at the television or on the page decides on a fresh word about the origin
-(`update.origin`, ten minutes), and asks for the check's probe first when it has none - the
-explicit action is the consent - while a command over MQTT never probes (review round 1, MF1).
+When the origin is unreachable, the plugin asks Home Assistant on `relay_request` (TOPICS.md)
+and takes `cmd/relay` only for the id it is waiting for, within 120 s; anything else is logged
+and dropped. The consent rule (ADR-0015 decision 4): a request that carries a relay never fetches
+from the origin; an install at the television or on the page decides on a fresh word about the
+origin (`update.origin`, ten minutes), and asks for the check's probe first when it has none -
+the explicit action is the consent - while a command over MQTT never probes (review round 1,
+MF1).
 
 The receiver is `test_selfupdate.py`'s; its fixtures and helpers are reused as they are.
 `test_relay_contract.py` feeds the plugin what the companion integration really sends.

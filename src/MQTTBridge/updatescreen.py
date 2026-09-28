@@ -6,19 +6,20 @@ the running one marked, the ones that cannot be installed with the reason - and 
 progress with who started it. Yellow asks for the list again; OK or green installs the chosen
 version.
 
-**The person at the television is the consent** (spec ae.4). Neither `update_check` nor
-`update_allowed` is asked: whoever holds the remote control can open the setup screen and switch
-either on, so refusing them here would protect nothing. Both requests go through the dispatcher
-with the origin `screen`, so every guard that protects the household - a recording, a running EPG
-import, standby, an update already running, the ten-minute limits - applies exactly as it does
-over MQTT, and `last_error` says what it says for any other origin.
+**The person at the television is the consent** (SETUP.md, "Installing a release from the
+receiver"; ADR-0015 decision 4). Neither `update_check` nor `update_allowed` is asked: whoever
+holds the remote control can open the setup screen and switch either on, so refusing them here
+would protect nothing. Both requests go through the dispatcher with the origin `screen`, so
+every guard that protects the household - a recording, a running EPG import, standby, an update
+already running, the ten-minute limits - applies exactly as it does over MQTT, and `last_error`
+says what it says for any other origin.
 
 **Every install is asked first, and a downgrade is asked in its own words.** An install ends in
 a restart of the user interface, so OK alone never starts one; the question defaults to "no". A
 version below the running one is a downgrade, which only this screen and the page may start
-(spec ae.8), and its question names what it takes away: the newer features, until the next
-update. Only a "yes" to *that* question carries the downgrade consent down the call - the
-version and the consent are bound into the question's own callback when it is asked, so an
+(ADR-0015 decision 4), and its question names what it takes away: the newer features, until
+the next update. Only a "yes" to *that* question carries the downgrade consent down the call -
+the version and the consent are bound into the question's own callback when it is asked, so an
 answer acts on nothing but the question it answers and is never judged again from the list.
 
 **An install may wait before it starts** (the relay handshake, `selfupdate.py`): first while the
@@ -28,11 +29,11 @@ down, and never "started" for an update that has not; when the wait this screen 
 it says how - the update started, or why not, in the household's words.
 
 **The doors.** From the helper's `installing` on, the plugin's files are being replaced under
-this process (`selfupdate.py`). The screen may stay open - the image's restart question opens on
-top of it (spec ae.6a) - but it then shows only the sentence the setup screen and the page show,
-and its keys do nothing but close it. It refreshes itself every second from what is loaded: this
-module and `updateview.py` import nothing lazily, because a first import now could read a
-half-written file of the next release.
+this process (`selfupdate.py`; TRANSACTION.md section 5.3). The screen may stay open - the
+image's restart question opens on top of it - but it then shows only the sentence the setup
+screen and the page show, and its keys do nothing but close it. It refreshes itself every
+second from what is loaded: this module and `updateview.py` import nothing lazily, because a
+first import now could read a half-written file of the next release.
 
 Nothing a key or the timer does may raise into enigma2's main loop: each entry point logs what it
 catches and leaves the screen as it was.

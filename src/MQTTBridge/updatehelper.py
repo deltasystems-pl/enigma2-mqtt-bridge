@@ -262,9 +262,11 @@ SENTENCES = {
 }
 
 # One reason code, two ends. `time_limit` on the forward path ends `failed` with nothing new left
-# running; after a proof window the deadline cut short it ends `rolled_back`, and the sentence
-# for that end has to say what the household reads it for: the update was undone and the
-# previous version is back - not that the new one failed, which nothing showed (review S1).
+# running; once it reaches R2 - a proof window the deadline cut short, or the deadline passing
+# while the package manager ran and the interface restarted on its own - it ends `rolled_back`,
+# and the sentence for that end has to say what the household reads it for: the update was undone
+# and the previous version is back - not that the new one failed, which nothing showed.
+# `rollback()` picks it for every `time_limit` it is given.
 ROLLED_BACK_SENTENCES = {
     "time_limit": "the update ran out of time before the new version confirmed that it started, "
                   "so it was undone; the previous version {previous} is back",
@@ -1495,7 +1497,7 @@ class Transaction:
         return body
 
     def cross_check(self, entry):
-        """OD 6: the release asset's GitHub digest, once, when the receiver fetched it itself."""
+        """The release asset's GitHub digest, once, when the receiver fetched it itself."""
         if self.request.get("relay") is not None or self.request["acceptance"]:
             self.record["digest"] = "not_checked"
             return
@@ -1915,8 +1917,8 @@ class Transaction:
             receiver.sleep(PROOF_POLL)
         self.record["proof"] = "none"
         if cut:
-            return self.rollback(Fail("time_limit", rolled_back=True,
-                                      previous=self.request["from"]["version"]))
+            # `rollback()` gives it the sentence that says the previous version is back.
+            return self.rollback(Fail("time_limit"))
         return self.rollback(Fail("not_started", previous=self.request["from"]["version"]))
 
     def commit(self, proof, fd_seen):
@@ -1960,6 +1962,13 @@ class Transaction:
         escapes before then meets the net as any other error after the package manager, and
         the net runs R2 again - never a `failed` over the new, unproven code.
         """
+        if failure.reason == "time_limit":
+            # However the deadline brought the update here - a proof window it cut short, or the
+            # 15 minutes running out while the package manager ran and the interface restarted
+            # on its own - a `rolled_back` end has to say that the previous version is back,
+            # not the forward path's "did not finish". An end that is not `rolled_back` takes its
+            # own reason below and keeps only the code as `cause`.
+            failure = Fail("time_limit", rolled_back=True, previous=self.request["from"]["version"])
         receiver = self.receiver
         limit = receiver.clock() + ROLLBACK_LIMIT
         recorded = self.before

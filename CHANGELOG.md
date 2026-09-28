@@ -23,58 +23,60 @@ version that has no section here.
   minutes since the last update. The work is done by the update helper outside enigma2; the plugin
   follows it on `update.transaction`, which keeps the end's `reason` code after `last_error` is
   cleared - a rollback because the update ran out of time (`time_limit`) is told apart from one
-  because the new release did not start (`not_started`). From the moment the package manager starts until the restart
-  the plugin's doors are closed: every command, the OpenWebif page and the setup screen say "an
-  update is being applied". A question on the television that nobody answers within 60 s withdraws
-  the update. A downgrade chosen on the receiver first retracts every retained topic but
-  `availability`, and publishes nothing after that. The plugin that starts afterwards confirms
-  itself to the helper - even when it is switched off - and reports how the update ended, including
-  after a power cut. It reads **`enigma2mqtt/integration/<node>`**, the companion integration's
-  version, contract and floor, and judges `update.available` and `cmd/update` by it. A receiver that
-  went into standby, or started recording or an EPG import, before the restart is not restarted: the
-  update is withdrawn with that reason. `cmd/uninstall` is refused (`busy`) while an update runs or
-  its lock is held, and `cmd/update` while an uninstall runs. When the old files cannot be put back
-  after a failed update, or only the code and not all of its package records, or the helper stops
-  once the package manager has started, the doors stay closed and say to install the plugin again.
-  When a rollback puts the previous version back under an interface that did not stop, that
-  interface's doors stay closed and say to restart it - the one command they still let through; a
-  plugin started since opens as usual. Whatever the end, a plugin that ran through the update
-  compares its own build with the build on disk before it opens again, and one that runs another
-  build stays closed, says so, and lets the same restart through; a plugin started by the update's
-  restart also closes its doors while the old files go back. A helper that stops without an end is
-  reported `interrupted`; the next `cmd/update` says when its lock lets a new one start, and the
-  start after a restart says how it ended, by the build that runs. It has run on a receiver once,
-  in a hardware spike (TRANSACTION.md section 8); the acceptance together with the integration is
-  still to come.
+  because the new release did not start (`not_started`), and a `time_limit` rollback's `last_error`
+  says the previous version is back, however the deadline came. From the moment the package manager
+  starts until the restart the plugin's doors are closed: every command, the OpenWebif page and the
+  setup screen say "an update is being applied". A question on the television that nobody answers
+  within 60 s withdraws the update. A downgrade chosen on the receiver first retracts every retained
+  topic but `availability`, and publishes nothing after that. The plugin that starts afterwards
+  confirms itself to the helper - even when it is switched off - and reports how the update ended,
+  including after a power cut. It reads **`enigma2mqtt/integration/<node>`**, the companion
+  integration's version, contract and floor, and judges `update.available` and `cmd/update` by it. A
+  receiver that went into standby, or started recording or an EPG import, before the restart is not
+  restarted: the update is withdrawn with that reason. `cmd/uninstall` is refused (`busy`) while an
+  update runs or its lock is held, and `cmd/update` while an uninstall runs. When the old files
+  cannot be put back after a failed update, or only the code and not all of its package records, or
+  the helper stops once the package manager has started, the doors stay closed and say to install
+  the plugin again. When a rollback puts the previous version back under an interface that did not
+  stop, that interface's doors stay closed and say to restart it - the one command they still let
+  through; a plugin started since opens as usual. Whatever the end, a plugin that ran through the
+  update compares its own build with the build on disk before it opens again, and one that runs
+  another build stays closed, says so, and lets the same restart through; a plugin started by the
+  update's restart also closes its doors while the old files go back. A helper that stops without an
+  end is reported `interrupted`; the next `cmd/update` says when its lock lets a new one start, and
+  the start after a restart says how it ended, by the build that runs. It has run on a receiver
+  once, in a hardware spike (TRANSACTION.md section 8); the acceptance together with the integration
+  is still to come.
 
-- **Plugin updates on the television and on the OpenWebif page.** The setup screen's blue key
-  opens *Plugin updates* ("Aktualizacje wtyczki"): the running version and build, the signed list of
+- **Plugin updates on the television and on the OpenWebif page.** The setup screen's blue key opens
+  *Plugin updates* ("Aktualizacje wtyczki"): the running version and build, the signed list of
   versions the receiver holds and its age, every version it offers - the running one marked, the
   ones that cannot be installed marked so, with the reason on OK (the page lists it) - and the
-  update in progress with who started it, or how the last one ended - by its reason, so a rollback
-  because the update ran out of time is not said as a new version that did not start. An install on a receiver without internet says what it
-  waits for - the look at the internet, then Home Assistant's answer, counted down - and how the
-  wait ended (the page for an hour after it), never "started" before it has.
-  Yellow checks for updates, OK or green installs; the OpenWebif page gains the same section and an
-  *Install a plugin version* action. Neither needs `update_check` or `update_allowed` - pressing is
-  the consent - and every household guard still applies. Every install is asked first, and only
-  here can an older version be installed, after a question that says the newer features disappear
-  until the next update; on the page that consent stays on the receiver with the confirmation step
-  and is never sent by the browser; a confirmation expires after ten minutes, and the television's
-  answer acts only on the question it answers. While the doors are closed both show only the doors
-  sentence, and the page answers every form with it, asking and keeping nothing - all but the
-  interface restart that is the repair after `not_stopped`, whose form the page offers under the
-  sentence and which keeps its confirmation and its own guards; the screen may
-  stay open under the restart question and imports nothing new. Refusals and a failed check are
+  update in progress with who started it, or how the last one ended - by its reason, so only a
+  rollback because the new version did not start is said that way; one because the update ran out of
+  time or was interrupted (a power cut, say) says so, and any other says the update was undone. An
+  install on a receiver without internet says what it waits for - the look at the internet, then
+  Home Assistant's answer, counted down - and how the wait ended (the page for an hour after it),
+  never "started" before it has. Yellow checks for updates, OK or green installs; the OpenWebif page
+  gains the same section and an *Install a plugin version* action. Neither needs `update_check` or
+  `update_allowed` - pressing is the consent - and every household guard still applies. Every
+  install is asked first, and only here can an older version be installed, after a question that
+  says the newer features disappear until the next update; on the page that consent stays on the
+  receiver with the confirmation step and is never sent by the browser; a confirmation expires after
+  ten minutes, and the television's answer acts only on the question it answers. While the doors are
+  closed both show only the doors sentence, and the page answers every form with it, asking and
+  keeping nothing - all but the interface restart that is the repair after `not_stopped`, whose form
+  the page offers under the sentence and which keeps its confirmation and its own guards; the screen
+  may stay open under the restart question and imports nothing new. Refusals and a failed check are
   said on the television in the household's language. A development build is never shown as the
-  installed release of the same number. Polish and German catalogues carry every new string. Not
-  yet tried on a receiver.
+  installed release of the same number. Polish and German catalogues carry every new string. Not yet
+  tried on a receiver.
 
 - **A receiver without internet installs through Home Assistant: `relay_request` and `cmd/relay`**
   ([TOPICS.md](docs/TOPICS.md) §1, §2). An install started at the television or on the OpenWebif
-  page decides who fetches the package on a fresh word about the release origin: a probe of the
-  last ten minutes, or - on a receiver that has never checked, which is the default, or whose word
-  is older - the check's own five-second probe, run once first because starting the install is the
+  page decides who fetches the package on a fresh word about the release origin: a probe of the last
+  ten minutes, or - on a receiver that has never checked, which is the default, or whose word is
+  older - the check's own five-second probe, run once first because starting the install is the
   consent to it (nothing else probes, and a command over MQTT never does). Origin reachable: the
   update helper fetches it. Unreachable: the plugin asks the companion integration on the new event
   topic `relay_request` (QoS 1, never retained) and waits at most 120 s for its answer on the new
@@ -91,11 +93,12 @@ version that has no section here.
   helper starts, and the install stays the television's or the page's. No answer: refused with
   `reason` `no_relay`, nothing changed; only answers that this receiver's clock calls expired:
   `clock_skew`, with a sentence that says an answer came and asks to check the receiver's clock -
-  not that Home Assistant answered, since any broker client may have. A wait whose timer could
-  not start still ends by its age. A request that carries an address never contacts the origin. The address rule is now one function shared by the plugin and
-  the helper, and it no longer takes a bracketed IPv6 host or a port outside 1-65535 in
-  `cmd/update`. That is a rule about how the address is written: a host name may resolve to any
-  address, IPv6 included, and the bytes are verified whatever answers.
+  not that Home Assistant answered, since any broker client may have. A wait whose timer could not
+  start still ends by its age. A request that carries an address never contacts the origin. The
+  address rule is now one function shared by the plugin and the helper, and it no longer takes a
+  bracketed IPv6 host or a port outside 1-65535 in `cmd/update`. That is a rule about how the
+  address is written: a host name may resolve to any address, IPv6 included, and the bytes are
+  verified whatever answers.
 
 - **Every package says which build it is.** `info` gains `build` - the commit the package was
   built from, the commit's time, whether the tracked files matched it, the flavour, and the commit
@@ -120,49 +123,47 @@ version that has no section here.
   builds with it and then reads the build id - commit, time, clean, flavour - back out of the
   package. The package stays reproducible: the same commit, timestamp and flavour give the same
   bytes, with or without `.git`, which a new CI step proves on every pull request by building twice
-  and from an export. A bundle of a release built from a source archive matches the released
-  package only with all three - the commit, `MQTTBRIDGE_BUILD_FLAVOUR=release` and the commit's time.
+  and from an export. A bundle of a release built from a source archive matches the released package
+  only with all three - the commit, `MQTTBRIDGE_BUILD_FLAVOUR=release` and the commit's time.
 - **The signed release index**, the one list of versions the plugin and the companion integration
   will install from ([docs/RELEASE-INDEX.md](docs/RELEASE-INDEX.md), ADR-0015 decisions 2 and 7).
   This builds, signs and publishes it; the update check below reads it. `feed/releases.json` and
-  `feed/releases.json.sig` on the feed carry, per release, its size and sha256 - checked against
-  the release asset's own digest and against the feed's copy - its commit and time, its contract
-  major, the oldest integration it needs, its dependencies, whether it can update itself and
-  whether it is withdrawn, plus a floor and a serial. The values come from a new `COMPATIBILITY`
-  file read at each release tag and from `release-index/policy.json` on `main`, which sets the
-  floor, withdraws a release and corrects a declaration. Two Ed25519 public keys are embedded -
-  the main key (rank 1), which signs in CI, and a sealed spare (rank 2) - with the rule every
-  reader applies: a signature over the exact bytes by a key it holds, a serial above the last one
-  accepted from that key and at most 1000 above it, and never a lower rank after a higher one - a
-  key ranked below one a reader has accepted is silenced there for good, whatever a later release
-  embeds. A release's key set keeps three rules against the previous release's (ranks never change,
-  new keys rank above all before them, a key is never dropped while a lower one is kept), which
-  `index.yml` enforces. A reader keeps its memory in one stored state with a `release` and an
-  `acceptance` part, each keyed by the key set's fingerprint, open for extension (unknown
-  members and a higher schema are kept and tolerated) and refused, never read as empty, when a
-  known member is missing or malformed; an acceptance build's test keys may never include a
-  release key - the builder and the plugin both refuse such a set - and it never writes memory a
-  release build reads. The
-  receiver will verify with a pure-Python Ed25519 verifier the plugin carries
-  (`src/MQTTBridge/ed25519.py`, verify only). `tests/vectors/release-index.json` holds the RFC 8032
-  vectors, forgeries and the rule's scenarios, shared with the integration. Three workflows:
-  `index.yml` checks every pull request (the workflows, the policy, the published index, and a
-  rehearsal of the sign step with a throwaway key); `publish-index.yml` builds the index with no
-  key, signs it in the `release-signing` environment only after the maintainer approves - with no
-  permissions, nothing installed, and no code from the repository at all - the artifact, its
-  hash with the runner's own `sha256sum`, the signature from a fixed step (the key on OpenSSL's
-  stdin only, `base64` and `openssl` by absolute path, OpenSSL's arguments fixed) and the signature
-  handed on as its only output - while the repository's checks run in key-free jobs before
-  (`precheck`, a fixed check of the artifact against build's sha256 with gh-pages' whole history)
-  and after (`publish`, which verifies the signature before it publishes); `emergency-index.yml`, in a concurrency group of its
-  own and startable by hand, publishes an index signed offline with the spare. The build and publish
-  jobs read the whole history of `gh-pages` and refuse to build on or publish over a pair older than
-  the newest it ever published, or none after one was - a rollback of the branch would otherwise
-  make every reader refuse the next index - and the build waits while an emergency index is
-  unpublished. The merge that adds `release-index/policy.json` starts the first run by itself. New
-  tools:
-  `make-index.py`, `sign-index.py`, `check-workflows.py`, `rehearse-signing.py`,
-  `check-release-package.py` and `make-index-vectors.py`.
+  `feed/releases.json.sig` on the feed carry, per release, its size and sha256 - checked against the
+  release asset's own digest and against the feed's copy - its commit and time, its contract major,
+  the oldest integration it needs, its dependencies, whether it can update itself and whether it is
+  withdrawn, plus a floor and a serial. The values come from a new `COMPATIBILITY` file read at each
+  release tag and from `release-index/policy.json` on `main`, which sets the floor, withdraws a
+  release and corrects a declaration. Two Ed25519 public keys are embedded - the main key (rank 1),
+  which signs in CI, and a sealed spare (rank 2) - with the rule every reader applies: a signature
+  over the exact bytes by a key it holds, a serial above the last one accepted from that key and at
+  most 1000 above it, and never a lower rank after a higher one - a key ranked below one a reader
+  has accepted is silenced there for good, whatever a later release embeds. A release's key set
+  keeps three rules against the previous release's (ranks never change, new keys rank above all
+  before them, a key is never dropped while a lower one is kept), which `index.yml` enforces. A
+  reader keeps its memory in one stored state with a `release` and an `acceptance` part, each keyed
+  by the key set's fingerprint, open for extension (unknown members and a higher schema are kept and
+  tolerated) and refused, never read as empty, when a known member is missing or malformed; an
+  acceptance build's test keys may never include a release key - the builder and the plugin both
+  refuse such a set - and it never writes memory a release build reads. The receiver will verify
+  with a pure-Python Ed25519 verifier the plugin carries (`src/MQTTBridge/ed25519.py`, verify only).
+  `tests/vectors/release-index.json` holds the RFC 8032 vectors, forgeries and the rule's scenarios,
+  shared with the integration. Three workflows: `index.yml` checks every pull request (the
+  workflows, the policy, the published index, and a rehearsal of the sign step with a throwaway
+  key); `publish-index.yml` builds the index with no key, signs it in the `release-signing`
+  environment only after the maintainer approves - with no permissions, nothing installed, and no
+  code from the repository at all - the artifact, its hash with the runner's own `sha256sum`, the
+  signature from a fixed step (the key on OpenSSL's stdin only, `base64` and `openssl` by absolute
+  path, OpenSSL's arguments fixed) and the signature handed on as its only output - while the
+  repository's checks run in key-free jobs before (`precheck`, a fixed check of the artifact against
+  build's sha256 with gh-pages' whole history) and after (`publish`, which verifies the signature
+  before it publishes); `emergency-index.yml`, in a concurrency group of its own and startable by
+  hand, publishes an index signed offline with the spare. The build and publish jobs read the whole
+  history of `gh-pages` and refuse to build on or publish over a pair older than the newest it ever
+  published, or none after one was - a rollback of the branch would otherwise make every reader
+  refuse the next index - and the build waits while an emergency index is unpublished. The merge
+  that adds `release-index/policy.json` starts the first run by itself. New tools: `make-index.py`,
+  `sign-index.py`, `check-workflows.py`, `rehearse-signing.py`, `check-release-package.py` and
+  `make-index-vectors.py`.
 - **The receiver checks which releases exist**, from the signed release index and nothing else
   (ADR-0015; installing one comes later). A new retained topic, `update`, says what the receiver
   holds: the index's serial, age and source, whether the release origin answered, when it last
@@ -330,6 +331,19 @@ version that has no section here.
   and on again, not for up to 30 minutes. The two hypotheses the restart rule rests on are still
   unmeasured, and the text now says the integration's code that relies on them is merged and is
   measured with them before its release.
+- [docs/TRANSACTION.md](docs/TRANSACTION.md) section 5.2 describes the companion integration's
+  rollback script after its signal fix: the trap only records a signal, the restore writes its own
+  exit status (`restored lost` when it is gone without one), the stop wait is measured in elapsed
+  time, a restore that ignores its watchdog is killed ten seconds later, a shutdown is
+  `started shutdown` rather than a start, and a `stop_timeout` beside an opkg overlap is
+  `rollback_failed`. Section 5 says the hardware spike saw the image start on a `lastservice`
+  written while it was stopped - the second hypothesis - while the first is still unmeasured, and
+  section 8 says the spike ran the self-update as it stood before its last pre-merge changes. The
+  self-update's parts are no longer called planned or not merged.
+- [docs/INSTALL.md](docs/INSTALL.md) has the checked manual install the companion integration's
+  documentation points to: download the package and `releases.json` from the feed, compare the
+  package's sha256 with the signed list, then `opkg install` that file - which catches a damaged
+  download, not a compromised origin.
 
 ### Changed
 

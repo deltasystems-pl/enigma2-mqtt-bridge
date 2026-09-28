@@ -948,6 +948,14 @@ msgid "the update ran out of time and was undone; the previous one is back"
 msgstr "zabrakło czasu na aktualizację, więc ją cofnięto; wróciła poprzednia"
 
 #: src/MQTTBridge/updateview.py
+msgid "the update was interrupted and undone; the previous one is back"
+msgstr "przerwano ją i cofnięto; wróciła poprzednia"
+
+#: src/MQTTBridge/updateview.py
+msgid "the update was undone; the previous one is back"
+msgstr "cofnięto ją; wróciła poprzednia"
+
+#: src/MQTTBridge/updateview.py
 msgid "The last check could not download the list of versions."
 msgstr "Ostatnie sprawdzenie nie pobrało listy wersji."
 

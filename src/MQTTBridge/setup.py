@@ -12,7 +12,7 @@ reach the broker, unless somebody says which it is.
 The blue key opens "Plugin updates" (`updatescreen.py`): the versions the signed index offers,
 a check, and an install - the television's half of the self-update, which needs neither
 `update_check` nor `update_allowed` because the person holding the remote control is the
-consent (spec ae.4).
+consent (ADR-0015 decision 4; SETUP.md, "Installing a release from the receiver").
 """
 
 from Components.ActionMap import ActionMap
@@ -132,7 +132,7 @@ def _updating(bridge):
 
 
 class MQTTBridgeSetup(Screen, ConfigListScreen):
-    # The blue key is wider than the others because its label is the spec's own words,
+    # The blue key is wider than the others because its label is the screen's own name,
     # "Aktualizacje wtyczki" and "Plugin-Aktualisierungen": this screen has no yellow key, so it
     # takes that room rather than a shorter name (`test_the_words_fit_the_screen`).
     skin = """

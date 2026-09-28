@@ -40,15 +40,15 @@ after `CONFIRM_SECONDS`.
 and so is the answer to every POST: nothing is asked, saved or kept.
 
 **Installing a release of the plugin** is `cmd/update` with the origin `page`
-(spec ae.4, ae.6): OpenWebif has admitted whoever is here, so neither
-`update_check` nor `update_allowed` is asked, and every household guard still
-is. It is always confirmed - it ends in a restart of the user interface - and a
-version below the running one is a downgrade, whose confirmation names what it
-takes away. That confirmation is the only way to one: the consent it gives is
-kept in the session with the pending confirmation, never sent by the browser,
-so no form another page could forge carries it. The versions offered are the
-ones the signed index offers (`updateview.py`, shared with the television's
-screen).
+(ADR-0015 decision 4; SETUP.md, "Installing a release from the receiver"):
+OpenWebif has admitted whoever is here, so neither `update_check` nor
+`update_allowed` is asked, and every household guard still is. It is always
+confirmed - it ends in a restart of the user interface - and a version below
+the running one is a downgrade, whose confirmation names what it takes away.
+That confirmation is the only way to one: the consent it gives is kept in the
+session with the pending confirmation, never sent by the browser, so no form
+another page could forge carries it. The versions offered are the ones the
+signed index offers (`updateview.py`, shared with the television's screen).
 
 **A GET can end an install's overdue wait.** An install on a receiver without internet may
 wait before it starts (the relay handshake, `selfupdate.py`), and a wait past its bound is
@@ -1708,8 +1708,8 @@ class MQTTBridgeWebResource(resource.Resource):
             return _answer(request, _("Request rejected."), http.FORBIDDEN)
         if _doors_closed() and not _repair_posted(request):
             # Every form - an install, any other action, a settings save, the answer to a
-            # confirmation asked before - gets the sentence alone (spec ae.6 step 3). No
-            # question: its answer could only meet the doors, and asking it tells the
+            # confirmation asked before - gets the sentence alone (TRANSACTION.md section
+            # 5.3). No question: its answer could only meet the doors, and asking it tells the
             # household something can still be done. Nothing kept: a confirmation asked
             # before the doors closed is dropped, not left to be answered once they reopen.
             # The one exception is the repair the sentence names (after `not_stopped`, the

@@ -30,7 +30,16 @@ from conftest import (
 from Screens import Standby as standby_module
 from updatelab import index_bytes, release
 
-from MQTTBridge import epgimport, power, recording, selfupdate, trust, updatehelper, webif
+from MQTTBridge import (
+    epgimport,
+    power,
+    recording,
+    selfupdate,
+    trust,
+    updatehelper,
+    updateview,
+    webif,
+)
 from MQTTBridge.origin import MQTT, PAGE, SCREEN
 from MQTTBridge.selfupdate import SelfUpdater
 from MQTTBridge.uninstall import Uninstaller
@@ -1074,10 +1083,13 @@ def test_an_end_the_plugin_judged_itself_carries_its_reason(starting, factory):
         marker(root, boot=OTHER_BOOT, to=("0.4.0", "ab" * 20), frm=("0.3.0", COMMIT))
         lock(root, "a1b2c3d4e5f6", boot=OTHER_BOOT)
 
-    starting(prepare=prepare)
+    bridge = starting(prepare=prepare)
     factory.client.fire_connect()
     ended = transaction(factory.client)
     assert (ended["result"], ended["reason"]) == ("rolled_back", "interrupted")
+    # The page and the television say what happened, not a failed start nobody saw.
+    line = updateview.transaction_line(bridge)
+    assert line.endswith(": the update was interrupted and undone; the previous one is back")
 
 
 @pytest.mark.parametrize("result, reason", [
