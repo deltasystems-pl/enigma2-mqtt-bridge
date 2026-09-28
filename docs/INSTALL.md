@@ -57,6 +57,34 @@ From v1.0 the plugin is also submitted to the OE-Alliance third-party feed, whic
 OpenATV and their siblings already have configured - at that point it appears in the built-in
 plugin browser with no feed to add at all.
 
+`opkg install` and `opkg upgrade` download and install in one step, with no moment to check the
+package, and the image's opkg checks no signature on this feed. To check a package first - the
+manual fallback the Home Assistant integration's documentation points to when it cannot install or
+repair the plugin itself - download it as its own step, here version `0.3.0` into `/tmp`:
+
+```sh
+cd /tmp
+wget -O enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk \
+    https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk
+wget -O releases.json https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/releases.json
+sha256sum enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk
+grep '"version": "0.3.0"' releases.json
+```
+
+`releases.json` is the plugin's signed list of releases ([RELEASE-INDEX.md](RELEASE-INDEX.md)), one
+line per version. The checksum `sha256sum` prints must be the `sha256` on that version's line; if
+they differ, stop and delete the file. Then install exactly that file, and restart the interface
+as in [Activate](#activate):
+
+```sh
+opkg install ./enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk
+```
+
+Add `--force-reinstall` when that version is already installed, and `--force-downgrade` for an
+older one. **This catches a damaged or truncated download, not a compromised origin**: the list
+comes from the same place as the package, and its signature, `releases.json.sig`, is checked by the
+plugin and by Home Assistant, not by these commands.
+
 ## Manually, with scp
 
 For a box with no route to the internet, or to install a build you made yourself:
