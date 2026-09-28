@@ -98,11 +98,18 @@ def _started_by(origin):
 
 
 def _result(result, reason=None):
-    # A rollback the forward deadline forced says nothing against the release: the restart came
-    # too late for its proof, and "did not start" would blame a version nobody saw fail
-    # (review S1). Only a rollback: `time_limit` with `failed` changed nothing that stays.
-    if result == "rolled_back" and reason == "time_limit":
-        return _("the update ran out of time and was undone; the previous one is back")
+    # "Did not start" is what `not_started` means and nothing else: a rollback the forward
+    # deadline forced, an interruption the update was undone after (the receiver lost power, say)
+    # and an acceptance drill say nothing against the release, and the line would blame a version
+    # nobody saw fail (review S1). Only a rollback: `time_limit` with `failed` changed nothing
+    # that stays, and `interrupted` as a result has its own word.
+    if result == "rolled_back":
+        if reason == "time_limit":
+            return _("the update ran out of time and was undone; the previous one is back")
+        if reason == "interrupted":
+            return _("the update was interrupted and undone; the previous one is back")
+        if reason == "drill":
+            return _("the update was undone; the previous one is back")
     return {
         "installed": _("installed"),
         "withdrawn_before_restart": _("withdrawn before the restart; the previous version runs"),

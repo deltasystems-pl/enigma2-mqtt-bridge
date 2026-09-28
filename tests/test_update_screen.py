@@ -520,8 +520,14 @@ def test_a_rollback_the_deadline_forced_is_not_said_as_a_failed_start(box, facto
      "the update ran out of time and was undone; the previous one is back"),
     ("rolled_back", "not_started", "the new version did not start; the previous one is back"),
     ("rolled_back", None, "the new version did not start; the previous one is back"),
+    # Neither an interruption (the receiver lost power, say, and came back on the previous
+    # version) nor an acceptance drill says anything about whether the new version starts.
+    ("rolled_back", "interrupted",
+     "the update was interrupted and undone; the previous one is back"),
+    ("rolled_back", "drill", "the update was undone; the previous one is back"),
     # The reason picks a sentence only for a rollback: a forward path out of time changed nothing.
     ("failed", "time_limit", "failed; the previous version runs"),
+    ("interrupted", "interrupted", "interrupted"),
 ])
 def test_how_the_last_update_ended_follows_its_reason(result, reason, said):
     record = {"target": "0.4.0", "started_by": "page", "phase": "finished", "result": result,
@@ -1027,7 +1033,8 @@ def transaction_lines():
                 for who in STARTERS for result in RESULTS]
     # A rollback's reason picks its own sentence (review S1).
     records += [{"target": LONG, "started_by": who, "phase": "finished",
-                 "result": "rolled_back", "reason": "time_limit"} for who in STARTERS]
+                 "result": "rolled_back", "reason": reason}
+                for who in STARTERS for reason in ("time_limit", "interrupted", "drill")]
     return [updateview.transaction_line(SimpleNamespace(
         self_update=SimpleNamespace(transaction_payload=lambda record=record: record)))
         for record in records]

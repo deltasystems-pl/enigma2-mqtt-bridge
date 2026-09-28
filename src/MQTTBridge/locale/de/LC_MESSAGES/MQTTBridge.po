@@ -949,6 +949,14 @@ msgid "the update ran out of time and was undone; the previous one is back"
 msgstr "dauerte zu lange und wurde rückgängig gemacht; die vorherige ist zurück"
 
 #: src/MQTTBridge/updateview.py
+msgid "the update was interrupted and undone; the previous one is back"
+msgstr "wurde unterbrochen und rückgängig gemacht; die vorherige ist zurück"
+
+#: src/MQTTBridge/updateview.py
+msgid "the update was undone; the previous one is back"
+msgstr "wurde rückgängig gemacht; die vorherige ist zurück"
+
+#: src/MQTTBridge/updateview.py
 msgid "The last check could not download the list of versions."
 msgstr "Die letzte Prüfung konnte die Versionsliste nicht herunterladen."
 
