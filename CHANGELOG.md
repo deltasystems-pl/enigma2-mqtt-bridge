@@ -344,6 +344,20 @@ version that has no section here.
   documentation points to: download the package and `releases.json` from the feed, compare the
   package's sha256 with the signed list, then `opkg install` that file - which catches a damaged
   download, not a compromised origin.
+- [docs/TRANSACTION.md](docs/TRANSACTION.md) marks what a change to the companion integration
+  that is still in review, for its 0.4.0, does to the shared contract: a failed recovery of an
+  abandoned install hands the lock back to that transaction a bounded number of times instead of
+  releasing it, with an `attempts` count and a placeholder boot id in the owner record, which the
+  plugin's stale rule already reads as stale; a snapshot without `snapshot.json` is passed over;
+  the restart record's `channel: changed by the household`; the restore's status named in an
+  empty file when it cannot be written; and the details of `started shutdown`, `restored lost`
+  and a missing status file. The plugin's own column no longer calls recovery by id "planned":
+  an interrupted self-update is reported and its snapshot kept for a person.
+- [TOPICS.md](docs/TOPICS.md#contract-version) says that the same integration change tolerates
+  an unknown `oscam.readers[].kind` and an unknown `key.press`, and that neither may be added by
+  a plugin release before an integration release carries it.
+- The PRD's copy ([ADR-0000](docs/adr/0000-prd.md)) no longer names the operator's private notes
+  by location, file name or section number; a note at its top says so.
 
 ### Changed
 

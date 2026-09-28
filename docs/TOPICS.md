@@ -70,20 +70,26 @@ list, which this file had described as a direct play, is not.
 **New values of an enumeration.** Every enumeration in this file is open: a consumer treats a value
 it does not know as unknown - neither an error nor any value it does know - and keeps the rest of
 the payload. That is what makes adding a value an addition. The release that adds one checks the
-companion integration's handling of it before it ships. Where the integration stands today (0.3.1,
-which is also its `main` at the time of writing):
+companion integration's handling of it before it ships. Where the integration stands (released
+0.3.1; the line numbers are its `box.py`):
 
 - **tolerated**: `last_error.reason` - "a code from a newer plugin" falls back to the English
   sentence (`box.py` l.562-583); `epg_import.state` (l.1768), `softcam.last_restart_reason`
   (l.1695) and `oscam.readers[].status` (l.1525) - an unknown value becomes unknown or `null`;
   `timers.state` - the integration does not read it at all (below);
-- **not tolerated**, both on the integration's backlog, and each needing an integration release
-  that tolerates it before a plugin release adds a value:
+- **not tolerated by 0.3.1**, each needing an integration release that tolerates it before a
+  plugin release adds a value:
   - `oscam.readers[].kind` - a value other than `reader`, `server` or `unknown` makes the
     integration discard the whole new `oscam` payload (`_normalize_oscam`, l.1486-1515), so the
     last good sample stays on its panel, going stale;
   - `key.press` - a value other than `short` or `long` is read as `short` (`box.py` l.1985-1987),
     so a new kind of press would fire the automations and device triggers of a short press;
+
+  Both are tolerated by a change to the integration that is in review for its 0.4.0 (unreleased,
+  not yet on its `main`): a source of a kind it does not know is skipped - it gets no entity, and
+  the rest of the payload applies - and a press other than `short` or `long` fires nothing. A
+  payload without `press` is still a short press, and a `kind` that is not a string is still a
+  malformed payload. The rule above stands until an integration release carries that change;
 - **not audited**: the other enumerations, among them the choices of an enumerated setting and
   `info.ha_mode`.
 

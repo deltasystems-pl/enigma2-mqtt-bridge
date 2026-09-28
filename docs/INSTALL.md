@@ -79,13 +79,14 @@ they differ, stop and delete the file. Then install exactly that file:
 opkg install ./enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk
 ```
 
-Add `--force-reinstall` when that version is already installed, and `--force-downgrade` for an
-older one - and restart the receiver's interface from its menu. That is the image's clean
-restart, which saves its settings and so comes back on the channel it was showing. Use
-`init 4 && sleep 3 && init 3` over SSH only when the menu cannot be reached: it stops the
-interface without that save, so the receiver may come back on an older channel. **This catches a damaged or truncated download, not a compromised origin**: the list
-comes from the same place as the package, and its signature, `releases.json.sig`, is checked by the
-plugin and by Home Assistant, not by these commands.
+Add `--force-reinstall` when that version is already installed, and `--force-downgrade` for an older
+one - and restart the receiver's interface from its menu. That is the image's clean restart, which
+saves its settings and so comes back on the channel it was showing. Use
+`init 4 && sleep 3 && init 3` over SSH only when the menu cannot be reached: it stops the interface
+without that save, so the receiver may come back on an older channel. **This catches a damaged or
+truncated download, not a compromised origin**: the list comes from the same place as the package,
+and its signature, `releases.json.sig`, is checked by the plugin and by Home Assistant, not by these
+commands.
 
 ## Manually, with scp
 

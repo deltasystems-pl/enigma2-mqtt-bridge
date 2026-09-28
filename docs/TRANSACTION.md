@@ -11,14 +11,17 @@ and the restart rule. A change to any name or rule here is a change to both repo
 What is built and what is not. For the integration there are two states: **released 0.3.1**, which
 is what every installer in the field does, and **integration main (unreleased, 0.4.0)**, which is
 merged on the integration's `main` branch, has **not yet been run on a receiver**, is accepted on
-hardware before the release that carries it, and is taken out again if that fails.
+hardware before the release that carries it, and is taken out again if that fails. A few places
+are marked **integration, in review (unreleased, 0.4.0)**: a change open against the integration's
+`main` and not merged yet. They say what that change does at the time of writing; where it may
+still change, they say so, and they are brought up to date when it merges.
 
 | Part | Integration's SSH installer | Plugin's self-update |
 |---|---|---|
 | The lock, its owner record and the stale rule (§2) | **released 0.3.1**; the owner record's `id` (§2.2): integration main (unreleased, 0.4.0) | helper written (`updatehelper.py`) |
 | The heartbeat (§2.4) | not used | helper written |
 | The snapshot, schema 2 (§3) | **released 0.3.1** | helper written, same layout |
-| Recovering an abandoned transaction by its id (§3.3) | integration main (unreleased, 0.4.0) | planned |
+| Recovering an abandoned transaction by its id (§3.3) | integration main (unreleased, 0.4.0); a failed recovery hands the lock back: integration, in review | not done: an interrupted self-update is reported, and its snapshot kept for a person (§4) |
 | Restoring while the interface runs (§3.4) | integration main (unreleased, 0.4.0) | helper written |
 | The marker (§4) | not used | helper writes it; the plugin reads it at start |
 | The restart rule (§5) | integration main (unreleased, 0.4.0); **released 0.3.1 stops and starts the interface with `init 4` / `init 3` on every path** | helper written for R2 and R3; R1's clean quit is the plugin's |
@@ -91,6 +94,11 @@ fresh random twelve-digit id, which matches nothing already there.
 - **Integration main (unreleased, 0.4.0)**: the claim writes the transaction's `<id>` into the owner
   record, and when it reclaimed a stale lock whose record carries an `id` and no `origin`, it
   reports that id - which is how §3.3 finds the abandoned transaction's snapshot.
+- **Hand-back** (integration, in review): when that recovery fails in a way a later try may get
+  past, the installer does not release the lock but rewrites its owner record to name the
+  abandoned transaction again, stale at once (§2.2, §3.3). It rewrites only a record that names
+  its own transaction and has no `origin`; a lock that is somebody else's by then is neither
+  handed back nor released.
 
 ### 2.2 The owner record
 
@@ -103,15 +111,25 @@ fresh random twelve-digit id, which matches nothing already there.
 | `origin` | string | no; the self-update's helper writes it (plugin main, unreleased) | Who started the self-update: `mqtt`, `home_assistant`, `screen`, `page` |
 | `id` | string | integration main (unreleased, 0.4.0) for the SSH installer; the self-update's helper (plugin main, unreleased) | The transaction's `<id>` |
 | `target` | string | no; the self-update's helper writes it (plugin main, unreleased) | The version being installed |
+| `attempts` | int | no; the installer writes it in a handed-back record (integration, in review) | How many recoveries of the transaction named by `id` have failed |
 
-A reader ignores keys it does not know. The helper of released 0.3.1 reads only `boot_id`,
-`uptime` and `started`, so `origin`, `id` and `target` change nothing for it. The helper on
-integration main reads `id` as well, and only from a record without `origin`.
-🔴 **The record is ASCII**: the released helper decodes it as ASCII, and a record it cannot decode falls to rule 1 of §2.3 -
-judged by the directory's age, so a live lock with a non-ASCII record looks stale after 30 minutes
-however fresh its heartbeat. A record **without** `origin` is the SSH installer's. The plugin does
-not report an SSH install on `update.transaction` - it writes no phases to report - and while its
-lock is held `cmd/update` and `cmd/uninstall` are refused `busy`.
+A record the installer hands back (§2.1, integration, in review) is not written at a claim, and
+its fields do not describe the process that wrote it: `id` names the abandoned transaction, not
+the writer's; `started` is dated a moment more than 30 minutes before the hand-back; `uptime` is
+absent; and `boot_id` is a placeholder no kernel reports (`handed-back` at the time of writing),
+so rule 3 of §2.3 finds it stale at once on any clock - after a reboot into 1970 as much as
+before - and a kernel without a boot id still has the backdated `started`. A reader must not take
+a record's `boot_id` for a real boot id, nor its `started` for the time of a claim. The plugin's
+rule reads it that way already, and needs no change.
+
+A reader ignores keys it does not know. The helper of released 0.3.1 reads only `boot_id`, `uptime`
+and `started`, so `origin`, `id` and `target` change nothing for it. The helper on integration main
+reads `id` as well, and only from a record without `origin`. 🔴 **The record is ASCII**: the released
+helper decodes it as ASCII, and a record it cannot decode falls to rule 1 of §2.3 - judged by the
+directory's age, so a live lock with a non-ASCII record looks stale after 30 minutes however fresh
+its heartbeat. A record **without** `origin` is the SSH installer's. The plugin does not report an
+SSH install on `update.transaction` - it writes no phases to report - and while its lock is held
+`cmd/update` and `cmd/uninstall` are refused `busy`.
 
 ### 2.3 When a lock is stale (released, and unchanged)
 
@@ -264,9 +282,31 @@ that transaction had begun to restore, or cannot say:
   preflight needs it - so this is the restore of §3.4: the files, opkg's metadata and the
   provisioning file, never the settings block.
 - If that recovery does not complete - opkg's lock stays held, or the restore fails - the install
-  stops before its own snapshot and releases the lock it holds. The abandoned transaction's id is
-  then in no lock any more, so no later install recovers it; its snapshot stays as an ordinary one
-  and is pruned like one (§3.2).
+  stops before its own snapshot. On integration main it releases the lock it holds. The abandoned
+  transaction's id is then in no lock any more, so no later install recovers it; its snapshot
+  stays as an ordinary one and is pruned like one (§3.2).
+- **Integration, in review (unreleased, 0.4.0)**, which replaces the previous point and whose
+  details may still change before it merges:
+  - A snapshot directory `ha-installer-<id>` **without `snapshot.json`** is passed over, as if
+    there were none. That record is the snapshot's last write, synced to the flash before the
+    snapshot returns, and the transaction changes nothing until then, so its absence means the
+    transaction was cut off - a power loss, a killed helper during the copy - before it changed
+    anything, and there is nothing to put back.
+  - A recovery that fails **in a way a later try may get past** - opkg's lock held by another
+    run, a connection that dropped, a command that did not answer in time - hands the lock back
+    to the abandoned transaction (§2.1), with the count of failed recoveries in `attempts`
+    (§2.2), instead of releasing it. The record is stale at once, so the next install reclaims it
+    and tries the same snapshot again first.
+  - A failure that would repeat the same way - a snapshot record the restore cannot read or does
+    not accept, a plugin directory it cannot rename across filesystems - or the third failed
+    recovery releases the lock as before. The household is told that the receiver could not be
+    put back, never that it was, and Home Assistant's log names the snapshot for a person to
+    check.
+  - A self-update that reclaims a handed-back lock - it is stale to the plugin's rule too -
+    does not recover the installer's snapshot: it forgets the id, and the snapshot is left as
+    an ordinary one, as after a release.
+  - A claim whose connection drops after the reclaim can lose the id the same way. Both are
+    accepted: the snapshot stays on the receiver.
 - A lock the installer released is never a recovery point: an R2 whose end the installer saw -
   including one whose restore failed or was cut off by its bound (§5.2) - releases the lock, and
   its snapshot is then left for a person: the installer's sentence names the backups directory,
@@ -311,7 +351,9 @@ there, R2's included, swaps the plugin directory in as below. Then:
   directory sits on another filesystem than `/usr/lib/enigma2/python/`, the installer's restore
   replaces opkg's records and then fails at the rename that sets the live tree aside (the
   self-update's helper, which puts the tree back first, would fail there before touching opkg's
-  records).
+  records). Integration, in review (unreleased, 0.4.0): the installer's restore makes the same
+  check whenever a plugin directory is live, snapshot tree or not, so the rollback of a first
+  install on such an image fails before opkg's records are rewritten.
 - Then the enigma2 pid is read again - on integration main for up to 60 s, and compared with the
   pid read **before the restart was requested**, never with a later reading, so a restart that
   began after the last look is still a restart. If it changed - somebody answered the question - the
@@ -420,20 +462,21 @@ so that a wrong answer costs a zap, not a lost channel:
   bound also counts as a restart - a failed one, which the proof then finds. The plugin's helper
   (written) keeps the same rule with its own starting point: the pid in its request - the process
   that asked - must be gone, and a new enigma2 must run that was never seen beside it; every pid
-  seen while the one that asked was still running (enigma2 forks children that keep its name
-  until they run something else) is never the restart, and is ignored by the proof. The one that
-  asked gone before the package manager ran ends the transaction `interrupted`, with nothing
-  changed; gone once it had started, before the helper handed the restart to the plugin, the
-  process running now may hold either version or a mix, so it goes to R2 and is never proved. A new process after `restarting` - asked for or not - found the
-  whole new tree, so it goes to the proof.
+  seen while the one that asked was still running (enigma2 forks children that keep its name until
+  they run something else) is never the restart, and is ignored by the proof. The one that asked
+  gone before the package manager ran ends the transaction `interrupted`, with nothing changed; gone
+  once it had started, before the helper handed the restart to the plugin, the process running now
+  may hold either version or a mix, so it goes to R2 and is never proved. A new process after
+  `restarting` - asked for or not - found the whole new tree, so it goes to the proof.
 - **Once the restart has been requested, nothing the installer cannot see ends in R2** (integration
   main). From the power-state request until a new enigma2 pid is seen, no rollback runs, because the
   image may be keeping the interface up on purpose. A connection that drops while the installer
   waits, or while it withdraws, is connected again and the receiver read again, and a withdraw it
   cut off is repeated - a restore of the same snapshot is safe to repeat (§3.3). New attempts start
-  for up to 120 s, and each may take its own 60 s, so the withdraw can last about 180 s at worst.
-  A receiver that cannot be read at all, or Home Assistant stopping in that window, leaves the transaction as it is: the new files stay, and the lock stays with the
-  transaction's id, for the next install to recover by that id once the lock is stale (§3.3).
+  for up to 120 s, and each may take its own 60 s, so the withdraw can last about 180 s at worst. A
+  receiver that cannot be read at all, or Home Assistant stopping in that window, leaves the
+  transaction as it is: the new files stay, and the lock stays with the transaction's id, for the
+  next install to recover by that id once the lock is stale (§3.3).
 - **The record** is taken from OpenWebif's `/api/statusinfo` on the receiver - `currservice_serviceref`
   and `inStandby` - and from the plugin's retained `bouquet` topic where one exists. With nothing
   recorded (the interface was not answering), nothing is restored, and the transaction's record says
@@ -459,6 +502,9 @@ so that a wrong answer costs a zap, not a lost channel:
   or no standby state. `lost` for the channel covers an interface that reported no channel within
   60 s of the start, a zap back that did not show within 10 s, and a channel somebody changed after
   the start, which is left alone; `lost` for standby is a standby that did not show within 10 s.
+  Integration, in review (unreleased, 0.4.0): the installer's record says
+  `channel: changed by the household` for a channel somebody chose after the start, so `lost`
+  there means only that the channel was not kept; the plugin's helper still says `lost` for it.
   Integration main writes the record as one line to Home Assistant's log; when the check itself
   fails, it logs a warning instead. On the forward path R3 runs **after the commit** - the lock is
   released first - so a lost connection or Home Assistant stopping while the channel is checked
@@ -532,10 +578,14 @@ So:
   `restored <rc>`, `written <rc>` or `not_written`, `started <rc>` (`init 3`'s exit status) or
   `started shutdown`, `done`. `restored` carries the exit status the restore wrote itself, or `lost`
   when the restore is gone without writing one (killed - by the watchdog, or by a signal to the
-  whole process group). `not_written` means enigma2 was not seen stopped, or no channel was
-  recorded. `restored` is always present once `started` is. A signal that arrived before the
-  finishing step began ends the script with exit status 1 after `started`, without `done`; one
-  during the finishing step is ignored and `done` is written.
+  whole process group). Integration, in review (unreleased, 0.4.0): a restore that finished but
+  cannot write its status file - a full `/tmp`, something in the way of its temporary name - names
+  its status in an empty file beside it, `restore-rc-<status>`, which needs no room for data, and
+  the script reads that too; `lost` is then left for a restore that could write neither.
+  `not_written` means enigma2 was not seen stopped, or no channel was recorded. `restored` is always
+  present once `started` is. A signal that arrived before the finishing step began ends the script
+  with exit status 1 after `started`, without `done`; one during the finishing step is ignored and
+  `done` is written.
 - **The bounds.** After `init 4` the script waits up to **30 s** for enigma2 to stop, measured in
   elapsed time from `/proc/uptime` rather than counted in sleeps. If it is still running then, the
   script says `stop_timeout` and puts back the files and opkg's metadata only - no settings block
@@ -545,18 +595,21 @@ So:
   back even from a restore that hangs or ignores the watchdog.
 - **How the installer follows it.** It reads `status` every 2 s, connecting again after a dropped
   connection, for at most 180 s (the 30 s stop wait, the 90 s restore bound and a 60 s margin).
-  Reading `started` ends the following. Unless the status says `stop_timeout` or `started` is not
-  0, the installer then waits up to 120 s for a new enigma2 pid and runs R3; in every case it then
+  Reading `started` ends the following. Unless the status says `stop_timeout` or `started` is not 0,
+  the installer then waits up to 120 s for a new enigma2 pid and runs R3; in every case it then
   releases the lock, and only after that removes `/tmp/enigma2-mqtt-r2-<id>/` and its uploaded
   helper. `restored` other than 0 is reported as `rollback_failed` (or, for the helper's two opkg
   exit statuses, `rollback_opkg_busy` and `rollback_opkg_overlap`); `restored lost` is
-  `rollback_failed`. With `stop_timeout`, "only the plugin's files were put back" is reported only
-  for `restored 0`; a failed restore keeps its own verdict with a note that the settings were not
+  `rollback_failed` - in review, with a detail saying that whether the restore completed is not
+  known. With `stop_timeout`, "only the plugin's files were put back" is reported only for
+  `restored 0`; a failed restore keeps its own verdict with a note that the settings were not
   restored either, except the opkg overlap, whose sentence says the receiver was put back as it
-  was - false without the settings - so it becomes `rollback_failed` with the overlap in its
-  detail. `started` other than 0, `started shutdown` included - or no new pid within the 120 s -
-  is `rollback_restart_failed`. When the restore and the restart both failed, the restore's code
-  is the one reported, with a note that the interface did not come back either.
+  was - false without the settings - so it becomes `rollback_failed` with the overlap in its detail.
+  `started` other than 0, `started shutdown` included - or no new pid within the 120 s - is
+  `rollback_restart_failed`; in review, `started shutdown` carries a detail saying the receiver was
+  shutting down, so the script asked for no start and the next start reads the restored files and
+  the channel. When the restore and the restart both failed, the restore's code is the one reported,
+  with a note that the interface did not come back either.
 - **The lock is held until the script's end is seen.** From the moment `r2-start` is sent until
   `started` is read, the installer neither releases the lock nor deletes anything of the script's.
   When the following ends without `started` - its bound passed, or Home Assistant stopped - the lock
@@ -568,7 +621,10 @@ So:
   it (read from `/proc/*/cmdline`). When `r2-start` did answer, `status` existed before the script
   started, so a missing one means it never started. A script that never started stopped nothing:
   the lock is released and the uploaded helper removed, but a directory is never removed on the
-  strength of its absence.
+  strength of its absence. Integration, in review (unreleased, 0.4.0): a `status` missing after
+  `r2-start` answered is no longer called "never started", because a receiver that rebooted has
+  emptied `/tmp` too and the script may have run to its end; it is `rollback_failed` with a
+  detail naming both possibilities, and the lock is released as before.
 - **The plugin's helper** (plugin main, unreleased) runs R2 inside itself - detached from enigma2
   and from any SSH session - and does not start a child for the restore at all: the restore is a
   function call in the helper's own process, and its result is the call's own, never a wait that
@@ -692,17 +748,17 @@ process whose build is not the one on disk.
 | Self-update, a target that knows the marker - one whose signed index entry says `self_update: true` (helper written, and the plugin's half) | The new plugin writes `started.json` (§7), with its version and build commit, into the transaction directory; both must be the signed entry's. Whether the new process also held the log open is recorded beside it, and decides nothing |
 | Self-update, a target that does not (0.2.0, 0.3.x - helper written) | The **new** enigma2 pid holds the plugin's log file open (`/proc/<pid>/fd`), polled every 2 s through the whole window, because a log rotation closes the file for a moment. Both released plugins configure logging before anything else at start, whether or not they are switched on and whether or not the broker answers. When neither log path was writable before the restart, those plugins hold no file, and the proof is the OpenWebif hook answering anything but 404 after the pid change. The transaction's record says which proof it used. The helper does not read the log's lines at all: a line is something a broker client can put there, and a timestamp it can forge |
 
-No proof within the window: R2 (§5.1), and the restored plugin puts the reason on `last_error`.
-For the self-update the window is 120 s from the restart, and ends earlier when the forward
-path's 15-minute deadline comes first (§2.4): a restart that lands late is given what is left.
-The reason then says which it was: `not_started` after a whole window, `time_limit` when the
-deadline cut it short - the forward path's time ran out, which says nothing against the release.
-Both are `rolled_back`, and both sentences say the previous version is back; only `not_started`
-says the new one did not start. Every other `time_limit` that ends `rolled_back` - the deadline
-passing while the package manager ran, with the interface restarting on its own in the meantime -
-says the same as the cut window: the previous version is back. An R2 that ends `failed` keeps its
-own sentence, with `time_limit` as its `cause`. `time_limit` has a second sentence, with `failed`, for a forward path that ran out before any
-restart: nothing it changed stays, and nothing is said to be back.
+No proof within the window: R2 (§5.1), and the restored plugin puts the reason on `last_error`. For
+the self-update the window is 120 s from the restart, and ends earlier when the forward path's
+15-minute deadline comes first (§2.4): a restart that lands late is given what is left. The reason
+then says which it was: `not_started` after a whole window, `time_limit` when the deadline cut it
+short - the forward path's time ran out, which says nothing against the release. Both are
+`rolled_back`, and both sentences say the previous version is back; only `not_started` says the new
+one did not start. Every other `time_limit` that ends `rolled_back` - the deadline passing while the
+package manager ran, with the interface restarting on its own in the meantime - says the same as the
+cut window: the previous version is back. An R2 that ends `failed` keeps its own sentence, with
+`time_limit` as its `cause`. `time_limit` has a second sentence, with `failed`, for a forward path
+that ran out before any restart: nothing it changed stays, and nothing is said to be back.
 
 ---
 
@@ -727,28 +783,27 @@ renamed into place.
 **The helper's reason codes** (with `result: failed` unless named): `busy`, `bad_request`,
 `unreachable` (no index could be fetched and none is kept), the rule's own `unknown_version`,
 `withdrawn`, `below_floor`, `incompatible`, `depends`, `downgrade`, `checksum`, `relay`, then
-`download`, `bad_package` (size, sha256, the `ar` layout, the control file, anything in the
-payload other than a directory or a regular file - a link, a device, a pipe - a path outside the
-plugin, or the release page's digest), `no_space`, `opkg_busy`, `snapshot_failed`, `opkg_failed`,
-`manifest`, `time_limit`; `question`, `retraction`, `standby`, `recording` and `epg_import`
-with `withdrawn_before_restart`; `not_started` with `rolled_back`, and `time_limit` with
-`rolled_back` when the forward deadline cut the proof window short (§6); `interrupted` (a
-signal, the lock taken, or the interface that asked restarting before the package manager ran)
-with `interrupted`, and with `rolled_back` when the interface
-restarted after the package manager started and before `restarting`; `internal_error` (an error nothing expected, the package
-or the first marker not written) with `failed`, or with `rolled_back` when it came after the
-restart and R2 put the old version back; `drill` with `rolled_back`, only for an acceptance
-build (below); `restore_failed` and `restore_incomplete` with `failed`, below; `not_stopped` and
-`interface_not_started` with `failed`, below. After the package
-manager ran, `installed` comes only after the proof, and every other result only once the old
-files are back - with two exceptions that say so. The first is a restore that did not complete,
-which replaces the end's reason (the first one is kept as `record.cause`) and whose sentence names
-the integration's **Force plugin reinstall (SSH)**, the repair for both: `restore_failed`
-(`record.restore` `failed: ...`) when the old code could not be put back - the new files, or a
-mix, are on disk, and opkg's records still name the new version, because the helper puts the code
-back first (§3.1) - and `restore_incomplete` (`record.restore` `partial: ...`) when the old code
-is back but opkg's records or the settings block are not: a full flash, or an I/O error on opkg's
-status file. After either, the plugin keeps its doors closed (below), and a withdraw or an
+`download`, `bad_package` (size, sha256, the `ar` layout, the control file, anything in the payload
+other than a directory or a regular file - a link, a device, a pipe - a path outside the plugin, or
+the release page's digest), `no_space`, `opkg_busy`, `snapshot_failed`, `opkg_failed`, `manifest`,
+`time_limit`; `question`, `retraction`, `standby`, `recording` and `epg_import` with
+`withdrawn_before_restart`; `not_started` with `rolled_back`, and `time_limit` with `rolled_back`
+when the forward deadline cut the proof window short (§6); `interrupted` (a signal, the lock taken,
+or the interface that asked restarting before the package manager ran) with `interrupted`, and with
+`rolled_back` when the interface restarted after the package manager started and before
+`restarting`; `internal_error` (an error nothing expected, the package or the first marker not
+written) with `failed`, or with `rolled_back` when it came after the restart and R2 put the old
+version back; `drill` with `rolled_back`, only for an acceptance build (below); `restore_failed` and
+`restore_incomplete` with `failed`, below; `not_stopped` and `interface_not_started` with `failed`,
+below. After the package manager ran, `installed` comes only after the proof, and every other result
+only once the old files are back - with two exceptions that say so. The first is a restore that did
+not complete, which replaces the end's reason (the first one is kept as `record.cause`) and whose
+sentence names the integration's **Force plugin reinstall (SSH)**, the repair for both:
+`restore_failed` (`record.restore` `failed: ...`) when the old code could not be put back - the new
+files, or a mix, are on disk, and opkg's records still name the new version, because the helper puts
+the code back first (§3.1) - and `restore_incomplete` (`record.restore` `partial: ...`) when the old
+code is back but opkg's records or the settings block are not: a full flash, or an I/O error on
+opkg's status file. After either, the plugin keeps its doors closed (below), and a withdraw or an
 undo still goes to R2 when the interface restarted meanwhile. The second is `interrupted` because
 the lock was taken, after which the helper touches nothing of the receiver.
 
@@ -778,55 +833,52 @@ enigma2 other than them appeared after `init 3` - the old process quit late and 
 once or after the second `init 3` - the end is `rolled_back`, with `record.stop` `not seen` saying
 that the settings block and the channel were not put back.
 
-**The plugin's side.** `cmd/update` runs every refusal of TOPICS.md §2 before anything changes, makes
-this directory, writes `request.json`, copies the files and runs
+**The plugin's side.** `cmd/update` runs every refusal of TOPICS.md §2 before anything changes,
+makes this directory, writes `request.json`, copies the files and runs
 `/sbin/start-stop-daemon -S -b -m -p <dir>/helper.pid -x /usr/bin/python3 -- <dir>/helper.py <id>`
 through `eConsoleAppContainer`. It reads `status.json` once a second into `update.transaction`. A
 launch that exits non-zero, or no `status.json` within 60 s, is `failed` (`internal_error`) and the
 directory is removed. At `installing` it closes its doors: the package manager is replacing the
-files under it. They stay closed through `rolling_back` (the acceptance drill goes there
-straight from `installing`) until the end, which reopens them with a fresh session - except a
-`failed` end whose `record.restore` is not `done` - `restore_failed` or `restore_incomplete`:
-the files under the running process may then be the new release's or a mix, or the old code
-with opkg's records naming the new version, a fresh session would import them, so the doors
-stay closed and every command, the page and the setup screen say to install the plugin again
-(the companion integration's forced reinstall over SSH). `last_error` carries the helper's
-sentence as it is, since it names that repair already. That is decided from the end's record alone - the
-helper tries a restore only once the package manager has run - so an end the plugin reads
-without having seen `installing` (the whole failure between two reads) closes the doors then.
-After `not_stopped` they stay closed in the process R2 could not stop, and after any end in a
-process whose build is not the one on disk - see "What the plugin does with these ends" below.
-The request's `acceptance`, `keys` and `origin` are
-the running build's own, never anything a command, the page or the integration's topic says. At `restarting` it asks the standby, recording and EPG-import guards again and,
-when one holds, writes `withdraw` with that reason instead of asking; otherwise it retracts first
-for a downgrade, writes `restart.json` and asks the image to restart. When the helper stops
-without an end, the plugin reports `interrupted` itself - reading `status.json` once more first,
-so a helper that wrote its end and exited is reported as it ended - and leaves the lock to go
-stale; from `installing` on it also keeps the marker, so the next start judges the transaction by
-the build that runs. A helper of its own transaction that stops from `installing` on is treated
-like a restore that failed: a helper killed outright leaves its package manager running as an
-orphan that may still be writing the files, so the doors stay closed (or close) and say to
-install the plugin again. The one exception is `installing` with no marker of this transaction:
-the helper writes the marker before it runs the package manager and runs nothing without it, so
-nothing changed, and the doors reopen with a fresh session. A plugin that only follows the
-transaction - the one its restart started - closes its doors at `rolling_back`: R2 is putting the
-previous version's files back under it, for as long as three minutes when the interface does not
-stop. The end opens them again on the same conditions as for the process that asked. A helper
-that stops during `rolling_back`, a followed transaction that passes the marker's deadline while
-they are closed, and one whose status, marker and last-transaction record all go missing while
-they are closed, are judged as a helper that stopped in the phase last seen: the reinstall
-sentence for the build the forward restart started, since the files went back under it; for a
-process R2 itself started - one that began following at `rolling_back`, after the files went
-back - the build rule alone, so on its own build it opens.
-Until the lock is stale `cmd/update` is refused `busy` with "the previous
-update stopped without finishing; a new one is possible in about <n> minutes, when its lock on
-the receiver expires" - said only for a self-update's record of this boot whose helper is
-provably gone; the lock is not taken back. While a transaction runs or the lock is held,
-`cmd/uninstall` is refused `busy`, and `cmd/update` while an uninstall runs. A followed
-transaction past the marker's deadline is let go - with its doors closed, as a helper that
-stopped. The plugin that starts after a restart writes
-`started.json` - never the process whose pid is the request's `enigma2_pid` - and follows the
-marker to the end.
+files under it. They stay closed through `rolling_back` (the acceptance drill goes there straight
+from `installing`) until the end, which reopens them with a fresh session - except a `failed` end
+whose `record.restore` is not `done` - `restore_failed` or `restore_incomplete`: the files under the
+running process may then be the new release's or a mix, or the old code with opkg's records naming
+the new version, a fresh session would import them, so the doors stay closed and every command, the
+page and the setup screen say to install the plugin again (the companion integration's forced
+reinstall over SSH). `last_error` carries the helper's sentence as it is, since it names that repair
+already. That is decided from the end's record alone - the helper tries a restore only once the
+package manager has run - so an end the plugin reads without having seen `installing` (the whole
+failure between two reads) closes the doors then. After `not_stopped` they stay closed in the
+process R2 could not stop, and after any end in a process whose build is not the one on disk - see
+"What the plugin does with these ends" below. The request's `acceptance`, `keys` and `origin` are
+the running build's own, never anything a command, the page or the integration's topic says. At
+`restarting` it asks the standby, recording and EPG-import guards again and, when one holds, writes
+`withdraw` with that reason instead of asking; otherwise it retracts first for a downgrade, writes
+`restart.json` and asks the image to restart. When the helper stops without an end, the plugin
+reports `interrupted` itself - reading `status.json` once more first, so a helper that wrote its end
+and exited is reported as it ended - and leaves the lock to go stale; from `installing` on it also
+keeps the marker, so the next start judges the transaction by the build that runs. A helper of its
+own transaction that stops from `installing` on is treated like a restore that failed: a helper
+killed outright leaves its package manager running as an orphan that may still be writing the files,
+so the doors stay closed (or close) and say to install the plugin again. The one exception is
+`installing` with no marker of this transaction: the helper writes the marker before it runs the
+package manager and runs nothing without it, so nothing changed, and the doors reopen with a fresh
+session. A plugin that only follows the transaction - the one its restart started - closes its doors
+at `rolling_back`: R2 is putting the previous version's files back under it, for as long as three
+minutes when the interface does not stop. The end opens them again on the same conditions as for the
+process that asked. A helper that stops during `rolling_back`, a followed transaction that passes
+the marker's deadline while they are closed, and one whose status, marker and last-transaction
+record all go missing while they are closed, are judged as a helper that stopped in the phase last
+seen: the reinstall sentence for the build the forward restart started, since the files went back
+under it; for a process R2 itself started - one that began following at `rolling_back`, after the
+files went back - the build rule alone, so on its own build it opens. Until the lock is stale
+`cmd/update` is refused `busy` with "the previous update stopped without finishing; a new one is
+possible in about <n> minutes, when its lock on the receiver expires" - said only for a
+self-update's record of this boot whose helper is provably gone; the lock is not taken back. While a
+transaction runs or the lock is held, `cmd/uninstall` is refused `busy`, and `cmd/update` while an
+uninstall runs. A followed transaction past the marker's deadline is let go - with its doors closed,
+as a helper that stopped. The plugin that starts after a restart writes `started.json` - never the
+process whose pid is the request's `enigma2_pid` - and follows the marker to the end.
 
 **What the plugin does with these ends.** Neither end may be read as "the previous version is
 running":
