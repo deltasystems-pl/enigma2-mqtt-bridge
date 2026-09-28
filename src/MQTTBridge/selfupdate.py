@@ -144,8 +144,10 @@ BATCH = max(1, MAX_QUEUED_MESSAGES // 2)
 COLLAPSE_DELAY_MILLISECONDS = (softcam.POST_START_SECONDS + 5) * 1000
 
 PUBLIC_KEYS = ("id", "started_by", "target", "from", "phase", "started", "finished", "result",
-               "error")
+               "reason", "error")
 MAX_TEXT = 512
+# A reason code on `update.transaction`: the helper's and this module's are lowercase words.
+REASON_CODE = re.compile(r"[a-z][a-z0-9_]{0,39}")
 
 RELAY_URL = re.compile(
     r"https?://(?:\[[0-9A-Fa-f:.]{2,45}\]|[A-Za-z0-9.-]{1,253})(?::[0-9]{1,5})?"
@@ -280,6 +282,12 @@ def public(record):
     result = source.get("result")
     out["result"] = result if result in updatehelper.RESULTS and out["phase"] == "finished" \
         else None
+    # The reason stays with the transaction: `last_error` carries it too, but the next command
+    # that succeeds clears that, and a `rolled_back` means different things by its reason -
+    # `not_started` blames the release, `time_limit` only the clock (review S1).
+    reason = source.get("reason")
+    out["reason"] = reason if out["result"] not in (None, "installed") \
+        and isinstance(reason, str) and REASON_CODE.fullmatch(reason) else None
     if out["id"] is None or not updatehelper.TRANSACTION_ID.fullmatch(out["id"]):
         return None
     return out
@@ -1199,6 +1207,12 @@ class SelfUpdater:
         included, which only a helper that misjudged could write to such a process: the same
         sentence, the same repair (review round 5).
         """
+        if payload is not None and payload.get("reason") is None and \
+                payload.get("result") not in (None, "installed") and \
+                isinstance(reason, str) and REASON_CODE.fullmatch(reason):
+            # An end this process judged itself - a power loss, a helper that stopped - has no
+            # helper's reason in the record, only the one it puts on `last_error`.
+            payload = dict(payload, reason=reason)
         if payload is not None:
             self._transaction = payload
         result = (payload or {}).get("result")
