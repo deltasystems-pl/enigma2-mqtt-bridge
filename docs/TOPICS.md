@@ -85,11 +85,12 @@ companion integration's handling of it before it ships. Where the integration st
   - `key.press` - a value other than `short` or `long` is read as `short` (`box.py` l.1985-1987),
     so a new kind of press would fire the automations and device triggers of a short press;
 
-  Both are tolerated by a change to the integration that is in review for its 0.4.0 (unreleased,
-  not yet on its `main`): a source of a kind it does not know is skipped - it gets no entity, and
-  the rest of the payload applies - and a press other than `short` or `long` fires nothing. A
-  payload without `press` is still a short press, and a `kind` that is not a string is still a
-  malformed payload. The rule above stands until an integration release carries that change;
+  Both are tolerated by a change to the integration that is in review for its 0.4.0 (unreleased, not
+  yet on its `main`): a source of a kind it does not know is skipped - it gets no new entity, one it
+  already has is kept, and the rest of the payload applies - and a press other than `short` or
+  `long` fires nothing. A payload without `press` is still a short press, and a `kind` that is not a
+  string is still a malformed payload. The rule above stands until an integration release carries
+  that change;
 - **not audited**: the other enumerations, among them the choices of an enumerated setting and
   `info.ha_mode`.
 

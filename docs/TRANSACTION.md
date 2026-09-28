@@ -114,11 +114,12 @@ fresh random twelve-digit id, which matches nothing already there.
 | `attempts` | int | no; the installer writes it in a handed-back record (integration, in review) | How many recoveries of the transaction named by `id` have failed |
 
 A record the installer hands back (§2.1, integration, in review) is not written at a claim, and
-its fields do not describe the process that wrote it: `id` names the abandoned transaction, not
-the writer's; `started` is dated a moment more than 30 minutes before the hand-back; `uptime` is
-absent; and `boot_id` is a placeholder no kernel reports (`handed-back` at the time of writing),
-so rule 3 of §2.3 finds it stale at once on any clock - after a reboot into 1970 as much as
-before - and a kernel without a boot id still has the backdated `started`. A reader must not take
+only its `pid` is the writer's, a process long gone by the time anybody reads it: `id` names the
+abandoned transaction, not the writer's; `started` is dated a moment more than 30 minutes before
+the hand-back; `uptime` is absent; and `boot_id` is a placeholder no kernel reports (`handed-back`
+at the time of writing), so rule 3 of §2.3 finds it stale at once on any clock - after a reboot
+into 1970 as much as before. A kernel without a boot id has only the backdated `started`, which
+is stale on a clock that has not been stepped back since the hand-back. A reader must not take
 a record's `boot_id` for a real boot id, nor its `started` for the time of a claim. The plugin's
 rule reads it that way already, and needs no change.
 
@@ -292,9 +293,10 @@ that transaction had begun to restore, or cannot say:
     snapshot returns, and the transaction changes nothing until then, so its absence means the
     transaction was cut off - a power loss, a killed helper during the copy - before it changed
     anything, and there is nothing to put back.
-  - A recovery that fails **in a way a later try may get past** - opkg's lock held by another
-    run, a connection that dropped, a command that did not answer in time - hands the lock back
-    to the abandoned transaction (§2.1), with the count of failed recoveries in `attempts`
+  - A recovery that fails **in a way a later try may get past** - opkg's lock held by another run, a
+    connection that dropped, a command that did not answer in time, and anything that is not the
+    installer's own failure, such as Home Assistant stopping during the recovery - hands the lock
+    back to the abandoned transaction (§2.1), with the count of failed recoveries in `attempts`
     (§2.2), instead of releasing it. The record is stale at once, so the next install reclaims it
     and tries the same snapshot again first.
   - A failure that would repeat the same way - a snapshot record the restore cannot read or does
@@ -306,7 +308,7 @@ that transaction had begun to restore, or cannot say:
     does not recover the installer's snapshot: it forgets the id, and the snapshot is left as
     an ordinary one, as after a release.
   - A claim whose connection drops after the reclaim can lose the id the same way. Both are
-    accepted: the snapshot stays on the receiver.
+    accepted: the snapshot stays on the receiver until it is pruned like any other (§3.2).
 - A lock the installer released is never a recovery point: an R2 whose end the installer saw -
   including one whose restore failed or was cut off by its bound (§5.2) - releases the lock, and
   its snapshot is then left for a person: the installer's sentence names the backups directory,
