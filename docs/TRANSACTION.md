@@ -45,7 +45,7 @@ directory, the marker's `id`, the lock owner's `id` and `update.transaction.id` 
 | `/home/root/mqttbridge-backups/` | both | The directory everything below lives in. Anything else a person puts here is theirs: neither program deletes a name it did not make |
 | `/home/root/mqttbridge-backups/.ha-installer.lock/` | both | **The** lock, a directory (0700). The name is historical - the installer came first - and it is kept, because every released installer looks for exactly this name |
 | `/home/root/mqttbridge-backups/ha-installer-<id>/` | the installer | Its snapshot, schema 2 (0700) |
-| `/home/root/mqttbridge-backups/self-update-<id>/` | the self-update (planned) | Its snapshot, schema 2 (0700) |
+| `/home/root/mqttbridge-backups/self-update-<id>/` | the self-update's helper | Its snapshot, schema 2 (0700) |
 | `/home/root/mqttbridge-backups/update-<id>/` | the self-update (the helper is written; the plugin does not start it yet) | The transaction directory (0700), §7: `request.json` (0600), the copy of the helper that runs and the four modules it imports, `status.json`, the downloaded package, and the plugin's words `restart.json`, `withdraw` and `started.json`. Removed when the transaction commits; after any other end it is kept, and the helper keeps its own and the newest other `update-<id>` |
 | `/etc/enigma2/mqttbridge-update.json` | the self-update (written by the helper; not yet read) | The marker (0600), §4 |
 | `/home/root/mqttbridge-backups/drill-r2` | a person, for the hardware acceptance drill | An empty regular file (`touch`). Honoured only by a self-update started by an **acceptance** build, which removes it and goes from installed straight into R2 (§7); every other build ignores it and leaves it where it is, and so does an acceptance build for anything else of that name - a file with something in it, a directory, a link |
@@ -249,7 +249,7 @@ safe** - a restore replaces the package's status stanza, its info files, the plu
 the hook wholesale - so the recovery restores the interrupted transaction's snapshot again whenever
 that transaction had begun to restore, or cannot say:
 
-- **the self-update** (planned) says where it was: its marker and its `status.json` carry the
+- **the self-update** says where it was: its marker and its `status.json` carry the
   phase (§4);
 - **the SSH installer** writes no phase record, so an interrupted installer transaction is treated
   as "cannot say", and its snapshot is restored again. **Which** snapshot is not decided by
