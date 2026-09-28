@@ -29,7 +29,8 @@ hardware before the release that carries it, and is taken out again if that fail
 
 "Helper written" means: the code is in the plugin's package and tested against a fake receiver,
 but **no released or merged plugin starts it yet** - the command that does, and the plugin's
-side of the conversation in §7, come in a later change - and none of it has run on a receiver.
+side of the conversation in §7, come in a later change - and it has run on a receiver only in the
+hardware spike of the whole self-update, which that later change records.
 
 Paths are the ones on the receiver. `<id>` is twelve lowercase hexadecimal digits
 (`secrets.token_hex(6)`), one per transaction; it names the snapshot, the self-update's transaction
