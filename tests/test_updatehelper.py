@@ -36,6 +36,9 @@ TVN = "1:0:19:283E:3FB:1:C00000:0:0:0:"
 ORIGIN = "https://origin.test/feed/"
 TID = "0123456789ab"
 OLD, NEW = "0.4.0", "0.4.1"
+# A proof window the forward deadline cut short, in the words `last_error` carries.
+TIME_LIMIT_ROLLED_BACK = ("the update ran out of time before the new version confirmed that it "
+                          "started, so it was undone; the previous version " + OLD + " is back")
 
 
 def package(version, *, extra=None, control_version=None, name=None):
@@ -939,6 +942,9 @@ def test_the_forward_path_gives_up_at_its_bound(tmp_path):
     scene.run()
     assert scene.last()["reason"] == "time_limit" and not scene.locked()
     assert scene.opkg_calls() == []
+    # Nothing was changed, so nothing is said to be back (review S1).
+    assert scene.last()["result"] == "failed"
+    assert scene.last()["error"] == "the update did not finish within its time limit"
 
 
 def test_a_failed_start_is_rolled_back_within_its_bound(tmp_path):
@@ -2744,7 +2750,9 @@ def test_a_restart_that_lands_late_is_given_only_what_is_left_of_the_forward_pat
     # The forward path's time ran out, not the new plugin: `not_started` would report a broken
     # release for a restart that only came late.
     assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "time_limit")
-    assert scene.last()["error"] == str(updatehelper.Fail("time_limit"))
+    # The sentence says what the household needs to know: the update was undone and the
+    # previous version runs again (review S1).
+    assert scene.last()["error"] == TIME_LIMIT_ROLLED_BACK
     assert scene.status()["record"]["proof"] == "none"
     # The proof window ended with the forward path, not 120 s after the restart.
     assert marks["r2"] <= scene.transaction.deadline + updatehelper.PROOF_POLL
@@ -2765,6 +2773,21 @@ def test_a_proof_window_is_time_limit_only_when_the_deadline_cut_it(tmp_path, le
     assert scene.run() == 1
     assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", reason)
     assert scene.status()["record"]["proof"] == "none"
+    # Either way the sentence says the previous version is back, and only `not_started` says
+    # the new one did not start.
+    assert scene.last()["error"] == {
+        "not_started": str(updatehelper.Fail("not_started", previous=OLD)),
+        "time_limit": TIME_LIMIT_ROLLED_BACK}[reason]
+
+
+def test_the_two_time_limit_ends_say_different_things(tmp_path):
+    """`failed` on the forward path changed nothing that stays; `rolled_back` undid a restart."""
+    forward = str(updatehelper.Fail("time_limit"))
+    rolled_back = str(updatehelper.Fail("time_limit", rolled_back=True, previous=OLD))
+    assert forward == "the update did not finish within its time limit"
+    assert rolled_back == TIME_LIMIT_ROLLED_BACK
+    # A reason with no sentence of its own for a rollback keeps its only one.
+    assert str(updatehelper.Fail("drill", rolled_back=True)) == updatehelper.SENTENCES["drill"]
 
 
 def test_a_late_restart_that_r2_cannot_stop_keeps_time_limit_as_its_cause(tmp_path):
