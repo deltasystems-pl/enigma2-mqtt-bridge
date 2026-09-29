@@ -31,16 +31,15 @@ install it again - a forced reinstall, from the companion integration or with
 `opkg install --force-reinstall`. A receiver without internet asks Home Assistant for the package.
 The Home Assistant parts - the relayed index, installs through Home Assistant and its forced
 reinstall - need the companion integration's 0.4.0, which follows this release; with its 0.3.1 the
-receiver checks and installs from the internet itself.
-Every package now says
-which build it is, so a development build no longer looks like the release with the same number.
+receiver checks and installs from the internet itself. Every package now says which build it is,
+so a development build no longer looks like the release with the same number.
 
 **The plugin can now connect to something other than your broker**, and only to check for or
 install an update of itself. It goes to its release origin, one fixed HTTPS address with a verified
 certificate: daily when the receiver-only setting `update_check` is on, on `cmd/update_check`
 (refused unless that setting is on), when a person presses *check* on the television or the
-OpenWebif page, and for an install. For an install on a receiver without internet it goes instead
-to the relay address Home Assistant gives it over MQTT - a fixed path, over plain HTTP or HTTPS
+OpenWebif page, and for an install. For an install Home Assistant starts, or one on a receiver
+without internet, it goes instead to the relay address Home Assistant gives it over MQTT - a fixed path, over plain HTTP or HTTPS
 without a certificate check, which is enough because the package is checked against the signed
 index before it is installed. [SECURITY.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/SECURITY.md#threat-model) says what an update
 trusts and what it does not cover. Where the broker enforces an ACL, the box's login needs two new

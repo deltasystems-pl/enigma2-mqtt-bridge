@@ -44,9 +44,9 @@ everything else:
      `update_check` is on (off by default), on `cmd/update_check` over MQTT (refused unless
      `update_check` is on), when a person presses *check* on the television or the OpenWebif page,
      and for an install - asked for there, or over MQTT with the receiver-only permission
-     `update_allowed`;
-   - for an install on a receiver without internet, the Home Assistant relay address the
-     companion integration gives it over MQTT: a fixed path, `/api/enigma2_mqtt/relay/<token>`,
+     `update_allowed` - that does not go through Home Assistant's relay;
+   - for an install Home Assistant starts, or one on a receiver without internet, the Home
+     Assistant relay address the companion integration gives it over MQTT: a fixed path, `/api/enigma2_mqtt/relay/<token>`,
      fetched over plain HTTP or over HTTPS without checking the certificate. That is enough
      because what it serves is checked against the signed index (below) before anything is
      installed.
