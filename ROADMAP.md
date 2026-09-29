@@ -6,13 +6,15 @@ Where the plugin stands and what comes next. What each release changed is in
 
 ## Where it stands
 
-Plugin v0.3.0 is released: the releases page and the opkg feed serve it. The companion
-integration [hass-enigma2-mqtt](https://github.com/deltasystems-pl/hass-enigma2-mqtt) v0.3.0 is
-released too, through HACS.
+Plugin v0.4.0 is released: the releases page and the opkg feed serve it. The companion integration
+[hass-enigma2-mqtt](https://github.com/deltasystems-pl/hass-enigma2-mqtt) is at v0.3.1 through
+HACS; its 0.4.0, which installs plugin releases through Home Assistant, follows this one.
 
 0.2.0 fixed what two days of household use turned up, and 0.3.0 added what the household asked
 for. The plan for both is in
-[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md).
+[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md). 0.4.0 lets the plugin update
+itself, only to releases on a signed list, as decided in
+[ADR-0015](docs/adr/0015-signed-self-update.md).
 
 ## Milestones
 

@@ -25,6 +25,9 @@ box = test_selfupdate.box
 tree = test_selfupdate.tree
 mono = test_selfupdate.mono
 
+# The scenarios below place releases around a running 0.3.0 (conftest.running_0_3_0).
+pytestmark = pytest.mark.usefixtures("running_0_3_0")
+
 BASE_TOPIC, NODE_ID = ROOT.split("/")
 # The integration's own test fixture: Home Assistant on the receiver's subnet (test_relay.py).
 HA_BASE = "http://192.0.2.5:8123"

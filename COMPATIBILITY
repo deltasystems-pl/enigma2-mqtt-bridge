@@ -8,4 +8,4 @@
 # self_update      whether this release can update itself from the index (ADR-0015)
 contract = 1
 min_integration = none
-self_update = false
+self_update = true
