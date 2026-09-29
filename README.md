@@ -26,9 +26,9 @@ The receiver's device page in Home Assistant, with the companion integration.
 - The receiver's zap history, a page inside OpenWebif with every setting and command, and an
   optional softcam restart and EPG import (both off until you allow them on the box).
 - Updates of the plugin itself, only to releases on a signed list: from the television, the
-  OpenWebif page or over MQTT (off until you allow it on the box), keeping the channel you were watching and putting the previous
-  version back when the new one does not start. A receiver without internet can get the package
-  through Home Assistant.
+  OpenWebif page or over MQTT (off until you allow it on the box), keeping the channel you were
+  watching and putting the previous version back when the new one does not start. A receiver
+  without internet can get the package through Home Assistant.
 - Pure Python with one vendored library (paho-mqtt). Nothing to compile, and no connection to
   anything but your broker unless you check for or install an update.
 
@@ -102,9 +102,10 @@ sender. The threat model is in
 The channel, programme, keys, zap history and screenshots say what your household watches. They
 land on the broker and, by default, in Home Assistant's recorder.
 [docs/SETUP.md](docs/SETUP.md#privacy) lists what to switch off or exclude. The plugin has no
-telemetry and no cloud part. It goes to the internet only to check for or install an update of
-itself - daily with `update_check` on, otherwise only when asked - and then only to one fixed
-address ([SECURITY.md](SECURITY.md#threat-model)).
+telemetry and no cloud part. Besides your broker it connects only to check for or install an
+update of itself - daily with `update_check` on, otherwise only when asked - and then only to its
+release origin, or, for an install without internet, to Home Assistant's relay
+([SECURITY.md](SECURITY.md#threat-model)).
 
 ## Documentation
 

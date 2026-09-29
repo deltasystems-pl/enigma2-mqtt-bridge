@@ -10,8 +10,9 @@ Why, and what it replaces, is [ADR-0015](adr/0015-signed-self-update.md). This f
 reference: the format, the rule every reader applies, where each value comes from, and how an index
 is built, signed and published. Two readers apply the rule: the companion integration, and the
 plugin's own update check (`src/MQTTBridge/updatecheck.py`), which reads the index from the
-origin - only when the receiver's `update_check` setting or a person at the OpenWebif page asks -
-or relayed by the integration on the retained topic `enigma2mqtt/release_index`, and publishes
+origin - only when the receiver's `update_check` setting or a person at the television or the
+OpenWebif page asks - or relayed by the integration on the retained topic
+`enigma2mqtt/release_index`, and publishes
 what it holds on the `update` topic ([TOPICS.md](TOPICS.md)). From 0.4.0 the plugin also installs
 from it - over MQTT, from the television and from the OpenWebif page - and only a release it names
 ([TRANSACTION.md](TRANSACTION.md)).

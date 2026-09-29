@@ -29,13 +29,20 @@ on the channel it was showing, and puts the previous version back by itself when
 not start. Where the old files cannot all be put back, the plugin keeps its doors closed and says to
 install it again - a forced reinstall, from the companion integration or with
 `opkg install --force-reinstall`. A receiver without internet asks Home Assistant for the package.
+The Home Assistant parts - the relayed index, installs through Home Assistant and its forced
+reinstall - need the companion integration's 0.4.0, which follows this release; with its 0.3.1 the
+receiver checks and installs from the internet itself.
 Every package now says
 which build it is, so a development build no longer looks like the release with the same number.
 
-**The plugin can now connect to something other than your broker.** Only to one fixed HTTPS
-address, its release origin, and only to check for or install an update: daily when the
-receiver-only setting `update_check` is on, when a person presses *check* on the television or the
-OpenWebif page, and for an install. [SECURITY.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/SECURITY.md#threat-model) says what an update
+**The plugin can now connect to something other than your broker**, and only to check for or
+install an update of itself. It goes to its release origin, one fixed HTTPS address with a verified
+certificate: daily when the receiver-only setting `update_check` is on, on `cmd/update_check`
+(refused unless that setting is on), when a person presses *check* on the television or the
+OpenWebif page, and for an install. For an install on a receiver without internet it goes instead
+to the relay address Home Assistant gives it over MQTT - a fixed path, over plain HTTP or HTTPS
+without a certificate check, which is enough because the package is checked against the signed
+index before it is installed. [SECURITY.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/SECURITY.md#threat-model) says what an update
 trusts and what it does not cover. Where the broker enforces an ACL, the box's login needs two new
 `read` lines ([docs/SETUP.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/SETUP.md#broker-access)).
 
@@ -306,8 +313,9 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   unsaved settings, and that the image comes back on a `lastservice` written while it is stopped -
   are marked as hypotheses still to be measured on a receiver, and what is released today is told
   apart from what is planned throughout.
-- [SECURITY.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/SECURITY.md#threat-model)'s threat model is rewritten for this release: the one
-  address besides the broker the plugin connects to, and when; what an update trusts - the signed
+- [SECURITY.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/SECURITY.md#threat-model)'s threat model is rewritten for this release: where
+  besides the broker the plugin connects - its release origin and Home Assistant's relay - and
+  when; what an update trusts - the signed
   index, the two keys and how each is kept, the serial and rank rules, the origin and Home
   Assistant as couriers; and what that does not cover - withholding, no expiry, an account
   compromise, and the image's own package manager, which checks no signature. Its supported

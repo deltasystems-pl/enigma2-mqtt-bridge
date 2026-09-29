@@ -1001,7 +1001,7 @@ bounds that case.
 
 **The acceptance drill's hook.** The hardware acceptance has to prove R2's stop, restore and
 `lastservice` write on a receiver in one restart, without a forward restart and a failed proof
-first. The planned hardware acceptance proves R2 with a deliberately broken build; this hook is
+first. The hardware acceptance proved R2 with a deliberately broken build as well; this hook is
 an **acceptance-only addition** to it, for the same proof without building one, and it
 exists only in the `acceptance` flavour. So a helper whose request says `acceptance: true` - which
 only an `acceptance`-flavour build writes; release and development builds always write `false` -
@@ -1053,9 +1053,12 @@ written, while the question waited, but no beat fell inside the few seconds of a
 H1 of §5 was not measured.
 
 Before 0.4.0 was released, its candidate ran on the same receiver together with the companion
-integration's candidate: a downgrade chosen on the television, once with the receiver online and
-once without internet through Home Assistant's relay; an upgrade over MQTT through the relay; a
-deliberately broken release put back through R2; an index signed with a rank-2 test key accepted,
-and a later rank-1 one refused, on both sides; the integration's forced reinstall, including after
-the helper was killed during the install; and that reinstall refused on the lock while an install
-started on the television was running. A power loss was not tested.
+integration's candidate: an install chosen on the television with the receiver online, of the
+release with the same number as the running development build; a downgrade to 0.2.0 chosen on the
+television on a receiver without internet, through Home Assistant's relay - the one real downgrade
+this acceptance proved; an upgrade over MQTT through the relay; a deliberately broken release put
+back through R2; an index signed with a rank-2 test key accepted, and a later rank-1 one refused,
+on both sides; and the integration's forced reinstall - run with the plugin switched off and after
+the helper was killed during an install, refused during an install started on the television
+because a client was streaming from the receiver, and refused on the lock the killed helper left,
+with a sentence naming the minutes until that lock may be taken. A power loss was not tested.
