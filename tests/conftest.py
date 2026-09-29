@@ -3623,3 +3623,17 @@ def install_epg_importer(monkeypatch, import_events=True, import_event=False,
 
     monkeypatch.setitem(sys.modules, EPG_IMPORTER_MODULE, module)
     return module
+
+
+@pytest.fixture
+def running_0_3_0(monkeypatch):
+    """The plugin runs 0.3.0, whatever `version.py` says.
+
+    The self-update scenarios place releases around the running version - older ones, the same one
+    and newer ones - and are written around 0.3.0. Every module that reads the version is pointed
+    at it here, so a release pull request that raises `version.py` leaves the scenarios as they are.
+    """
+    from MQTTBridge import bridge, selfupdate, updateview, webif
+
+    for module in (bridge, selfupdate, updateview, webif):
+        monkeypatch.setattr(module, "__version__", "0.3.0")

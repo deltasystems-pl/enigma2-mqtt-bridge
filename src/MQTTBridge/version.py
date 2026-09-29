@@ -9,6 +9,6 @@ version"), published as `info.contract`. It changes only in a release that
 declares a new major, and a test holds it to docs/contract.json.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 CONTRACT = 1

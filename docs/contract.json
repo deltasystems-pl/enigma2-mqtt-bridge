@@ -100,11 +100,13 @@
     },
     "update": {
       "payload": "json",
-      "retained": true
+      "retained": true,
+      "since": "0.4.0"
     },
     "relay_request": {
       "payload": "json",
-      "retained": false
+      "retained": false,
+      "since": "0.4.0"
     },
     "last_error": {
       "payload": "json",
@@ -145,9 +147,15 @@
     "uninstall": {
       "since": "0.3.0"
     },
-    "update_check": {},
-    "update": {},
-    "relay": {}
+    "update_check": {
+      "since": "0.4.0"
+    },
+    "update": {
+      "since": "0.4.0"
+    },
+    "relay": {
+      "since": "0.4.0"
+    }
   },
   "info_members": {
     "image": "string",
@@ -233,12 +241,12 @@
     "update_check": {
       "type": "bool",
       "writable": false,
-      "since": "unreleased"
+      "since": "0.4.0"
     },
     "update_allowed": {
       "type": "bool",
       "writable": false,
-      "since": "unreleased"
+      "since": "0.4.0"
     }
   },
   "capabilities": [
@@ -286,11 +294,11 @@
     },
     {
       "name": "timers-lists-finished",
-      "release": "unreleased"
+      "release": "0.4.0"
     },
     {
       "name": "zap-under-popup-recorded",
-      "release": "unreleased"
+      "release": "0.4.0"
     }
   ],
   "planned": []

@@ -82,7 +82,8 @@ def test_the_parse_is_not_empty(checker, topics_text):
     assert parsed["settings"]["screenshot"]["type"] == "enum(off|on_zap|interval)"
     assert "uninstall" in parsed["capabilities"]
     assert "relay" in parsed["commands"]
-    assert parsed["state_topics"]["relay_request"] == {"payload": "json", "retained": False}
+    assert parsed["state_topics"]["relay_request"] == {"payload": "json", "retained": False,
+                                                       "since": "0.4.0"}
     # Nothing is planned now; the table is there, empty, and a row in it is read (below).
     assert parsed["planned"] == []
 
@@ -418,9 +419,10 @@ def test_a_removed_outside_topic_is_refused(checker, contract):
 def test_the_update_check_is_in_the_contract_and_out_of_the_plan(checker, topics_text):
     parsed = checker.parse_topics(topics_text)
     assert parsed["settings"]["update_check"] == {
-        "type": "bool", "writable": False, "since": "unreleased",
+        "type": "bool", "writable": False, "since": "0.4.0",
     }
-    assert parsed["state_topics"]["update"] == {"payload": "json", "retained": True}
+    assert parsed["state_topics"]["update"] == {"payload": "json", "retained": True,
+                                                "since": "0.4.0"}
     assert "update_check" in parsed["commands"]
     assert "enigma2mqtt/release_index" in parsed["other_topics"]
     planned = {(row["kind"], row["name"]) for row in parsed["planned"]}
@@ -434,13 +436,14 @@ def test_the_install_and_the_relay_are_in_the_contract_and_nothing_is_planned(ch
                                                                               topics_text):
     parsed = checker.parse_topics(topics_text)
     assert parsed["settings"]["update_allowed"] == {
-        "type": "bool", "writable": False, "since": "unreleased",
+        "type": "bool", "writable": False, "since": "0.4.0",
     }
     assert "self_update" in parsed["capabilities"]
     assert "update" in parsed["commands"]
     assert "enigma2mqtt/integration/<node>" in parsed["other_topics"]
     assert "relay" in parsed["commands"]
-    assert parsed["state_topics"]["relay_request"] == {"payload": "json", "retained": False}
+    assert parsed["state_topics"]["relay_request"] == {"payload": "json", "retained": False,
+                                                       "since": "0.4.0"}
     assert parsed["planned"] == []
 
 
@@ -655,12 +658,19 @@ def test_cli_an_unknown_option_exits_two(repo):
 # on HEAD - the first release carrying the file. The release workflow runs the check there.
 
 
-def _real_record(topics_text, contract, unreleased_as):
+# The first release carrying the file is 0.4.0. Its record's own exceptions - "unreleased" before
+# its release pull request, "0.4.0" from then on - are given as `as_` here, so the history below
+# can be rebuilt from either state of the repository.
+FIRST_CARRYING = "0.4.0"
+
+
+def _real_record(topics_text, contract, as_):
+    ours = ("unreleased", FIRST_CARRYING)
     rows = [
-        (row["name"], unreleased_as if row["release"] == "unreleased" else row["release"])
+        (row["name"], as_ if row["release"] in ours else row["release"])
         for row in contract["exceptions"]
     ]
-    assert any(row["release"] == "unreleased" for row in contract["exceptions"])
+    assert any(row["release"] in ours for row in contract["exceptions"])
     return _with_exceptions(topics_text, contract, rows)
 
 
@@ -668,7 +678,7 @@ def _history_before_the_first_carrying_release(repo, topics_text, contract):
     for version in ("0.1.0", "0.2.0", "0.3.0"):
         _write(repo, topics_text, None, version=version)
         _commit(repo, version, tag=f"v{version}")
-    _write(repo, topics_text, contract, version="0.3.0")
+    _write(repo, *_real_record(topics_text, contract, "unreleased"), version="0.3.0")
     _commit(repo, "the contract lands, unreleased exceptions and all")
     status, output = _run(repo, "--previous", "tag")
     assert status == 0, output
@@ -699,7 +709,7 @@ def test_cli_the_first_carrying_release_still_saying_unreleased_is_refused(
     repo, topics_text, contract
 ):
     _history_before_the_first_carrying_release(repo, topics_text, contract)
-    _write(repo, topics_text, contract, version="0.4.0")
+    _write(repo, *_real_record(topics_text, contract, "unreleased"), version="0.4.0")
     _commit(repo, "a release pull request that forgot the dates")
     _git(repo, "tag", "v0.4.0")
     status, output = _run(repo, "--previous", "tag")
@@ -713,7 +723,7 @@ def test_cli_a_release_pull_request_must_date_its_exceptions(repo, topics_text, 
     # version.py above the previous release tag is a release on its way: its exceptions are
     # dated now, in the pull request, not discovered when the tag is pushed.
     _history_before_the_first_carrying_release(repo, topics_text, contract)
-    _write(repo, topics_text, contract, version="0.4.0")
+    _write(repo, *_real_record(topics_text, contract, "unreleased"), version="0.4.0")
     _commit(repo, "a release pull request that forgot the dates")
     status, output = _run(repo, "--previous", "tag")
     assert status == 1, output

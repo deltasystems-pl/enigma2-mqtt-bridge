@@ -477,7 +477,13 @@ topic readwrite enigma2/<node_id>/#
 topic write enigma2mqtt/discovery/<node_id>/#
 topic write homeassistant/device/<node_id>/#
 topic write homeassistant/device_automation/<node_id>/#
+topic read enigma2mqtt/release_index
+topic read enigma2mqtt/integration/<node_id>
 ```
+
+The two `read` lines (since 0.4.0) let the receiver hear the release index and the version of the
+companion integration that Home Assistant publishes; without them it learns of releases only from
+the internet, and cannot ask Home Assistant for a package.
 
 Then **verify it by effect**. Subscribe as a privileged user to a topic the box has no business
 touching and publish there as the box's user: the message must not arrive. Mosquitto drops an

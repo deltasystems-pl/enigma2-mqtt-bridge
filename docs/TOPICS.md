@@ -39,9 +39,9 @@ The contract has a major number, and the current contract major is **1**.
 | Contract | Plugin releases |
 |---|---|
 | 0 | 0.1.0 |
-| 1 | 0.2.0, 0.3.0, and every later release until a release declares contract 2 |
+| 1 | 0.2.0, 0.3.0, 0.4.0, and every later release until a release declares contract 2 |
 
-A plugin publishes its major as `info.contract` from the first release after 0.3.0 (§1,
+A plugin publishes its major as `info.contract` from 0.4.0 on (§1,
 [ADR-0015](adr/0015-signed-self-update.md)). A plugin that does not publish it is contract 0 when
 `info.plugin` is below 0.2.0 and contract 1 when it is 0.2.0 or a 0.3.x.
 
@@ -124,8 +124,8 @@ hold:
 |---|---|---|---|
 | `zap-moves-channel-list` | 0.3.0 | `cmd/zap` goes through the receiver's channel list, so a zap to a channel outside the bouquet being browsed moves the channel list to that channel's bouquet, and `bouquet` names it | The integration shows `bouquet` as the receiver reports it (`select.py` l.252 and l.278, `sensor.py` l.719 follow the topic), so it follows the move rather than contradicting it. Recorded after the fact: the rule did not exist when 0.3.0 shipped, and this check is made against integration 0.3.1 |
 | `epg-grid-generated-means-changed` | 0.3.0 | `epg_grid/<bouquet_slug>`'s `generated` means when the grid last changed, not when it was last built | The integration reads `generated` only into its diagnostics (`diagnostics.py` l.144). Recorded after the fact, as above |
-| `timers-lists-finished` | unreleased | `timers` lists the timers the receiver has finished with - ended, failed and disabled - and not only the pending ones; `state` gains `disabled`, `failed` and `unknown`, and a state number with no word is `unknown` where it used to read `waiting`. A consumer that treated every entry as pending filters on `state` (`waiting`, `prepared`, `running`) | The integration keeps the `timers` payload for its diagnostics only (`box.py` l.1299, `diagnostics.py` l.119) and builds no entity from it; its recording guard reads OpenWebif, not this topic (`installer.py` l.516-532). Decided by the maintainer on 2026-09-26 |
-| `zap-under-popup-recorded` | unreleased | With only an information popup open directly over the info bar, `cmd/zap`, `cmd/zap_history` and the zap `cmd/bouquet` makes go through the channel list: the zap is recorded in the zap history, and a zap outside the bouquet being browsed moves the channel list. 0.3.0 played them directly, as with any screen open | As for `zap-moves-channel-list`: the integration follows `bouquet` and `zap_history` as the receiver reports them (`box.py` l.1291 for `zap_history`) |
+| `timers-lists-finished` | 0.4.0 | `timers` lists the timers the receiver has finished with - ended, failed and disabled - and not only the pending ones; `state` gains `disabled`, `failed` and `unknown`, and a state number with no word is `unknown` where it used to read `waiting`. A consumer that treated every entry as pending filters on `state` (`waiting`, `prepared`, `running`) | The integration keeps the `timers` payload for its diagnostics only (`box.py` l.1299, `diagnostics.py` l.119) and builds no entity from it; its recording guard reads OpenWebif, not this topic (`installer.py` l.516-532). Decided by the maintainer on 2026-09-26 |
+| `zap-under-popup-recorded` | 0.4.0 | With only an information popup open directly over the info bar, `cmd/zap`, `cmd/zap_history` and the zap `cmd/bouquet` makes go through the channel list: the zap is recorded in the zap history, and a zap outside the bouquet being browsed moves the channel list. 0.3.0 played them directly, as with any screen open | As for `zap-moves-channel-list`: the integration follows `bouquet` and `zap_history` as the receiver reports them (`box.py` l.1291 for `zap_history`) |
 
 The rule was written down after 0.3.0, so the history below classifies the releases before it by
 what they did.
@@ -158,7 +158,7 @@ not by the checker; their types are the tables below.
 |---|---|---|
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
-| unreleased, on `main` after 0.3.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3); the read-only setting `update_allowed`, the capability `self_update`, the command `update`, `update.transaction` and the subscription to `enigma2mqtt/integration/<node>` (§3); the event topic `relay_request` and the command `relay`, and `cmd/update`'s refusal `no_relay`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
+| 0.3.0 -> 0.4.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3); the read-only setting `update_allowed`, the capability `self_update`, the command `update`, `update.transaction` and the subscription to `enigma2mqtt/integration/<node>` (§3); the event topic `relay_request` and the command `relay`, and `cmd/update`'s refusal `no_relay`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
 
 ---
 
@@ -187,7 +187,7 @@ announcement retained.
 {
   "image": "OpenViX 6.6.007",
   "enigma": "2024-09-11-Release",
-  "plugin": "0.3.0",
+  "plugin": "0.4.0",
   "build": {"commit": "3f6c0a2d9e41b7c85a0f2e6d1c9b8a7f6e5d4c3b", "time": 1790000000,
             "dirty": false, "flavour": "release", "on_disk": null},
   "contract": 1,
@@ -215,8 +215,8 @@ announcement retained.
 | `image` | string | Image name and version as the box reports it |
 | `enigma` | string | enigma2's own version string, as `getEnigmaVersionString()` reports it - on OE-Alliance images a build date such as `2024-09-11-Release`, not a number |
 | `plugin` | string | This plugin's version - what an `update` entity compares against. The same for a release and for every development build that carries its number; `build` tells them apart |
-| `build` | object | Which build of the plugin is running, and which one is waiting on disk. Added after 0.3.0 (unreleased). See below |
-| `contract` | int | The [contract major](#contract-version) this plugin implements. Added after 0.3.0 (unreleased); a plugin without it is contract 0 below 0.2.0 and contract 1 otherwise |
+| `build` | object | Which build of the plugin is running, and which one is waiting on disk. Since 0.4.0. See below |
+| `contract` | int | The [contract major](#contract-version) this plugin implements. Since 0.4.0; a plugin without it is contract 0 below 0.2.0 and contract 1 otherwise |
 | `boxtype` | string | Machine name, lowercase |
 | `mac` | string | Lowercase, colon-separated; the Wake-on-LAN target |
 | `ip` | string | Current LAN address |
@@ -238,8 +238,8 @@ settings it did mean to change as well.
 | `softcam_restart_allowed` | 0.3.0 | Whether `cmd/softcam_restart` is permitted over MQTT, and with it the opt-in auto-heal. Always present, whichever way it is set | The same places, and never over MQTT |
 | `epg_import_allowed` | 0.3.0 | Whether `cmd/epg_import` is permitted over MQTT. Always present, whichever way it is set | The same places, and never over MQTT |
 | `uninstall_allowed` | 0.3.0 | Whether `cmd/uninstall` is permitted over MQTT. Always present, whichever way it is set. A consumer offers the removal only on a **stated** `true` together with the `uninstall` capability: for a one-way door, silence means no | The same places, and never over MQTT |
-| `update_check` | unreleased | Whether the receiver asks the plugin's release origin, on the internet, which releases there are: once a day, and when `cmd/update_check` asks over MQTT. Not a permission for anything on the receiver, but the one switch that lets it make a connection other than the broker's, so it sits on this side of the line for the same reason. Always present, whichever way it is set | The same places, and never over MQTT |
-| `update_allowed` | unreleased | Whether `cmd/update` is permitted over MQTT - an install of a signed release, which ends in a restart of the interface. Always present, whichever way it is set. A consumer offers an install over MQTT only on a stated `true` together with the `self_update` capability | The same places, and never over MQTT |
+| `update_check` | 0.4.0 | Whether the receiver asks the plugin's release origin, on the internet, which releases there are: once a day, and when `cmd/update_check` asks over MQTT. Not a permission for anything on the receiver, but the one switch that lets it make a connection other than the broker's, so it sits on this side of the line for the same reason. Always present, whichever way it is set | The same places, and never over MQTT |
+| `update_allowed` | 0.4.0 | Whether `cmd/update` is permitted over MQTT - an install of a signed release, which ends in a restart of the interface. Always present, whichever way it is set. A consumer offers an install over MQTT only on a stated `true` together with the `self_update` capability | The same places, and never over MQTT |
 
 The rule behind which side of the line a setting falls on: one that **enables a command** is never
 writable over MQTT - it is set on the receiver (the setup screen, the provisioning file, or the
@@ -268,7 +268,7 @@ are not capabilities. `uninstall` (since 0.3.0) is the one name with no feature 
 says the package manager installed this very copy of the plugin, so `cmd/uninstall` can work - opkg
 is executable, its configured info directory knows the package, and the package's file list names
 the running `plugin.py`. A copy unpacked by hand or carried in a firmware image does not claim it.
-`self_update` (unreleased) has no feature area behind it either: it is `uninstall`'s condition, and
+`self_update` (since 0.4.0) has no feature area behind it either: it is `uninstall`'s condition, and
 the receiver can run the update helper outside enigma2 - `/sbin/start-stop-daemon` and
 `/usr/bin/python3` are executable and the helper and the four modules it imports are in the plugin's
 directory - so `cmd/update` can work.
@@ -308,8 +308,8 @@ like an older plugin that publishes no `wol` at all: silence, not `false`. And `
 image has a switch - it is not evidence that a magic packet wakes the receiver, which no drill has
 shown on any image yet.
 
-**`build` says which code runs, which a version number cannot.** Added after 0.3.0 (unreleased;
-[ADR-0015](adr/0015-signed-self-update.md), decision 1). A development build of the commit after a
+**`build` says which code runs, which a version number cannot.** Since 0.4.0
+([ADR-0015](adr/0015-signed-self-update.md), decision 1). A development build of the commit after a
 release carries that release's number until the next release pull request changes it, so `plugin`
 alone makes a receiver running it look up to date. The values come from whoever built the package
 (`tools/build-ipk.sh`, which records them in the package) and are never worked out on the
@@ -339,7 +339,7 @@ There is deliberately no `origin` member. Where a build fetches its releases fro
 this object has to say to tell builds apart - only an `acceptance` build may carry another source
 or other index keys, and the build refuses both for every other flavour - and "origin" already
 means two other things in this contract: where a command came from, and whether the release index
-could be reached (the planned `update.origin`). The release workflow reads every release package
+could be reached (`update.origin`). The release workflow reads every release package
 back and refuses one that carries either.
 
 ### `<base>/<node>/power`
@@ -1049,7 +1049,7 @@ every reconnect. The plugin observes keys and **never consumes them** - the rece
 exactly as it would with the plugin absent - and publishing is capped so that holding a button
 cannot flood the broker. `publish_keys` turns the topic off.
 
-### `<base>/<node>/update` - added after 0.3.0 (unreleased)
+### `<base>/<node>/update` - since 0.4.0
 
 Retained. Which releases of the plugin this receiver could install, read from the signed release
 index ([RELEASE-INDEX.md](RELEASE-INDEX.md), [ADR-0015](adr/0015-signed-self-update.md)) and from
@@ -1113,7 +1113,7 @@ closed (§2, `cmd/update`); the plugin that starts after the restart reports the
 downgrade chosen on the receiver the old plugin publishes nothing from the retraction on, so this
 topic stands still until the older release connects.
 
-### `<base>/<node>/relay_request` - added after 0.3.0 (unreleased)
+### `<base>/<node>/relay_request` - since 0.4.0
 
 **Not retained** - QoS 1. A receiver without internet asks the companion integration for a
 package: an install started at the television or on the OpenWebif page, when the release origin is
@@ -1205,13 +1205,13 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
 | `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
 | `uninstall` - since 0.3.0 | this receiver's node id, exactly (surrounding whitespace is stripped; case matters) | Removes the plugin from the receiver: stops publishing, retracts every retained topic this node owns at QoS 1, publishes `offline` last, removes the package and restarts the interface. 🔴 **A one-way door** | Refused, before anything changes, in this order: unless `uninstall_allowed` is on - „uninstall is switched off in the plugin's settings"; unless the payload is this node's id - „the payload must be this receiver's node id"; while an update runs, or an update or an SSH install holds the transaction lock - `cmd/update`'s `busy` sentence, with `reason` `busy`, because both end in the package manager and a restart; without the `uninstall` capability - „this plugin was not installed by the package manager, so it cannot remove itself"; while an EPG import runs - „an EPG import is running", exactly as `restart_gui` refuses it and with the same lapse, because the removal ends in the same restart; by the same recording guard as `deep_standby`; where the image has no way to restart the interface; while a removal is already running - „an uninstall is already running". See below |
-| `update` - added after 0.3.0 (unreleased), capability `self_update` | `{"version": "0.4.1" \| "latest", "sha256": "<64 hex>", "relay": {"url": "...", "expires": <epoch>}}`; `sha256` and `relay` optional | Installs one signed release of the plugin and restarts the interface to run it, keeping the channel being watched; rolls back by itself when the new release does not start. **Upgrades and repairs only** - never a downgrade over MQTT. The answer is `update.transaction` moving (§1). See below | Refused before anything changes, in the order below, each with a `reason` on `last_error` |
-| `update_check` - added after 0.3.0 (unreleased) | any (`PRESS` by convention) | Asks the plugin's release origin for the signed release index, judges what comes back, and says what it found on `update` (§1) | Refused unless `update_check` is on: "checking for updates is switched off in the plugin's settings" (`reason` `not_permitted`). At most one request per ten minutes, shared with the OpenWebif page: inside that the command succeeds, nothing is fetched and `update` stands as the last check left it. The answer is `update` changing once the check has run, as for every command. **The payload is ignored**: nothing from the broker names where to look |
-| `relay` - added after 0.3.0 (unreleased) | `{"id": "a1b2c3d4e5f6", "version": "0.4.1", "url": "http://192.0.2.5:8123/api/enigma2_mqtt/relay/<token>", "expires": <epoch>}` | Home Assistant's answer to this receiver's `relay_request` (§1): where to download the package. Taken only as the answer the receiver is waiting for, and it then starts the install that asked (below) | **Never refused on `last_error`, and never clears it**: an answer that is not the awaited one is logged and dropped, and the wait goes on. What comes of an answer that is taken is `cmd/update`'s |
+| `update` - since 0.4.0, capability `self_update` | `{"version": "0.4.1" \| "latest", "sha256": "<64 hex>", "relay": {"url": "...", "expires": <epoch>}}`; `sha256` and `relay` optional | Installs one signed release of the plugin and restarts the interface to run it, keeping the channel being watched; rolls back by itself when the new release does not start. **Upgrades and repairs only** - never a downgrade over MQTT. The answer is `update.transaction` moving (§1). See below | Refused before anything changes, in the order below, each with a `reason` on `last_error` |
+| `update_check` - since 0.4.0 | any (`PRESS` by convention) | Asks the plugin's release origin for the signed release index, judges what comes back, and says what it found on `update` (§1) | Refused unless `update_check` is on: "checking for updates is switched off in the plugin's settings" (`reason` `not_permitted`). At most one request per ten minutes, shared with the OpenWebif page: inside that the command succeeds, nothing is fetched and `update` stands as the last check left it. The answer is `update` changing once the check has run, as for every command. **The payload is ignored**: nothing from the broker names where to look |
+| `relay` - since 0.4.0 | `{"id": "a1b2c3d4e5f6", "version": "0.4.1", "url": "http://192.0.2.5:8123/api/enigma2_mqtt/relay/<token>", "expires": <epoch>}` | Home Assistant's answer to this receiver's `relay_request` (§1): where to download the package. Taken only as the answer the receiver is waiting for, and it then starts the install that asked (below) | **Never refused on `last_error`, and never clears it**: an answer that is not the awaited one is logged and dropped, and the wait goes on. What comes of an answer that is taken is `cmd/update`'s |
 
 Every one of them is refused when it arrives retained, as above.
 
-### `cmd/update` semantics - added after 0.3.0 (unreleased)
+### `cmd/update` semantics - since 0.4.0
 
 [ADR-0015](adr/0015-signed-self-update.md) and [TRANSACTION.md](TRANSACTION.md) have the design;
 this is what a consumer sees. `version` is a release number or `latest` (the newest compatible
@@ -1806,7 +1806,7 @@ configuration; `docs/SETUP.md` lists what stays and why.
   "base_topic": "enigma2",
   "image": "OpenViX 6.6.007",
   "enigma": "2024-09-11-Release",
-  "plugin": "0.3.0",
+  "plugin": "0.4.0",
   "boxtype": "vuuno4kse",
   "mac": "00:00:5e:00:53:01",
   "ip": "192.0.2.12",
@@ -1831,8 +1831,8 @@ Besides its own command topics, the plugin subscribes to two topics it does not 
 
 | Topic | Published by | What the plugin does with it |
 |---|---|---|
-| `enigma2mqtt/release_index` - added after 0.3.0 (unreleased) | The companion integration, retained, after it verified a newer index: `{"index": "<base64 of the exact signed bytes>", "sig": "<base64 of the signature file>"}` | Judges it by the rule for accepting an index ([RELEASE-INDEX.md](RELEASE-INDEX.md)), exactly as an index it fetched itself, and keeps it when the rule accepts it - `update.index.source` is then `relay`. A refusal is a line in the plugin's log, never `last_error`. A payload over 88 KiB is dropped unread. It needs no setting and causes no connection, so a receiver without internet learns of releases this way. The plugin never publishes to it and never retracts it |
-| `enigma2mqtt/integration/<node>` - added after 0.3.0 (unreleased) | The companion integration, retained, QoS 1: `{"integration": "0.4.0", "contract": 1, "plugin_min": "0.2.0"}`; retracted when its entry is removed | Keeps it in memory and judges `update.available` and `cmd/update` by it: a release of another contract major than the integration's, or one whose `min_integration` is above `integration`, is `incompatible`, and `plugin_min` raises the floor. An empty payload forgets it, and an unreadable one is ignored. A forged one can only narrow or widen the choice among signed, non-withdrawn releases of one major. The plugin never publishes to it and never retracts it |
+| `enigma2mqtt/release_index` - since 0.4.0 | The companion integration, retained, after it verified a newer index: `{"index": "<base64 of the exact signed bytes>", "sig": "<base64 of the signature file>"}` | Judges it by the rule for accepting an index ([RELEASE-INDEX.md](RELEASE-INDEX.md)), exactly as an index it fetched itself, and keeps it when the rule accepts it - `update.index.source` is then `relay`. A refusal is a line in the plugin's log, never `last_error`. A payload over 88 KiB is dropped unread. It needs no setting and causes no connection, so a receiver without internet learns of releases this way. The plugin never publishes to it and never retracts it |
+| `enigma2mqtt/integration/<node>` - since 0.4.0 | The companion integration, retained, QoS 1: `{"integration": "0.4.0", "contract": 1, "plugin_min": "0.2.0"}`; retracted when its entry is removed | Keeps it in memory and judges `update.available` and `cmd/update` by it: a release of another contract major than the integration's, or one whose `min_integration` is above `integration`, is `incompatible`, and `plugin_min` raises the floor. An empty payload forgets it, and an unreadable one is ignored. A forged one can only narrow or widen the choice among signed, non-withdrawn releases of one major. The plugin never publishes to it and never retracts it |
 
 ---
 

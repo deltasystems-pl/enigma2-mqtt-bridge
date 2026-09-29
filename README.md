@@ -25,8 +25,12 @@ The receiver's device page in Home Assistant, with the companion integration.
   [hass-enigma2-mqtt](https://github.com/deltasystems-pl/hass-enigma2-mqtt).
 - The receiver's zap history, a page inside OpenWebif with every setting and command, and an
   optional softcam restart and EPG import (both off until you allow them on the box).
+- Updates of the plugin itself, only to releases on a signed list: from the television, the
+  OpenWebif page or over MQTT (off until you allow it on the box), keeping the channel you were watching and putting the previous
+  version back when the new one does not start. A receiver without internet can get the package
+  through Home Assistant.
 - Pure Python with one vendored library (paho-mqtt). Nothing to compile, and no connection to
-  anything but your broker.
+  anything but your broker unless you check for or install an update.
 
 <img src="docs/images/zap-history.png" width="400" alt="The Recently watched list in Home Assistant, showing the last six channels">
 
@@ -80,7 +84,8 @@ OpenPLi or OpenBH, a test report in an issue helps;
 
 | Plugin | Integration |
 |---|---|
-| 0.3.0 (current) | 0.3.0 |
+| 0.4.0 (current) | 0.3.1; its 0.4.0, to follow, adds installs through Home Assistant |
+| 0.3.0 | 0.3.0 |
 | 0.2.0 | 0.2.0 |
 | 0.1.0 | 0.1.0 |
 
@@ -97,7 +102,9 @@ sender. The threat model is in
 The channel, programme, keys, zap history and screenshots say what your household watches. They
 land on the broker and, by default, in Home Assistant's recorder.
 [docs/SETUP.md](docs/SETUP.md#privacy) lists what to switch off or exclude. The plugin has no
-telemetry, no cloud part and no update check of its own.
+telemetry and no cloud part. It goes to the internet only to check for or install an update of
+itself - daily with `update_check` on, otherwise only when asked - and then only to one fixed
+address ([SECURITY.md](SECURITY.md#threat-model)).
 
 ## Documentation
 

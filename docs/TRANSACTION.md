@@ -1,8 +1,8 @@
 # The install transaction
 
 Two programs change the plugin on a receiver: the companion Home Assistant integration's installer,
-which works over SSH, and - decided in [ADR-0015](adr/0015-signed-self-update.md), merged and not
-yet released - the plugin's own update helper. They must never run at the same time, they must
+which works over SSH, and - decided in [ADR-0015](adr/0015-signed-self-update.md), released in
+plugin 0.4.0 - the plugin's own update helper. They must never run at the same time, they must
 be able to undo each other's unfinished work, and whichever restarts the receiver's interface
 must leave the household on the channel it was watching. This file is the contract between the
 two: the names on the receiver's disk, the lock and how it goes stale, the snapshot, the marker,
@@ -28,15 +28,14 @@ hardware before the release that carries it, and is taken out again if that fail
 | The transaction directory (§7) | - | helper written, and the plugin's side |
 
 "Helper written" means: the helper and the plugin's side that starts it - `cmd/update`, the
-television and the OpenWebif page (`selfupdate.py`), and its half of §4 and §7 - are merged on the
-plugin's `main` branch, **not released**, and tested against a fake receiver; the only runs on a
-receiver are the hardware spike's (§8), before the merge. The acceptance together with the
-integration comes before a release, and §8 lists what the spike left for it.
+television and the OpenWebif page (`selfupdate.py`), and its half of §4 and §7 - are **released in
+plugin 0.4.0**, tested against a fake receiver, run on a receiver in the hardware spike (§8) before
+the merge, and in the hardware acceptance together with the integration before the release (§8).
 
 Paths are the ones on the receiver. `<id>` is twelve lowercase hexadecimal digits
 (`secrets.token_hex(6)`), one per transaction; it names the snapshot, the self-update's transaction
 directory, the marker's `id`, the lock owner's `id` and `update.transaction.id` in
-[TOPICS.md](TOPICS.md#basenodeupdate---added-after-030-unreleased).
+[TOPICS.md](TOPICS.md#basenodeupdate---since-040).
 
 ---
 
@@ -106,9 +105,9 @@ fresh random twelve-digit id, which matches nothing already there.
 | `started` | int | yes | Epoch seconds when the record was written |
 | `boot_id` | string | yes | `/proc/sys/kernel/random/boot_id` at that moment, or empty |
 | `uptime` | number or `null` | yes | Seconds since boot at that moment, from `/proc/uptime` |
-| `origin` | string | no; the self-update's helper writes it (plugin main, unreleased) | Who started the self-update: `mqtt`, `home_assistant`, `screen`, `page` |
-| `id` | string | integration main (unreleased, 0.4.0) for the SSH installer; the self-update's helper (plugin main, unreleased) | The transaction's `<id>` |
-| `target` | string | no; the self-update's helper writes it (plugin main, unreleased) | The version being installed |
+| `origin` | string | no; the self-update's helper writes it (plugin 0.4.0) | Who started the self-update: `mqtt`, `home_assistant`, `screen`, `page` |
+| `id` | string | integration main (unreleased, 0.4.0) for the SSH installer; the self-update's helper (plugin 0.4.0) | The transaction's `<id>` |
+| `target` | string | no; the self-update's helper writes it (plugin 0.4.0) | The version being installed |
 | `attempts` | int | no; integration main (unreleased, 0.4.0) writes it in a handed-back record only | How many recoveries of the transaction named by `id` have failed, 1 to 100; the installer stops handing back at 3 (§3.3). A reader that finds another value or type reads it as 0 |
 
 **The handed-back record** (§2.1, integration main, unreleased 0.4.0) is
@@ -342,7 +341,7 @@ Either way the recovery first needs the lock, and the two programs' locks age di
 self-update's lock is stale 30 minutes after its last heartbeat, but the SSH installer's lock has
 no heartbeat and stays fresh for **30 minutes from its claim** - the residual named in §5.2.
 
-### 3.4 Restoring while the interface runs (integration main, unreleased 0.4.0; the self-update's helper, plugin main, unreleased)
+### 3.4 Restoring while the interface runs (integration main, unreleased 0.4.0; the self-update's helper, plugin 0.4.0)
 
 When a restart is withdrawn (§5, R1 with a question), the old enigma2 is still the running process
 and the old files go back underneath it. On integration main the same restore also serves the
@@ -445,7 +444,7 @@ notes a failed write in its record and carries on):
 
 <a id="5-the-restart-rule-planned-for-040-both-programs"></a>
 
-## 5. The restart rule (integration main, unreleased 0.4.0; the self-update, plugin main, unreleased)
+## 5. The restart rule (integration main, unreleased 0.4.0; the self-update, plugin 0.4.0)
 
 **Why.** The image saves its settings - the channel being watched among them, as
 `config.tv.lastservice` - only on a **clean** quit: `StartEnigma.py` runs `stopService()`,
@@ -558,7 +557,7 @@ Home Assistant stopping in either of the last two windows leaves the receiver an
 same way, with no sentence shown. When the lock cannot be released after a withdrawal, the outcome
 is `rollback_lock_failed` instead.
 
-### 5.2 R2 runs as one unit, and an interruption ends with the interface running (integration main, unreleased 0.4.0; the self-update's helper, plugin main, unreleased)
+### 5.2 R2 runs as one unit, and an interruption ends with the interface running (integration main, unreleased 0.4.0; the self-update's helper, plugin 0.4.0)
 
 Between `init 4` and `init 3` the household has no picture. Nothing that can be interrupted from
 outside the receiver may sit between the two. What a shell does when it is interrupted was
@@ -648,7 +647,7 @@ So:
   one is not called "never started": a receiver that rebooted has emptied `/tmp` too, and the
   script may have run to its end. It is `rollback_failed` with a detail naming both possibilities,
   and the lock is released.
-- **The plugin's helper** (plugin main, unreleased) runs R2 inside itself - detached from enigma2
+- **The plugin's helper** (plugin 0.4.0) runs R2 inside itself - detached from enigma2
   and from any SSH session - and does not start a child for the restore at all: the restore is a
   function call in the helper's own process, and its result is the call's own, never a wait that
   a signal can cut short. Its handlers for `HUP`, `INT`, `TERM` and `PIPE` only record the signal,
@@ -785,7 +784,7 @@ that ran out before any restart: nothing it changed stays, and nothing is said t
 
 ---
 
-## 7. The self-update's transaction directory (helper and plugin written, plugin main, unreleased)
+## 7. The self-update's transaction directory (helper and plugin written, plugin 0.4.0)
 
 The plugin and its helper talk through files in `/home/root/mqttbridge-backups/update-<id>/`
 (0700) and nothing else: the helper outlives the plugin's process, and a file is the one thing both
@@ -1052,3 +1051,11 @@ a power loss, the rollback of a release that does not start (`not_started`, and 
 and a downgrade. The owner record's heartbeat was seen advancing once, 60 s after the record was
 written, while the question waited, but no beat fell inside the few seconds of a clean restart.
 H1 of §5 was not measured.
+
+Before 0.4.0 was released, its candidate ran on the same receiver together with the companion
+integration's candidate: a downgrade chosen on the television, once with the receiver online and
+once without internet through Home Assistant's relay; an upgrade over MQTT through the relay; a
+deliberately broken release put back through R2; an index signed with a rank-2 test key accepted,
+and a later rank-1 one refused, on both sides; the integration's forced reinstall, including after
+the helper was killed during the install; and that reinstall refused on the lock while an install
+started on the television was running. A power loss was not tested.

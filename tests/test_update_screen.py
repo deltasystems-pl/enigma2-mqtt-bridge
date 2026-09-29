@@ -67,6 +67,9 @@ from MQTTBridge.updatescreen import MQTTBridgeUpdates
 # Fixtures of `test_selfupdate.py`, used by name as parameters below.
 FIXTURES = (box, mono, tree)
 
+# The scenarios below place releases around a running 0.3.0 (conftest.running_0_3_0).
+pytestmark = pytest.mark.usefixtures("running_0_3_0")
+
 PACKAGE_DIR = Path(updatescreen.__file__).resolve().parent
 # The tests' receiver runs a development build of 0.3.0, so its release is not "installed".
 RUNNING = "0.3.0 - release; a development build of it runs"

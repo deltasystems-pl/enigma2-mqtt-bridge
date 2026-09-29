@@ -14,5 +14,6 @@ Description: Push receiver state to MQTT and take commands back.
  Commands travel back on the same session: power, zap, volume, mute, remote
  keys, on-screen messages, timers, recording and screenshots, each verified by
  effect. Announces itself with Home Assistant MQTT discovery, or stays quiet for
- the companion Home Assistant integration to build its own entities. Pure
- Python, no native code, no outbound connection other than your broker.
+ the companion Home Assistant integration to build its own entities. Updates
+ itself only to releases on a signed list. Pure Python, no native code, and no
+ connection but your broker's except to check for or install an update.

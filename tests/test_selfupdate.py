@@ -44,7 +44,6 @@ from MQTTBridge.origin import MQTT, PAGE, SCREEN
 from MQTTBridge.selfupdate import SelfUpdater
 from MQTTBridge.uninstall import Uninstaller
 from MQTTBridge.updatecheck import RELEASE_INDEX_TOPIC
-from MQTTBridge.version import __version__
 
 NODE = "vuuno4kse_005301"
 ROOT = "enigma2/" + NODE
@@ -63,7 +62,8 @@ UPTIME = 1000.0
 DOORS = "an update is being applied on the receiver"
 BUSY = "an update is already running on the receiver"
 
-assert __version__ == "0.3.0", "the scenarios below place releases around the running 0.3.0"
+# The scenarios below place releases around a running 0.3.0 (conftest.running_0_3_0).
+pytestmark = pytest.mark.usefixtures("running_0_3_0")
 
 
 # ---------------------------------------------------------------------- helpers --

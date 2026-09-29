@@ -30,6 +30,9 @@ box = test_selfupdate.box
 tree = test_selfupdate.tree
 mono = test_selfupdate.mono
 
+# The scenarios below place releases around a running 0.3.0 (conftest.running_0_3_0).
+pytestmark = pytest.mark.usefixtures("running_0_3_0")
+
 RELAY_REQUEST = ROOT + "/relay_request"
 RELAY_COMMAND = ROOT + "/cmd/relay"
 TOKEN = "A" * 43
