@@ -48,7 +48,9 @@ and settings survive a plugin upgrade.
 `uninstall_allowed`, `update_check` and `update_allowed` are never writable over MQTT.** They are
 set on the receiver - here, in the provisioning file, or on the [OpenWebif page](#the-openwebif-page)
 - and published in `info.settings` so that a consumer can hide a control the box would always
-refuse, but `cmd/config` rejects them like any other key outside its allowlist. The rule is the
+refuse, but `cmd/config` rejects them like any other key outside its allowlist - the whole command,
+with "the config object contains unknown settings" on `last_error`, a sentence that does not name
+the key. The rule is the
 same for all of them: a setting that **enables** a command is granted on the receiver, and a setting
 that only **tunes** a command already permitted - `softcam_autoheal` and its delay - may be
 changed from the broker. `update_check` enables no command on the receiver, but it is what lets
@@ -269,8 +271,8 @@ protects the household still applies - a recording, a running EPG import, standb
 already running, the ten-minute limits - and says so, on the television in the household's
 language. Every install is asked first, because it ends in a restart of the user interface: the
 picture stops while it restarts, and the restart is the image's clean one, which is meant to bring
-the receiver back on the channel it was showing. How long the picture stops, and that the channel
-comes back, have not yet been measured on a receiver. **Only here can a version older than the
+the receiver back on the channel it was showing. It did in the installs run on a receiver before
+0.4.0 was released - one receiver, on OpenViX 6.6; how long the picture stops was not measured. **Only here can a version older than the
 running one be installed**, and its question says what that costs: the plugin's newer features
 disappear until it is updated again. The release still has to be on the signed list, at or above
 its floor, and not withdrawn. The answer on the television acts only on the question it answers,
