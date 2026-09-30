@@ -85,11 +85,12 @@ companion integration's handling of it before it ships. Where the integration st
   - `key.press` - a value other than `short` or `long` is read as `short` (`box.py` l.1985-1987),
     so a new kind of press would fire the automations and device triggers of a short press;
 
-  Both are tolerated on the integration's `main` (unreleased, 0.4.0): a source of a kind it does not
-  know is skipped - it gets no new entity, one it already has is kept, and the rest of the payload
+  Both are tolerated since the integration's 0.4.0: a source of a kind it does not know is
+  skipped - it gets no new entity, one it already has is kept, and the rest of the payload
   applies - and a press other than `short` or `long` fires nothing. A payload without `press` is
-  still a short press, and a `kind` that is not a string is still a malformed payload. The rule
-  above stands until an integration release carries that change;
+  still a short press, and a `kind` that is not a string is still a malformed payload. A plugin
+  release that adds such a value still has to consider installations on 0.3.1 and older, which
+  behave as described above;
 - **not audited**: the other enumerations, among them the choices of an enumerated setting and
   `info.ha_mode`.
 
@@ -1671,7 +1672,9 @@ screen, the provisioning file or the OpenWebif page - and never over MQTT, and r
 writing it are two different permissions. Home Assistant mode has its dedicated command, and active TV bouquet
 context has `cmd/bouquet`; neither broadens this settings API. The command accepts the three original keys plus independently optional `screenshot_delay`,
 `cam_telemetry`, `oscam_telemetry`, `softcam_autoheal` and `softcam_autoheal_seconds`,
-with their JSON types unchanged. The two softcam keys only *tune* a restart the receiver has
+with their JSON types unchanged. An object holding any other key is refused whole, with
+`last_error` "the config object contains unknown settings" - which names none of them, so compare
+the payload with this list. The two softcam keys only *tune* a restart the receiver has
 already permitted; with `softcam_restart_allowed` off they change nothing, because the
 permission is the gate. The plugin validates the whole object before assigning anything,
 persists the values through enigma2's settings store, then rebinds only the affected publishers

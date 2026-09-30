@@ -27,6 +27,16 @@ leaving `debug` on cannot fill the flash. Levels are `error`, `warning`, `info` 
 The password is never written at any level. If you see it there, that is a bug worth a security
 report.
 
+**The start line counts what was ready at the start.** Each start logs
+`starting: ha_mode=... plugin=... capabilities=<n> build=...`, and `<n>` is the number of
+capabilities bound at that moment. Some bind only once enigma2 has built the screen behind them -
+`bouquet_context`, `zap_history` and `history_clear` read the receiver's own channel list - so
+after an interface restart the start line can count fewer than `info.capabilities` holds once
+they bind (22 against 25 on the receiver this was seen on), and a start inside a running
+interface - after the settings were saved - counts them all. `info` is published again when a
+late one arrives ([TOPICS.md](TOPICS.md#1-state-topics), "A capability can also arrive late"), so
+`info.capabilities` is the list to go by.
+
 ## Nothing happens at all
 
 **The plugin never loaded.** `opkg install` reporting success only means the files landed;
@@ -190,6 +200,49 @@ recording**, and nothing in the plugin can prevent it.
 So: check the `recording` topic before restarting anything, and never let a package script or a
 cron job restart enigma2 unconditionally. This is why `postinst` only prints a message.
 
+## Two copies of the softcam after a restart
+
+Some images start the softcam with a liveness check that looks it up by process name, and the
+kernel keeps only the first 15 characters of that name. A softcam binary with a longer name - an
+OSCam build named after its version, for example - is never found, so every start of the
+interface starts **another copy**, and an update's restart is no exception. The plugin says so in
+its log when it starts:
+
+```text
+<binary> is longer than 15 characters, so the image's own liveness check cannot find it and starts another copy at every interface start
+```
+
+and the `softcam` topic reports `manager_check_on_start: true` and the number of copies in
+`running_instances` ([TOPICS.md](TOPICS.md)).
+
+Two copies can run side by side while encrypted channels still decode. When you clean up, **stop
+every copy and start one**: the plugin's softcam restart does exactly that - `cmd/softcam_restart`
+with `softcam_restart_allowed` on, or the action on its OpenWebif page
+([SETUP.md](SETUP.md#what-the-softcam-restart-does)). Do not keep the older copy and stop the
+newer one. On the receiver where this was examined (OSCam on OpenViX 6.6), the copy from before
+the restart still answered on its web interface but no longer decoded anything for the restarted
+interface, so stopping the new copy froze every encrypted channel until the softcam was restarted.
+
+## An update or install is refused with "standby"
+
+Every install and update is refused while the receiver is in standby, because its restart would
+wake the receiver - and, with HDMI-CEC, may switch the television on. With HDMI-CEC set to follow
+the television, **switching the television off puts the receiver into standby** too, and so does
+a television that switches itself off at night. Wake the receiver first - the remote, or
+`cmd/power` `on` - and then install. Waking it may switch the television on.
+
+## The update check says the origin cannot be reached
+
+The receiver checks the release origin's certificate against the image's own CA certificates. An
+image whose CA bundle is missing, or too old to hold the root the origin's certificate chains to,
+cannot verify it, and that looks exactly like no internet:
+`update.origin` is `unreachable`, the check's `check_error` is `unreachable`, and the log has a
+line starting `the release origin cannot be reached:` with the TLS error. Such a receiver still
+learns of releases from the index the companion integration relays over MQTT, and an install
+started on the television or the OpenWebif page asks Home Assistant for the package instead
+([SETUP.md](SETUP.md#installing-a-release-from-the-receiver)). Without the integration, update the
+image's CA certificates package, or install by hand ([INSTALL.md](INSTALL.md#updating)).
+
 ## Commands appear to do nothing
 
 There is no acknowledgement topic. A command's answer is the state topic changing; a refusal is
@@ -199,7 +252,10 @@ There is no acknowledgement topic. A command's answer is the state topic changin
    with the reason.
 2. Check the payload form in [TOPICS.md](TOPICS.md#2-commands). `cmd/zap` by name is refused
    unless exactly one service matches within the configured bouquets; `cmd/key` is refused for an
-   unknown key name.
+   unknown key name. `cmd/config` refuses the whole object when one key is not on its list - the
+   receiver-only permissions such as `update_allowed` included - with "the config object contains
+   unknown settings", which does not say which key; compare the payload with the list in
+   [TOPICS.md](TOPICS.md#cmdconfig-semantics).
 3. Check `info.capabilities`. If the hook a command needs is not in that list, this image did not
    give it to the plugin and the command cannot work - say so in an issue with your image name.
 4. Make sure you are not publishing the command **retained**. The plugin logs a retained command

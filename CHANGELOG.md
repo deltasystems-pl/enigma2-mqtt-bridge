@@ -9,12 +9,25 @@ version that has no section here.
 
 ## [Unreleased]
 
-Nothing yet.
+### Documentation
+
+- TRANSACTION.md treats the companion integration's 0.4.0 as released, and says which of its
+  paths ran on a receiver before and after that release - its clean restart did, its
+  stop-and-restore paths have not.
+- ADR-0015's relay (decision 3) serves more than receivers without internet: the relayed index
+  reaches every receiver whose broker login may read it, and every install Home Assistant starts
+  over MQTT carries the relay's address.
+- TROUBLESHOOTING.md: why the start line can count fewer capabilities than `info`; two copies of
+  the softcam after a restart, and why a cleanup must stop every copy and start one; installs
+  refused for standby after the television switched the receiver off over HDMI-CEC; an image
+  whose CA certificates cannot verify the release origin.
+- `cmd/config`'s refusal of a key outside its list does not name the key (TOPICS.md, SETUP.md).
+- The 0.4.0 notes link to the files as released rather than to `main`.
 
 ## [0.4.0] - 2026-09-29
 
 The release in which the plugin updates itself, decided in
-[ADR-0015](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0015-signed-self-update.md).
+[ADR-0015](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/adr/0015-signed-self-update.md).
 
 0.3.0 added what the household asked for. This one lets a receiver install the plugin's own
 releases, and only releases named in a signed list: a release index signed with an Ed25519 key in
@@ -39,11 +52,13 @@ install an update of itself. It goes to its release origin, one fixed HTTPS addr
 certificate: daily when the receiver-only setting `update_check` is on, on `cmd/update_check`
 (refused unless that setting is on), when a person presses *check* on the television or the
 OpenWebif page, and for an install. For an install Home Assistant starts, or one on a receiver
-without internet, it goes instead to the relay address Home Assistant gives it over MQTT - a fixed path, over plain HTTP or HTTPS
-without a certificate check, which is enough because the package is checked against the signed
-index before it is installed. [SECURITY.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/SECURITY.md#threat-model) says what an update
-trusts and what it does not cover. Where the broker enforces an ACL, the box's login needs two new
-`read` lines ([docs/SETUP.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/SETUP.md#broker-access)).
+without internet, it goes instead to the relay address Home Assistant gives it over MQTT - a fixed
+path, over plain HTTP or HTTPS without a certificate check, which is enough because the package is
+checked against the signed index before it is installed.
+[SECURITY.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/SECURITY.md#threat-model)
+says what an update trusts and what it does not cover. Where the broker enforces an ACL, the box's
+login needs two new `read` lines
+([docs/SETUP.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/SETUP.md#broker-access)).
 
 **`timers` changes meaning** (named in-major exception `timers-lists-finished`): it lists the
 timers the receiver has finished with - ended, failed and disabled - as well as the pending ones.
@@ -54,12 +69,13 @@ Filter on `state` to keep only what is still going to happen.
 outside the bouquet being browsed moves the channel list.
 
 The topic contract now has a version: `info.contract` is 1, and
-[docs/TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md#contract-version) says what a release may change inside it. The
-code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
+[docs/TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TOPICS.md#contract-version)
+says what a release may change inside it. The code uses no syntax above Python 3.9 and is tested
+on 3.9, 3.12 and 3.14.
 
 ### Added
 
-- **The plugin installs its own releases: `cmd/update`** (ADR-0015, [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md) §2).
+- **The plugin installs its own releases: `cmd/update`** (ADR-0015, [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TOPICS.md) §2).
   `{"version": "0.4.1" | "latest", "sha256": ..., "relay": {"url", "expires"}}` installs one release
   of the signed index - upgrades and repairs only, never a downgrade over MQTT - and restarts the
   interface the image's own clean way, so the receiver comes back on the channel it was showing.
@@ -94,7 +110,7 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   end is reported `interrupted`; the next `cmd/update` says when its lock lets a new one start, and
   the start after a restart says how it ended, by the build that runs. It ran on a receiver in a
   hardware spike before its merge, and again in a hardware acceptance together with the companion
-  integration before this release ([TRANSACTION.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TRANSACTION.md) section 8).
+  integration before this release ([TRANSACTION.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TRANSACTION.md) section 8).
 
 - **Plugin updates on the television and on the OpenWebif page.** The setup screen's blue key opens
   *Plugin updates* ("Aktualizacje wtyczki"): the running version and build, the signed list of
@@ -120,7 +136,7 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   installed release of the same number. Polish and German catalogues carry every new string.
 
 - **A receiver without internet installs through Home Assistant: `relay_request` and `cmd/relay`**
-  ([TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md) §1, §2). An install started at the television or on the OpenWebif
+  ([TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TOPICS.md) §1, §2). An install started at the television or on the OpenWebif
   page decides who fetches the package on a fresh word about the release origin: a probe of the last
   ten minutes, or - on a receiver that has never checked, which is the default, or whose word is
   older - the check's own five-second probe, run once first because starting the install is the
@@ -158,7 +174,7 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   pre-release suffix. The values are written into the package by whoever builds it, through the
   new `tools/make-buildinfo.py`, and never worked out on the receiver; a copy of the plugin that was
   not built into a package says so, with an empty commit. There is deliberately no `origin` member:
-  [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md) says why. ADR-0015 is accepted with this, its first code.
+  [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TOPICS.md) says why. ADR-0015 is accepted with this, its first code.
 - **`tools/build-ipk.sh` takes the build id from its builder**: `MQTTBRIDGE_BUILD_COMMIT` names the
   commit for a build without its git checkout - the companion integration rebuilds its bundled
   package from a `git archive` that has none - and must match HEAD when there is one;
@@ -173,7 +189,7 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   and from an export. A bundle of a release built from a source archive matches the released package
   only with all three - the commit, `MQTTBRIDGE_BUILD_FLAVOUR=release` and the commit's time.
 - **The signed release index**, the one list of versions the plugin and the companion integration
-  will install from ([docs/RELEASE-INDEX.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/RELEASE-INDEX.md), ADR-0015 decisions 2 and 7).
+  will install from ([docs/RELEASE-INDEX.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/RELEASE-INDEX.md), ADR-0015 decisions 2 and 7).
   This builds, signs and publishes it; the update check below reads it. `feed/releases.json` and
   `feed/releases.json.sig` on the feed carry, per release, its size and sha256 - checked against the
   release asset's own digest and against the feed's copy - its commit and time, its contract major,
@@ -259,7 +275,7 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
 
 ### Documentation
 
-- **The topic contract has a version.** [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md#contract-version) gains a
+- **The topic contract has a version.** [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TOPICS.md#contract-version) gains a
   "Contract version" section: the current contract major is 1 (0.2.0 and later; 0.1.0 is contract
   0), what a release may change inside a major - additions, new values of an enumeration, new
   refusals, tighter free text - and what needs a new one. A change of what a field or command means
@@ -273,7 +289,7 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   stands on that today, including the two places it does not: a new `oscam` reader `kind` makes it
   drop the whole payload, and a new `key` `press` is read as a short press. The `process` heading
   now says it is new in 0.3.0.
-- **The same contract as data**: [docs/contract.json](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/contract.json) lists every state topic
+- **The same contract as data**: [docs/contract.json](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/contract.json) lists every state topic
   with its payload kind and retain flag, every command, every `info` member with its type, every
   setting with its type and whether `cmd/config` may write it, every capability name, the named
   exceptions and the planned additions. `tools/check-contract.py` fails when it and TOPICS.md
@@ -289,11 +305,11 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   command table, settings and their types, `info` members, raw topics and capability names, and run
   the command line against throwaway git repositories. Payload fields are not in the data.
 - **The decisions behind updates from a signed release index** are
-  [ADR-0015](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0015-signed-self-update.md) (accepted with the build id, above): a
+  [ADR-0015](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/adr/0015-signed-self-update.md) (accepted with the build id, above): a
   receiver-only `update_check` setting, a receiver-only `update_allowed` permission, the
   `self_update` capability, an `update` topic, `cmd/update_check`, `cmd/update` (upgrades only),
   and the relay a receiver without internet uses through Home Assistant, all built in this
-  release and described in [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md). The index is signed with a main key in the repository's CI, by a job in an environment that admits
+  release and described in [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TOPICS.md). The index is signed with a main key in the repository's CI, by a job in an environment that admits
   the `main` branch only and releases the key only to a run the maintainer approves; that job
   cannot write to the repository, and the job that publishes holds no key. Release tags are
   protected by a tag ruleset. A spare key of higher rank stays sealed offline, and its emergency
@@ -301,7 +317,7 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   the companion integration's ADR-0008, what a lost, deleted or leaked key means, and what CI
   signing does not protect against: an account compromise is detectable and recoverable, not
   prevented.
-- [docs/TRANSACTION.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TRANSACTION.md) is new: the contract between the companion
+- [docs/TRANSACTION.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TRANSACTION.md) is new: the contract between the companion
   integration's SSH installer and the self-update - the names on the receiver's disk, the
   shared lock and when it is stale (the released installer's 30-minute rule, unchanged), the
   heartbeat that keeps a long self-update's lock alive, the snapshot layout, the marker, and the
@@ -312,7 +328,7 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   unsaved settings, and that the image comes back on a `lastservice` written while it is stopped -
   are marked as hypotheses still to be measured on a receiver, and what is released today is told
   apart from what is planned throughout.
-- [SECURITY.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/SECURITY.md#threat-model)'s threat model is rewritten for this release: where
+- [SECURITY.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/SECURITY.md#threat-model)'s threat model is rewritten for this release: where
   besides the broker the plugin connects - its release origin and Home Assistant's relay - and
   when; what an update trusts - the signed
   index, the two keys and how each is kept, the serial and rank rules, the origin and Home
@@ -322,14 +338,14 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   the broker except to check for or install an update, and the README lists the updates among
   what you get and 0.4.0 in its compatibility table. ADR-0000 §7 is marked as superseded in part
   by ADR-0015.
-- The broker ACL in [docs/SETUP.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/SETUP.md#broker-access) and SECURITY.md gains
+- The broker ACL in [docs/SETUP.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/SETUP.md#broker-access) and SECURITY.md gains
   `topic read enigma2mqtt/release_index` and `topic read enigma2mqtt/integration/<node_id>`:
   without them, on a broker that enforces the ACL, the receiver never hears the index or the
   integration that Home Assistant publishes, and an install without internet is refused
   `no_relay`.
 - The README is now a short landing page: what the plugin does, how to install it, what it needs.
-  The milestones and open items moved to [ROADMAP.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/ROADMAP.md); the privacy notes and the
-  ACL's role as the privacy boundary moved to [docs/SETUP.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/SETUP.md#privacy). The release
+  The milestones and open items moved to [ROADMAP.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/ROADMAP.md); the privacy notes and the
+  ACL's role as the privacy boundary moved to [docs/SETUP.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/SETUP.md#privacy). The release
   history stays here.
 - The Mosquitto add-on note in the README, SETUP.md and SECURITY.md now says which version was
   reported upstream and which was measured: the unenforced `acl_file` was reported against 7.1.0
@@ -337,12 +353,12 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
 - `enter_standby`'s docstring no longer says the remote's power button queues a notification. The
   power button opens the standby screen directly, and only when the screen on top allows it; the
   plugin queues it because a command can arrive with any screen open.
-- [ADR-0008](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0008-discreet-toast.md) carries a dated note under its Context: the sentence
+- [ADR-0008](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/adr/0008-discreet-toast.md) carries a dated note under its Context: the sentence
   saying a payload could recolour its own text describes the receiver before that decision.
-- The PRD's copy here ([ADR-0000](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0000-prd.md)) points to the companion integration's
+- The PRD's copy here ([ADR-0000](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/adr/0000-prd.md)) points to the companion integration's
   ADR-0007, which supersedes its paragraph saying entity ids derive from the English keys: Home
   Assistant makes them from the name in the installation's language.
-- [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md#what-enters-the-receivers-zap-history) now says what enters the
+- [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TOPICS.md#what-enters-the-receivers-zap-history) now says what enters the
   receiver's zap history and what does not: a zap timer is recorded when the receiver is awake and
   not in timeshift, and not from standby or when the timeshift question is answered with a zap -
   "Zap", "Save timeshift and zap", or no answer within 20 s, which saves the timeshift as a
@@ -370,9 +386,9 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   only until the next channel change, when the receiver deletes them. It also says what the
   receiver's own question would have done - every answer but "No" erases its `timeshift.` files,
   and the buffer links go at the next channel change either way - and what is not measured.
-  [ADR-0014](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0014-the-zap-history-is-the-receivers.md) carries a dated amendment, and
+  [ADR-0014](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/adr/0014-the-zap-history-is-the-receivers.md) carries a dated amendment, and
   TROUBLESHOOTING.md has a short entry on a channel missing from the zap history.
-- [docs/TRANSACTION.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TRANSACTION.md) now describes what the companion integration's `main`
+- [docs/TRANSACTION.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TRANSACTION.md) now describes what the companion integration's `main`
   does - unreleased, for its 0.4.0, and not yet run on a receiver - apart from what its released
   0.3.1 does. It names the places that adds on the receiver: the stop-and-restore script's own
   directory `/tmp/enigma2-mqtt-r2-<id>/` (the script's copy of the helper, the script, its status
@@ -389,7 +405,7 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   and on again, not for up to 30 minutes. The two hypotheses the restart rule rests on are still
   unmeasured, and the text now says the integration's code that relies on them is merged and is
   measured with them before its release.
-- [docs/TRANSACTION.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TRANSACTION.md) section 5.2 describes the companion integration's
+- [docs/TRANSACTION.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TRANSACTION.md) section 5.2 describes the companion integration's
   rollback script after its signal fix: the trap only records a signal, the restore writes its own
   exit status (`restored lost` when it is gone without one), the stop wait is measured in elapsed
   time, a restore that ignores its watchdog is killed ten seconds later, a shutdown is
@@ -398,11 +414,11 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   written while it was stopped - the second hypothesis - while the first is still unmeasured, and
   section 8 says the spike ran the self-update as it stood before its last pre-merge changes. The
   self-update's parts are no longer called planned or not merged.
-- [docs/INSTALL.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/INSTALL.md) has the checked manual install the companion integration's
+- [docs/INSTALL.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/INSTALL.md) has the checked manual install the companion integration's
   documentation points to: download the package and `releases.json` from the feed, compare the
   package's sha256 with the signed list, then `opkg install` that file - which catches a damaged
   download, not a compromised origin.
-- [docs/TRANSACTION.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TRANSACTION.md) describes what the companion integration's `main`
+- [docs/TRANSACTION.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TRANSACTION.md) describes what the companion integration's `main`
   (unreleased, 0.4.0) now does to the shared contract. A recovery of an abandoned install that
   fails in a way a later try may get past hands the lock back to that transaction, at most three
   times, instead of releasing it; a failure that would repeat, or the third, releases it as
@@ -417,10 +433,10 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   in an empty file when it cannot be written; and the details of `started shutdown`,
   `restored lost` and a missing status file. The plugin's own column no longer calls recovery by
   id "planned": an interrupted self-update is reported and its snapshot kept for a person.
-- [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md#contract-version) says that the integration's `main` tolerates an
+- [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TOPICS.md#contract-version) says that the integration's `main` tolerates an
   unknown `oscam.readers[].kind` and an unknown `key.press`, and that neither may be added by a
   plugin release before an integration release carries it.
-- The PRD's copy ([ADR-0000](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0000-prd.md)) no longer names the operator's private notes
+- The PRD's copy ([ADR-0000](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/adr/0000-prd.md)) no longer names the operator's private notes
   by location, file name or section number; a note at its top says so.
 - TOPICS.md, TRANSACTION.md and RELEASE-INDEX.md mark the plugin's parts of the self-update as
   released in 0.4.0, and TRANSACTION.md section 8 lists what the hardware acceptance before this
@@ -430,7 +446,7 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
 
 - A dirty development build - one whose tracked files differed from its commit - now displays as
   `0.3.0+g<first seven digits>.dirty` on the plugin's OpenWebif page and in its start line, so it
-  no longer looks like the clean build of the same commit. [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md) has the
+  no longer looks like the clean build of the same commit. [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TOPICS.md) has the
   rule for consumers. `info.build` itself is unchanged.
 - `timers` now lists every timer the receiver still lists - the pending ones and the ones it has
   finished with - and `state` has three new words: `disabled`, `failed` and `unknown`. A timer
@@ -446,9 +462,9 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   ones). The payload grows, uncapped, by about 180 bytes per kept timer, with how long the receiver
   keeps finished timers (`config.recording.keep_timers`) and with AutoTimer use, and a Home
   Assistant diagnostics download, which carries the topic, now includes the names of finished and
-  disabled timers too. [docs/TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md#basenodetimers) has the table and the
+  disabled timers too. [docs/TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TOPICS.md#basenodetimers) has the table and the
   limits. **Behaviour change, named in-major exception `timers-lists-finished`**
-  ([TOPICS.md, Contract version](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md#contract-version)): the list's meaning changes
+  ([TOPICS.md, Contract version](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TOPICS.md#contract-version)): the list's meaning changes
   inside contract 1; filter on `state` to keep only what is still going to happen.
 
 ### Fixed
@@ -463,13 +479,13 @@ code uses no syntax above Python 3.9 and is tested on 3.9, 3.12 and 3.14.
   `cmd/zap_history` and for the zap `cmd/bouquet` makes. Only a plain information, warning or
   error popup directly over the info bar counts: a question, a popup over any other screen, or one
   already closing is still treated as a screen open, and `cmd/history_clear` still refuses under
-  any popup. [docs/TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md) has the exact rule. The first version of this
+  any popup. [docs/TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TOPICS.md) has the exact rule. The first version of this
   wanted the info bar to be the only screen under the popup, and on a receiver where a plugin
   keeps an invisible screen under the info bar - the Vu+ HbbTV plugin does - it still played
   every such zap directly; only the screen directly under the popup counts now. When a zap is
   played directly because a screen is open, the log says which condition was not met.
   **Behaviour change, named in-major exception `zap-under-popup-recorded`**
-  ([TOPICS.md, Contract version](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md#contract-version)): 0.3.0's contract said such a
+  ([TOPICS.md, Contract version](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TOPICS.md#contract-version)): 0.3.0's contract said such a
   zap was played directly; now it is recorded, and a zap outside the bouquet being browsed moves the
   channel list, as any recorded zap does.
 - `cmd/timer` `delete` refused a finished timer - "no timer on ..." - although OpenWebif and the

@@ -36,7 +36,8 @@ everything else:
 1. **The box is weakly protected.** Enigma2 images commonly ship a well-known root password and
    an open telnet or SSH port. Anyone with LAN access to such a box can read the plugin's
    configuration, and with it the broker credential. The first install step in the README and in
-   docs/INSTALL.md therefore tells users to change the root password; the plugin cannot do it for them.
+   docs/INSTALL.md therefore tells users to change the root password; the plugin cannot do it for
+   them.
 2. **The LAN is the trust boundary.** The plugin connects to the broker the user configures and,
    since 0.4.0, for updates of itself only, to two more places:
    - its release origin, `https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/`, over HTTPS
@@ -46,10 +47,10 @@ everything else:
      and for an install - asked for there, or over MQTT with the receiver-only permission
      `update_allowed` - that does not go through Home Assistant's relay;
    - for an install Home Assistant starts, or one on a receiver without internet, the Home
-     Assistant relay address the companion integration gives it over MQTT: a fixed path, `/api/enigma2_mqtt/relay/<token>`,
-     fetched over plain HTTP or over HTTPS without checking the certificate. That is enough
-     because what it serves is checked against the signed index (below) before anything is
-     installed.
+     Assistant relay address the companion integration gives it over MQTT: a fixed path,
+     `/api/enigma2_mqtt/relay/<token>`, fetched over plain HTTP or over HTTPS without checking
+     the certificate. That is enough because what it serves is checked against the signed index
+     (below) before anything is installed.
 
    There is no telemetry and no cloud service. TLS to the broker is supported; client
    certificates are not in v1.
@@ -61,10 +62,10 @@ everything else:
    main key, which only this repository's CI uses, in a signing job the maintainer approves by
    hand, and a spare key of higher rank, kept offline. A receiver refuses an index whose serial is
    not above the last one it accepted from that key, and one from a key ranked below a key it has
-   accepted. The origin, and Home Assistant when it relays the index and the package to a receiver
-   without internet (above), are couriers, not authorities. Installing over MQTT needs
-   the receiver-only permission `update_allowed` (off by default) and never downgrades; a downgrade
-   needs a confirmation on the television or the OpenWebif page.
+   accepted. The origin, and Home Assistant when it relays the index and the package (above), are
+   couriers, not authorities. Installing over MQTT needs the receiver-only permission
+   `update_allowed` (off by default) and never downgrades; a downgrade needs a confirmation on the
+   television or the OpenWebif page.
 
    **What that does not cover.** Whoever controls the origin, the relay or the broker can delay or
    withhold an index or an install, but cannot get anything installed that the index does not

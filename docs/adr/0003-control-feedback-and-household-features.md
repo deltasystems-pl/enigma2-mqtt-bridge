@@ -32,6 +32,7 @@ and the two must be read together for anything that spans both.
 ### 1. `deep_standby_allowed` is echoed, read-only - 0.2.0
 
 > **Merged to `main` 2026-09-21, unreleased; noted 2026-09-22, with one line corrected.**
+> Released in 0.2.0 (2026-09-22); the note below is kept as it was written.
 >
 > This decision is implemented and on `main`; it is in no release. `info.settings` carries
 > `deep_standby_allowed` as a
@@ -207,7 +208,7 @@ that the contract keeps one home and a consumer can be written against it before
 
 | Release | Addition | Kind | Capability | Notes |
 |---|---|---|---|---|
-| 0.2.0 | `info.settings.deep_standby_allowed` | read-only member | - | **On `main` since 2026-09-21; unreleased.** Not writable by `cmd/config` or the status page; changes what `info.settings` means |
+| 0.2.0 | `info.settings.deep_standby_allowed` | read-only member | - | **Released in 0.2.0** (on `main` since 2026-09-21). Not writable by `cmd/config` or the status page; changes what `info.settings` means |
 | 0.3.0 | `cmd/message` optional `style`: `popup` \| `toast` | command field | `toast` | `popup` is the default and is today's behaviour |
 | 0.3.0 | `cmd/softcam_restart` | command | `softcam` | Permission `softcam_restart_allowed`; refused while recording; 1/min |
 | 0.3.0 | `softcam` | retained topic | `softcam` | `{selected, running_instances, last_restart, last_restart_reason, restarts_today}` |

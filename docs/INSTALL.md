@@ -130,7 +130,9 @@ package.
 On some images every restart of the interface leaves one more copy of the softcam (OSCam, for
 example) running, and an update's restart is no exception: with `softcam_restart_allowed` on, the
 plugin restarts the softcam once after a self-update it has proved, and otherwise the extra copy
-stays until the softcam is next restarted.
+stays until the softcam is next restarted. If you clean up by hand, stop every copy and start one
+([TROUBLESHOOTING.md](TROUBLESHOOTING.md#two-copies-of-the-softcam-after-a-restart) says why
+keeping the older copy is the wrong choice).
 
 **The upgrade sweeps orphaned bytecode for you.** The image byte-compiles a plugin after
 installing it, so the `.pyc` files in the plugin directory were written by the receiver and are not

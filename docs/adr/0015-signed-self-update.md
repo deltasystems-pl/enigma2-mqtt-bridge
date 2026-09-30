@@ -1,7 +1,8 @@
 # ADR-0015: The plugin updates itself only to releases from a signed index, in a detached transaction that proves the new plugin started or puts the old one back
 
 **Status:** accepted 2026-09-26, with the first code that implements it - decision 1, the build id.
-Decisions 2 to 7 are built by later changes.
+Decisions 2 to 7 are built by later changes; all seven are released in 0.4.0. Amended 2026-09-30
+(documentation, no change of decision: decision 3's relay, below).
 **Date:** 2026-09-26
 **Supersedes:** in part - [ADR-0000](0000-prd.md) §7 "no outbound connection other than the user's
 broker"; the matching sentence of [SECURITY.md](../../SECURITY.md) ("The LAN is the trust boundary.
@@ -53,9 +54,14 @@ anything that decides what runs as root on the receiver has to carry its own ver
    main key is leaked or lost; its emergency publication is a separate workflow that holds no
    secret.
 3. **One fixed origin.** The index and the packages come from a fixed HTTPS address, fetched with
-   verified TLS and no redirects. Without internet, the receiver accepts both from a relay - the Home
-   Assistant integration - over plain HTTP, because it verifies both itself: the relay is a courier,
-   not an authority.
+   verified TLS and no redirects. The receiver also accepts both from a relay - the Home Assistant
+   integration - over plain HTTP, because it verifies both itself: the relay is a courier, not an
+   authority. (Amended 2026-09-30: this first said the relay was for a receiver without internet.
+   It serves more than that: an index Home Assistant relays reaches every receiver on the broker
+   whose login may read `enigma2mqtt/release_index`,
+   and every install Home Assistant starts over MQTT carries the relay's address, whether or not
+   the receiver could reach the origin itself. A receiver without internet is the case that needs
+   it, and the only one in which the receiver asks for the relay.)
 4. **Who may cause what.** Checking by itself is a receiver-only setting, `update_check`, off by
    default. Installing over MQTT needs the receiver-only permission `update_allowed`, off by default,
    and is **upgrades only**. Downgrades start only at the television or on the OpenWebif page.
@@ -82,9 +88,9 @@ anything that decides what runs as root on the receiver has to carry its own ver
 
 The names on the receiver, the lock and its stale rule, the heartbeat, the snapshot, the marker and
 the restart rule are specified in [TRANSACTION.md](../TRANSACTION.md), which the companion
-integration's installer implements too. The topics, commands, settings and capability are in
-[TOPICS.md §5](../TOPICS.md#5-planned-not-implemented-yet) until they are built; `info.build` and
-`info.contract` are built, and are in §1.
+integration's installer implements too. The topics, commands, settings and capability were in
+[TOPICS.md §5](../TOPICS.md#5-planned-not-implemented-yet) until they were built; since 0.4.0 they
+are all in TOPICS.md §1, §2 and §3.
 
 **Settled when it was accepted (2026-09-26).** Three points changed between the proposal and its
 acceptance with the build id:

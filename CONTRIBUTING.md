@@ -109,7 +109,10 @@ drafted and marked `# needs-review` until a native speaker confirms it.
 
 - Branch off `main`, one concern per pull request.
 - CI must be green: ruff, pyflakes, the tests on all three Python versions, and the IPK build.
-- Add a `CHANGELOG.md` entry under `## [Unreleased]` for anything a user would notice.
+- Add a `CHANGELOG.md` entry under `## [Unreleased]` for anything a user would notice. A
+  release's section becomes its GitHub release notes word for word, so its links are absolute,
+  and the release pull request points them at the release's tag (`blob/vX.Y.Z/...`) rather than
+  at `main`, whose files move on after the release.
 - Update the docs in the same pull request. `docs/TOPICS.md` is the contract the companion
   integration is written against - a change to a payload is a change to that file, to
   `docs/contract.json`, and to the compatibility table in both READMEs. `contract.json` is the

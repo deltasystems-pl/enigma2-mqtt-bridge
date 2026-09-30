@@ -168,7 +168,7 @@ Which part a reader uses is never a default: `memory_for` and `store` take `acce
 required keyword, answered by `trust.configured`.
 
 A reader that finds the exact bytes it already holds re-delivered has nothing new: `replay` is the
-verdict, and it is not a failure. This is the spec's "ignored for good" rank rule written per key:
+verdict, and it is not a failure. This is ADR-0015's "ignored for good" rank rule written per key:
 for key sets that keep the rules above it gives the same verdicts as a single stored rank carried
 across releases, and where a set breaks them it keeps the safer one.
 
