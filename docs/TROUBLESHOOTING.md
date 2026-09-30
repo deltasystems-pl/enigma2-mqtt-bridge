@@ -215,14 +215,13 @@ its log when it starts:
 and the `softcam` topic reports `manager_check_on_start: true` and the number of copies in
 `running_instances` ([TOPICS.md](TOPICS.md)).
 
-Two copies can run side by side while encrypted channels still decode. When you clean up, **stop every copy and start one**:
-the plugin's softcam restart does exactly that - `cmd/softcam_restart` with
-`softcam_restart_allowed` on, or the action on its OpenWebif page
+Two copies can run side by side while encrypted channels still decode. When you clean up, **stop
+every copy and start one**: the plugin's softcam restart does exactly that - `cmd/softcam_restart`
+with `softcam_restart_allowed` on, or the action on its OpenWebif page
 ([SETUP.md](SETUP.md#what-the-softcam-restart-does)). Do not keep the older copy and stop the
-newer one. On the receiver
-where this was examined (OSCam on OpenViX 6.6), the copy from before the restart still answered on
-its web interface but no longer decoded anything for the restarted interface, so stopping the new
-copy froze every encrypted channel until the softcam was restarted.
+newer one. On the receiver where this was examined (OSCam on OpenViX 6.6), the copy from before
+the restart still answered on its web interface but no longer decoded anything for the restarted
+interface, so stopping the new copy froze every encrypted channel until the softcam was restarted.
 
 ## An update or install is refused with "standby"
 

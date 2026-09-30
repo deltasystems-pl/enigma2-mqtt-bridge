@@ -15,8 +15,8 @@ version that has no section here.
   paths ran on a receiver before and after that release - its clean restart did, its
   stop-and-restore paths have not.
 - ADR-0015's relay (decision 3) serves more than receivers without internet: the relayed index
-  reaches every receiver, and every install Home Assistant starts over MQTT carries the relay's
-  address.
+  reaches every receiver whose broker login may read it, and every install Home Assistant starts
+  over MQTT carries the relay's address.
 - TROUBLESHOOTING.md: why the start line can count fewer capabilities than `info`; two copies of
   the softcam after a restart, and why a cleanup must stop every copy and start one; installs
   refused for standby after the television switched the receiver off over HDMI-CEC; an image
