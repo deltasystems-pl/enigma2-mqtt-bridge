@@ -9,8 +9,8 @@ two: the names on the receiver's disk, the lock and how it goes stale, the snaps
 and the restart rule. A change to any name or rule here is a change to both repositories.
 
 What is built and what is not. For the integration there are two states: **released 0.3.1**, which
-is what an installer that has not been updated still does, and **integration 0.4.0**, released
-2026-09-30. Before that release, its candidate ran on one receiver together with the plugin's
+is what an installer that has not been updated still does, and **integration 0.4.0**, released.
+Before that release, its candidate ran on one receiver together with the plugin's
 0.4.0 candidate (§8); what that run did not reach is said where it matters, most of all in §5.
 
 | Part | Integration's SSH installer | Plugin's self-update |
@@ -1070,4 +1070,7 @@ back through R2; an index signed with a rank-2 test key accepted, and a later ra
 on both sides; and the integration's forced reinstall - run with the plugin switched off and after
 the helper was killed during an install, refused during an install started on the television
 because a client was streaming from the receiver, and refused on the lock the killed helper left,
-with a sentence naming the minutes until that lock may be taken. A power loss was not tested.
+with a sentence naming the minutes until that lock may be taken. The integration's update from its
+card over SSH, with the clean restart of §5, ran too. The install and the downgrade chosen on the
+television, and that update over SSH, came back on the channel being watched. A power loss was not
+tested.

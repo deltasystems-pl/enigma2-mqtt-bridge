@@ -57,7 +57,8 @@ anything that decides what runs as root on the receiver has to carry its own ver
    verified TLS and no redirects. The receiver also accepts both from a relay - the Home Assistant
    integration - over plain HTTP, because it verifies both itself: the relay is a courier, not an
    authority. (Amended 2026-09-30: this first said the relay was for a receiver without internet.
-   It serves more than that: an index Home Assistant relays reaches every receiver on the broker,
+   It serves more than that: an index Home Assistant relays reaches every receiver on the broker
+   whose login may read `enigma2mqtt/release_index`,
    and every install Home Assistant starts over MQTT carries the relay's address, whether or not
    the receiver could reach the origin itself. A receiver without internet is the case that needs
    it, and the only one in which the receiver asks for the relay.)

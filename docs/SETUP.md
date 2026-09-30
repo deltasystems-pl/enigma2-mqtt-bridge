@@ -271,9 +271,11 @@ protects the household still applies - a recording, a running EPG import, standb
 already running, the ten-minute limits - and says so, on the television in the household's
 language. Every install is asked first, because it ends in a restart of the user interface: the
 picture stops while it restarts, and the restart is the image's clean one, which is meant to bring
-the receiver back on the channel it was showing. It did in the installs run on a receiver before
-0.4.0 was released - one receiver, on OpenViX 6.6; how long the picture stops was not measured. **Only here can a version older than the
-running one be installed**, and its question says what that costs: the plugin's newer features
+the receiver back on the channel it was showing. In the acceptance before 0.4.0 was released - one
+receiver, on OpenViX 6.6 - an install and a downgrade chosen on the television both came back on
+the channel being watched ([TRANSACTION.md](TRANSACTION.md) §8); how long the picture stops was not
+measured. **Only here can a version older than the running one be installed**, and its question
+says what that costs: the plugin's newer features
 disappear until it is updated again. The release still has to be on the signed list, at or above
 its floor, and not withdrawn. The answer on the television acts only on the question it answers,
 and a confirmation on the page expires after ten minutes.

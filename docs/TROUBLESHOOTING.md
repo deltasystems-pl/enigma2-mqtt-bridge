@@ -31,10 +31,11 @@ report.
 `starting: ha_mode=... plugin=... capabilities=<n> build=...`, and `<n>` is the number of
 capabilities bound at that moment. Some bind only once enigma2 has built the screen behind them -
 `bouquet_context`, `zap_history` and `history_clear` read the receiver's own channel list - so
-after an interface restart the start line can count fewer than `info.capabilities` holds a few
-seconds later (22 against 25 on the receiver this was seen on), and a start inside a running
-interface - after the settings were saved - counts them all. `info` is published again when a late one arrives ([TOPICS.md](TOPICS.md#1-state-topics),
-"A capability can also arrive late"), so `info.capabilities` is the list to go by.
+after an interface restart the start line can count fewer than `info.capabilities` holds once
+they bind (22 against 25 on the receiver this was seen on), and a start inside a running
+interface - after the settings were saved - counts them all. `info` is published again when a
+late one arrives ([TOPICS.md](TOPICS.md#1-state-topics), "A capability can also arrive late"), so
+`info.capabilities` is the list to go by.
 
 ## Nothing happens at all
 
@@ -214,7 +215,7 @@ its log when it starts:
 and the `softcam` topic reports `manager_check_on_start: true` and the number of copies in
 `running_instances` ([TOPICS.md](TOPICS.md)).
 
-Two copies can go on decoding side by side. When you clean up, **stop every copy and start one**:
+Two copies can run side by side while encrypted channels still decode. When you clean up, **stop every copy and start one**:
 the plugin's softcam restart does exactly that - `cmd/softcam_restart` with
 `softcam_restart_allowed` on, or the action on its OpenWebif page
 ([SETUP.md](SETUP.md#what-the-softcam-restart-does)). Do not keep the older copy and stop the
@@ -234,7 +235,8 @@ a television that switches itself off at night. Wake the receiver first - the re
 ## The update check says the origin cannot be reached
 
 The receiver checks the release origin's certificate against the image's own CA certificates. An
-image whose bundle is old or missing cannot verify it, and that looks exactly like no internet:
+image whose CA bundle is missing, or too old to hold the root the origin's certificate chains to,
+cannot verify it, and that looks exactly like no internet:
 `update.origin` is `unreachable`, the check's `check_error` is `unreachable`, and the log has a
 line starting `the release origin cannot be reached:` with the TLS error. Such a receiver still
 learns of releases from the index the companion integration relays over MQTT, and an install
