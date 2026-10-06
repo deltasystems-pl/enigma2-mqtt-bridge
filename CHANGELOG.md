@@ -19,10 +19,12 @@ version that has no section here.
   later and sent the same payload again, so the entities went unavailable and came back for as
   long as the receiver was on, and the receiver slowed down from building the payload each time.
   A payload whose packet would be over 1,000,000 bytes is now not sent at all: the log says so
-  once for each topic and size, a smaller payload this node had retained on that topic is
-  retracted rather than left to look current, and `info` gains `not_published`, which lists each
-  such topic with its size and the limit and is empty otherwise. Everything else is published as
-  before. To get the topic back, limit `bouquets_for_select` to the bouquets in use, or lower
+  once when a topic becomes too big, a smaller payload this node had retained on that topic under
+  its own tree is retracted rather than left to look current, and `info` gains `not_published`,
+  which lists each such topic with the size first measured and the limit and is empty otherwise.
+  A discovery payload is never retracted for its size - that would delete the device in Home
+  Assistant - so the entities stay and the channel select keeps the options it had. Everything
+  else is published as before. To get the topic back, limit `bouquets_for_select` to the bouquets in use, or lower
   `epg_grid_events` - 0 switches the grid off
   ([TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back),
   [TOPICS.md](docs/TOPICS.md)).

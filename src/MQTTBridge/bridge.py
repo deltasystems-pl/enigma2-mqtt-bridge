@@ -225,7 +225,7 @@ class Bridge:
         # (`availability`, the screenshot) are only named, never kept.
         self._last_json = OrderedDict()
         self._raw_topics = set()
-        # topic -> the packet size of a payload that was too big to send
+        # topic -> the packet size, when it was first measured, of a payload too big to send
         # (`MAX_PACKET_BYTES`): `info.not_published`. Not `_published`, and not
         # forgotten on a connect - a reconnect that forgot it would log the same
         # payload again every time. Beside it, the list `info` last carried on
@@ -1028,25 +1028,33 @@ class Bridge:
         Handing it to the client is what must not happen: the broker answers
         an oversize packet by closing the connection, and every connect would
         send it again. What a consumer gets instead is the topic named in
-        `info.not_published`, and one line in the log - per topic and size, not
-        per attempt, because the snapshot attempts it on every connect and the
-        channel list on every change.
+        `info.not_published`, and one line in the log - when the topic becomes
+        withheld, not per attempt and not per size: the snapshot attempts it on
+        every connect, and a grid that stays too big has another size every
+        time it is built. The size kept is the first one measured.
 
-        A copy this node published earlier, when the payload was smaller, is
-        retracted: left retained it would go on saying it is the current state.
-        A topic that was never published gets nothing at all.
+        A copy this node published earlier under its own tree, when the payload
+        was smaller, is retracted: left retained it would go on saying it is the
+        current state. A topic that was never published gets nothing at all.
+
+        Outside the tree nothing is retracted. Those are the announcement and
+        the Home Assistant discovery payloads, and an empty retained device
+        payload deletes the device and all its entities there; a select that
+        keeps the options it had is the lesser harm.
         """
-        if self._not_published.get(topic) != size:
+        if topic not in self._not_published:
             LOG.warning(
                 "not publishing %s: %d bytes is over the %d byte packet limit",
                 self._topic_label(topic), size, MAX_PACKET_BYTES,
             )
-        self._not_published[topic] = size
-        if self.state.knows(topic):
-            self.client.publish(topic, "", qos=STATE_QOS, retain=True)
-            self.state.forget(topic)
-        self._published.pop(topic, None)
-        self._forget(topic)
+            self._not_published[topic] = size
+        if self._topic_label(topic) != topic:
+            # Under the node's own tree.
+            if self.state.knows(topic):
+                self.client.publish(topic, "", qos=STATE_QOS, retain=True)
+                self.state.forget(topic)
+            self._published.pop(topic, None)
+            self._forget(topic)
         self._report_not_published()
         return None
 

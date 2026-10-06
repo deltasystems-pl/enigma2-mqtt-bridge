@@ -140,14 +140,37 @@ def test_it_is_logged_once_and_not_on_every_connect(make_bridge, factory, settin
     assert "x" * 64 not in written
 
 
-def test_another_size_is_another_line(make_bridge, factory, settings, plugin_log):
+def test_another_size_while_it_stays_too_big_says_nothing_new(make_bridge, factory, settings,
+                                                              plugin_log):
+    """A grid that stays too big has another size at every pass; that is not news."""
     _bridge, publisher = connect(make_bridge, factory, settings, BIG)
-
-    publisher.publish("channels", BIG)
-    assert plugin_log().count("not publishing channels") == 1
+    factory.client.clear()
 
     publisher.publish("channels", channel_list(LIMIT + 2000))
+    publisher.publish("channels", channel_list(LIMIT + 3000))
+
+    assert plugin_log().count("not publishing channels") == 1
+    assert factory.client.published == []
+
+    # And the size a consumer reads is the one first measured.
+    factory.client.fire_connect()
+    assert not_published(factory) == [entry("channels", CHANNELS, BIG)]
+
+
+def test_too_big_again_after_it_fitted_is_a_new_withholding(make_bridge, factory, settings,
+                                                            plugin_log):
+    _bridge, publisher = connect(make_bridge, factory, settings, BIG)
+    publisher.publish("channels", SMALL)
+    factory.client.clear()
+    bigger = channel_list(LIMIT + 2000)
+
+    publisher.publish("channels", bigger)
+
     assert plugin_log().count("not publishing channels") == 2
+    # The copy that fitted is taken back, and `info` says so with the new size.
+    assert [sent.text for sent in factory.client.all_for(CHANNELS)] == [""]
+    lists = [sent.json()["not_published"] for sent in factory.client.all_for(INFO)]
+    assert lists == [[entry("channels", CHANNELS, bigger)]]
 
 
 def test_info_names_what_was_not_published(make_bridge, factory, settings):
@@ -342,6 +365,30 @@ def test_an_oversized_discovery_payload_is_named_by_its_full_topic(make_bridge, 
     assert [one["topic"] for one in listed] == [DEVICE]
     assert listed[0]["bytes"] > LIMIT
     assert listed[0]["limit"] == LIMIT
+
+
+def test_a_discovery_payload_on_the_broker_is_never_retracted(make_bridge, factory, settings,
+                                                              plugin_log):
+    """An empty retained device payload deletes the device and every entity it has."""
+    bridge, publisher = connect(make_bridge, factory, settings, SMALL, ha_mode="discovery",
+                                names=["One", "Two"])
+    assert factory.client.last(DEVICE).json()
+    assert bridge.state.knows(DEVICE)
+    factory.client.clear()
+
+    publisher.names = [f"{number:04d} " + "n" * 2000 for number in range(600)]
+    bridge.publish_discovery()
+
+    # Neither the payload nor a retraction: the device keeps the options it had.
+    assert factory.client.all_for(DEVICE) == []
+    assert bridge.state.knows(DEVICE)
+    assert [one["topic"] for one in not_published(factory)] == [DEVICE]
+    assert plugin_log().count("not publishing " + DEVICE) == 1
+
+    factory.client.clear()
+    factory.client.fire_connect()
+    assert factory.client.all_for(DEVICE) == []
+    assert [one["topic"] for one in not_published(factory)] == [DEVICE]
 
 
 def test_a_grid_too_big_is_reported_when_its_timer_publishes_it(live_bridge, factory, receiver):
