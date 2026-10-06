@@ -462,7 +462,7 @@ def test_a_box_without_grab_has_no_screenshots(make_bridge, factory, settings, r
     assert "screenshot" not in bridge.capabilities()
 
 
-# ------------------------------------------------ what the OpenWebif page reads (§11 ac) --
+# ---------------------------------------------- what the OpenWebif page reads (ADR-0010) --
 
 
 def test_completed_at_is_when_grab_finished_not_when_it_started(live_bridge, tmp_path,

@@ -8,7 +8,8 @@ retained `update` topic. Installing one is not done here.
 
 **Two ways in, one rule.** The index reaches the receiver either from the origin, fetched by the
 receiver itself, or relayed by the companion integration on the retained topic
-`enigma2mqtt/release_index`, for a receiver that has no internet of its own. Both go through
+`enigma2mqtt/release_index`, to every receiver on the broker, with internet or without. Both go
+through
 `trust.accept` with the same memory, so an index relayed by anybody with publish rights on the
 broker is worth exactly what a fetched one is: nothing until its signature verifies with a key
 this build embeds, and nothing if its key or serial is behind what this receiver has already

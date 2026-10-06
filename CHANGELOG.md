@@ -116,6 +116,17 @@ version that has no section here.
   refused for standby after the television switched the receiver off over HDMI-CEC; an image
   whose CA certificates cannot verify the release origin.
 - The 0.4.0 notes link to the files as released rather than to `main`.
+- SECURITY.md says how often the receiver contacts GitHub, as the code does it: what one check
+  asks for, when the daily one is due, the ten-minute limit on checks, the one probe before an
+  install at the television or on the page - and a third address it did not name, GitHub's API,
+  asked once by an install the receiver fetches itself, to compare the package's digest.
+- INSTALL.md: an image whose CA certificates are old or missing fails the origin's certificate
+  check and updates through Home Assistant's relay or by hand.
+- CONTRIBUTING.md: the Polish words for standby and deep standby, and where the Polish catalogue
+  does not hold to them yet.
+- More comments that cited the unpublished plan - a quotation in TOPICS.md, three tags in the
+  code and five headings in the tests - name the ADR or the TRANSACTION.md section, or say it in
+  plain words.
 
 ## [0.4.0] - 2026-09-29
 

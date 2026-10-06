@@ -507,7 +507,7 @@ def test_the_restart_is_refused_with_a_recording_due(
     assert lab.proc.signals == []
 
 
-# ------------------------------------------------------------ from the page (§11 ab) --
+# ---------------------------------------------------------- from the page (ADR-0009) --
 
 
 def test_a_restart_from_the_openwebif_page_needs_no_permission(softcam_bridge, factory, lab):

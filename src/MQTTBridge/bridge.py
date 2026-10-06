@@ -541,8 +541,8 @@ class Bridge:
             return
 
         configure_logging(self.value("log_level"), self._log_path)
-        # Before the provisioning file and before `enabled` (S-h): a new release that is
-        # switched off still confirms to its update helper that it started.
+        # Before the provisioning file and before `enabled` (TRANSACTION.md, section 4): a
+        # new release that is switched off still confirms to its update helper that it started.
         self._self_update.on_start()
 
         # Before anything connects: an installer may have written the broker in.

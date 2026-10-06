@@ -1468,7 +1468,7 @@ def test_the_dispatcher_run_keeps_the_brokers_size_limit(connected_bridge, facto
     assert factory.client.published == before
 
 
-# ------------------------------------------------ the page inside OpenWebif (§11 ac) --
+# ---------------------------------------------- the page inside OpenWebif (ADR-0010) --
 
 XHR = {"x-requested-with": "XMLHttpRequest"}
 FETCH = {"sec-fetch-dest": "empty"}

@@ -672,7 +672,7 @@ def actions(bouquets=(), node_id="", history=(), versions=()):
                     ("info", _("Information")), ("warning", _("Warning")), ("error", _("Error")),
                 )),
                 Field("timeout", "number", _("Seconds on screen"), default="10"),
-                # The toast is §11 g's second style, through the same handler:
+                # The toast is the second style (ADR-0008), through the same handler:
                 # with `osd_toast` off the handler refuses it, as over MQTT.
                 Field("style", "select", _("Style"), (
                     ("popup", _("Popup")), ("toast", _("Discreet toast")),

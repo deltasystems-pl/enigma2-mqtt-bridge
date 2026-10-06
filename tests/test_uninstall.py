@@ -739,7 +739,7 @@ def test_a_shutdown_while_opkg_runs_acts_on_nothing_opkg_reports(
     assert bridge.uninstaller.phase == "abandoned"
 
 
-# ---------------------------------------------------- review round 1 (§11 v) --
+# -------------------------------------------------- review round 1 (ADR-0004) --
 
 
 def test_refused_while_an_epg_import_runs_where_restart_gui_is(box, factory, receiver,

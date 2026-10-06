@@ -775,7 +775,7 @@ def test_a_withdrawn_update_reopens_the_doors_with_a_fresh_session(box, factory,
     assert bridge.publisher("power") is not None
 
 
-# ------------------------------------------------- the downgrade and S-a --
+# ------------------------------------------ the downgrade and its retraction --
 
 
 def test_a_downgrade_from_the_television_retracts_all_but_availability_first(box, factory,

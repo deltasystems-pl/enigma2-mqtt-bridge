@@ -1500,8 +1500,8 @@ refusal above, the receiver looks at `update.origin` (§1). A probe's word of th
 is taken as it is; otherwise - `unknown`, the default on a receiver that has never checked, a word
 read back after a restart, or an older one - it probes once first: the check's own request for the
 signature file, five seconds, while the install waits (at most 60 s, for a check that may already
-be running). Starting the install is the consent to that probe (spec: "an explicit TV/page
-action"); nothing else probes, and a `cmd/update` over MQTT never does. `reachable`: the update
+be running). Starting the install is the consent to that probe - an explicit action at the
+television or on the page; nothing else probes, and a `cmd/update` over MQTT never does. `reachable`: the update
 helper fetches the release itself. `unreachable`: the receiver asks Home Assistant for the
 package. An update helper whose download from the origin got no answer at all makes
 `update.origin` `unreachable` as well. Its failed end starts the ten-minute limit between updates,
