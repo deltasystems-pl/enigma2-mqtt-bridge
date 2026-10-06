@@ -465,6 +465,7 @@ def test_a_publisher_that_fires_after_the_retraction_publishes_nothing(box, fact
     volume._publish_now()
     bridge.publish_state("volume", {"level": 99, "muted": False})
     bridge.retract(ROOT + "/cmd/anything")
+    assert bridge.retract_last_error() is False
 
     assert len(client.published) == after
 
@@ -478,6 +479,9 @@ def test_commands_are_not_dispatched_once_the_doors_are_closed(box, factory, rec
 
     client.fire_message(ROOT + "/cmd/restart_gui", b"PRESS")
     client.fire_message(ROOT + "/cmd/reset", b"PRESS")
+    # Not even the one that only retracts: the removal's own set is what is acknowledged.
+    client.fire_message(ROOT + "/cmd/clear_error", b"PRESS")
+    assert bridge.run_command("clear_error", "", PAGE) == "an uninstall is already running"
     refusal = bridge.run_command("screenshot", "", PAGE)
     # A settings save is kept and not applied, like the setup screen's Save.
     clients = len(factory.clients)

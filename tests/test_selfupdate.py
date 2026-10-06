@@ -736,6 +736,21 @@ def test_behind_closed_doors_every_command_gets_the_sentence(box, factory):
     assert bridge.apply_settings({"log_level": "debug"}) == DOORS
 
 
+def test_behind_closed_doors_clear_error_is_refused_like_every_command(box, factory):
+    """It clears nothing there, and its refusal is the doors' sentence on `last_error`."""
+    bridge = box()
+    restarting(bridge, factory)
+    factory.client.fire_message(ROOT + "/cmd/power", b"standby")
+    factory.client.clear()
+
+    factory.client.fire_message(ROOT + "/cmd/clear_error", b"PRESS")
+
+    entries = factory.client.all_for(LAST_ERROR)
+    assert [entry.json()["cmd"] for entry in entries] == ["clear_error"]
+    assert entries[0].json()["error"] == DOORS
+    assert bridge.run_command("clear_error", "", PAGE) == DOORS
+
+
 def test_behind_closed_doors_the_page_and_the_setup_screen_say_only_that(box, factory,
                                                                          monkeypatch, settings):
     from test_setup_screen import FakeSession
@@ -808,10 +823,12 @@ def test_after_the_retraction_nothing_is_published_until_the_reload(box, factory
     assert bridge.self_update.silent
     quiet = len(factory.client.published)
     factory.client.fire_message(ROOT + "/cmd/power", b"standby")
+    factory.client.fire_message(ROOT + "/cmd/clear_error", b"PRESS")
     helper_says(directory, phase="restarting", restart="requested")
     tick(3)
     bridge.check_build_on_disk()
     bridge.updates.publish()
+    assert bridge.retract_last_error() is False
     factory.client.fire_connect()
     assert factory.client.published[quiet:] == []
     helper_says(directory, phase="finished", result="withdrawn_before_restart",
@@ -1043,6 +1060,186 @@ def test_a_finished_marker_is_reported_once_and_removed(starting, factory):
     assert transaction(factory.client)["result"] == "rolled_back"
     assert refusal(factory.client)[0] == "not_started"
     assert not (bridge.root / updatehelper.MARKER).exists()
+
+
+def test_an_updates_end_read_at_the_start_is_not_cleared_as_an_earlier_runs_error(
+        starting, factory, state_path):
+    """The process before the restart left a `last_error` retained - a command refused behind
+    its closed doors. The one that starts clears an earlier run's error at its first connect,
+    but not when it has the update's end to say there: that is this run's, and it replaces
+    the other."""
+    from MQTTBridge.discovery import StateStore
+
+    earlier = StateStore(path=state_path)
+    earlier.remember(LAST_ERROR)
+    earlier.save()
+    starting(prepare=lambda root: marker(
+        root, phase="finished", result="rolled_back", reason="not_started",
+        error="the new plugin did not start; the previous version 0.2.0 is back",
+        finished=NOW))
+
+    factory.client.fire_connect()
+
+    entries = factory.client.all_for(LAST_ERROR)
+    assert [entry.text != "" for entry in entries] == [True]
+    assert refusal(factory.client) == (
+        "not_started", "the new plugin did not start; the previous version 0.2.0 is back")
+
+
+def test_an_updates_end_is_not_lost_to_a_connect_whose_socket_was_gone(starting, factory):
+    """The end is read once, at the start, and the marker goes with it: a first connect that
+    could publish nothing must not be the only time it was said."""
+    starting(prepare=lambda root: marker(
+        root, phase="finished", result="rolled_back", reason="not_started",
+        error="the new plugin did not start; the previous version 0.2.0 is back",
+        finished=NOW))
+    factory.client.publish_rc = 4
+    factory.client.fire_connect()
+    factory.client.fire_disconnect(7)
+    factory.client.publish_rc = 0
+    factory.client.clear()
+
+    factory.client.fire_connect()
+
+    assert refusal(factory.client) == (
+        "not_started", "the new plugin did not start; the previous version 0.2.0 is back")
+    assert len(factory.client.all_for(LAST_ERROR)) == 1
+
+
+def _last_record(root, result, reason):
+    """The last-transaction record as the helper leaves it; the marker is gone by then."""
+    updatehelper.write_json(str(root / updatehelper.LAST), {
+        "id": "a1b2c3d4e5f6", "started_by": "mqtt", "target": "0.3.0", "from": "0.2.0",
+        "phase": "finished", "started": NOW - 900, "finished": NOW - 600,
+        "result": result, "reason": reason, "error": None if reason is None else "x"})
+
+
+def _an_earlier_runs_error(state_path):
+    from MQTTBridge.discovery import StateStore
+
+    earlier = StateStore(path=state_path)
+    earlier.remember(LAST_ERROR)
+    earlier.save()
+
+
+@pytest.mark.parametrize("reason", ["restore_failed", "restore_incomplete"])
+def test_a_restart_does_not_clear_the_sentence_of_a_restore_that_did_not_complete(
+        reason, starting, factory, state_path, plugin_log):
+    """Nobody repaired the receiver by restarting it: the record of the last update still says
+    the previous version was not put back whole, so "install the plugin again" stays."""
+    _an_earlier_runs_error(state_path)
+    bridge = starting(prepare=lambda root: _last_record(root, "failed", reason))
+
+    factory.client.fire_connect()
+
+    assert LAST_ERROR not in factory.client.topics()
+    assert bridge.state.knows(LAST_ERROR)
+    assert transaction(factory.client)["reason"] == reason
+    assert "keeping the last_error an earlier run left" in plugin_log()
+    # Nor at a later connect of this run.
+    factory.client.fire_disconnect(7)
+    factory.client.fire_connect()
+    assert LAST_ERROR not in factory.client.topics()
+
+
+@pytest.mark.parametrize("reason", ["restore_failed", "restore_incomplete"])
+def test_clear_error_clears_whatever_the_last_updates_record_says(reason, starting, factory,
+                                                                  state_path, monkeypatch):
+    _an_earlier_runs_error(state_path)
+    bridge = starting(prepare=lambda root: _last_record(root, "failed", reason))
+    factory.client.fire_connect()
+    # The command's own retraction, not the one every command that succeeds ends with.
+    monkeypatch.setattr(bridge, "clear_last_error", lambda: False)
+
+    factory.client.fire_message(ROOT + "/cmd/clear_error", b"PRESS")
+
+    assert [entry.text for entry in factory.client.all_for(LAST_ERROR)] == [""]
+    assert not bridge.state.knows(LAST_ERROR)
+
+
+def test_the_start_decides_once_whether_the_sentence_is_held(starting, factory, state_path):
+    """Held at the start, the question is settled for this run: a refusal of this run is not
+    taken for an earlier run's at a later connect, whatever the record has become by then."""
+    _an_earlier_runs_error(state_path)
+    bridge = starting(prepare=lambda root: _last_record(root, "failed", "restore_failed"))
+    factory.client.fire_connect()
+    factory.client.fire_message(ROOT + "/cmd/nonsense", b"")
+    # A transaction accepted since: the record this process holds names no restore any more.
+    bridge.self_update._transaction = None
+    factory.client.fire_disconnect(7)
+    factory.client.clear()
+
+    factory.client.fire_connect()
+
+    assert LAST_ERROR not in factory.client.topics()
+    assert bridge.last_error() is not None
+
+
+def test_a_command_that_succeeds_still_clears_it_after_such_an_end(starting, factory,
+                                                                   state_path):
+    _an_earlier_runs_error(state_path)
+    starting(prepare=lambda root: _last_record(root, "failed", "restore_failed"))
+    factory.client.fire_connect()
+
+    factory.client.fire_message(ROOT + "/cmd/discovery", b"PRESS")
+
+    assert [entry.text for entry in factory.client.all_for(LAST_ERROR)] == [""]
+
+
+@pytest.mark.parametrize("result, reason", [
+    ("installed", None),
+    ("failed", "not_stopped"),
+    ("failed", "interface_not_started"),
+    ("failed", "time_limit"),
+    ("rolled_back", "not_started"),
+    ("rolled_back", "interrupted"),
+    ("interrupted", "interrupted"),
+    ("withdrawn_before_restart", "question"),
+])
+def test_a_restart_clears_after_every_other_end(result, reason, starting, factory, state_path):
+    """After these the files and the package manager's records agree - on the previous version
+    or the new one - or the restart itself is the repair (`not_stopped`)."""
+    _an_earlier_runs_error(state_path)
+    starting(prepare=lambda root: _last_record(root, result, reason))
+
+    factory.client.fire_connect()
+
+    assert [entry.text for entry in factory.client.all_for(LAST_ERROR)] == [""]
+
+
+@pytest.mark.parametrize("how", ["deadline", "boot"])
+def test_a_marker_let_go_without_a_verdict_leaves_nothing_to_hold_the_sentence(
+        how, starting, factory, state_path):
+    """TRANSACTION.md section 7, documented and not held: a helper that stopped from
+    `installing` on wrote no end, and a start past the marker's deadline, or in another boot
+    with no lock of it, discards the marker without one. No record then says what the files
+    are, and the earlier run's sentence is cleared like any other."""
+    _an_earlier_runs_error(state_path)
+    options = {"deadline": UPTIME - 1} if how == "deadline" else {"boot": OTHER_BOOT}
+    bridge = starting(prepare=lambda root: marker(root, phase="installing", **options))
+
+    factory.client.fire_connect()
+
+    assert not (bridge.root / updatehelper.MARKER).exists()
+    assert [entry.text for entry in factory.client.all_for(LAST_ERROR)] == [""]
+
+
+def test_an_update_that_installed_leaves_no_earlier_runs_error_behind(starting, factory,
+                                                                      state_path):
+    """`installed` has nothing to say on `last_error`, so what the process before the restart
+    left there - "an update is being applied on the receiver", to a command it refused - goes."""
+    from MQTTBridge.discovery import StateStore
+
+    earlier = StateStore(path=state_path)
+    earlier.remember(LAST_ERROR)
+    earlier.save()
+    starting(prepare=lambda root: marker(
+        root, phase="finished", result="installed", finished=NOW))
+
+    factory.client.fire_connect()
+
+    assert transaction(factory.client)["result"] == "installed"
+    assert [entry.text for entry in factory.client.all_for(LAST_ERROR)] == [""]
 
 
 # `update.transaction.reason` (review S1): `last_error` is cleared by the next command that

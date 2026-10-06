@@ -117,6 +117,7 @@ class CommandDispatcher:
             "discovery": self.discovery,
             "ha_mode": self.ha_mode,
             "reset": self.reset,
+            "clear_error": self.clear_error,
             "uninstall": self.uninstall,
             "update_check": self.update_check,
             "update": self.update,
@@ -658,6 +659,18 @@ class CommandDispatcher:
 
     def reset(self, _text, origin=MQTT):
         self.bridge.reset_retained()
+        return None
+
+    def clear_error(self, _text, origin=MQTT):
+        """Empty the retained `last_error`, whether or not there is one.
+
+        The payload is ignored. Every command that succeeds clears
+        `last_error` on its way out (`_execute`); this one does it itself, and
+        sends the retraction even when this process knows of no error
+        (`Bridge.retract_last_error`), so it never depends on that. No
+        permission: taking a message back changes nothing on the receiver.
+        """
+        self.bridge.retract_last_error()
         return None
 
     def uninstall(self, text, origin=MQTT):

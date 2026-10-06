@@ -972,6 +972,31 @@ and a restart is not let through: it would start a mix. The pid and the version 
 first signal and still hold a process by themselves; they can no longer open one whose build is not
 the one on disk.
 
+**`last_error` across the restart that follows.** A plugin process that starts clears, at its first
+connect, a `last_error` an earlier process left retained (TOPICS.md, the exception
+`last-error-cleared-at-start`). What that does to the sentences of this section:
+
+- An end the starting process reads itself - a finished marker, or a marker whose helper is gone
+  and which it judges by the build that started - is reported at that connect and is what stays
+  retained; nothing is cleared first, and the report waits for a connect that could send it.
+- After `restore_failed` and `restore_incomplete` the process that read the end removes the marker,
+  so the next start has nothing to report - and it **does not clear**: the last-transaction record
+  still carries that reason, the sentence on `last_error` says to install the plugin again, and a
+  restart is not that repair. The sentence stays until a command succeeds or `cmd/clear_error` is
+  sent. It also stays after the reinstall: the SSH install writes no last-transaction record, so
+  the reason is there until the next update ends, and nothing a starting process has can tell that
+  the receiver was repaired.
+- After `not_stopped`, and after an end held only by the build rule, the restart **is** the repair:
+  the process that starts clears the sentence that asked for it.
+- **Not held, and cleared:** the sentence of a helper that stopped from `installing` on ("an update
+  stopped part-way ... install the plugin again"), when the start that follows gives no verdict. The
+  helper wrote no end, so the last-transaction record does not name this transaction, and the
+  marker is the only trace. A start in the same boot before the marker's deadline judges it by the
+  build that started and reports that. A start past the deadline, or in another boot with no lock
+  of it, discards the marker without a verdict (section 4) - that process and every later one
+  then has no record that says what the files are, so it does not guess: the earlier sentence is
+  cleared like any other, and `update.transaction` still shows the last end the helper did write.
+
 A build id on disk that cannot be read is not the running build. A process that loaded one at its
 start and finds none now - the file missing, unreadable, or not what the builder writes - had its
 files changed under it, or damaged, and is held with the build rule's sentence: the conservative

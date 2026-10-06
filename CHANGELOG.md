@@ -27,6 +27,15 @@ version that has no section here.
   ([TOPICS.md](docs/TOPICS.md)).
 - `epg_grid/<bouquet_slug>` gains `events_per_channel`: how many events a channel may carry in
   that payload. It is `epg_grid_events` unless the grid was cut to fit one packet (Changed, below).
+- `cmd/clear_error` clears the retained `last_error` on request. Until now the only way to empty
+  it was to send some other command that succeeds. The payload is ignored, the command succeeds
+  whether or not an error is retained, and it publishes the empty retained payload either way -
+  so it also clears an error the running plugin does not know of. It needs no permission and no
+  capability, and is refused only as every command is: discarded when it arrives retained or
+  oversized, and answered with the doors' sentence while an update is being applied. In
+  discovery mode the device gains a "Clear last error" button, a configuration entity that is
+  always announced, and the OpenWebif page gains the same action, in English, Polish and German
+  ([TOPICS.md](docs/TOPICS.md#2-commands)).
 
 ### Changed
 
@@ -47,6 +56,28 @@ version that has no section here.
   entity and later creates a new one, so a customisation of it is lost. The log says once that it
   was left out. A payload too big even without the select is withheld as before
   ([TOPICS.md](docs/TOPICS.md#4-home-assistant-discovery)).
+- A `last_error` left by an earlier run of the plugin is cleared when the plugin starts again.
+  The topic is retained, so after an interface restart, a reboot, a reinstall or an update the
+  broker went on showing the last refusal of the run before - until some command succeeded, which
+  on a receiver nobody commands is never. The first connect of a new plugin process now empties
+  it. A reconnect after a broker outage does not, and neither does the new session a settings
+  save opens: the refusal of the run that is still going stays. When the starting plugin has a
+  refusal of its own to report - how an update ended - that one is published instead and nothing
+  is emptied first. And it is left alone while the last update's record ends in a restore that
+  did not complete (`restore_failed`, `restore_incomplete`): "install the plugin again" is not
+  made untrue by a restart. The empty payload goes out before `availability` says `online`, and
+  only when the plugin knows of an error - which is not always what the broker holds. The plugin
+  knows from its state file, which is not written at every refusal - a connect and a clean stop
+  write it - so an error published shortly before the interface was killed can still be left
+  behind; `cmd/clear_error` (Added, above) clears that one. The other way round, one empty
+  message goes to a topic the broker holds nothing on when the state file knows of an error the
+  broker has lost, or when the only refusal was made before this run had a session. A clearing
+  counts only when the client took the message: with the socket gone, nothing is forgotten and
+  the next connect, or the next clearing, sends it again - after a command that succeeds too.
+  **Behaviour change, named in-major exception `last-error-cleared-at-start`**
+  ([TOPICS.md, Contract version](docs/TOPICS.md#contract-version)): a consumer that wants the
+  last refusal across a restart of the receiver keeps it itself when it arrives, as it already
+  had to across the next command that succeeds. The companion integration does.
 - `cmd/config`'s refusal of a key outside its list names the key. The sentence on `last_error`
   was "the config object contains unknown settings" and left the reader to compare the payload
   with the list; it now goes on with the keys it refused, each in single quotes -
@@ -68,6 +99,11 @@ version that has no section here.
 
 ### Fixed
 
+- The outcome of an update, or the reason a removal stopped, is no longer lost to a connect that
+  could not send it. An error carried to the next session was dropped at the first connect
+  whether or not its publish left the receiver; when the socket was gone again before the
+  connect had finished, nothing was said and nothing said it later. It now waits until the
+  client has taken a publish of it, and is said once, at the connect that can.
 - A password that contains another registered password is kept out of the log whole. The log's
   redaction replaced the registered values in no particular order, so with a broker password
   that held the OSCam password inside it - or the other way round - the longer one could come

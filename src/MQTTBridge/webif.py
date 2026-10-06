@@ -742,6 +742,7 @@ def actions(bouquets=(), node_id="", history=(), versions=()):
             done=_update_started,
         ),
         Action("discovery", "discovery", _("Publish discovery again")),
+        Action("clear_error", "clear_error", _("Clear last error")),
         Action(
             "ha_mode", "ha_mode", _("Home Assistant mode"),
             (Field("mode", "select", _("Mode"), [

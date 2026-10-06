@@ -455,6 +455,10 @@ msgid "Publish discovery again"
 msgstr ""
 
 #: src/MQTTBridge/webif.py
+msgid "Clear last error"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
 msgid "Reboot"
 msgstr ""
 

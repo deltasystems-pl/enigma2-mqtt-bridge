@@ -332,7 +332,9 @@ There is no acknowledgement topic. A command's answer is the state topic changin
 `last_error`. In order:
 
 1. Subscribe to `enigma2/<node_id>/last_error` - a guard that refused the command says so there,
-   with the reason.
+   with the reason. It is retained, so look at its `ts`: it stays until a command succeeds, until
+   the plugin starts again (after 0.4.0) or until `cmd/clear_error` empties it (after 0.4.0;
+   *Clear last error* on the OpenWebif page and, in discovery mode, in Home Assistant).
 2. Check the payload form in [TOPICS.md](TOPICS.md#2-commands). `cmd/zap` by name is refused
    unless exactly one service matches within the configured bouquets; `cmd/key` is refused for an
    unknown key name. `cmd/config` refuses the whole object when one key is not on its list - the

@@ -416,6 +416,16 @@ class _Components:
             ent_cat="config",
             ic="mdi:refresh",
         )
+        # No capability and no permission: the command is the bridge's own and
+        # changes nothing on the receiver. There is no `last_error` entity here
+        # to go with it - the topic is read by whoever subscribes to it.
+        self.add(
+            "clear_error", "button", None,
+            name="Clear last error",
+            cmd_t=self.topic("cmd/clear_error"),
+            ent_cat="config",
+            ic="mdi:notification-clear-all",
+        )
         if deep_standby_allowed:
             # Only when the box has been told it may: a button that is always
             # refused is a button somebody will press twice and then report.

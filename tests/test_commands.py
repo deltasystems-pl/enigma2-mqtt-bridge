@@ -6,6 +6,8 @@ publisher who did not read it; an oversized payload is somebody else's mistake
 being parsed on the thread that draws the television.
 """
 
+import pytest
+
 NODE = "vuuno4kse_005301"
 INFO = "enigma2/" + NODE + "/info"
 LAST_ERROR = "enigma2/" + NODE + "/last_error"
@@ -361,9 +363,11 @@ def test_reset_clears_an_outstanding_last_error(connected_bridge, factory):
     assert factory.client.last(LAST_ERROR).text == ""
 
 
-def test_a_last_error_from_a_previous_run_is_cleared_by_the_first_success(
+def test_a_last_error_from_a_previous_run_is_gone_before_the_first_command(
     make_bridge, factory, settings, state_path
 ):
+    """The first connect of a new process took it back (`test_bridge.py`), so a success after
+    it has nothing left to clear."""
     from MQTTBridge.discovery import StateStore
 
     earlier = StateStore(path=state_path)
@@ -375,10 +379,171 @@ def test_a_last_error_from_a_previous_run_is_cleared_by_the_first_success(
     bridge = make_bridge(state_store=StateStore(path=state_path))
     bridge.start()
     factory.client.fire_connect()
+    assert factory.client.last(LAST_ERROR).text == ""
     factory.client.clear()
 
     send(factory, "discovery", b"PRESS")
+    assert LAST_ERROR not in factory.client.topics()
+
+
+# ------------------------------------------------------------------ clear_error --
+
+
+def retractions(factory):
+    return [entry for entry in factory.client.all_for(LAST_ERROR) if entry.text == ""]
+
+
+def test_clear_error_retracts_an_outstanding_last_error(connected_bridge, factory):
+    send(factory, "teleport", b"PRESS")
+    assert connected_bridge.last_error() is not None
+    factory.client.clear()
+
+    send(factory, "clear_error", b"")
+
+    assert [(entry.topic, entry.text, entry.retain) for entry in factory.client.published] == [
+        (LAST_ERROR, "", True)
+    ]
+    assert factory.client.last(LAST_ERROR).qos == 0
+    assert connected_bridge.last_error() is None
+    assert not connected_bridge.state.knows(LAST_ERROR)
+
+
+@pytest.mark.parametrize("payload", [
+    b"", b"PRESS", b"press", b'{"cmd": "zap"}', b"[1, 2]", b"\xff\xfe", b"x" * 4096, None,
+])
+def test_clear_error_ignores_its_payload(payload, connected_bridge, factory):
+    send(factory, "teleport", b"PRESS")
+    factory.client.clear()
+
+    send(factory, "clear_error", payload)
+
+    assert [entry.text for entry in factory.client.all_for(LAST_ERROR)] == [""]
+
+
+def test_clear_error_with_nothing_outstanding_succeeds_and_says_nothing_of_itself(
+        connected_bridge, factory):
+    """The retraction goes out all the same: an error this process does not know of - the
+    state file did not keep it - is exactly what the command is for."""
+    factory.client.clear()
+
+    send(factory, "clear_error", b"PRESS")
+
+    assert [(entry.topic, entry.text, entry.retain) for entry in factory.client.published] == [
+        (LAST_ERROR, "", True)
+    ]
+    assert connected_bridge.last_error() is None
+
+
+def test_clear_error_does_not_lean_on_the_dispatchers_own_clearing(connected_bridge, factory,
+                                                                   monkeypatch):
+    """Every command that succeeds clears `last_error`; this one is that, said out loud."""
+    send(factory, "teleport", b"PRESS")
+    factory.client.clear()
+    monkeypatch.setattr(connected_bridge, "clear_last_error", lambda: False)
+
+    send(factory, "clear_error", b"PRESS")
+
+    assert len(retractions(factory)) == 1
+    assert connected_bridge.last_error() is None
+
+
+def test_clear_error_sends_one_retraction_not_two(connected_bridge, factory):
+    send(factory, "teleport", b"PRESS")
+    factory.client.clear()
+    send(factory, "clear_error", b"PRESS")
+    assert len(retractions(factory)) == 1
+
+
+def test_a_retained_clear_error_is_discarded(connected_bridge, factory, plugin_log):
+    send(factory, "teleport", b"PRESS")
+    factory.client.clear()
+
+    send(factory, "clear_error", b"PRESS", retain=True)
+
+    assert factory.client.published == []
+    assert connected_bridge.last_error() is not None
+    assert "discarding a RETAINED cmd/clear_error" in plugin_log()
+    assert "enigma2/" + NODE + "/cmd/clear_error" in connected_bridge.discarded_retained_commands()
+
+
+def test_an_oversized_clear_error_is_discarded(connected_bridge, factory):
+    send(factory, "teleport", b"PRESS")
+    factory.client.clear()
+    send(factory, "clear_error", b"x" * 4097)
+    assert factory.client.published == []
+    assert connected_bridge.last_error() is not None
+
+
+def test_clear_error_leaves_the_state_file_without_the_topic(connected_bridge, factory,
+                                                             state_path):
+    from MQTTBridge.discovery import StateStore
+
+    send(factory, "teleport", b"PRESS")
+    connected_bridge.state.save()
+    assert StateStore(path=state_path).knows(LAST_ERROR)
+
+    send(factory, "clear_error", b"PRESS")
+    connected_bridge.stop()
+
+    assert not StateStore(path=state_path).knows(LAST_ERROR)
+
+
+def test_a_clear_error_the_client_did_not_take_forgets_nothing(connected_bridge, factory,
+                                                           state_path):
+    """The socket is gone and the main thread has not heard yet: the retraction was not sent,
+    so the state file keeps the topic and the error is still there to clear."""
+    from MQTTBridge.discovery import StateStore
+
+    send(factory, "teleport", b"PRESS")
+    factory.client.publish_rc = 4
+
+    send(factory, "clear_error", b"PRESS")
+
+    assert connected_bridge.state.knows(LAST_ERROR)
+    assert connected_bridge.last_error() is not None
+    connected_bridge.state.save()
+    assert StateStore(path=state_path).knows(LAST_ERROR)
+
+    factory.client.publish_rc = 0
+    factory.client.clear()
+    send(factory, "clear_error", b"PRESS")
+    assert len(retractions(factory)) == 1
+    assert connected_bridge.last_error() is None
+    assert not connected_bridge.state.knows(LAST_ERROR)
+
+
+def test_clear_error_without_a_session_sends_nothing_and_raises_nothing(make_bridge, factory,
+                                                                        settings):
+    """A bridge that never started has no client: the call is a no-op, not a crash that would
+    come back as a refusal about the command itself."""
+    from MQTTBridge.origin import PAGE
+
+    settings.node_id.value = NODE
+    bridge = make_bridge()
+
+    assert bridge.retract_last_error() is False
+    assert bridge.run_command("clear_error", "", PAGE) is None
+    assert bridge.last_error() is None
+    assert factory.clients == []
+
+
+def test_an_error_after_clear_error_is_published_and_cleared_as_ever(connected_bridge, factory):
+    send(factory, "clear_error", b"PRESS")
+    send(factory, "teleport", b"PRESS")
+    assert factory.client.last(LAST_ERROR).json()["cmd"] == "teleport"
+    send(factory, "discovery", b"PRESS")
     assert factory.client.last(LAST_ERROR).text == ""
+
+
+def test_the_page_clears_the_error_through_the_same_handler(connected_bridge, factory):
+    from MQTTBridge.origin import PAGE
+
+    send(factory, "teleport", b"PRESS")
+    factory.client.clear()
+
+    assert connected_bridge.run_command("clear_error", "", PAGE) is None
+
+    assert [entry.text for entry in factory.client.all_for(LAST_ERROR)] == [""]
 
 
 # -------------------------------------------------------------------- discovery --
@@ -400,6 +565,6 @@ def test_a_bridge_with_no_feature_areas_still_announces_the_plugins_own_entities
     no capability at all.
     """
     device = factory.client.last("homeassistant/device/" + NODE + "/config").json()
-    assert set(device["cmps"]) == {"restart_gui", "refresh_discovery", "uptime"}
+    assert set(device["cmps"]) == {"restart_gui", "refresh_discovery", "clear_error", "uptime"}
     # And nothing claiming to know what is playing.
     assert "channel" not in device["cmps"]

@@ -376,7 +376,8 @@ the page fills in the node id itself. Going back to a recently watched channel o
 of the last `zap_history` the plugin published, by reference, as a consumer would send them.
 Installing a plugin version always asks first, and asks in its own words before an older version
 ([above](#installing-a-release-from-the-receiver)); only that confirmation can start a downgrade -
-it is kept on the receiver with the confirmation step, never sent by the browser. The one
+it is kept on the receiver with the confirmation step, never sent by the browser.
+*Clear last error* empties the `last_error` the page shows. The one
 difference from MQTT: a command from this page **does not need** `deep_standby_allowed`,
 `softcam_restart_allowed`, `epg_import_allowed`, `uninstall_allowed`, `update_check` or
 `update_allowed`. While the bridge is idle

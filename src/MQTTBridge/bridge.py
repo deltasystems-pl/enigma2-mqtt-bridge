@@ -226,6 +226,10 @@ class Bridge:
         # reason a removal failed, reported once the fresh session is up.
         self._pending_error = None
         self._last_error_published = False
+        # Until this process has connected once: a `last_error` the state file
+        # knows of then is an earlier run's (`_clear_earlier_runs_error`). Not
+        # reset by a reload - a new session is not a new run.
+        self._first_connect = True
         # topic -> the bytes last sent to it, so a repeat can be dropped.
         self._published = {}
         # topic -> the JSON last published to it, for the OpenWebif page. Not
@@ -985,6 +989,14 @@ class Bridge:
         # also goes when HDMI-CEC does.
         if self.publisher(CecPublisher.name) is None:
             self.retract(self.topic(CEC_TOPIC))
+        # And the refusal an earlier run left retained, here with the other
+        # leftovers of an earlier process: before `online`, so that a consumer
+        # which takes `online` for the start of this run never reads that
+        # refusal as this run's, and before the state file is written at the
+        # end of this connect, so that it is written without the topic. The
+        # error this run brings to the connect is said at the other end of it,
+        # after the snapshot it is about.
+        self._clear_earlier_runs_error()
         # Every payload goes out on every connect, so what was published before
         # this connection is not what is on the broker now.
         self.forget_published()
@@ -1021,9 +1033,12 @@ class Bridge:
             self.client.subscribe(integration, qos=COMMAND_QOS)
         self.state.save()
         if self._pending_error is not None:
+            # Said once, so only a publish the client took counts as said: a
+            # connect whose socket was gone again leaves it for the next one.
+            # Nothing else would say it - the marker it was read from is gone.
             command, message = self._pending_error
-            self._pending_error = None
-            self.publish_last_error(command, message)
+            if accepted(self.publish_last_error(command, message)):
+                self._pending_error = None
 
     def on_message(self, topic, payload, retain):
         if self._uninstaller.closed:
@@ -1668,15 +1683,102 @@ class Bridge:
         if reason:
             payload["reason"] = str(reason)
         LOG.warning("cmd/%s refused: %s", payload["cmd"], message)
-        self.publish_json(self.topic("last_error"), payload)
+        info = self.publish_json(self.topic("last_error"), payload)
         self._last_error_published = True
+        return info
 
     def clear_last_error(self):
         if not self._last_error_published:
             return False
-        self.retract(self.topic("last_error"))
+        return self._retract_last_error()
+
+    def _retract_last_error(self):
+        """The empty retained payload to `last_error`; whether the client took it.
+
+        Forgetting the error is only true when the retraction was sent
+        (`_take_back` has the same rule, for the same reason): a session that
+        looks open may have lost its socket already, and the client then
+        answers "no connection". Forgetting there would leave the refusal on
+        the broker with nothing here that knows of it - not the state file, so
+        not the next start either, and not the next command that succeeds. So
+        without an accepted publish everything stays as it was, and whoever
+        clears next sends it again.
+
+        Nothing is sent while the plugin removes itself or an update has taken
+        this node's topics back, as for any other publish (`publish_raw`).
+        """
+        topic = self.topic("last_error")
+        if self.client is None or self._uninstaller.closed or self._self_update.silent:
+            return False
+        if not accepted(self.client.publish(topic, "", qos=STATE_QOS, retain=True)):
+            return False
+        self.state.forget(topic)
+        self._published.pop(topic, None)
+        self._forget(topic)
         self._last_error_published = False
         return True
+
+    def _clear_earlier_runs_error(self):
+        """Take back the `last_error` an earlier run left retained. Whether it did.
+
+        A retained refusal outlives the process that published it: after an
+        interface restart, a reinstall or an update the broker still holds it,
+        and it then describes a command of a run that is over - until some
+        command succeeds, which on a receiver nobody commands is never. So the
+        first connect of a process clears it. The state file is how this
+        process knows there is one (`_start`).
+
+        Only the first connect. A reconnect is the same run, whose refusal has
+        to survive a broker outage, and so is the session a settings save or a
+        failed removal opens (`reload`). And not when this run has an error of
+        its own to say at that connect - how an update ended, read at the start
+        (`selfupdate.py`): that one is published a few lines on and replaces the
+        earlier run's, so emptying the topic first would only be a second
+        message about nothing.
+
+        A refusal this process made before it had a session - a command from
+        the page, with the broker away - was not sent, and goes the same way:
+        `last_error()` is what stands on the broker.
+
+        Nor while the last update's record says the receiver still needs
+        somebody: after a restore that did not complete the earlier run's
+        sentence is "install the plugin again", and restarting the interface
+        has not done that (`SelfUpdater.needs_reinstall`). It stays until a
+        command succeeds or `cmd/clear_error` takes it back, as it did before
+        this clearing existed.
+
+        The connect counts as the first one until the question is settled:
+        answered with "nothing to clear", or with a retraction the client took.
+        A connect whose socket was gone again before the retraction could be
+        handed over settles nothing, and the next one asks again.
+        """
+        if not self._first_connect:
+            return False
+        if self._pending_error is not None or not self._last_error_published:
+            self._first_connect = False
+            return False
+        if self._self_update.needs_reinstall():
+            self._first_connect = False
+            LOG.info("keeping the last_error an earlier run left: the last update's record "
+                     "says the plugin has to be installed again")
+            return False
+        if not self._retract_last_error():
+            return False
+        self._first_connect = False
+        LOG.info("clearing the last_error an earlier run left retained")
+        return True
+
+    def retract_last_error(self):
+        """`cmd/clear_error`: the retraction, whether or not this process knows of an error.
+
+        `clear_last_error` sends nothing when no error is known here. That is
+        right after every other command and wrong for this one: the state file
+        is not written at every refusal, so an interface that was killed before
+        the next write leaves a retained refusal nothing here knows of, and this
+        command is how somebody takes it back. Whether the client took the
+        retraction; when it did not, nothing is forgotten (`_retract_last_error`).
+        """
+        return self._retract_last_error()
 
     def set_ha_mode(self, mode):
         """The republished `info` is the acknowledgement; there is no ack topic."""
