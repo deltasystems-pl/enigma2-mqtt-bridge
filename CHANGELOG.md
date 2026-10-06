@@ -38,11 +38,13 @@ version that has no section here.
   integration up to 0.4.0 skips a bouquet without a list, so it shows the bouquet names and no
   channels until `bouquets_for_select` is narrowed.
 - An EPG grid too big for one packet is cut instead of withheld. When the packet of an
-  `epg_grid/<bouquet_slug>` would be over the bound, the plugin lowers the events per channel for
-  that bouquet - `epg_grid_events`, one fewer, down to 1 - keeps each channel's earliest events
-  without asking the EPG cache again, and publishes the grid with the most that fits. The log has
-  one line when a bouquet's grid is first cut or the cut moves. Only a grid that does not fit with
-  one event on each channel is still withheld. A connect republishes the grid as it was fitted.
+  `epg_grid/<bouquet_slug>` would be over the bound, the plugin publishes that bouquet's grid
+  with the largest number of events per channel that fits, from `epg_grid_events` down to 1,
+  keeping each channel's earliest events without asking the EPG cache again. The log has one line
+  when a bouquet's grid is first cut or the cut moves. Only a grid that does not fit with one
+  event on each channel is still withheld, and `info.not_published` then gives its size at one
+  event per channel. A connect republishes the grid as it was fitted, and the next pass starts
+  from the last cut, so a grid that stays cut costs what a grid that fits costs.
 - Discovery mode on a receiver with a very large channel list keeps its device. The device's
   discovery payload carries every channel name as the options of the channel select; when it
   would be over the bound with them, it is now published without the select instead of not at

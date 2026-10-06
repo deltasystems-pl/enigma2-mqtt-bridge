@@ -208,6 +208,32 @@ def _finish_state(state):
     return state["payload"]
 
 
+# What an event takes in a grid's JSON besides its title and the digits of its
+# three numbers: the punctuation and the keys, and the comma in front of it.
+EVENT_LEAST = len(',{"begin":,"end":,"event_id":,"title":""}')
+
+
+def _least_added(payload, count):
+    """The least a grid's JSON grows by when a channel may carry one event more than `count`.
+
+    Counted, not encoded: for each channel that has another event, the title's
+    characters, the digits of its numbers and the fixed text around them. The
+    encoded form can only be longer - a character is at least a byte, and an
+    escape adds to it - so this is a floor, good for saying that something
+    cannot fit and for nothing else.
+    """
+    added = 0
+    for entry in payload["channels"]:
+        events = entry["events"]
+        if len(events) > count:
+            event = events[count]
+            added += (
+                EVENT_LEAST + len(event["title"]) + len(str(event["begin"]))
+                + len(str(event["end"])) + len(str(event["event_id"]))
+            )
+    return added
+
+
 def _cut(payload, count):
     """A finished grid with at most `count` events on each channel - the earliest."""
     cut = dict(payload)
@@ -232,7 +258,8 @@ class EpgGridPublisher(Publisher):
         Publisher.__init__(self, bridge)
         self._slugs = []
         self._payloads = {}
-        # slug -> the events per channel a grid was last cut to (`_fitted`).
+        # slug -> the events per channel a grid was last cut to, which is where
+        # the next pass starts looking (`_fitted`).
         self._cuts = {}
         self._queue = []
         self._current = None
@@ -369,29 +396,68 @@ class EpgGridPublisher(Publisher):
         withhold as it withholds anything else.
 
         Measuring is encoding, and a grid near the bound is about a megabyte of
-        JSON. A grid that fits is encoded once, and that JSON is the one
-        published. One that does not is encoded again for each count tried,
-        and the count is searched by halves - the size only falls as events are
-        cut - so that is at most five more with the setting at its highest, 20,
-        and two with the default of 4. This runs in the pass's own timer step,
-        every quarter of an hour for one bouquet at a time, and never on a
-        connect, which republishes the payload fitted here.
+        JSON, so the encodings are counted. A grid that fits is encoded once,
+        and that JSON is the one published. The first time one does not, the
+        count is searched by halves - the size only falls as events are cut -
+        which is at most five more with the setting at its highest, 20, and
+        two with the default of 4.
+
+        After that the search starts from the count the bouquet was last cut
+        to, because a guide a quarter of an hour older is nearly the same
+        guide. That count is tried first and usually fits: one encoding, the
+        same as for a grid that was never too big, and the whole grid is not
+        encoded at all. Whether one event more would fit is first asked
+        without encoding - the JSON just measured, plus the least the next
+        event of each channel can add (`_least_added`) - and only when that
+        leaves room is the next count encoded to find out, which is when the
+        guide has thinned out or the titles got shorter, not at every pass.
+        If it fits, the counts above it are searched by halves; if the last
+        count itself no longer fits, the ones below it are. Either way what is
+        published is the largest count that fits.
+
+        This runs in the pass's own timer step, every quarter of an hour for
+        one bouquet at a time, and never on a connect, which republishes the
+        payload fitted here.
         """
         if self.bridge is None:
             return payload, None
         suffix = "epg_grid/" + slug
         wanted = payload["events_per_channel"]
-        encoded, size = self.bridge.measure(suffix, payload)
-        if not size:
-            self._cuts.pop(slug, None)
-            return payload, encoded
-        best = None
-        smallest = (payload, encoded)
-        low, high = 1, wanted - 1
+        measure = self.bridge.measure
+        seed = self._cuts.get(slug)
+        best = smallest = None
+        if seed is None or seed >= wanted:
+            encoded, size = measure(suffix, payload)
+            if not size:
+                self._cuts.pop(slug, None)
+                return payload, encoded
+            smallest = (payload, encoded)
+            low, high = 1, wanted - 1
+        else:
+            trial = _cut(payload, seed)
+            encoded, size = measure(suffix, trial)
+            if size:
+                smallest = (trial, encoded)
+                low, high = 1, seed - 1
+            else:
+                best = (trial, encoded)
+                low, high = seed + 1, wanted
+                floor = len(encoded) + _least_added(payload, seed)
+                if self.bridge.exceeds(suffix, floor):
+                    # One event more cannot fit, so nothing above it can.
+                    high = seed
+                else:
+                    trial = _cut(payload, seed + 1)
+                    encoded, size = measure(suffix, trial)
+                    if size:
+                        high = seed
+                    else:
+                        best = (trial, encoded)
+                        low = seed + 2
         while low <= high:
             middle = (low + high) // 2
             trial = _cut(payload, middle)
-            encoded, size = self.bridge.measure(suffix, trial)
+            encoded, size = measure(suffix, trial)
             if size:
                 smallest = (trial, encoded)
                 high = middle - 1
@@ -400,10 +466,15 @@ class EpgGridPublisher(Publisher):
                 low = middle + 1
         if best is None:
             # Too big with one event on each channel. The smallest one measured
-            # goes to the bridge, which keeps it off the wire and says so.
+            # goes to the bridge, which keeps it off the wire and says so. The
+            # cut is forgotten with it: fitting again later is a new cut.
             self._cuts.pop(slug, None)
             return smallest
         count = best[0]["events_per_channel"]
+        if count >= wanted:
+            # The guide has thinned out and the whole grid fits again.
+            self._cuts.pop(slug, None)
+            return best
         if self._cuts.get(slug) != count:
             # When the cut starts or moves, not at every pass.
             LOG.warning(
@@ -421,6 +492,8 @@ class EpgGridPublisher(Publisher):
             slug: payload for slug, payload in self._payloads.items() if slug in completed
         }
         self._slugs = list(self._completed_slugs)
+        # A cut belongs to a bouquet; one that is gone takes its own with it.
+        self._cuts = {slug: count for slug, count in self._cuts.items() if slug in completed}
         total = int((time.time() - self._started_at) * 1000)
         LOG.info("epg grid: %d bouquet(s) in %d ms", len(self._slugs), total)
         if self.bridge is not None:

@@ -367,7 +367,7 @@ everything fits, otherwise one entry for each such topic, sorted by `topic`:
 | Field | Type | Meaning |
 |---|---|---|
 | `topic` | string | The topic, relative to `<base>/<node>/` - `channels/astra`, `epg_grid/astra` - or in full for a topic outside the node's tree, which is how a discovery payload appears: `homeassistant/device/<node>/config` |
-| `bytes` | int | The size of the packet the payload would have needed - the fixed header counted at its longest, the topic and the payload, in bytes - **measured when the topic was first withheld**, in this run of the plugin. It is not updated while the topic stays in the list, so it says how far over the bound the payload was then, not what it is now |
+| `bytes` | int | The size of the packet the payload would have needed - the fixed header counted at its longest, the topic and the payload, in bytes - **measured when the topic was first withheld**, in this run of the plugin. It is not updated while the topic stays in the list, so it says how far over the bound the payload was then, not what it is now. For an `epg_grid/<bouquet_slug>` it is the size of the grid with **one event on each channel** - the smallest there was to send, since a grid is cut before it is withheld - and not of the grid with `epg_grid_events` |
 | `limit` | int | The bound it was held to, `1000000` |
 
 A topic of the node's own tree that is in the list is **not on the broker**: when this node had
@@ -742,8 +742,8 @@ takes, and a channel showing a three-hour film has one event in it.
 
 **A grid that does not fit one packet is cut, not dropped.** Added after 0.4.0 (unreleased). When
 the packet of a bouquet's grid would be over the bound of 1,000,000 bytes (the conventions at the
-top of this file), the plugin lowers the events per channel for that bouquet - `epg_grid_events`,
-one fewer, and so on down to 1 - and publishes the grid with the most that fits. Each channel
+top of this file), the plugin publishes that bouquet's grid with **the largest number of events
+per channel that fits**, from `epg_grid_events` down to 1. Each channel
 keeps its earliest events; the EPG cache is not asked again. `events_per_channel` is the number
 the payload was built with: equal to `epg_grid_events` on a grid that was not cut, and lower on
 one that was, which is how a consumer tells "this channel has two programmes left today" from "this

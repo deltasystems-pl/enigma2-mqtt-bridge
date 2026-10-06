@@ -6,6 +6,7 @@ the events per channel are lowered until the packet fits, the payload says how
 many it was built with, and the fitted payload is the one a connect sends again.
 """
 
+import conftest
 import pytest
 from conftest import TVN, TVP1, Event
 
@@ -314,23 +315,147 @@ def test_a_grid_that_fits_costs_no_more_encoding_than_before(live_bridge, factor
     assert "generated" not in grids[1]
 
 
-def test_a_cut_is_found_in_a_few_encodings(make_bridge, factory, settings, receiver,
-                                           monkeypatch):
-    """With the setting at its highest, 20: by halves, not one count at a time."""
-    guide(receiver, count=20, width=1000)
-    bridge = start(make_bridge, factory, settings, receiver, events=20)
-    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", size_with(factory, 3))
+def watch_measuring(bridge, monkeypatch):
+    """Record the events per channel of every grid of the first bouquet that is measured."""
     measured = []
     measure = bridge.measure
-    monkeypatch.setattr(
-        bridge, "measure",
-        lambda suffix, payload: measured.append((suffix, payload["events_per_channel"]))
-        or measure(suffix, payload),
-    )
+
+    def watching(suffix, payload):
+        if suffix == "epg_grid/ulubione_tv":
+            measured.append(payload["events_per_channel"])
+        return measure(suffix, payload)
+
+    monkeypatch.setattr(bridge, "measure", watching)
+    return measured
+
+
+@pytest.mark.parametrize("fits", [3, 13])
+def test_a_first_cut_is_found_in_a_few_encodings(make_bridge, factory, settings, receiver,
+                                                 monkeypatch, fits):
+    """With the setting at its highest, 20: by halves, from neither end one count at a time."""
+    guide(receiver, count=20, width=1000)
+    bridge = start(make_bridge, factory, settings, receiver, events=20)
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", size_with(factory, fits))
+    measured = watch_measuring(bridge, monkeypatch)
 
     generate(bridge)
 
+    assert factory.client.last(ULUBIONE).json()["events_per_channel"] == fits
+    assert measured[0] == 20
+    assert len(measured) <= 6
+
+
+def test_a_grid_that_stays_cut_costs_what_a_grid_that_fits_costs(live_bridge, factory, receiver,
+                                                                 monkeypatch):
+    """The next pass starts from the last cut: one measurement, and the whole grid never built."""
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", LOW)
+    guide(receiver)
+    generate(live_bridge)
+    measured = watch_measuring(live_bridge, monkeypatch)
+    built = watch_encoding(monkeypatch)
+
+    # The guide moves on a little, as it does in a quarter of an hour.
+    receiver.epg.events[TVP1][0].title = "a00 " + "u" * WIDE
+    generate(live_bridge)
+
     assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 3
-    tried = [count for suffix, count in measured if suffix == "epg_grid/ulubione_tv"]
-    assert tried[0] == 20
-    assert len(tried) <= 6
+    assert measured == [3]
+    grids = [payload for _length, payload in built
+             if isinstance(payload, dict) and payload.get("bouquet") == "Ulubione TV"]
+    # The measurement, and the comparison's copy without the stamp.
+    assert [("generated" in grid, grid["events_per_channel"]) for grid in grids] == [
+        (True, 3), (False, 3),
+    ]
+    assert max(length for length, _payload in built) < LOW
+
+
+def test_the_search_goes_up_from_the_last_cut_when_there_is_room(live_bridge, factory, receiver,
+                                                                 monkeypatch):
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", 45000)
+    guide(receiver)
+    generate(live_bridge)
+    assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 2
+    measured = watch_measuring(live_bridge, monkeypatch)
+
+    # Room for one event more on each channel, and not for two.
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", LOW)
+    generate(live_bridge)
+    assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 3
+    assert measured == [2, 3, 4]
+
+    # Room for everything: the last cut, one more, and that is the whole grid.
+    del measured[:]
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", 1000000)
+    generate(live_bridge)
+    payload = factory.client.last(ULUBIONE).json()
+    assert payload["events_per_channel"] == 4
+    assert [len(channel["events"]) for channel in payload["channels"]] == [4, 4]
+    assert measured == [3, 4]
+    assert live_bridge.publisher("epg_grid")._cuts == {}
+
+
+def test_the_search_goes_down_when_the_last_cut_no_longer_fits(live_bridge, factory, receiver,
+                                                               monkeypatch):
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", LOW)
+    guide(receiver)
+    generate(live_bridge)
+    measured = watch_measuring(live_bridge, monkeypatch)
+
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", 45000)
+    generate(live_bridge)
+
+    assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 2
+    assert measured[0] == 3 and 4 not in measured
+    assert live_bridge.publisher("epg_grid")._cuts == {"ulubione_tv": 2}
+
+
+def test_a_cut_grid_is_published_from_the_json_that_was_measured(live_bridge, factory, receiver,
+                                                                 monkeypatch):
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", LOW)
+    guide(receiver)
+    built = watch_encoding(monkeypatch)
+    factory.client.clear()
+
+    generate(live_bridge)
+
+    sent = factory.client.last(ULUBIONE)
+    assert sent.json()["events_per_channel"] == 3
+    whole = [payload for _length, payload in built
+             if isinstance(payload, dict) and payload.get("bouquet") == "Ulubione TV"
+             and "generated" in payload and payload["events_per_channel"] == 3]
+    assert len(whole) == 1
+    assert sent.text == bridge_module._encoded(whole[0])
+
+
+def test_a_grid_cut_again_after_it_was_withheld_says_so_again(live_bridge, receiver,
+                                                              monkeypatch, plugin_log):
+    """Withheld is not cut; coming back from it to the same count is a new cut."""
+    guide(receiver)
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", 25000)
+    generate(live_bridge)
+    line = "is cut from 4 to 1 event(s)"
+    assert plugin_log().count(line) == 1
+
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", 15000)
+    guide(receiver, width=WIDE + 1)
+    generate(live_bridge)
+    assert live_bridge.publisher("epg_grid")._cuts == {}
+
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", 25000)
+    generate(live_bridge)
+    assert plugin_log().count(line) == 2
+
+
+def test_a_bouquet_that_is_gone_takes_its_cut_with_it(live_bridge, receiver, monkeypatch):
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", LOW)
+    guide(receiver)
+    publisher = generate(live_bridge)
+    assert publisher._cuts == {"ulubione_tv": 3}
+
+    receiver.service_center.contents[conftest.BOUQUET_ROOT][0] = (
+        conftest.FIRST_BOUQUET, "Inne"
+    )
+    live_bridge.publisher("channels").refresh()
+    generate(live_bridge)
+
+    assert publisher._cuts == {"inne": 3}

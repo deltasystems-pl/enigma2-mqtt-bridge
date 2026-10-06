@@ -1148,6 +1148,16 @@ class Bridge:
         encoded = _encoded(payload)
         return encoded, _oversize(self.topic(suffix), encoded)
 
+    def exceeds(self, suffix, least):
+        """Whether a payload of at least `least` bytes is certainly over the bound here.
+
+        For a publisher that can put a floor under a payload's size without
+        encoding it, and so need not encode what cannot fit. It only ever says
+        "too big": that something fits is `measure`'s to say.
+        """
+        topic = self.topic(suffix)
+        return PACKET_OVERHEAD_BYTES + len(topic.encode("utf-8")) + least > MAX_PACKET_BYTES
+
     def publish_json(self, topic, payload, retain=True, volatile=(), encoded=None):
         if encoded is None:
             encoded = _encoded(payload)
