@@ -634,8 +634,9 @@ class Bridge:
                 self._stop_publishers()
                 return
             if self._self_update.silent:
-                # S-a: a downgrade's retraction is done and nothing more goes out. The clean
-                # disconnect keeps the will unsent; the release that starts says `online`.
+                # ADR-0015, decision 5: a downgrade's retraction is done and nothing more
+                # goes out. The clean disconnect keeps the will unsent; the release that
+                # starts says `online`.
                 LOG.info("not publishing offline: an update has retracted this node's topics")
             elif self.client.connected:
                 info = self.client.publish(
@@ -961,9 +962,10 @@ class Bridge:
         self.publish_announcement(info)
         self.publish_discovery(info)
         self.client.subscribe(self.command_root + "/#", qos=COMMAND_QOS)
-        # The signed release index, relayed by the companion integration for a
-        # receiver without internet. Retained, so a fresh session is handed it at
-        # once; judged like any fetched index, and never obeyed as a command.
+        # The signed release index, relayed by the companion integration to every
+        # receiver on the broker, with internet or without. Retained, so a fresh
+        # session is handed it at once; judged like any fetched index, and never
+        # obeyed as a command.
         self.client.subscribe(RELEASE_INDEX_TOPIC, qos=COMMAND_QOS)
         # The companion integration's version, contract and plugin floor, retained: what
         # the rule of `update.available` and of `cmd/update` judges against once it is known.
