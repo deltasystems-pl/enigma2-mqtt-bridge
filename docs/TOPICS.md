@@ -25,7 +25,7 @@ Conventions that hold everywhere:
 | Timestamps | `begin`, `end`, `generated`, `ts` are **Unix epoch seconds, UTC, integer**. Never a formatted string, never local time. |
 | Absent values | `null` for a field that has no value right now (no next event, no recording). A key is not silently dropped. |
 | Retraction | An empty payload published retained. That is how `last_error` is cleared and how `cmd/reset` and discovery retraction work. |
-| Packet size | No state topic, announcement or discovery payload is published in a packet over **1,000,000 bytes** - the fixed header, the topic and the payload together. (The retractions and the few fixed messages the plugin sends outside that path are small by construction.) That is under Mosquitto 2.1's default `max_packet_size` of 2,000,000 and under the 1 MiB default of other common brokers; a broker closes the connection on a bigger packet, and MQTT 3.1.1 gives a client no way to learn its limit. A payload that would need more is **not published**, and its topic is named in `info.not_published` (§1). A topic under `<base>/<node>/` is also retracted when an earlier, smaller payload was retained there; a topic outside the node's tree - a discovery payload - is left as it was. An event that is not retained and would be too big is dropped, with a line in the log. `channels` gives something up before it comes to that: it goes out without its lists, which are on `channels/<bouquet_slug>` (§1). In practice what is not published is the list of a single bouquet that is too big on its own, an `epg_grid/<bouquet_slug>` or, in discovery mode, the device's discovery payload, on a receiver with a very large channel list. Added after 0.4.0 (unreleased). |
+| Packet size | No state topic, announcement or discovery payload is published in a packet over **1,000,000 bytes** - the fixed header, the topic and the payload together. (The retractions and the few fixed messages the plugin sends outside that path are small by construction.) That is under Mosquitto 2.1's default `max_packet_size` of 2,000,000 and under the 1 MiB default of other common brokers; a broker closes the connection on a bigger packet, and MQTT 3.1.1 gives a client no way to learn its limit. A payload that would need more is **not published**, and its topic is named in `info.not_published` (§1). A topic under `<base>/<node>/` is also retracted when an earlier, smaller payload was retained there; a topic outside the node's tree - a discovery payload - is left as it was. An event that is not retained and would be too big is dropped, with a line in the log. Two payloads give something up before it comes to that: `channels` goes out without its lists, which are on `channels/<bouquet_slug>`, and an `epg_grid/<bouquet_slug>` is cut to fewer events per channel (§1). In practice what is not published is the list or the grid of a single bouquet that is too big on its own or, in discovery mode, the device's discovery payload, on a receiver with a very large channel list. Added after 0.4.0 (unreleased). |
 
 Everything the plugin publishes it also publishes again on every `on_connect` - the full state
 snapshot, the announcement and, in discovery mode, the discovery payloads. A broker that lost its
@@ -164,7 +164,7 @@ not by the checker; their types are the tables below.
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
 | 0.3.0 -> 0.4.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3); the read-only setting `update_allowed`, the capability `self_update`, the command `update`, `update.transaction` and the subscription to `enigma2mqtt/integration/<node>` (§3); the event topic `relay_request` and the command `relay`, and `cmd/update`'s refusal `no_relay`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
-| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topic `channels/<bouquet_slug>` and the capability `channel_topics`; the `channels` members `embedded`, `bouquets[].slug` and `bouquets[].count`. **Exceptions**: `oversize-payload-withheld`, `channels-lists-per-bouquet` |
+| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topic `channels/<bouquet_slug>` and the capability `channel_topics`; the `channels` members `embedded`, `bouquets[].slug` and `bouquets[].count`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld. **Exceptions**: `oversize-payload-withheld`, `channels-lists-per-bouquet` |
 
 ---
 
@@ -386,11 +386,14 @@ pass, and neither `bytes` nor `info` follows. A topic that fitted, was published
 again is a new entry with a new `bytes`. The receiver's log has one line each time a topic joins
 the list.
 
-`channels` itself is rarely in the list: it drops its lists before it is withheld (below), and
-what is listed then is `channels/<bouquet_slug>` for a bouquet whose own list is too big. The
-remedy is on the receiver: `bouquets_for_select` limited to the bouquets in use takes that bouquet
-out and shrinks the grids and the discovery payload, and a lower `epg_grid_events` shrinks the
-grids
+What gets into the list is what could not be made smaller. `channels` drops its lists and a grid
+is cut to fewer events per channel before either is withheld (below), so an entry of the node's
+tree is nearly always `channels/<bouquet_slug>` or `epg_grid/<bouquet_slug>` for one bouquet that
+is too big by itself - a list of many thousands of services, or a grid that does not fit with one
+event on each channel. The remedy is on the receiver: `bouquets_for_select` limited to the
+bouquets in use takes that bouquet out and shrinks the discovery payload, or the bouquet is split
+into smaller ones. A lower `epg_grid_events` changes nothing for a grid that is in the list; `0`
+switches the grids off
 ([TROUBLESHOOTING.md](TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back)).
 
 ### `<base>/<node>/power`
@@ -708,6 +711,7 @@ original**, and the payload is what a user should be shown.
 {
   "bouquet": "Ulubione TV",
   "generated": 1789459200,
+  "events_per_channel": 4,
   "channels": [
     {"sref": "1:0:19:283D:3FB:1:C00000:0:0:", "name": "TVP 1 HD",
      "events": [{"title": "Wiadomości", "begin": 1789459200, "end": 1789460700, "event_id": 27431}]}
@@ -719,9 +723,10 @@ original**, and the payload is what a user should be shown.
 |---|---|---|
 | `bouquet` | string | The bouquet's name as enigma2 spells it - not the slug |
 | `generated` | int | Epoch seconds, when this bouquet's grid last **changed** - see below; it is not the time of the last build |
+| `events_per_channel` | int | The most events a channel carries in this payload: `epg_grid_events`, or fewer when the grid was cut to fit one packet - see below. Added after 0.4.0 (unreleased) |
 | `channels[].sref` | string | |
 | `channels[].name` | string | |
-| `channels[].events[]` | list | Up to `epg_grid_events` entries per channel, chronological |
+| `channels[].events[]` | list | Up to `events_per_channel` entries per channel, chronological |
 | `events[].title` | string | |
 | `events[].begin`, `events[].end` | int | Epoch seconds |
 | `events[].event_id` | int | |
@@ -733,6 +738,18 @@ republishes **every** configured bouquet, not just one. `epg_grid_events` is a s
 A channel can carry fewer than `epg_grid_events` events: the plugin asks the EPG cache for a
 bounded window of time rather than for a number of events, because that is the question the cache
 takes, and a channel showing a three-hour film has one event in it.
+
+**A grid that does not fit one packet is cut, not dropped.** Added after 0.4.0 (unreleased). When
+the packet of a bouquet's grid would be over the bound of 1,000,000 bytes (the conventions at the
+top of this file), the plugin lowers the events per channel for that bouquet - `epg_grid_events`,
+one fewer, and so on down to 1 - and publishes the grid with the most that fits. Each channel
+keeps its earliest events; the EPG cache is not asked again. `events_per_channel` is the number
+the payload was built with: equal to `epg_grid_events` on a grid that was not cut, and lower on
+one that was, which is how a consumer tells "this channel has two programmes left today" from "this
+grid was cut to two". The other bouquets keep their own count. The receiver's log has one line
+when a bouquet's grid is first cut or the cut moves - `epg grid: Astra is cut from 4 to 2 event(s)
+per channel to fit one packet`. Only a grid that does not fit with one event on each channel is
+not published, and is named in `info.not_published`.
 
 **Four channels per main-loop turn.** A bouquet of two hundred channels is two hundred EPG
 lookups, and doing one whole bouquet in a single callback can hold the thread that draws the

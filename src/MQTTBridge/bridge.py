@@ -1136,9 +1136,9 @@ class Bridge:
 
         `size` is `_oversize`'s answer - the bytes of the packet when that is
         over the bound, else 0 - for a publisher that has something smaller to
-        send instead: the channel list without its lists. `encoded` is the JSON
-        that was measured, handed back so that the publish that follows does
-        not build it a second time.
+        send instead: the channel list without its lists, a grid with fewer
+        events. `encoded` is the JSON that was measured, handed back so that
+        the publish that follows does not build it a second time.
         """
         encoded = _encoded(payload)
         return encoded, _oversize(self.topic(suffix), encoded)

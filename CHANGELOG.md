@@ -19,6 +19,8 @@ version that has no section here.
   else. The capability `channel_topics` says the topics are published. `channels` gains
   `embedded` and, for each bouquet, `slug` and `count`
   ([TOPICS.md](docs/TOPICS.md)).
+- `epg_grid/<bouquet_slug>` gains `events_per_channel`: how many events a channel may carry in
+  that payload. It is `epg_grid_events` unless the grid was cut to fit one packet (Changed, below).
 
 ### Changed
 
@@ -35,6 +37,12 @@ version that has no section here.
   finds `null` there - or always, when `channel_topics` is a capability. The companion
   integration up to 0.4.0 skips a bouquet without a list, so it shows the bouquet names and no
   channels until `bouquets_for_select` is narrowed.
+- An EPG grid too big for one packet is cut instead of withheld. When the packet of an
+  `epg_grid/<bouquet_slug>` would be over the bound, the plugin lowers the events per channel for
+  that bouquet - `epg_grid_events`, one fewer, down to 1 - keeps each channel's earliest events
+  without asking the EPG cache again, and publishes the grid with the most that fits. The log has
+  one line when a bouquet's grid is first cut or the cut moves. Only a grid that does not fit with
+  one event on each channel is still withheld. A connect republishes the grid as it was fitted.
 
 ### Fixed
 

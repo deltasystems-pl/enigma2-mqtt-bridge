@@ -119,6 +119,7 @@ def build(bouquet, count):
     payload = {
         "bouquet": bouquet.get("name"),
         "generated": int(time.time()),
+        "events_per_channel": count,
         "channels": [
             {"sref": channel["sref"], "name": channel.get("name"), "events": []}
             for channel in channels
@@ -165,6 +166,9 @@ def _build_state(bouquet, count):
     payload = {
         "bouquet": bouquet.get("name"),
         "generated": int(time.time()),
+        # How many events a channel may carry here. The setting, until the grid
+        # has to be cut to fit one packet (`EpgGridPublisher._fitted`).
+        "events_per_channel": count,
         "channels": [
             {"sref": channel["sref"], "name": channel.get("name"), "events": []}
             for channel in channels
@@ -204,6 +208,16 @@ def _finish_state(state):
     return state["payload"]
 
 
+def _cut(payload, count):
+    """A finished grid with at most `count` events on each channel - the earliest."""
+    cut = dict(payload)
+    cut["events_per_channel"] = count
+    cut["channels"] = [
+        dict(entry, events=entry["events"][:count]) for entry in payload["channels"]
+    ]
+    return cut
+
+
 class EpgGridPublisher(Publisher):
     """`epg_grid/<bouquet_slug>` - one topic for each configured bouquet."""
 
@@ -218,6 +232,8 @@ class EpgGridPublisher(Publisher):
         Publisher.__init__(self, bridge)
         self._slugs = []
         self._payloads = {}
+        # slug -> the events per channel a grid was last cut to (`_fitted`).
+        self._cuts = {}
         self._queue = []
         self._current = None
         self._generation = 0
@@ -319,13 +335,17 @@ class EpgGridPublisher(Publisher):
         payload = _finish_state(state)
         self._current = None
         bouquet = state["bouquet"]
-        elapsed = int((time.time() - state["began"]) * 1000)
         slug = slugify(bouquet.get("name"))
         if slug:
+            payload, encoded = self._fitted(slug, payload)
+            # The fitted payload is the one kept, so a connect republishes it
+            # as it is and nothing is fitted again there.
             self._payloads[slug] = payload
             if slug not in self._completed_slugs:
                 self._completed_slugs.append(slug)
-            self.publish("epg_grid/" + slug, payload)
+            self.publish("epg_grid/" + slug, payload, encoded)
+        # After the fitting, so that what it cost is in the line below.
+        elapsed = int((time.time() - state["began"]) * 1000)
         events = sum(len(entry["events"]) for entry in payload["channels"])
         line = LOG.warning if elapsed >= SLOW_MILLISECONDS else LOG.info
         line(
@@ -336,6 +356,62 @@ class EpgGridPublisher(Publisher):
             self._step.start(STEP_MILLISECONDS, True)
             return
         self._finished()
+
+    def _fitted(self, slug, payload):
+        """`(payload, encoded)`: this bouquet's grid with as many events as one packet takes.
+
+        A grid whose packet would be over the bridge's bound is cut to fewer
+        events per channel - the earliest of each channel's list, which is
+        already built and in order, so the EPG cache is not asked again - and
+        the largest count that fits is what is published, with
+        `events_per_channel` saying which. Only a grid that does not fit with
+        one event on each channel is handed over too big, for the bridge to
+        withhold as it withholds anything else.
+
+        Measuring is encoding, and a grid near the bound is about a megabyte of
+        JSON. A grid that fits is encoded once, and that JSON is the one
+        published. One that does not is encoded again for each count tried,
+        and the count is searched by halves - the size only falls as events are
+        cut - so that is at most five more with the setting at its highest, 20,
+        and two with the default of 4. This runs in the pass's own timer step,
+        every quarter of an hour for one bouquet at a time, and never on a
+        connect, which republishes the payload fitted here.
+        """
+        if self.bridge is None:
+            return payload, None
+        suffix = "epg_grid/" + slug
+        wanted = payload["events_per_channel"]
+        encoded, size = self.bridge.measure(suffix, payload)
+        if not size:
+            self._cuts.pop(slug, None)
+            return payload, encoded
+        best = None
+        smallest = (payload, encoded)
+        low, high = 1, wanted - 1
+        while low <= high:
+            middle = (low + high) // 2
+            trial = _cut(payload, middle)
+            encoded, size = self.bridge.measure(suffix, trial)
+            if size:
+                smallest = (trial, encoded)
+                high = middle - 1
+            else:
+                best = (trial, encoded)
+                low = middle + 1
+        if best is None:
+            # Too big with one event on each channel. The smallest one measured
+            # goes to the bridge, which keeps it off the wire and says so.
+            self._cuts.pop(slug, None)
+            return smallest
+        count = best[0]["events_per_channel"]
+        if self._cuts.get(slug) != count:
+            # When the cut starts or moves, not at every pass.
+            LOG.warning(
+                "epg grid: %s is cut from %d to %d event(s) per channel to fit one packet",
+                payload.get("bouquet"), wanted, count,
+            )
+        self._cuts[slug] = count
+        return best
 
     def _finished(self):
         if self._current is not None or self._queue:

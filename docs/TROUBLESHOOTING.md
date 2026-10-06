@@ -179,8 +179,12 @@ What a household sees depends on which payload was too big:
   0.4.0 - has the bouquet names and no channels, so its channel selects are empty until the list
   is narrowed. Only a single bouquet too big for one packet by itself is missing altogether, and
   is named in `info.not_published`.
-- **A grid.** An `epg_grid/<bouquet_slug>` that is too big is not on the broker - an older,
-  smaller copy is retracted - so there is no programme guide for that bouquet.
+- **A grid.** An `epg_grid/<bouquet_slug>` that is too big is cut to fewer events per channel -
+  the most that fits one packet - and published; its `events_per_channel` says how many, and the
+  log has `epg grid: Astra is cut from 4 to 2 event(s) per channel to fit one packet`. The guide
+  for that bouquet is shorter, and the other bouquets keep theirs. Only a grid that does not fit
+  with one event on each channel is not on the broker - an older, smaller copy is retracted - and
+  is named in `info.not_published`.
 - **The device's discovery payload**, in `discovery` mode. Nothing is taken away: the device and
   its entities stay, and the channel select keeps the options it had before the list outgrew the
   limit - or, on a first install, the device does not appear in Home Assistant until the payload
@@ -191,10 +195,13 @@ To get back what is missing:
 - set `bouquets_for_select` to the bouquets the household uses - that shrinks the channel list,
   the grids and the discovery payload at once, and it is still what a consumer that reads only
   `channels` needs;
-- lower `epg_grid_events`, the events per channel in the grid; `0` switches the grid off.
+- split a bouquet that is in `info.not_published` by itself into smaller ones, or leave it out;
+- `epg_grid_events` no longer needs lowering for the size - the plugin cuts a grid that is too
+  big by itself - and `0` still switches the grid off.
 
-Both are on the setup screen and on the plugin's OpenWebif page ([SETUP.md](SETUP.md)). With an
-older plugin, the same two settings are the way out, or a higher `max_packet_size` on the broker.
+Both settings are on the setup screen and on the plugin's OpenWebif page ([SETUP.md](SETUP.md)).
+With a plugin up to 0.4.0, `bouquets_for_select` and a lower `epg_grid_events` are the way out, or
+a higher `max_packet_size` on the broker.
 
 ## Entities Home Assistant will never update again
 
