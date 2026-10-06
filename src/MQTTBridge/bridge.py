@@ -253,6 +253,7 @@ class Bridge:
         self._build_path = build_path if build_path is not None else buildid.ON_DISK_PATH
         self._build_reported = None
         self._build_ticker = Ticker(self.check_build_on_disk, "build")
+        self._capabilities_logged = None
 
     # ----------------------------------------------------------------- settings --
 
@@ -901,10 +902,17 @@ class Bridge:
         that appears a few seconds later - a hook that could only bind once
         enigma2 had built the screen behind it - would otherwise stay invisible
         until the next reconnect. The log gets the new count for the same
-        reason: the start line counted what was bound by then.
+        reason: the start line counted what was bound by then. It gets it
+        whether or not a session is up - the connect that follows carries the
+        list - and only when the count is not the one last logged here since
+        the start. A start is told by its client, which each start makes anew,
+        so the first change after any start is logged.
         """
-        LOG.info("capabilities=%d now; the start line counted those bound by then",
-                 len(self.capabilities()))
+        count = len(self.capabilities())
+        logged = self._capabilities_logged
+        if logged is None or logged[0] is not self.client or logged[1] != count:
+            self._capabilities_logged = (self.client, count)
+            LOG.info("capabilities=%d now; the start line counted those bound by then", count)
         if not self.connected:
             return False
         info = self.build_info()
