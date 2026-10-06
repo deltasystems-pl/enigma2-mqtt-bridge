@@ -11,32 +11,25 @@ version that has no section here.
 
 ### Added
 
-- Each bouquet's channel list is on a retained topic of its own, `channels/<bouquet_slug>` - the
-  slug the EPG grid uses - with the bouquet's name, its reference, when the list last changed and
-  the services. A bouquet nobody edited is not republished when another one changes, a bouquet
-  that is renamed, removed or left out of `bouquets_for_select` has its topic retracted, also
-  across a restart, and `cmd/reset` and `cmd/uninstall` take the topics back with everything
-  else. The capability `channel_topics` says the topics are published. `channels` gains
-  `embedded` and, for each bouquet, `slug` and `count`
+- Each bouquet's channel list is on a retained topic of its own, `channels/<bouquet_slug>`, with
+  the bouquet's name, its reference, when the list last changed and the services; and a new small
+  topic, `bouquets`, is their index: every bouquet in the receiver's order with the slug of its
+  topic and how many services it holds. `channels` is unchanged - every bouquet with its list, or,
+  over the packet bound, withheld (Fixed, below) - and on a receiver where it is withheld the new
+  topics are where the lists are. A bouquet nobody edited is not republished when another one
+  changes and keeps its `generated`, also across a reconnect. Two bouquets whose names slug the
+  same each get a topic: the first keeps the slug, later ones get `_2`, `_3`, so the slug is taken
+  from `bouquets`. A bouquet that is renamed, removed or left out of `bouquets_for_select` has its
+  topic retracted, also across a restart, and `cmd/reset` and `cmd/uninstall` take the topics back
+  with everything else. The capability `channel_topics` says both are published. A walk encodes
+  each bouquet's list once and a connect encodes none of them again; while `channels` is too big,
+  a connect does not encode it either to find that out
   ([TOPICS.md](docs/TOPICS.md)).
 - `epg_grid/<bouquet_slug>` gains `events_per_channel`: how many events a channel may carry in
   that payload. It is `epg_grid_events` unless the grid was cut to fit one packet (Changed, below).
 
 ### Changed
 
-- `channels` on a receiver with a very large channel list. The payload grows with the sum of all
-  bouquets, and over the packet bound of 1,000,000 bytes it was not published at all (Fixed,
-  below). It is now published without the lists instead: `embedded` is `false`, every bouquet's
-  `channels` is `null`, and its name, reference, `slug` and `count` are there as always; the lists
-  are on `channels/<bouquet_slug>`, whose size follows one bouquet. `cmd/zap` by name, the
-  `bouquet` field of `service` and the EPG grid go on working from the complete list. Where the
-  packet fits - nearly everywhere - `embedded` is `true` and the lists are in `channels` as before.
-  **Behaviour change, named in-major exception `channels-lists-per-bouquet`**
-  ([TOPICS.md, Contract version](docs/TOPICS.md#contract-version)): `bouquets[].channels` was
-  always a list; on such a receiver it is now `null`. A consumer reads `channels/<slug>` when it
-  finds `null` there - or always, when `channel_topics` is a capability. The companion
-  integration up to 0.4.0 skips a bouquet without a list, so it shows the bouquet names and no
-  channels until `bouquets_for_select` is narrowed.
 - An EPG grid too big for one packet is cut instead of withheld. When the packet of an
   `epg_grid/<bouquet_slug>` would be over the bound, the plugin publishes that bouquet's grid
   with the largest number of events per channel that fits, from `epg_grid_events` down to 1,
@@ -49,8 +42,10 @@ version that has no section here.
   discovery payload carries every channel name as the options of the channel select; when it
   would be over the bound with them, it is now published without the select instead of not at
   all, so a first install gets the device and every other entity. A select that had been
-  announced is removed by name, and it is announced again as soon as the names fit. The log says
-  once that it was left out. A payload too big even without the select is withheld as before
+  announced is removed by name, and it is announced again the next time discovery is published
+  with names that fit - a connect, a settings save, `cmd/discovery`. Home Assistant deletes the
+  entity and later creates a new one, so a customisation of it is lost. The log says once that it
+  was left out. A payload too big even without the select is withheld as before
   ([TOPICS.md](docs/TOPICS.md#4-home-assistant-discovery)).
 
 ### Fixed
@@ -72,9 +67,9 @@ version that has no section here.
   else is published as before. To get the topic back, limit `bouquets_for_select` to the
   bouquets in use, or lower `epg_grid_events` - 0 switches the grid off
   ([TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back),
-  [TOPICS.md](docs/TOPICS.md)). Each of the three payloads now gives something up before it is
-  withheld - the lists, events, the channel select (Added and Changed, above) - so what is left
-  to withhold is a single bouquet too big by itself.
+  [TOPICS.md](docs/TOPICS.md)). A grid and the discovery payload now give something up before they
+  are withheld - events, the channel select (Changed, above) - and the lists of a withheld
+  `channels` are on `channels/<bouquet_slug>` (Added, above).
   **Behaviour change, named in-major exception `oversize-payload-withheld`**
   ([TOPICS.md, Contract version](docs/TOPICS.md#contract-version)): `channels` and
   `epg_grid/<bouquet_slug>` used to be published whatever their size; over the bound they are

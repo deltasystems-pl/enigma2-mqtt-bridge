@@ -1076,6 +1076,19 @@ class Bridge:
         self._report_not_published()
         return None
 
+    def withhold_state(self, suffix, size):
+        """Withhold a state topic its publisher already knows is over the bound.
+
+        For a payload measured when it was built and not changed since: the
+        snapshot leaves it out, and this does what `publish_raw` would have
+        done had it been handed the payload and measured it again - under the
+        same conditions, and with the size that measurement would have found.
+        It spares a connect the encoding of megabytes that cannot be sent.
+        """
+        if self.client is None or self._uninstaller.closed or self._self_update.silent:
+            return None
+        return self._withhold(self.topic(suffix), size)
+
     def _take_back(self, topic):
         """Retract the retained copy of a withheld topic - once the broker can be told.
 
@@ -1148,6 +1161,10 @@ class Bridge:
         encoded = _encoded(payload)
         return encoded, _oversize(self.topic(suffix), encoded)
 
+    def encode(self, value):
+        """The canonical JSON for a value, for a publisher that builds a payload in parts."""
+        return _encoded(value)
+
     def exceeds(self, suffix, least):
         """Whether a payload of at least `least` bytes is certainly over the bound here.
 
@@ -1158,12 +1175,13 @@ class Bridge:
         topic = self.topic(suffix)
         return PACKET_OVERHEAD_BYTES + len(topic.encode("utf-8")) + least > MAX_PACKET_BYTES
 
-    def publish_json(self, topic, payload, retain=True, volatile=(), encoded=None):
+    def publish_json(self, topic, payload, retain=True, volatile=(), encoded=None,
+                     change_key=None):
         if encoded is None:
             encoded = _encoded(payload)
-        info = self.publish_raw(
-            topic, encoded, retain=retain, change_key=_change_key(encoded, payload, volatile)
-        )
+        if change_key is None:
+            change_key = _change_key(encoded, payload, volatile)
+        info = self.publish_raw(topic, encoded, retain=retain, change_key=change_key)
         if retain and self.client is not None and topic not in self._not_published:
             self._remember(topic, encoded)
         return info
@@ -1176,7 +1194,8 @@ class Bridge:
         """
         self._published = {}
 
-    def publish_state(self, suffix, payload, raw=False, retain=True, volatile=(), encoded=None):
+    def publish_state(self, suffix, payload, raw=False, retain=True, volatile=(), encoded=None,
+                      change_key=None):
         """A feature area's state topic - published only when it has changed.
 
         `sort_keys` in `_encoded` is what makes the comparison meaningful: two
@@ -1189,14 +1208,18 @@ class Bridge:
         A topic that is not retained (`key`) is never compared - every press is
         an event, including the same press twice.
         `encoded` is the payload's JSON when the caller measured it first
-        (`measure`); it is then not built again here.
+        (`measure`); it is then not built again here. `change_key` is what the
+        comparison is made on when the publisher has one of its own
+        (`Publisher.prepared`), which saves encoding the payload a second time
+        without its stamps.
         """
         topic = self.topic(suffix)
         if raw:
             encoded = payload
         elif encoded is None:
             encoded = _encoded(payload)
-        change_key = _change_key(encoded, payload, volatile)
+        if change_key is None:
+            change_key = _change_key(encoded, payload, volatile)
         if retain and self._published.get(topic) == change_key:
             return None
         info = self.publish_raw(topic, encoded, retain=retain, change_key=change_key)
@@ -1279,16 +1302,24 @@ class Bridge:
             try:
                 raw = getattr(publisher, "raw", ())
                 volatile = getattr(publisher, "volatile", ())
-                volatile_for = getattr(publisher, "volatile_for", None)
+                prepared = getattr(publisher, "prepared", None)
                 for suffix, payload in publisher.snapshot().items():
                     if suffix in raw:
                         self.publish_raw(self.topic(suffix), payload)
                     else:
-                        if volatile_for is not None:
-                            volatile = volatile_for(suffix)
-                        self.publish_json(self.topic(suffix), payload, volatile=volatile)
+                        # The JSON and the key a publisher holds already are
+                        # the ones a state publish would use, so what this
+                        # records as sent is what the next one is judged by.
+                        encoded, key = prepared(suffix, payload) if prepared else (None, None)
+                        self.publish_json(self.topic(suffix), payload, volatile=volatile,
+                                          encoded=encoded, change_key=key)
                     published += 1
                     topic_count += 1
+                # What the publisher measured over the bound when it built it,
+                # and left out above: withheld as if it had been measured here.
+                too_big = getattr(publisher, "too_big", None)
+                for suffix, size in (too_big() if too_big else {}).items():
+                    self.withhold_state(suffix, size)
             except Exception:
                 LOG.exception("the %s publisher could not produce a snapshot", publisher.name)
             finally:
@@ -1480,6 +1511,10 @@ class Bridge:
                 "retracting the channel list of a bouquet that is no longer configured: %s", slug
             )
             self.retract(self.topic("channels/" + slug))
+        index = self.topic("bouquets")
+        if channels is None and self.state.knows(index):
+            # The index of topics that have all just gone.
+            self.retract(index)
         self.state.set_channel_slugs(published)
         self.state.save()
         return len(stale)

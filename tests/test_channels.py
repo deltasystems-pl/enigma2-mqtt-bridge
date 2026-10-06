@@ -11,13 +11,10 @@ CHANNELS = "enigma2/" + NODE + "/channels"
 
 def test_the_channel_list_has_the_documented_shape(live_bridge, factory):
     payload = factory.client.last(CHANNELS).json()
-    assert set(payload) == {"generated", "embedded", "bouquets"}
+    assert set(payload) == {"generated", "bouquets"}
     assert isinstance(payload["generated"], int)
-    assert payload["embedded"] is True
     bouquet = payload["bouquets"][0]
-    assert set(bouquet) == {"name", "sref", "slug", "count", "channels"}
-    assert isinstance(bouquet["slug"], str)
-    assert isinstance(bouquet["count"], int)
+    assert set(bouquet) == {"name", "sref", "channels"}
     assert set(bouquet["channels"][0]) == {"sref", "name"}
 
 

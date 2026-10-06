@@ -60,12 +60,14 @@ POLL_MILLISECONDS = 60000
 # largest bouquet where `channels` follows the sum of all of them.
 LIST_PREFIX = "channels/"
 
-# Claimed with `channels`: the per-bouquet topics are published.
+# The index of those topics: every bouquet with the slug its topic has and how
+# many services it holds. Small whatever the receiver, so it is there when
+# `channels` is too big to send.
+INDEX = "bouquets"
+
+# Claimed with `channels`: the index and the per-bouquet topics are published.
 LISTS_CAPABILITY = "channel_topics"
 
-# The stamp on a bouquet's own topic is left out of the change comparison, as
-# the grid's is - see `ChannelsPublisher.volatile_for`.
-LIST_VOLATILE = ("generated",)
 
 # eServiceReference flags, by value, because the names are only importable on a
 # receiver and the numbers are part of the reference's string form anyway: they
@@ -112,6 +114,35 @@ def slugify(name):
     decomposed = unicodedata.normalize("NFKD", text)
     stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
     return _NOT_ALLOWED.sub("_", stripped.lower()).strip("_")
+
+
+def topic_slugs(names):
+    """The slug of each bouquet's own channel topic, in bouquet order.
+
+    The slug of the name, and "" where the name leaves none. Where two names
+    slug the same, the first bouquet keeps the slug and each later one gets
+    `_2`, `_3` and so on behind it - the first number from 2 that no bouquet's
+    own slug and no number already given out has taken, so a bouquet that is
+    really called "Sport HD 2" keeps `sport_hd_2` wherever it stands in the
+    list. Sharing one topic would leave the list of all but one of them
+    nowhere, once `channels` has had to drop its lists.
+
+    The EPG grid does not use this: it slugs each name by itself.
+    """
+    natural = [slugify(name) for name in names]
+    taken = {slug for slug in natural if slug}
+    seen = set()
+    slugs = []
+    for slug in natural:
+        if slug and slug in seen:
+            number = 2
+            while slug + "_" + str(number) in taken:
+                number += 1
+            slug = slug + "_" + str(number)
+            taken.add(slug)
+        seen.add(slug)
+        slugs.append(slug)
+    return slugs
 
 
 # The fewest colon-separated fields anything resembling a service reference has.
@@ -286,10 +317,21 @@ class ChannelsPublisher(Publisher):
         self._generated = 0
         self._mtimes = ()
         self._index = {}
-        # Whether `channels` carries each bouquet's list, or only says where it
-        # is. Decided when the bouquets are walked and kept until the next walk,
-        # so a connect does not build megabytes of JSON to learn it again.
-        self._embedded = True
+        # The size of the packet `channels` would need, when the last walk
+        # found that over the bound, else 0. Kept until the next walk, so a
+        # connect does not build megabytes of JSON to learn it again.
+        self._too_big = 0
+        # (body, stamp): the JSON of the index's `bouquets`, and when it last
+        # differed from the walk before.
+        self._index_part = None
+        # The slug of each bouquet's own topic, beside `_bouquets`, and what
+        # was last logged about the ones that had to be numbered.
+        self._slugs = []
+        self._collisions = ()
+        # slug -> (head, tail, stamp): the JSON of that bouquet's topic in two
+        # parts, between which `generated` goes, and when the two last differed
+        # from the walk before (`_encode_lists`).
+        self._parts = {}
         self._ticker = Ticker(self._poll, "bouquets")
         self._on_change = []
 
@@ -310,18 +352,29 @@ class ChannelsPublisher(Publisher):
         self._on_change.append(callback)
 
     def extra_capabilities(self):
-        """`channel_topics`: each bouquet's list is on a topic of its own as well."""
+        """`channel_topics`: the index, and each bouquet's list on a topic of its own."""
         return [LISTS_CAPABILITY]
 
-    def volatile_for(self, suffix):
-        """`generated` takes no part in the comparison on a bouquet's own topic.
+    def prepared(self, suffix, payload):
+        """The JSON of a bouquet's own topic, and the key that says whether it differs.
 
-        On `channels` it does, as it always has: that one says when the
-        bouquets were last walked. On `channels/<bouquet_slug>` it is left out,
-        as on the grid, or a change to one bouquet would rewrite the retained
-        list of every other.
+        Both come from the parts the walk encoded, so neither a publish nor a
+        connect encodes a list again. The key is the payload without its
+        stamp: on `channels/<bouquet_slug>` `generated` takes no part in the
+        comparison, or a change to one bouquet would rewrite the retained list
+        of every other. The index, `bouquets`, is answered the same way. On
+        `channels` the stamp does count, as it always has.
         """
-        return LIST_VOLATILE if suffix.startswith(LIST_PREFIX) else self.volatile
+        if suffix == INDEX and self._index_part is not None:
+            body, stamp = self._index_part
+            return '{"bouquets":' + body + ',"generated":' + str(stamp) + "}", body
+        if not suffix.startswith(LIST_PREFIX):
+            return None, None
+        part = self._parts.get(suffix[len(LIST_PREFIX):])
+        if part is None:
+            return None, None
+        head, tail, stamp = part
+        return head + ',"generated":' + str(stamp) + tail, (head, tail)
 
     # ------------------------------------------------------------------ reading --
 
@@ -340,7 +393,11 @@ class ChannelsPublisher(Publisher):
         for bouquet in self._bouquets:
             for channel in bouquet["channels"]:
                 self._index.setdefault(identity(channel["sref"]), bouquet["name"])
+        self._slugs = topic_slugs([bouquet["name"] for bouquet in self._bouquets])
+        self._log_collisions()
         payload = self._publish_channels()
+        self._encode_lists()
+        self.publish(INDEX, self.index())
         for suffix, one in self._lists().items():
             self.publish(suffix, one)
         if self.bridge is not None:
@@ -359,65 +416,118 @@ class ChannelsPublisher(Publisher):
             LOG.info("the bouquets changed; the channel list was republished")
 
     def _publish_channels(self):
-        """Publish `channels`, with every bouquet's list while that fits one packet.
+        """Publish `channels` - every bouquet with its list, as it has always been.
 
-        The bridge measures it, as it measures everything it sends, and the JSON
-        it measured is the JSON it then publishes - one encoding, as before
-        there was a bound. A payload over the bound goes out without the lists
-        instead of not at all: it still names every bouquet, with its slug and
-        how many services it has, and each list is on `channels/<bouquet_slug>`.
+        The bridge measures it first, and the JSON it measured is the JSON it
+        publishes, so a list that fits is encoded once. One that does not is
+        withheld by the bridge like any payload over the bound; what is kept
+        here is the size it measured, so that a connect can say "still too
+        big" without encoding megabytes to find out (`too_big`). The lists are
+        on `channels/<bouquet_slug>` either way, and `bouquets` says where.
         """
-        was_embedded = self._embedded
-        self._embedded = True
         payload = self.payload()
+        self._too_big = 0
         if self.bridge is None:
             return payload
-        encoded, size = self.bridge.measure("channels", payload)
-        if size:
-            self._embedded = False
-            payload = self.payload()
-            encoded = None
-            if was_embedded:
-                LOG.warning(
-                    "the channel list would need a packet of %d bytes; channels is published"
-                    " without the lists, which are on channels/<bouquet_slug>", size,
-                )
+        encoded, self._too_big = self.bridge.measure("channels", payload)
         self.publish("channels", payload, encoded)
         return payload
 
     def payload(self):
-        """What `channels` carries: the bouquets, and their lists when `_embedded` says so."""
+        return {"generated": self._generated, "bouquets": self._bouquets}
+
+    def too_big(self):
+        """{suffix: packet bytes} for what the last walk measured over the bound.
+
+        The snapshot leaves such a topic out and the bridge withholds it from
+        this, exactly as it would from a measurement of its own - the same
+        payload on the same topic has the same size.
+        """
+        return {"channels": self._too_big} if self._too_big else {}
+
+    def index(self):
+        """What `bouquets` carries: each bouquet's name, reference, topic slug and size."""
+        stamp = self._generated if self._index_part is None else self._index_part[1]
         return {
-            "generated": self._generated,
-            "embedded": self._embedded,
+            "generated": stamp,
             "bouquets": [
                 {
                     "name": bouquet["name"],
                     "sref": bouquet["sref"],
-                    "slug": slugify(bouquet["name"]),
+                    "slug": slug,
                     "count": len(bouquet["channels"]),
-                    "channels": bouquet["channels"] if self._embedded else None,
                 }
-                for bouquet in self._bouquets
+                for slug, bouquet in zip(self._slugs, self._bouquets)
             ],
         }
+
+    def _log_collisions(self):
+        """Say which bouquets had their slug numbered - when that changes, not at every walk."""
+        collisions = tuple(
+            (bouquet["name"], slug)
+            for slug, bouquet in zip(self._slugs, self._bouquets)
+            if slug != slugify(bouquet["name"])
+        )
+        if collisions != self._collisions:
+            for name, slug in collisions:
+                LOG.warning(
+                    "the bouquet %s slugs the same as an earlier one; its channel list is"
+                    " on channels/%s", name, slug,
+                )
+        self._collisions = collisions
+
+    def _encode_lists(self):
+        """Encode each bouquet's list once, and stamp the ones that differ.
+
+        The JSON of `channels/<bouquet_slug>` is put together here by hand, in
+        the key order and with the separators of the bridge's own encoder, so
+        that the megabyte in it - the list - is encoded once a walk and never
+        on a connect: `prepared` joins the parts around `generated`, and the
+        parts without it are the change key. A test holds the result equal to
+        what the encoder makes of the whole payload.
+
+        A bouquet whose parts are what the walk before made of it keeps its
+        stamp, so `generated` says when that bouquet's list last differed -
+        within the life of this publisher, which a start of the plugin or a
+        settings save begins anew. The index's `bouquets` is encoded here as
+        well and stamped by the same rule.
+        """
+        parts = {}
+        if self.bridge is not None:
+            encode = self.bridge.encode
+            body = encode(self.index()["bouquets"])
+            if self._index_part is None or self._index_part[0] != body:
+                self._index_part = (body, self._generated)
+            for slug, bouquet in zip(self._slugs, self._bouquets):
+                if not slug:
+                    continue
+                head = (
+                    '{"bouquet":' + encode(bouquet["name"])
+                    + ',"channels":' + encode(bouquet["channels"])
+                )
+                tail = ',"sref":' + encode(bouquet["sref"]) + "}"
+                before = self._parts.get(slug)
+                if before is not None and before[:2] == (head, tail):
+                    parts[slug] = before
+                else:
+                    parts[slug] = (head, tail, self._generated)
+        self._parts = parts
 
     def _lists(self):
         """{suffix: payload} - `channels/<bouquet_slug>` for each bouquet.
 
         A bouquet whose name leaves no slug has no topic, as it has no grid.
-        Two bouquets with one slug share a topic and the second wins it, which
-        the payload's `bouquet` shows (`slugify`).
+        `generated` is the bouquet's own stamp (`_encode_lists`).
         """
         topics = {}
-        for bouquet in self._bouquets:
-            slug = slugify(bouquet["name"])
+        for slug, bouquet in zip(self._slugs, self._bouquets):
             if not slug:
                 continue
+            part = self._parts.get(slug)
             topics[LIST_PREFIX + slug] = {
                 "bouquet": bouquet["name"],
                 "sref": bouquet["sref"],
-                "generated": self._generated,
+                "generated": self._generated if part is None else part[2],
                 "channels": bouquet["channels"],
             }
         return topics
@@ -425,7 +535,7 @@ class ChannelsPublisher(Publisher):
     @property
     def published_slugs(self):
         """The slugs of the `channels/<bouquet_slug>` topics, in bouquet order."""
-        return [suffix[len(LIST_PREFIX):] for suffix in self._lists()]
+        return [slug for slug in self._slugs if slug]
 
     @property
     def bouquets(self):
@@ -445,7 +555,8 @@ class ChannelsPublisher(Publisher):
     def snapshot(self):
         if not self._bouquets:
             self.refresh()
-        topics = {"channels": self.payload()}
+        topics = {} if self._too_big else {"channels": self.payload()}
+        topics[INDEX] = self.index()
         topics.update(self._lists())
         return topics
 

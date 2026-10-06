@@ -33,6 +33,10 @@
       "retained": true,
       "since": "0.2.0"
     },
+    "bouquets": {
+      "payload": "json",
+      "retained": true
+    },
     "channels/<bouquet_slug>": {
       "payload": "json",
       "retained": true
@@ -308,10 +312,6 @@
     },
     {
       "name": "oversize-payload-withheld",
-      "release": "unreleased"
-    },
-    {
-      "name": "channels-lists-per-bouquet",
       "release": "unreleased"
     }
   ],

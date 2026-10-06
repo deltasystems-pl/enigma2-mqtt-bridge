@@ -456,8 +456,8 @@ def test_a_copy_an_earlier_process_left_is_retracted_although_the_publisher_star
 ):
     """The real channel list publishes in `start()`, before the client has a session.
 
-    What is too big here is one bouquet's own list, `channels/ulubione_tv`:
-    `channels` gives its lists up before it is withheld, so it is published.
+    One name of a megabyte is too much for `channels` and for the list of the
+    bouquet it is in, `channels/ulubione_tv`; both are withheld the same way.
     """
     settings.host.value = "10.0.0.5"
     settings.node_id.value = NODE
@@ -466,6 +466,7 @@ def test_a_copy_an_earlier_process_left_is_retracted_although_the_publisher_star
     first = make_bridge(session=receiver.session)
     first.start()
     factory.client.fire_connect()
+    assert factory.client.last(CHANNELS).json()["bouquets"]
     assert factory.client.last(ULUBIONE_LIST).json()["channels"]
     first.stop()
 
@@ -475,18 +476,21 @@ def test_a_copy_an_earlier_process_left_is_retracted_although_the_publisher_star
     bridge = make_bridge(session=receiver.session)
     bridge.start()
     client = factory.client
-    # Nothing could be sent yet, so the state file still has to know the topic.
-    assert client.all_for(ULUBIONE_LIST) == []
-    assert bridge.state.knows(ULUBIONE_LIST)
+    # Nothing could be sent yet, so the state file still has to know the topics.
+    for topic in (CHANNELS, ULUBIONE_LIST):
+        assert client.all_for(topic) == []
+        assert bridge.state.knows(topic)
 
     client.fire_connect()
 
-    assert [sent.text for sent in client.all_for(ULUBIONE_LIST)] == [""]
-    assert not bridge.state.knows(ULUBIONE_LIST)
-    assert client.last(CHANNELS).json()["embedded"] is False
-    # It was measured before the connect, so the first `info` already names it.
+    for topic in (CHANNELS, ULUBIONE_LIST):
+        assert [sent.text for sent in client.all_for(topic)] == [""]
+        assert not bridge.state.knows(topic)
+    # They were measured before the connect, so the first `info` already names them.
     lists = [sent.json()["not_published"] for sent in client.all_for(INFO)]
-    assert [[one["topic"] for one in listed] for listed in lists] == [["channels/ulubione_tv"]]
+    assert [[one["topic"] for one in listed] for listed in lists] == [
+        ["channels", "channels/ulubione_tv"]
+    ]
 
 
 def test_a_topic_that_outgrew_the_bound_during_an_outage_is_retracted_on_the_connect(

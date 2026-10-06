@@ -251,7 +251,8 @@ def test_a_real_channel_list_too_big_for_the_select_keeps_every_other_entity(
     found = components(factory)
     assert "channel_select" not in found
     assert {"power", "channel", "program", "volume", "mute", "screen", "uptime"} <= set(found)
-    assert not_published(factory) == []
+    # `channels` is too big for this bound as well; the device payload is not.
+    assert [one["topic"] for one in not_published(factory)] == ["channels"]
     assert all(packet(one) <= test_channel_topics.LOW for one in factory.client.published)
 
     # The select is gone; what it did still works.

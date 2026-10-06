@@ -49,14 +49,17 @@ class Publisher:
     # substring of it.
     volatile = ()
 
-    def volatile_for(self, suffix):
-        """The volatile fields of one of this area's topics.
+    def prepared(self, suffix, payload):
+        """`(encoded, change_key)` for a topic whose JSON this area has built itself.
 
-        The same for every topic of an area, unless the area says otherwise:
-        the channel list stamps `generated` on two kinds of topic and means two
-        things by it.
+        `(None, None)` for every other topic, which is nearly all of them: the
+        bridge then encodes the payload, and encodes it a second time without
+        its `volatile` fields to have something to compare. For a payload of a
+        megabyte that second encoding is worth avoiding, and an area that
+        already holds the JSON - and a key that says whether it differs -
+        hands both over here, on a state publish and on the snapshot alike.
         """
-        return self.volatile
+        return None, None
 
     # Set by a publisher that returns False from `start()` because its feature
     # is switched off in the settings, rather than because this image could not
@@ -117,9 +120,15 @@ class Publisher:
         """
         if self.bridge is None:
             return None
-        options = {} if encoded is None else {"encoded": encoded}
+        options = {}
+        if encoded is None:
+            encoded, change_key = self.prepared(suffix, payload)
+            if change_key is not None:
+                options["change_key"] = change_key
+        if encoded is not None:
+            options["encoded"] = encoded
         return self.bridge.publish_state(
-            suffix, payload, raw=suffix in self.raw, volatile=self.volatile_for(suffix), **options
+            suffix, payload, raw=suffix in self.raw, volatile=self.volatile, **options
         )
 
     def report(self, command, message):

@@ -422,10 +422,10 @@ def test_the_order_on_the_way_out(box, factory, receiver, monkeypatch):
 
 
 def test_the_channel_lists_go_with_everything_else(box, factory):
-    """`channels/<bouquet_slug>` is a retained topic like any other, and so are its slugs."""
+    """`channels/<bouquet_slug>` and `bouquets` are retained topics like any other."""
     bridge = box()
     client = factory.client
-    lists = {ROOT + "/channels/ulubione_tv", ROOT + "/channels/sport_hd"}
+    lists = {ROOT + "/bouquets", ROOT + "/channels/ulubione_tv", ROOT + "/channels/sport_hd"}
     assert lists <= set(bridge.state.retained_topics)
     assert bridge.state.channel_slugs == ["ulubione_tv", "sport_hd"]
     before = len(client.published)

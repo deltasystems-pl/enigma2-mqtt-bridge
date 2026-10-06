@@ -170,15 +170,15 @@ log has that line once, when the topic becomes too big, not at every attempt.
 
 What a household sees depends on which payload was too big:
 
-- **The channel list.** `channels` is published without the lists: it still names every bouquet,
-  with `embedded` `false` and how many services each has, and each bouquet's list is on a topic
-  of its own, `channels/<bouquet_slug>` ([TOPICS.md](TOPICS.md#basenodechannels---since-m2)).
-  The log says so once - `the channel list would need a packet of 2315478 bytes; channels is
-  published without the lists, which are on channels/<bouquet_slug>`. A consumer that reads those
-  topics has every channel. One that reads only `channels` - the companion integration up to
-  0.4.0 - has the bouquet names and no channels, so its channel selects are empty until the list
-  is narrowed. Only a single bouquet too big for one packet by itself is missing altogether, and
-  is named in `info.not_published`.
+- **The channel list.** `channels` - every bouquet with its list - is not on the broker, and is
+  named in `info.not_published`; an older, smaller copy is retracted. The lists are still
+  published, one bouquet a topic, on `channels/<bouquet_slug>`, and `bouquets` is their index:
+  every bouquet with the slug of its topic and how many services it has
+  ([TOPICS.md](TOPICS.md#basenodechannels---since-m2)). A consumer that reads those has every
+  channel. One that reads only `channels` - the companion integration up to 0.4.0 - has no
+  channel list, so its channel selects are empty until the list is narrowed. A single bouquet too
+  big for one packet by itself is missing from `channels/<bouquet_slug>` as well, and named there
+  too.
 - **A grid.** An `epg_grid/<bouquet_slug>` that is too big is cut to fewer events per channel -
   the most that fits one packet - and published; its `events_per_channel` says how many, and the
   log has `epg grid: Astra is cut from 4 to 2 event(s) per channel to fit one packet`. The guide
@@ -205,6 +205,11 @@ To get back what is missing:
 Both settings are on the setup screen and on the plugin's OpenWebif page ([SETUP.md](SETUP.md)).
 With a plugin up to 0.4.0, `bouquets_for_select` and a lower `epg_grid_events` are the way out, or
 a higher `max_packet_size` on the broker.
+
+**After going back to 0.4.0 by hand**, `bouquets` and the `channels/<bouquet_slug>` topics stay on
+the broker, retained, with the lists they had: 0.4.0 does not publish them, so it does not update
+them either, though it still knows their names from the state file. `cmd/reset` on the downgraded
+plugin retracts them, and so does an uninstall.
 
 ## Entities Home Assistant will never update again
 
