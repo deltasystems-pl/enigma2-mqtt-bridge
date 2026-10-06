@@ -828,6 +828,7 @@ def test_after_the_retraction_nothing_is_published_until_the_reload(box, factory
     tick(3)
     bridge.check_build_on_disk()
     bridge.updates.publish()
+    assert bridge.retract_last_error() is False
     factory.client.fire_connect()
     assert factory.client.published[quiet:] == []
     helper_says(directory, phase="finished", result="withdrawn_before_restart",
@@ -1143,15 +1144,35 @@ def test_a_restart_does_not_clear_the_sentence_of_a_restore_that_did_not_complet
 
 @pytest.mark.parametrize("reason", ["restore_failed", "restore_incomplete"])
 def test_clear_error_clears_whatever_the_last_updates_record_says(reason, starting, factory,
-                                                                  state_path):
+                                                                  state_path, monkeypatch):
     _an_earlier_runs_error(state_path)
     bridge = starting(prepare=lambda root: _last_record(root, "failed", reason))
     factory.client.fire_connect()
+    # The command's own retraction, not the one every command that succeeds ends with.
+    monkeypatch.setattr(bridge, "clear_last_error", lambda: False)
 
     factory.client.fire_message(ROOT + "/cmd/clear_error", b"PRESS")
 
     assert [entry.text for entry in factory.client.all_for(LAST_ERROR)] == [""]
     assert not bridge.state.knows(LAST_ERROR)
+
+
+def test_the_start_decides_once_whether_the_sentence_is_held(starting, factory, state_path):
+    """Held at the start, the question is settled for this run: a refusal of this run is not
+    taken for an earlier run's at a later connect, whatever the record has become by then."""
+    _an_earlier_runs_error(state_path)
+    bridge = starting(prepare=lambda root: _last_record(root, "failed", "restore_failed"))
+    factory.client.fire_connect()
+    factory.client.fire_message(ROOT + "/cmd/nonsense", b"")
+    # A transaction accepted since: the record this process holds names no restore any more.
+    bridge.self_update._transaction = None
+    factory.client.fire_disconnect(7)
+    factory.client.clear()
+
+    factory.client.fire_connect()
+
+    assert LAST_ERROR not in factory.client.topics()
+    assert bridge.last_error() is not None
 
 
 def test_a_command_that_succeeds_still_clears_it_after_such_an_end(starting, factory,

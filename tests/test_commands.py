@@ -512,6 +512,21 @@ def test_a_clear_error_the_client_did_not_take_forgets_nothing(connected_bridge,
     assert not connected_bridge.state.knows(LAST_ERROR)
 
 
+def test_clear_error_without_a_session_sends_nothing_and_raises_nothing(make_bridge, factory,
+                                                                        settings):
+    """A bridge that never started has no client: the call is a no-op, not a crash that would
+    come back as a refusal about the command itself."""
+    from MQTTBridge.origin import PAGE
+
+    settings.node_id.value = NODE
+    bridge = make_bridge()
+
+    assert bridge.retract_last_error() is False
+    assert bridge.run_command("clear_error", "", PAGE) is None
+    assert bridge.last_error() is None
+    assert factory.clients == []
+
+
 def test_an_error_after_clear_error_is_published_and_cleared_as_ever(connected_bridge, factory):
     send(factory, "clear_error", b"PRESS")
     send(factory, "teleport", b"PRESS")

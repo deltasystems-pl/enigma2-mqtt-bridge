@@ -465,6 +465,7 @@ def test_a_publisher_that_fires_after_the_retraction_publishes_nothing(box, fact
     volume._publish_now()
     bridge.publish_state("volume", {"level": 99, "muted": False})
     bridge.retract(ROOT + "/cmd/anything")
+    assert bridge.retract_last_error() is False
 
     assert len(client.published) == after
 
