@@ -35,10 +35,12 @@ after an interface restart the start line can count fewer than `info.capabilitie
 they bind (22 against 25 on the receiver this was seen on), and a start inside a running
 interface - after the settings were saved - counts them all. `info` is published again when a
 late one arrives ([TOPICS.md](TOPICS.md#1-state-topics), "A capability can also arrive late"),
-and the log then has a line of its own, `capabilities=<n> now; the start line counted those bound
-by then`, with the count `info` carries from that moment - the last such line after a start is
-the one that matches `info.capabilities`. A release up to 0.4.0 logs the start line only, so
-there `info.capabilities` is the list to go by.
+and the log has a line of its own, `capabilities=<n> now; the start line counted those bound by
+then`, whenever a capability binds or goes after the start and the count is not the one last
+logged since that start. It is written with or without a session to the broker: before the
+connect, the connect's `info` is what carries the list. The last such line after a start is the
+count `info.capabilities` holds; a start with no such line after it counted them all. A release
+up to 0.4.0 logs the start line only, so there `info.capabilities` is the list to go by.
 
 ## Nothing happens at all
 
@@ -286,6 +288,24 @@ newer one. On the receiver where this was examined (OSCam on OpenViX 6.6), the c
 the restart still answered on its web interface but no longer decoded anything for the restarted
 interface, so stopping the new copy froze every encrypted channel until the softcam was restarted.
 
+## OSCam runs, but `oscam.software_running` is false
+
+`oscam.software_running` is read from the process list, and only while OSCam's web interface does
+not answer does it matter: a web interface that answers is the proof on its own. A process is
+taken for OSCam when its name - the 15 characters the kernel keeps of it - is `oscam`, or starts
+with `oscam-`, or starts with `oscam_` **and** the file it runs has a name starting with `oscam`
+(any case). So these are not found:
+
+- a binary named any other way - `oscam.bin`, `oscamd`, `OSCam11` - or started under another name;
+- a process named `oscam_...` whose executable is called something else, which is what a shell
+  script of that name is, or whose executable cannot be read.
+
+And the name is all there is to go by, so anything named like the cam counts as the cam: a helper
+binary called `oscam_...`, and any process at all named `oscam-...`. The softcam the image is set
+to start is not consulted here - `softcam.running_instances` on the `softcam` topic counts exactly
+that binary, where the image has a softcam manager the plugin can read
+([TOPICS.md](TOPICS.md#1-state-topics)).
+
 ## An update or install is refused with "standby"
 
 Every install and update is refused while the receiver is in standby, because its restart would
@@ -317,7 +337,8 @@ There is no acknowledgement topic. A command's answer is the state topic changin
    unless exactly one service matches within the configured bouquets; `cmd/key` is refused for an
    unknown key name. `cmd/config` refuses the whole object when one key is not on its list - the
    receiver-only permissions such as `update_allowed` included - with "the config object contains
-   unknown settings: " and the keys it refused (up to 0.4.0 the sentence names none); the keys it
+   unknown settings: " and the keys it refused, each in single quotes (up to 0.4.0 the sentence
+   names none); the keys it
    takes are listed in [TOPICS.md](TOPICS.md#cmdconfig-semantics).
 3. Check `info.capabilities`. If the hook a command needs is not in that list, this image did not
    give it to the plugin and the command cannot work - say so in an issue with your image name.

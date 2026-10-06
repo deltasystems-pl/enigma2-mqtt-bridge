@@ -49,17 +49,21 @@ version that has no section here.
   ([TOPICS.md](docs/TOPICS.md#4-home-assistant-discovery)).
 - `cmd/config`'s refusal of a key outside its list names the key. The sentence on `last_error`
   was "the config object contains unknown settings" and left the reader to compare the payload
-  with the list; it now goes on with the keys it refused - "...unknown settings: update_allowed" -
-  sorted, the first five and then "and N more", a name longer than 32 characters cut. Only the
-  names: a value is never echoed. The OpenWebif page's settings form answers with the same
-  sentence. No reason code is added or changed
+  with the list; it now goes on with the keys it refused, each in single quotes -
+  `...unknown settings: 'host', 'update_allowed'` - sorted, the first five and then
+  " and N more", a name longer than 32 characters cut. Only the names: a value is never echoed.
+  A character that cannot be printed, and an apostrophe, is shown as `?`, so a name cannot pass
+  for two names or for the count; a broker or OSCam password sent as a name, or inside one, is
+  shown as `***`, whole, before the name is cut. No reason code is added or changed
   ([TOPICS.md](docs/TOPICS.md#cmdconfig-semantics)).
 - The log counts the capabilities again when one binds late. The start line's `capabilities=<n>`
   is the number bound at the start, and after an interface restart `bouquet_context`,
   `zap_history` and `history_clear` bind a few seconds later, so the line said 22 on a receiver
-  whose `info.capabilities` then held 25. Each time `info` is republished for such a change the
-  log now has `capabilities=<n> now; the start line counted those bound by then`, and the last of
-  those lines is the count `info` carries. The start line is unchanged
+  whose `info.capabilities` then held 25. Whenever a capability binds or goes after the start,
+  the log now has `capabilities=<n> now; the start line counted those bound by then` - once for
+  each count that is not the one last logged since that start, and also before the session to
+  the broker is up, when the connect's `info` is what carries the list. The last of those lines
+  is the count `info` holds. The start line is unchanged
   ([TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#the-log)).
 
 ### Fixed
@@ -68,8 +72,13 @@ version that has no section here.
   and `oscam.software` come from the process list, and the list was asked for `oscam` and
   `oscam-...` only, so a cam named with an underscore - `oscam_11.704-emu-...`, of which the
   kernel keeps fifteen characters - was `software_running: false` whenever its web interface did
-  not answer, which is the moment the member is for. It is now found too, when the process runs
-  a binary of that name; a shell script that is merely called `oscam_...` is not taken for it.
+  not answer, which is the moment the member is for. A process whose name starts with `oscam_`
+  is now taken for it too, when the file it runs has a name starting with `oscam`. That leaves
+  out a shell script that is merely called `oscam_...`, and it also leaves out a process of that
+  name whose executable cannot be read or is called something else; a helper binary named
+  `oscam_...` counts as the cam, as any process named `oscam-...` always did. The name is all
+  the rule has
+  ([TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#oscam-runs-but-oscamsoftware_running-is-false)).
 - `tools/deploy-to-box.sh` no longer removes backups it did not make. It kept "the three newest"
   of everything named `MQTTBridge.bak-*` in the receiver's backup directory, ordered by name -
   and a backup made by hand, `MQTTBridge.bak-pre-<reason>-<date>`, sorts ahead of every dated
@@ -77,6 +86,9 @@ version that has no section here.
   the backup it had just made among them. It now counts and removes only its own - directories
   named `MQTTBridge.bak-YYYYMMDD-HHMMSS` exactly - keeps the newest three of them by that stamp,
   and touches nothing else (`tools/rotate-box-backups.sh`, run on the receiver as it stands).
+  Run by hand, that script takes a number to keep from 1 to 999 and refuses anything else, a
+  leading zero included, and a relative directory is the one under the working directory
+  whatever `CDPATH` says.
 - A receiver with a very large channel list could knock itself off the broker over and over.
   Mosquitto 2.1 - the version in the current Home Assistant add-on - closes the connection on a
   packet over 2,000,000 bytes ("disconnected: oversize packet" in its log), and `channels` with
@@ -117,9 +129,13 @@ version that has no section here.
   whose CA certificates cannot verify the release origin.
 - The 0.4.0 notes link to the files as released rather than to `main`.
 - SECURITY.md says how often the receiver contacts GitHub, as the code does it: what one check
-  asks for, when the daily one is due, the ten-minute limit on checks, the one probe before an
-  install at the television or on the page - and a third address it did not name, GitHub's API,
-  asked once by an install the receiver fetches itself, to compare the package's digest.
+  asks for, when the daily one is due, the ten-minute limit on checks and the three cases that
+  let one through sooner, the one probe before an install at the television or on the page and
+  what stands in for it - and a third address it did not name, GitHub's API, asked once by an
+  install the receiver fetches itself, to compare the package's digest. It also names
+  `cmd/epg_import`, which makes the image's own importer download.
+- TROUBLESHOOTING.md: which processes `oscam.software_running` takes for OSCam, and which it
+  cannot find.
 - INSTALL.md: an image whose CA certificates are old or missing fails the origin's certificate
   check and updates through Home Assistant's relay or by hand.
 - CONTRIBUTING.md: the Polish words for standby and deep standby, and where the Polish catalogue

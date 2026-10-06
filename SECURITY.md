@@ -48,11 +48,16 @@ everything else:
        once an hour whether it is, and not before the receiver's clock has been set - and one on
        `cmd/update_check` over MQTT (refused unless `update_check` is on). A person pressing
        *check* on the television or the OpenWebif page gets one whatever the setting says. A
-       check asked for within ten minutes of the last one is answered from its result and
-       connects to nothing;
+       check asked for within ten minutes after the last one, by the receiver's clock and the
+       time of the last check it keeps in a file, is answered from that check's result and
+       connects to nothing. Three things let one through sooner: a clock that was set back to
+       before the last check; the first moments after a start, until that file has been read;
+       and a file that is missing or cannot be read;
      - **an install asked for at the television or on the page** first asks for the signature
        file alone, once, to learn whether the receiver can fetch the release itself - unless a
-       check or a probe of the last ten minutes has already said;
+       check or a probe of the last ten minutes has already said, or an install ended in the
+       last twenty minutes because the origin gave no answer, which is taken as the origin's
+       word for that long;
      - **an install that does not go through Home Assistant's relay** - asked for there, or over
        MQTT with the receiver-only permission `update_allowed` - asks for the index and its
        signature again, and for the package;
@@ -66,6 +71,10 @@ everything else:
      `/api/enigma2_mqtt/relay/<token>`, fetched over plain HTTP or over HTTPS without checking
      the certificate. That is enough because what it serves is checked against the signed index
      (below) before anything is installed.
+
+   One command makes the image connect, not the plugin: `cmd/epg_import` (since 0.3.0, refused
+   over MQTT unless the receiver-only permission `epg_import_allowed` is on; off by default)
+   starts the image's own EPG importer, which downloads from the sources selected in it.
 
    There is no telemetry and no cloud service. TLS to the broker is supported; client
    certificates are not in v1.
