@@ -90,6 +90,13 @@ version that has no section here.
   kernel keeps fifteen characters - was `software_running: false` whenever its web interface did
   not answer, which is the moment the member is for. It is now found too, when the process runs
   a binary of that name; a shell script that is merely called `oscam_...` is not taken for it.
+- `tools/deploy-to-box.sh` no longer removes backups it did not make. It kept "the three newest"
+  of everything named `MQTTBridge.bak-*` in the receiver's backup directory, ordered by name -
+  and a backup made by hand, `MQTTBridge.bak-pre-<reason>-<date>`, sorts ahead of every dated
+  one, so on a receiver with seven of those a deploy would have removed seven of ten entries,
+  the backup it had just made among them. It now counts and removes only its own - directories
+  named `MQTTBridge.bak-YYYYMMDD-HHMMSS` exactly - keeps the newest three of them by that stamp,
+  and touches nothing else (`tools/rotate-box-backups.sh`, run on the receiver as it stands).
   **Behaviour change, named in-major exception `oversize-payload-withheld`**
   ([TOPICS.md, Contract version](docs/TOPICS.md#contract-version)): `channels` and
   `epg_grid/<bouquet_slug>` used to be published whatever their size; over the bound they are
