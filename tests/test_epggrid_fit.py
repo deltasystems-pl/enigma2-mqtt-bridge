@@ -394,6 +394,55 @@ def test_the_search_goes_up_from_the_last_cut_when_there_is_room(live_bridge, fa
     assert live_bridge.publisher("epg_grid")._cuts == {}
 
 
+@pytest.mark.parametrize("short", [10, 0])
+def test_one_event_more_is_taken_when_it_fits_to_the_byte(live_bridge, factory, receiver,
+                                                          monkeypatch, short):
+    """The floor under "one event more" is the next event's own least size, and no more.
+
+    Whether the count above the last cut is worth encoding is asked without
+    encoding it. A floor that is a byte too high, or counted from another
+    event than the next one, answers "cannot fit" for a grid that fits exactly
+    - and the grid then stays smaller than it could be for as long as the bound
+    is that near. So the third event of each channel is far shorter than its
+    neighbours here, and the bound is the packet with three events, to the byte.
+    """
+    guide(receiver)
+    for sref in (TVP1, TVN):
+        receiver.epg.events[sref][2].title = "c" * short
+    generate(live_bridge)
+    assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 4
+    two, three = size_with(factory, 2), size_with(factory, 3)
+    assert three - two < 200 < WIDE
+
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", two)
+    live_bridge.forget_published()
+    generate(live_bridge)
+    assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 2
+    measured = watch_measuring(live_bridge, monkeypatch)
+
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", three)
+    live_bridge.forget_published()
+    generate(live_bridge)
+
+    sent = factory.client.last(ULUBIONE)
+    assert sent.json()["events_per_channel"] == 3
+    assert packet(sent) == three
+    # The last cut, the one above it - which the floor let through - and the whole grid.
+    assert measured == [2, 3, 4]
+
+    # One byte less, and the floor alone says so: the count above is not encoded.
+    del measured[:]
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", two)
+    live_bridge.forget_published()
+    generate(live_bridge)
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", three - 1)
+    del measured[:]
+    live_bridge.forget_published()
+    generate(live_bridge)
+    assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 2
+    assert measured == [2]
+
+
 def test_the_search_goes_down_when_the_last_cut_no_longer_fits(live_bridge, factory, receiver,
                                                                monkeypatch):
     monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", LOW)
