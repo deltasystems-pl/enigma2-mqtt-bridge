@@ -1190,3 +1190,35 @@ def test_an_earlier_runs_error_is_replaced_by_the_one_that_had_to_wait_a_connect
     entries = factory.client.all_for(LAST_ERROR)
     assert [entry.text != "" for entry in entries] == [True]
     assert entries[0].json()["cmd"] == "update"
+
+
+def test_the_earlier_runs_error_is_taken_back_before_this_run_says_it_is_online(
+        make_bridge, factory, settings, state_path):
+    """With the other leftovers of an earlier process, ahead of `online` and the snapshot: a
+    consumer that takes `online` for the start of this run never reads the earlier run's
+    refusal as this run's."""
+    _left_by_an_earlier_run(state_path)
+    _a_new_process(make_bridge, settings)
+
+    factory.client.fire_connect()
+
+    order = [(entry.topic, entry.text) for entry in factory.client.published]
+    cleared = order.index((LAST_ERROR, ""))
+    assert cleared < order.index((AVAILABILITY, "online"))
+    assert cleared < factory.client.topics().index(INFO)
+    assert cleared < factory.client.topics().index(ANNOUNCEMENT)
+
+
+def test_the_error_that_waited_for_a_session_is_said_after_the_snapshot(
+        make_bridge, factory, settings):
+    """The other end of the connect: the report follows `online`, `info` and the rest, so
+    a consumer has the state it is about before it."""
+    bridge = _a_new_process(make_bridge, settings)
+    bridge._pending_error = ("update", "the previous version 0.4.0 is back")
+
+    factory.client.fire_connect()
+
+    topics = factory.client.topics()
+    assert topics.index(LAST_ERROR) > topics.index(INFO)
+    assert topics.index(LAST_ERROR) > topics.index(ANNOUNCEMENT)
+    assert topics[-1] == LAST_ERROR

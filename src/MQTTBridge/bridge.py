@@ -989,6 +989,14 @@ class Bridge:
         # also goes when HDMI-CEC does.
         if self.publisher(CecPublisher.name) is None:
             self.retract(self.topic(CEC_TOPIC))
+        # And the refusal an earlier run left retained, here with the other
+        # leftovers of an earlier process: before `online`, so that a consumer
+        # which takes `online` for the start of this run never reads that
+        # refusal as this run's, and before the state file is written at the
+        # end of this connect, so that it is written without the topic. The
+        # error this run brings to the connect is said at the other end of it,
+        # after the snapshot it is about.
+        self._clear_earlier_runs_error()
         # Every payload goes out on every connect, so what was published before
         # this connection is not what is on the broker now.
         self.forget_published()
@@ -1023,8 +1031,6 @@ class Bridge:
         integration = self._self_update.integration_topic()
         if integration:
             self.client.subscribe(integration, qos=COMMAND_QOS)
-        # Before the state file is written, so that it is written without the topic.
-        self._clear_earlier_runs_error()
         self.state.save()
         if self._pending_error is not None:
             # Said once, so only a publish the client took counts as said: a
