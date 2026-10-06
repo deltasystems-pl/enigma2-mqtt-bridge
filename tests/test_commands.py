@@ -160,7 +160,7 @@ def test_config_cannot_write_the_permission_it_can_read(connected_bridge, factor
     payload = factory.client.last(LAST_ERROR).json()
     assert payload["cmd"] == "config"
     assert payload["error"] == (
-        "the config object contains unknown settings: deep_standby_allowed"
+        "the config object contains unknown settings: 'deep_standby_allowed'"
     )
     assert "reason" not in payload
     assert settings.deep_standby_allowed.value is False
@@ -176,7 +176,7 @@ def test_config_names_every_key_it_refused(connected_bridge, factory, settings):
 
     payload = factory.client.last(LAST_ERROR).json()
     assert payload["error"] == (
-        "the config object contains unknown settings: host, update_allowed"
+        "the config object contains unknown settings: 'host', 'update_allowed'"
     )
     assert settings.update_allowed.value is False
     assert factory.client.last(INFO) is None

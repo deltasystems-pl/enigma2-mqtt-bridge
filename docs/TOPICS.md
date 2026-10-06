@@ -1856,9 +1856,13 @@ writing it are two different permissions. Home Assistant mode has its dedicated 
 context has `cmd/bouquet`; neither broadens this settings API. The command accepts the three original keys plus independently optional `screenshot_delay`,
 `cam_telemetry`, `oscam_telemetry`, `softcam_autoheal` and `softcam_autoheal_seconds`,
 with their JSON types unchanged. An object holding any other key is refused whole, with
-`last_error` "the config object contains unknown settings: " and the keys it refused - their
-names only, never a value, sorted, the first five and then "and N more", a name longer than 32
-characters cut. Up to 0.4.0 the sentence ended at "settings" and named none of them. The two
+`last_error` "the config object contains unknown settings: " and the keys it refused, as in
+`the config object contains unknown settings: 'host', 'update_allowed'`. Their names only, never
+a value: each in single quotes, sorted, separated by a comma and a space; the first five, and
+then " and N more" for the rest. A name longer than 32 characters is cut to 32 and an ellipsis.
+A character in a name that cannot be printed, and an apostrophe, is shown as `?`, so what is
+between two quotes is always one name; a broker or OSCam password sent as a name, or inside one,
+is shown as `***`. Up to 0.4.0 the sentence ended at "settings" and named none of them. The two
 softcam keys only *tune* a restart the receiver has already permitted; with
 `softcam_restart_allowed` off they change nothing, because the
 permission is the gate. The plugin validates the whole object before assigning anything,

@@ -1163,7 +1163,7 @@ def test_config_can_switch_autoheal_on_but_not_the_permission(
         b'"softcam_restart_allowed":true}',
     )
     assert error(factory) == (
-        "the config object contains unknown settings: softcam_restart_allowed"
+        "the config object contains unknown settings: 'softcam_restart_allowed'"
     )
     assert settings.softcam_restart_allowed.value is False
 

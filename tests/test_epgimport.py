@@ -687,7 +687,7 @@ def test_the_permission_is_published_read_only(connected_bridge, factory, settin
         b'"epg_import_allowed":true}',
     )
     assert error(factory) == (
-        "the config object contains unknown settings: epg_import_allowed"
+        "the config object contains unknown settings: 'epg_import_allowed'"
     )
     assert settings.epg_import_allowed.value is False
 

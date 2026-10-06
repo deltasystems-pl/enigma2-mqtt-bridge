@@ -451,13 +451,21 @@ def save_settings(values, section=None):
 
 
 def _named(name):
-    """A key somebody sent, as it may be shown: printable and of bounded length."""
+    """A key somebody sent, as it may be shown: in quotes, printable, of bounded length.
+
+    Redacted whole, before it is cut: a secret sent as a name and cut in the
+    middle would no longer be the registered text, and its head would be
+    shown. The quotes are the sentence's own, so an apostrophe in a name is
+    shown as `?`, like a character that cannot be printed - a name cannot
+    close its quotes and pass for two names, or for the count that follows.
+    """
     text = "".join(
-        character if character.isprintable() else "?" for character in str(name)
+        character if character.isprintable() and character != "'" else "?"
+        for character in redact(str(name))
     )
     if len(text) > UNKNOWN_SETTING_NAME_LIMIT:
         text = text[:UNKNOWN_SETTING_NAME_LIMIT] + "\u2026"
-    return text
+    return "'" + text + "'"
 
 
 def unknown_settings_refusal(unknown):
@@ -471,7 +479,7 @@ def unknown_settings_refusal(unknown):
     )
     if len(unknown) > UNKNOWN_SETTINGS_NAMED:
         sentence += " and " + str(len(unknown) - UNKNOWN_SETTINGS_NAMED) + " more"
-    return redact(sentence)
+    return sentence
 
 
 def validate_remote_settings(raw, section=None):
