@@ -144,3 +144,21 @@ def test_the_log_level_setting_reaches_the_logger(make_bridge, settings):
     settings.log_level.value = "error"
     make_bridge().start()
     assert logging.getLogger(log_module.LOGGER_NAME).level == logging.ERROR
+
+
+def test_a_secret_inside_another_is_redacted_whole(monkeypatch):
+    """Longest first: the short one replaced first would leave the long one's head and tail."""
+    # A list, so that the order is the worst one every time and not when the hash says so.
+    monkeypatch.setattr(log_module, "_secrets", ["hunter2", "my-hunter2-phrase"])
+
+    assert log_module.redact("login my-hunter2-phrase ok") == "login *** ok"
+    assert log_module.redact("hunter2 and my-hunter2-phrase") == "*** and ***"
+
+
+def test_overlapping_secrets_registered_the_usual_way_leave_nothing():
+    log_module.register_secret("hunter2")
+    log_module.register_secret("my-hunter2-phrase")
+
+    cleaned = log_module.redact("a my-hunter2-phrase b hunter2 c")
+
+    assert cleaned == "a *** b *** c"

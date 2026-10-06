@@ -277,6 +277,18 @@ def test_several_secrets_sent_as_names_are_none_of_them_echoed():
     assert other[:4] not in sentence
 
 
+@pytest.mark.parametrize("secret", ["correct'horse-battery", "correct\x07horse-battery"])
+def test_a_secret_with_a_character_the_sentence_replaces_is_not_echoed(secret):
+    """Redacted first: once the apostrophe or the bell is a `?`, it is no longer the secret."""
+    from MQTTBridge import log as log_module
+
+    log_module.register_secret(secret)
+    assert _refused(secret) == UNKNOWN + "'***'"
+    sentence = _refused("pre-" + secret + "-post")
+    assert sentence == UNKNOWN + "'pre-***-post'"
+    assert "horse" not in sentence
+
+
 def test_no_secret_registered_in_one_test_reaches_the_next():
     """`isolated_log` forgets them around every test, so the tests above leak nothing."""
     assert _refused("correct-horse") == UNKNOWN + "'correct-horse'"

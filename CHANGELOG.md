@@ -68,6 +68,10 @@ version that has no section here.
 
 ### Fixed
 
+- A password that contains another registered password is kept out of the log whole. The log's
+  redaction replaced the registered values in no particular order, so with a broker password
+  that held the OSCam password inside it - or the other way round - the longer one could come
+  out with only its middle replaced. The longest is now replaced first.
 - An OSCam whose binary is named `oscam_<version>` is reported as running. `oscam.software_running`
   and `oscam.software` come from the process list, and the list was asked for `oscam` and
   `oscam-...` only, so a cam named with an underscore - `oscam_11.704-emu-...`, of which the
