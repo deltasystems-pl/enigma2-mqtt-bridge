@@ -185,16 +185,19 @@ What a household sees depends on which payload was too big:
   for that bouquet is shorter, and the other bouquets keep theirs. Only a grid that does not fit
   with one event on each channel is not on the broker - an older, smaller copy is retracted - and
   is named in `info.not_published`.
-- **The device's discovery payload**, in `discovery` mode. Nothing is taken away: the device and
-  its entities stay, and the channel select keeps the options it had before the list outgrew the
-  limit - or, on a first install, the device does not appear in Home Assistant until the payload
-  fits.
+- **The device's discovery payload**, in `discovery` mode. It is published without the channel
+  select, whose options - every channel name - are what made it too big. The device and all its
+  other entities are there, also on a first install; the "Channel list" select is missing, or
+  disappears if it was there before, and the log says `the channel select is left out of the
+  discovery payload`. It comes back by itself once the names fit. Zapping by name still works,
+  from an automation or a script publishing `cmd/zap`.
 
 To get back what is missing:
 
 - set `bouquets_for_select` to the bouquets the household uses - that shrinks the channel list,
-  the grids and the discovery payload at once, and it is still what a consumer that reads only
-  `channels` needs;
+  the grids and the discovery payload at once. It is still needed for the channel select in
+  `discovery` mode, for a consumer that reads only `channels`, and for a guide with all its
+  events;
 - split a bouquet that is in `info.not_published` by itself into smaller ones, or leave it out;
 - `epg_grid_events` no longer needs lowering for the size - the plugin cuts a grid that is too
   big by itself - and `0` still switches the grid off.

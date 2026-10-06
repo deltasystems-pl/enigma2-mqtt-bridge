@@ -232,6 +232,10 @@ class Bridge:
         # this connection, or None before the first one.
         self._not_published = {}
         self._not_published_reported = None
+        # Whether the discovery payload last built had to leave the channel
+        # select out to fit one packet (`_discovery_components`). Kept so that
+        # the log says so when it starts, not on every connect.
+        self._select_left_out = False
         # The last picture this process put on `screen`, and when it was taken,
         # for the OpenWebif page. Held here and not on the publisher, because
         # the publisher is replaced by every settings save while the retained
@@ -710,6 +714,7 @@ class Bridge:
             # The save may have renamed the node or narrowed what is published,
             # and the new session measures everything again.
             self._not_published = {}
+            self._select_left_out = False
         except Exception:
             LOG.exception("could not shut the old session down cleanly")
         return self.start()
@@ -1336,14 +1341,50 @@ class Bridge:
         return names
 
     def _discovery_components(self, info):
-        """{topic: payload} for every Home Assistant discovery payload, as it stands now."""
+        """`(components, encoded)` for the Home Assistant discovery payloads, as they stand now.
+
+        `components` is {topic: payload}; `encoded` holds the JSON of the device
+        payload, which was built to be measured and need not be built again.
+
+        The channel select is the one component that grows with the receiver:
+        its options are every channel name. When the device payload with it
+        would be over the packet bound, the payload is built without it - which
+        costs one entity, where a payload that is not sent costs a first install
+        the whole device. A select announced earlier is then in `previous` and
+        absent here, so the builder writes its removal, as for any component
+        that is no longer announced, and it comes back the same way once the
+        names fit.
+        """
+        topic = discovery.device_topic(self.discovery_prefix, self.node_id)
+        options = self.channel_options()
+        components = self._build_discovery(info, options)
+        encoded = {}
+        left_out = False
+        if topic in components:
+            encoded[topic] = _encoded(components[topic])
+            if options and _oversize(topic, encoded[topic]):
+                components = self._build_discovery(info, ())
+                encoded[topic] = _encoded(components[topic])
+                # Too big even so: the smaller payload is the one withheld,
+                # and the select has not been left out of anything sent.
+                left_out = not _oversize(topic, encoded[topic])
+        if left_out and not self._select_left_out:
+            LOG.warning(
+                "the channel select is left out of the discovery payload: with %d channel"
+                " name(s) it would be over the %d byte packet limit",
+                len(options), MAX_PACKET_BYTES,
+            )
+        self._select_left_out = left_out
+        return components, encoded
+
+    def _build_discovery(self, info, channel_options):
         return discovery.build_discovery_components(
             self.node_id,
             self.value("friendly_name"),
             self.base_topic,
             info,
             prefix=self.discovery_prefix,
-            channel_options=self.channel_options(),
+            channel_options=channel_options,
             # From the same payload the announcement carries, so what is
             # announced and what is published cannot disagree about it.
             deep_standby_allowed=bool(info.get("settings", {}).get("deep_standby_allowed")),
@@ -1358,9 +1399,10 @@ class Bridge:
         """The discovery topics whose payload, built now, would not be sent for its size."""
         if self.value("ha_mode") != "discovery":
             return set()
-        components = self._discovery_components(self.build_info())
+        components, encoded = self._discovery_components(self.build_info())
         return {
-            topic for topic, payload in components.items() if _oversize(topic, _encoded(payload))
+            topic for topic, payload in components.items()
+            if _oversize(topic, encoded.get(topic) or _encoded(payload))
         }
 
     def publish_discovery(self, info=None):
@@ -1368,12 +1410,12 @@ class Bridge:
             return
         if info is None:
             info = self.build_info()
-        components = self._discovery_components(info)
+        components, encoded = self._discovery_components(info)
         if not components:
             LOG.debug("this build publishes no Home Assistant discovery payloads")
             return
         for topic, payload in sorted(components.items()):
-            self.publish_json(topic, payload)
+            self.publish_json(topic, payload, encoded=encoded.get(topic))
         self.state.set_components(sorted(components))
         device_topic = discovery.device_topic(self.discovery_prefix, self.node_id)
         if device_topic in self._not_published:

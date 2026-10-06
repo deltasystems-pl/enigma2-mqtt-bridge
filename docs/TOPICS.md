@@ -25,7 +25,7 @@ Conventions that hold everywhere:
 | Timestamps | `begin`, `end`, `generated`, `ts` are **Unix epoch seconds, UTC, integer**. Never a formatted string, never local time. |
 | Absent values | `null` for a field that has no value right now (no next event, no recording). A key is not silently dropped. |
 | Retraction | An empty payload published retained. That is how `last_error` is cleared and how `cmd/reset` and discovery retraction work. |
-| Packet size | No state topic, announcement or discovery payload is published in a packet over **1,000,000 bytes** - the fixed header, the topic and the payload together. (The retractions and the few fixed messages the plugin sends outside that path are small by construction.) That is under Mosquitto 2.1's default `max_packet_size` of 2,000,000 and under the 1 MiB default of other common brokers; a broker closes the connection on a bigger packet, and MQTT 3.1.1 gives a client no way to learn its limit. A payload that would need more is **not published**, and its topic is named in `info.not_published` (§1). A topic under `<base>/<node>/` is also retracted when an earlier, smaller payload was retained there; a topic outside the node's tree - a discovery payload - is left as it was. An event that is not retained and would be too big is dropped, with a line in the log. Two payloads give something up before it comes to that: `channels` goes out without its lists, which are on `channels/<bouquet_slug>`, and an `epg_grid/<bouquet_slug>` is cut to fewer events per channel (§1). In practice what is not published is the list or the grid of a single bouquet that is too big on its own or, in discovery mode, the device's discovery payload, on a receiver with a very large channel list. Added after 0.4.0 (unreleased). |
+| Packet size | No state topic, announcement or discovery payload is published in a packet over **1,000,000 bytes** - the fixed header, the topic and the payload together. (The retractions and the few fixed messages the plugin sends outside that path are small by construction.) That is under Mosquitto 2.1's default `max_packet_size` of 2,000,000 and under the 1 MiB default of other common brokers; a broker closes the connection on a bigger packet, and MQTT 3.1.1 gives a client no way to learn its limit. A payload that would need more is **not published**, and its topic is named in `info.not_published` (§1). A topic under `<base>/<node>/` is also retracted when an earlier, smaller payload was retained there; a topic outside the node's tree - a discovery payload - is left as it was. An event that is not retained and would be too big is dropped, with a line in the log. Three payloads grow with the channel list, and each gives something up before it comes to that: `channels` goes out without its lists, which are on `channels/<bouquet_slug>`; an `epg_grid/<bouquet_slug>` is cut to fewer events per channel; and in discovery mode the device's discovery payload leaves the channel select out (§1, §4). In practice what is not published is the list or the grid of a single bouquet that is too big on its own. Added after 0.4.0 (unreleased). |
 
 Everything the plugin publishes it also publishes again on every `on_connect` - the full state
 snapshot, the announcement and, in discovery mode, the discovery payloads. A broker that lost its
@@ -164,7 +164,7 @@ not by the checker; their types are the tables below.
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
 | 0.3.0 -> 0.4.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3); the read-only setting `update_allowed`, the capability `self_update`, the command `update`, `update.transaction` and the subscription to `enigma2mqtt/integration/<node>` (§3); the event topic `relay_request` and the command `relay`, and `cmd/update`'s refusal `no_relay`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
-| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topic `channels/<bouquet_slug>` and the capability `channel_topics`; the `channels` members `embedded`, `bouquets[].slug` and `bouquets[].count`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld. **Exceptions**: `oversize-payload-withheld`, `channels-lists-per-bouquet` |
+| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topic `channels/<bouquet_slug>` and the capability `channel_topics`; the `channels` members `embedded`, `bouquets[].slug` and `bouquets[].count`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4). **Exceptions**: `oversize-payload-withheld`, `channels-lists-per-bouquet` |
 
 ---
 
@@ -375,8 +375,9 @@ published a smaller payload there earlier, that copy is retracted - at once on a
 otherwise on the connect that follows - so a consumer never reads an old channel list as the
 current one. A topic outside the tree is never retracted for its size: an empty
 retained device payload would delete the device and all its entities in Home Assistant, so the
-discovery payload published earlier stays, with the channel names it had, and a first install has
-none until the payload fits.
+discovery payload published earlier stays as it was, and a first install has none until the
+payload fits. It takes a payload that is too big without its channel select to get there, because
+the select is left out first (§4).
 
 The entry goes when the topic is published again - the payload fits - or is retracted for another
 reason, such as the EPG grid being switched off. `info` is published again when a topic joins or
@@ -386,13 +387,13 @@ pass, and neither `bytes` nor `info` follows. A topic that fitted, was published
 again is a new entry with a new `bytes`. The receiver's log has one line each time a topic joins
 the list.
 
-What gets into the list is what could not be made smaller. `channels` drops its lists and a grid
-is cut to fewer events per channel before either is withheld (below), so an entry of the node's
-tree is nearly always `channels/<bouquet_slug>` or `epg_grid/<bouquet_slug>` for one bouquet that
-is too big by itself - a list of many thousands of services, or a grid that does not fit with one
-event on each channel. The remedy is on the receiver: `bouquets_for_select` limited to the
-bouquets in use takes that bouquet out and shrinks the discovery payload, or the bouquet is split
-into smaller ones. A lower `epg_grid_events` changes nothing for a grid that is in the list; `0`
+What gets into the list is what could not be made smaller. `channels` drops its lists, a grid is
+cut to fewer events per channel and the discovery payload leaves the channel select out before
+any of them is withheld (below, and §4), so an entry is nearly always `channels/<bouquet_slug>` or
+`epg_grid/<bouquet_slug>` for one bouquet that is too big by itself - a list of many thousands of
+services, or a grid that does not fit with one event on each channel. The remedy is on the
+receiver: `bouquets_for_select` limited to the bouquets in use takes that bouquet out, or the
+bouquet is split into smaller ones. A lower `epg_grid_events` changes nothing for a grid that is in the list; `0`
 switches the grids off
 ([TROUBLESHOOTING.md](TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back)).
 
@@ -2000,7 +2001,7 @@ gets no volume entity, rather than one that never moves. The unique id of each i
 | `next_timer` | sensor | `recording` | `device_class: timestamp` |
 | `volume` | number | `volume` | 0-100, slider |
 | `mute` | switch | `volume` | |
-| `channel_select` | select | `service` | Options are the channel names of the configured bouquets; selecting one publishes `cmd/zap` |
+| `channel_select` | select | `service` | Options are the channel names of the configured bouquets; selecting one publishes `cmd/zap`. Left out when the payload would not fit one packet with it - below |
 | `history_clear` | button | - | Since 0.3.0, when `history_clear` is a capability. Publishes `cmd/history_clear`: the receiver switches to channel 1 and empties its zap history |
 | `screen` | image | `screen` | `image/jpeg` |
 | `screenshot`, `restart_gui`, `refresh_discovery` | button | - | And `deep_standby` and `reboot` **only** when `deep_standby_allowed` is on |
@@ -2018,6 +2019,20 @@ gets no volume entity, rather than one that never moves. The unique id of each i
 
 The channel names in `channel_select` are **deduplicated**: `cmd/zap` by name refuses a name that
 is not unique, so offering the same „Sport" twice would be offering an option that can only fail.
+
+**The channel select is left out when the payload does not fit with it.** Added after 0.4.0
+(unreleased). Its options are every channel name, which makes it the one component that grows with
+the receiver. When the device payload with the select would be over the packet bound of 1,000,000
+bytes (the conventions at the top of this file), the payload is published **without the select**,
+and every other entity is announced as usual - where a payload that is not published at all would
+leave a first install with no device. A select that had been announced is removed by name, the way
+any component that is no longer announced is (below), so Home Assistant does not keep it with the
+options it last had; and it is announced again, with its options, as soon as the names fit - after
+`bouquets_for_select` was narrowed, for one. The receiver's log says so once, when it starts:
+`the channel select is left out of the discovery payload: with 9412 channel name(s) it would be
+over the 1000000 byte packet limit`. `cmd/zap` by name does not depend on the select. Only a
+payload that is too big even without the select is not published, and is then named in
+`info.not_published` (§1).
 
 Four details of the payload are worth knowing before writing a consumer against it, because each
 was measured against Home Assistant rather than assumed:

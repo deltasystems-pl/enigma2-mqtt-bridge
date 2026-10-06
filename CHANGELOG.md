@@ -43,6 +43,13 @@ version that has no section here.
   without asking the EPG cache again, and publishes the grid with the most that fits. The log has
   one line when a bouquet's grid is first cut or the cut moves. Only a grid that does not fit with
   one event on each channel is still withheld. A connect republishes the grid as it was fitted.
+- Discovery mode on a receiver with a very large channel list keeps its device. The device's
+  discovery payload carries every channel name as the options of the channel select; when it
+  would be over the bound with them, it is now published without the select instead of not at
+  all, so a first install gets the device and every other entity. A select that had been
+  announced is removed by name, and it is announced again as soon as the names fit. The log says
+  once that it was left out. A payload too big even without the select is withheld as before
+  ([TOPICS.md](docs/TOPICS.md#4-home-assistant-discovery)).
 
 ### Fixed
 
@@ -63,7 +70,9 @@ version that has no section here.
   else is published as before. To get the topic back, limit `bouquets_for_select` to the
   bouquets in use, or lower `epg_grid_events` - 0 switches the grid off
   ([TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back),
-  [TOPICS.md](docs/TOPICS.md)).
+  [TOPICS.md](docs/TOPICS.md)). Each of the three payloads now gives something up before it is
+  withheld - the lists, events, the channel select (Added and Changed, above) - so what is left
+  to withhold is a single bouquet too big by itself.
   **Behaviour change, named in-major exception `oversize-payload-withheld`**
   ([TOPICS.md, Contract version](docs/TOPICS.md#contract-version)): `channels` and
   `epg_grid/<bouquet_slug>` used to be published whatever their size; over the bound they are
