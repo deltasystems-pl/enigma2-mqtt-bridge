@@ -25,6 +25,7 @@ Conventions that hold everywhere:
 | Timestamps | `begin`, `end`, `generated`, `ts` are **Unix epoch seconds, UTC, integer**. Never a formatted string, never local time. |
 | Absent values | `null` for a field that has no value right now (no next event, no recording). A key is not silently dropped. |
 | Retraction | An empty payload published retained. That is how `last_error` is cleared and how `cmd/reset` and discovery retraction work. |
+| Packet size | No packet the plugin sends is over **1,000,000 bytes** - the fixed header, the topic and the payload together. That is under Mosquitto 2.1's default `max_packet_size` of 2,000,000 and under the 1 MiB default of other common brokers; a broker closes the connection on a bigger packet, and MQTT 3.1.1 gives a client no way to learn its limit. A payload that would need more is **not published**: its topic is retracted when an earlier, smaller payload was retained there, and named in `info.not_published` (§1). In practice that is `channels`, an `epg_grid/<bouquet_slug>` or, in discovery mode, the device's discovery payload, on a receiver with a very large channel list. Added after 0.4.0 (unreleased). |
 
 Everything the plugin publishes it also publishes again on every `on_connect` - the full state
 snapshot, the announcement and, in discovery mode, the discovery payloads. A broker that lost its
@@ -159,6 +160,7 @@ not by the checker; their types are the tables below.
 |---|---|---|
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
+| unreleased, on `main` after 0.4.0 | contract 1: an addition | **Added**: the `info` member `not_published`, and the bound behind it - a payload whose packet would be over 1,000,000 bytes is not published, and a smaller payload retained on its topic earlier is retracted (the conventions at the top of this file). Until now such a payload was sent, and a broker with a lower limit closed the connection on it |
 | 0.3.0 -> 0.4.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3); the read-only setting `update_allowed`, the capability `self_update`, the command `update`, `update.transaction` and the subscription to `enigma2mqtt/integration/<node>` (§3); the event topic `relay_request` and the command `relay`, and `cmd/update`'s refusal `no_relay`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
 
 ---
@@ -207,7 +209,8 @@ announcement retained.
                "update_check": false, "update_allowed": false},
   "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
                    "volume", "hdd", "process", "channels", "bouquet_context", "epg_grid", "keys",
-                   "screenshot", "toast", "message"]
+                   "screenshot", "toast", "message"],
+  "not_published": []
 }
 ```
 
@@ -226,6 +229,7 @@ announcement retained.
 | `ha_mode` | string | `discovery` \| `integration` \| `off` - the acknowledgement of `cmd/ha_mode` |
 | `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5-3600), `screenshot_delay` (post-zap settling seconds, 1-30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30-600). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`, `uninstall_allowed`, `update_check` and `update_allowed` (bools, off by default). See below. |
 | `capabilities` | list of strings | Which hooks this image actually gave the plugin |
+| `not_published` | list of objects | The topics whose payload was too big to send, so they are not on the broker. `[]` when everything fits, which is nearly always. Added after 0.4.0 (unreleased). See below |
 
 **Presence in `settings` is not permission to write it back.** Until 0.2.0 this object was „the
 complete remotely writable subset" and the two things were the same; they are not any more. The
@@ -342,6 +346,34 @@ or other index keys, and the build refuses both for every other flavour - and "o
 means two other things in this contract: where a command came from, and whether the release index
 could be reached (`update.origin`). The release workflow reads every release package
 back and refuses one that carries either.
+
+**`not_published` names the topics that are missing on purpose.** Added after 0.4.0 (unreleased).
+A payload whose packet would be over the plugin's bound of 1,000,000 bytes (the conventions at the
+top of this file) is not sent, because a broker answers an oversize packet by closing the
+connection, and the plugin would send it again on every reconnect. Always present; `[]` when
+everything fits, otherwise one entry for each such topic, sorted by `topic`:
+
+```json
+"not_published": [{"topic": "channels", "bytes": 2315478, "limit": 1000000},
+                  {"topic": "epg_grid/astra", "bytes": 1204611, "limit": 1000000}]
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `topic` | string | The topic, relative to `<base>/<node>/` - `channels`, `epg_grid/astra` - or in full for a topic outside the node's tree, which is how a discovery payload appears: `homeassistant/device/<node>/config` |
+| `bytes` | int | The size of the packet the payload would have needed: the fixed header counted at its longest, the topic and the payload, in bytes |
+| `limit` | int | The bound it was held to, `1000000` |
+
+A topic in the list is **not on the broker**: when this node had published a smaller payload there
+earlier, that copy is retracted, so a consumer never reads an old channel list as the current one.
+The entry goes when the topic is published again - the payload fits - or is retracted for another
+reason, such as the EPG grid being switched off. `info` is published again whenever the list
+changes, which for a grid built after the connect is some time after the first `info` of the
+connection; a grid that stays too big changes its entry's `bytes` as the programme guide moves, and
+`info` follows. The receiver's log has one line for each topic and size. The remedy is on the
+receiver: `bouquets_for_select` limited to the bouquets in use shrinks `channels`, the grids and
+the discovery payload, and a lower `epg_grid_events` shrinks the grids
+([TROUBLESHOOTING.md](TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back)).
 
 ### `<base>/<node>/power`
 

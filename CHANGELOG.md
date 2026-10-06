@@ -9,6 +9,24 @@ version that has no section here.
 
 ## [Unreleased]
 
+### Fixed
+
+- A receiver with a very large channel list could knock itself off the broker over and over.
+  Mosquitto 2.1 - the version in the current Home Assistant add-on - closes the connection on a
+  packet over 2,000,000 bytes ("disconnected: oversize packet" in its log), and `channels` with
+  every bouquet, an `epg_grid/<bouquet_slug>` or, in discovery mode, the device's discovery payload
+  can be bigger than that. The last will then said `offline`, the plugin reconnected a second
+  later and sent the same payload again, so the entities went unavailable and came back for as
+  long as the receiver was on, and the receiver slowed down from building the payload each time.
+  A payload whose packet would be over 1,000,000 bytes is now not sent at all: the log says so
+  once for each topic and size, a smaller payload this node had retained on that topic is
+  retracted rather than left to look current, and `info` gains `not_published`, which lists each
+  such topic with its size and the limit and is empty otherwise. Everything else is published as
+  before. To get the topic back, limit `bouquets_for_select` to the bouquets in use, or lower
+  `epg_grid_events` - 0 switches the grid off
+  ([TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back),
+  [TOPICS.md](docs/TOPICS.md)).
+
 ### Documentation
 
 - TRANSACTION.md treats the companion integration's 0.4.0 as released, and says which of its

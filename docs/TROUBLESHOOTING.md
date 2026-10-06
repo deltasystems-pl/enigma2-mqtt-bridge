@@ -151,6 +151,30 @@ sensors work but Home Assistant never discovers the device".
 `availability` is the canary: it is published first and by the last will, so if even that is
 missing the login or the ACL is the problem, not the plugin's hooks.
 
+## Entities keep going unavailable and coming back
+
+Over and over, for as long as the receiver is on, and the broker's log says why:
+`disconnected: oversize packet`. **Mosquitto 2.1** - the version in the current Home Assistant
+add-on - refuses a packet over 2,000,000 bytes (`max_packet_size`) by closing the connection. The
+last will then says `offline`, the plugin reconnects, publishes everything again, and is cut off at
+the same payload. A receiver with a very large channel list gets there: `channels` carries every
+bouquet with every service while `bouquets_for_select` is empty, each `epg_grid/<bouquet_slug>`
+carries a bouquet's programme guide, and in `discovery` mode the device's discovery payload
+carries every channel name.
+
+A plugin after 0.4.0 does not send such a payload. It holds every packet to 1,000,000 bytes,
+says in its log which topic was too big - `not publishing channels: 2315478 bytes is over the
+1000000 byte packet limit` - and lists it in `info.not_published`
+([TOPICS.md](TOPICS.md#basenodeinfo)), so the connection stays up and everything else works. The
+topic itself is missing until its payload fits:
+
+- set `bouquets_for_select` to the bouquets the household uses - that shrinks the channel list,
+  the grids and the discovery payload at once;
+- lower `epg_grid_events`, the events per channel in the grid; `0` switches the grid off.
+
+Both are on the setup screen and on the plugin's OpenWebif page ([SETUP.md](SETUP.md)). With an
+older plugin, the same two settings are the way out, or a higher `max_packet_size` on the broker.
+
 ## Entities Home Assistant will never update again
 
 **Retained ghosts.** A retained topic belongs to the broker, and it outlives whatever created it.

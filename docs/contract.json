@@ -170,7 +170,8 @@
     "wol": "object",
     "ha_mode": "string",
     "settings": "object",
-    "capabilities": "list of strings"
+    "capabilities": "list of strings",
+    "not_published": "list of objects"
   },
   "info_wol_members": {
     "supported": "bool or null",

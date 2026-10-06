@@ -150,7 +150,39 @@ SLOW_SNAPSHOT_TOTAL_SECONDS = 1.0
 REMEMBERED_TOPICS = 256
 REMEMBERED_BYTES = 16384
 
+# The largest MQTT packet this node sends. A broker that is handed a bigger one
+# closes the connection: Mosquitto 2.1 at 2,000,000 bytes by default, other
+# common brokers at 1 MiB, and MQTT 3.1.1 gives a client no way to learn the
+# figure. The will then says `offline`, the client reconnects a second later
+# and the snapshot sends the same payload again - for as long as the box is
+# switched on. So the bound is this node's own, under both defaults, and a
+# payload over it stays on the receiver (`publish_raw`).
+MAX_PACKET_BYTES = 1000000
+
+# What a PUBLISH at QoS 0 carries besides its topic and payload: the fixed
+# header - one byte and up to four of remaining length - and the two bytes of
+# the topic's length. Counted at its largest, so the estimate never runs short.
+PACKET_OVERHEAD_BYTES = 1 + 4 + 2
+
 _DEFAULT_MONITOR = object()
+
+
+def _oversize(topic, payload):
+    """The bytes of the packet this publish needs when that is over the bound, else 0.
+
+    Bytes, not characters: a channel name in Polish or Greek is two bytes a
+    letter. Text that fits even at four bytes a character is not encoded just
+    to be measured - that covers every payload but the few worth measuring.
+    """
+    if isinstance(payload, (bytes, bytearray)):
+        body = len(payload)
+    else:
+        text = "" if payload is None else str(payload)
+        if PACKET_OVERHEAD_BYTES + (len(topic) + len(text)) * 4 <= MAX_PACKET_BYTES:
+            return 0
+        body = len(text.encode("utf-8"))
+    size = PACKET_OVERHEAD_BYTES + len(topic.encode("utf-8")) + body
+    return size if size > MAX_PACKET_BYTES else 0
 
 
 class Bridge:
@@ -193,6 +225,13 @@ class Bridge:
         # (`availability`, the screenshot) are only named, never kept.
         self._last_json = OrderedDict()
         self._raw_topics = set()
+        # topic -> the packet size of a payload that was too big to send
+        # (`MAX_PACKET_BYTES`): `info.not_published`. Not `_published`, and not
+        # forgotten on a connect - a reconnect that forgot it would log the same
+        # payload again every time. Beside it, the list `info` last carried on
+        # this connection, or None before the first one.
+        self._not_published = {}
+        self._not_published_reported = None
         # The last picture this process put on `screen`, and when it was taken,
         # for the OpenWebif page. Held here and not on the publisher, because
         # the publisher is replaced by every settings save while the retained
@@ -668,6 +707,9 @@ class Bridge:
             self._will_topic = None
             self._session_settings = None
             self._stop_publishers()
+            # The save may have renamed the node or narrowed what is published,
+            # and the new session measures everything again.
+            self._not_published = {}
         except Exception:
             LOG.exception("could not shut the old session down cleanly")
         return self.start()
@@ -865,6 +907,9 @@ class Bridge:
     # -------------------------------------------------------------------- events --
 
     def on_connect(self):
+        # This connection has not published `info` yet; until it has, nothing
+        # below republishes it over a change to `not_published`.
+        self._not_published_reported = None
         # First, before a single new payload: whatever this node published under
         # an older name is still on the broker and this is the first chance to
         # take it back.
@@ -940,6 +985,9 @@ class Bridge:
             # Closed: a publisher's timer or event that fires after the
             # retraction would re-create a retained topic for good.
             return None
+        size = _oversize(topic, payload)
+        if size:
+            return self._withhold(topic, size)
         info = self.client.publish(topic, payload, qos=STATE_QOS, retain=retain)
         if retain:
             self.state.remember(topic)
@@ -954,7 +1002,68 @@ class Bridge:
                 self._raw_topics.add(topic)
             if topic == self.topic("screen") and payload:
                 self._record_screenshot(payload)
+        if self._not_published.pop(topic, None) is not None:
+            # It fits again, so it is on the broker and off the list.
+            self._report_not_published()
         return info
+
+    def _topic_label(self, topic):
+        """A topic as `info.not_published` and the log name it: relative to the node's tree."""
+        root = self.base_topic + "/" + self.node_id + "/"
+        return topic[len(root):] if topic.startswith(root) else topic
+
+    def not_published(self):
+        """`info.not_published`: what was too big to send, sorted by topic."""
+        return sorted(
+            (
+                {"topic": self._topic_label(topic), "bytes": size, "limit": MAX_PACKET_BYTES}
+                for topic, size in self._not_published.items()
+            ),
+            key=lambda entry: entry["topic"],
+        )
+
+    def _withhold(self, topic, size):
+        """Keep a payload whose packet is over `MAX_PACKET_BYTES` off the wire.
+
+        Handing it to the client is what must not happen: the broker answers
+        an oversize packet by closing the connection, and every connect would
+        send it again. What a consumer gets instead is the topic named in
+        `info.not_published`, and one line in the log - per topic and size, not
+        per attempt, because the snapshot attempts it on every connect and the
+        channel list on every change.
+
+        A copy this node published earlier, when the payload was smaller, is
+        retracted: left retained it would go on saying it is the current state.
+        A topic that was never published gets nothing at all.
+        """
+        if self._not_published.get(topic) != size:
+            LOG.warning(
+                "not publishing %s: %d bytes is over the %d byte packet limit",
+                self._topic_label(topic), size, MAX_PACKET_BYTES,
+            )
+        self._not_published[topic] = size
+        if self.state.knows(topic):
+            self.client.publish(topic, "", qos=STATE_QOS, retain=True)
+            self.state.forget(topic)
+        self._published.pop(topic, None)
+        self._forget(topic)
+        self._report_not_published()
+        return None
+
+    def _report_not_published(self):
+        """Publish `info` again when `not_published` is not what it last said.
+
+        Only on an open session that has published `info` already: before that,
+        the `info` about to go out carries the list anyway. It cannot loop -
+        `build_info` records what it reports before the publish, so the second
+        time round there is nothing left to say.
+        """
+        if self._not_published_reported is None or not self.connected:
+            return False
+        if self.not_published() == self._not_published_reported:
+            return False
+        self.publish_json(self.topic("info"), self.build_info())
+        return True
 
     def _record_screenshot(self, payload):
         """Remember the picture just sent on `screen`, with the time it was taken.
@@ -983,7 +1092,7 @@ class Bridge:
         info = self.publish_raw(
             topic, encoded, retain=retain, change_key=_change_key(encoded, payload, volatile)
         )
-        if retain and self.client is not None:
+        if retain and self.client is not None and topic not in self._not_published:
             self._remember(topic, encoded)
         return info
 
@@ -1017,7 +1126,7 @@ class Bridge:
         if retain and self._published.get(topic) == change_key:
             return None
         info = self.publish_raw(topic, encoded, retain=retain, change_key=change_key)
-        if not raw and retain and self.client is not None:
+        if not raw and retain and self.client is not None and topic not in self._not_published:
             self._remember(topic, encoded)
         return info
 
@@ -1032,6 +1141,9 @@ class Bridge:
         self.state.forget(topic)
         self._published.pop(topic, None)
         self._forget(topic)
+        if self._not_published.pop(topic, None) is not None:
+            # Taken back on purpose is not "too big to send" any more.
+            self._report_not_published()
         return info
 
     def build_report(self):
@@ -1059,6 +1171,8 @@ class Bridge:
     def build_info(self):
         build = self.build_report()
         self._build_reported = build
+        not_published = self.not_published()
+        self._not_published_reported = not_published
         return {
             "image": boxinfo.image_version(),
             "enigma": boxinfo.enigma_version(),
@@ -1075,6 +1189,9 @@ class Bridge:
             "ha_mode": self.value("ha_mode"),
             "settings": self.published_settings(),
             "capabilities": self.capabilities(),
+            # Empty on nearly every receiver: the retained topics a payload was
+            # too big for, which are therefore not on the broker (`_withhold`).
+            "not_published": not_published,
         }
 
     def publish_snapshot(self, info=None):
@@ -1302,6 +1419,7 @@ class Bridge:
         """Step 5 of the removal: nothing this process published is on the broker any more."""
         self.state.forget_all()
         self.forget_published()
+        self._not_published = {}
         self._last_json.clear()
         self._raw_topics.clear()
         self._screenshot = None

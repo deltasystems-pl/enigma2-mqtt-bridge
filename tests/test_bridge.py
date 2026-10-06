@@ -32,8 +32,9 @@ def test_info_carries_every_documented_field(connected_bridge, factory):
     payload = factory.client.last(INFO).json()
     assert set(payload) == {
         "image", "enigma", "plugin", "build", "contract", "boxtype", "mac", "ip", "uptime",
-        "wol", "ha_mode", "settings", "capabilities",
+        "wol", "ha_mode", "settings", "capabilities", "not_published",
     }
+    assert payload["not_published"] == []
     assert set(payload["wol"]) == {"supported", "armed", "iface", "mechanism"}
     assert payload["plugin"] == __version__
     assert payload["boxtype"] == "vuuno4kse"
