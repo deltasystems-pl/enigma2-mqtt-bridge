@@ -106,6 +106,9 @@ def kind(payload):
     """Which of the channel list's payloads an encoding was of, or None."""
     if isinstance(payload, dict) and "bouquets" in payload:
         return "channels"
+    if isinstance(payload, dict) and set(payload) == {"bouquet", "sref", "generated", "channels"}:
+        # A bouquet's whole payload: its list encoded a second time.
+        return "list again"
     if isinstance(payload, list) and payload and isinstance(payload[0], dict):
         if "slug" in payload[0]:
             return "index"

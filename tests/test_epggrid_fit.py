@@ -405,8 +405,25 @@ def test_the_search_goes_down_when_the_last_cut_no_longer_fits(live_bridge, fact
     generate(live_bridge)
 
     assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 2
-    assert measured[0] == 3 and 4 not in measured
+    # The last cut, then only what is below it: neither it nor the whole grid again.
+    assert measured == [3, 1, 2]
     assert live_bridge.publisher("epg_grid")._cuts == {"ulubione_tv": 2}
+
+
+def test_the_search_goes_all_the_way_up_in_one_pass(live_bridge, factory, receiver, monkeypatch):
+    """Not one event a pass: a guide that fits whole again is whole at the next pass."""
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", 25000)
+    guide(receiver)
+    generate(live_bridge)
+    assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 1
+    measured = watch_measuring(live_bridge, monkeypatch)
+
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", 1000000)
+    generate(live_bridge)
+
+    assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 4
+    assert measured[:2] == [1, 2] and measured[-1] == 4
+    assert len(measured) <= 4
 
 
 def test_a_cut_grid_is_published_from_the_json_that_was_measured(live_bridge, factory, receiver,

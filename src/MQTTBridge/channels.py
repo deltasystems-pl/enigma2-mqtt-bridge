@@ -426,7 +426,6 @@ class ChannelsPublisher(Publisher):
         on `channels/<bouquet_slug>` either way, and `bouquets` says where.
         """
         payload = self.payload()
-        self._too_big = 0
         if self.bridge is None:
             return payload
         encoded, self._too_big = self.bridge.measure("channels", payload)
