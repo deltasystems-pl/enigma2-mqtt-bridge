@@ -111,7 +111,7 @@ def _problems(copy, monkeypatch, repin):
     return check_workflows.check(copy)
 
 
-CHECKOUT = "      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0\n"
+CHECKOUT = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
 ANCHOR = "          umask 077\n"
 PRINTF = ("printf '%s' \"$INDEX_SIGNING_KEY\" | /usr/bin/env -u INDEX_SIGNING_KEY "
           "/usr/bin/base64 -d")
@@ -206,7 +206,7 @@ SIGN_JOB_CHANGES = [
     ("--check --strict", "--check --strict --ignore-missing",
      "runs only the fixed hash, sign and emit steps"),
     ("      - name: The file build hashed\n",
-     "      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0\n\n"
+     "      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n\n"
      "      - name: The file build hashed\n", "no checkout and no action but download-artifact"),
     ("releases.json.raw-sig)\" >> \"$GITHUB_OUTPUT\"",
      "releases.json.raw-sig)\" >> \"$GITHUB_OUTPUT\"; env",
@@ -263,8 +263,8 @@ def _new(copy, name, job="", steps="      - run: echo hi\n", on=None):
      "not pinned"),
     (lambda copy: _edit(copy, "release.yml", "@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2",
                         "@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65"), "no `# vX.Y.Z` comment"),
-    (lambda copy: _edit(copy, "index.yml", "@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0",
-                        "@11d5960a # v4.4.0"), "not pinned"),
+    (lambda copy: _edit(copy, "index.yml", "@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+                        "@3d3c42e5 # v7.0.1"), "not pinned"),
     (lambda copy: _edit(copy, "ci.yml", CHECKOUT,
                         CHECKOUT + "\n      - {uses: evil/action@main}\n"),
      "`evil/action@main` is not pinned"),

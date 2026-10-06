@@ -47,7 +47,7 @@ jobs:
     outputs:
       sha256: ${{ steps.build.outputs.sha256 }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Every tag: COMPATIBILITY is read at each release tag.
           fetch-depth: 0
@@ -82,7 +82,7 @@ jobs:
             ${REQUIRED:+--require-version "$REQUIRED"} \
             --out releases.json --summary "$GITHUB_STEP_SUMMARY" --github-output "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: unsigned-index
           path: releases.json
@@ -100,7 +100,7 @@ jobs:
     # sees the key: the file is the one build hashed, every member is right, the key id is the
     # main key's, the serial is the next one, and gh-pages' history agrees. sign waits for it.
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -109,7 +109,7 @@ jobs:
         shell: bash
         run: git fetch --no-tags origin gh-pages:refs/remotes/origin/gh-pages
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: unsigned-index
           path: index
@@ -141,7 +141,7 @@ jobs:
     # review next to a new pin. The repository's code checks the file before (precheck) and the
     # signature after (publish), in jobs that never see the key.
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: unsigned-index
           path: ${{ runner.temp }}/index
@@ -190,12 +190,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The whole history: the index is judged against every index gh-pages has published.
           fetch-depth: 0
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: unsigned-index
           path: index

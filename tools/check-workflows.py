@@ -298,7 +298,7 @@ def load(text):
 # The sign job's whole text, pinned: any change to the one job that holds the key must change this
 # pin in the same pull request, so it can never pass review unnoticed - the diff shows the new
 # text and the new hash side by side.
-SIGN_JOB_SHA256 = "e816a640876e8bbf1363aaf442551d9941c35e1e6a9a66d6af0e1e01113a5c78"
+SIGN_JOB_SHA256 = "b3eb0c28b8c7ccec35bf30150398edc9335cf3934a9f2c4e08cf39cd2a85f647"
 
 # The two steps that run before any code from the repository, exactly - not a pattern. The sign
 # step expands the key once, into the one pipeline that decodes it for OpenSSL's stdin, and
