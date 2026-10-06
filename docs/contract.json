@@ -33,6 +33,10 @@
       "retained": true,
       "since": "0.2.0"
     },
+    "channels/<bouquet_slug>": {
+      "payload": "json",
+      "retained": true
+    },
     "bouquet": {
       "payload": "json",
       "retained": true
@@ -254,6 +258,7 @@
     "bouquet_context",
     "cam",
     "cec_workaround",
+    "channel_topics",
     "channels",
     "epg",
     "epg_grid",
@@ -303,6 +308,10 @@
     },
     {
       "name": "oversize-payload-withheld",
+      "release": "unreleased"
+    },
+    {
+      "name": "channels-lists-per-bouquet",
       "release": "unreleased"
     }
   ],

@@ -421,6 +421,26 @@ def test_the_order_on_the_way_out(box, factory, receiver, monkeypatch):
     assert client.published[-1] is published[-1]
 
 
+def test_the_channel_lists_go_with_everything_else(box, factory):
+    """`channels/<bouquet_slug>` is a retained topic like any other, and so are its slugs."""
+    bridge = box()
+    client = factory.client
+    lists = {ROOT + "/channels/ulubione_tv", ROOT + "/channels/sport_hd"}
+    assert lists <= set(bridge.state.retained_topics)
+    assert bridge.state.channel_slugs == ["ulubione_tv", "sport_hd"]
+    before = len(client.published)
+
+    run_to_opkg(bridge, factory)
+
+    retracted = {entry.topic for entry in teardown(client, before) if entry.text == ""}
+    assert lists <= retracted
+    assert bridge.state.channel_slugs == []
+    with open(bridge.state.path, encoding="utf-8") as handle:
+        import json
+
+        assert json.load(handle)["channels_slugs"] == []
+
+
 def test_the_command_clears_last_error_before_the_doors_close(box, factory):
     box()
     send(factory, "wrong")

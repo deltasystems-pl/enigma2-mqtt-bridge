@@ -9,6 +9,33 @@ version that has no section here.
 
 ## [Unreleased]
 
+### Added
+
+- Each bouquet's channel list is on a retained topic of its own, `channels/<bouquet_slug>` - the
+  slug the EPG grid uses - with the bouquet's name, its reference, when the list last changed and
+  the services. A bouquet nobody edited is not republished when another one changes, a bouquet
+  that is renamed, removed or left out of `bouquets_for_select` has its topic retracted, also
+  across a restart, and `cmd/reset` and `cmd/uninstall` take the topics back with everything
+  else. The capability `channel_topics` says the topics are published. `channels` gains
+  `embedded` and, for each bouquet, `slug` and `count`
+  ([TOPICS.md](docs/TOPICS.md)).
+
+### Changed
+
+- `channels` on a receiver with a very large channel list. The payload grows with the sum of all
+  bouquets, and over the packet bound of 1,000,000 bytes it was not published at all (Fixed,
+  below). It is now published without the lists instead: `embedded` is `false`, every bouquet's
+  `channels` is `null`, and its name, reference, `slug` and `count` are there as always; the lists
+  are on `channels/<bouquet_slug>`, whose size follows one bouquet. `cmd/zap` by name, the
+  `bouquet` field of `service` and the EPG grid go on working from the complete list. Where the
+  packet fits - nearly everywhere - `embedded` is `true` and the lists are in `channels` as before.
+  **Behaviour change, named in-major exception `channels-lists-per-bouquet`**
+  ([TOPICS.md, Contract version](docs/TOPICS.md#contract-version)): `bouquets[].channels` was
+  always a list; on such a receiver it is now `null`. A consumer reads `channels/<slug>` when it
+  finds `null` there - or always, when `channel_topics` is a capability. The companion
+  integration up to 0.4.0 skips a bouquet without a list, so it shows the bouquet names and no
+  channels until `bouquets_for_select` is narrowed.
+
 ### Fixed
 
 - A receiver with a very large channel list could knock itself off the broker over and over.

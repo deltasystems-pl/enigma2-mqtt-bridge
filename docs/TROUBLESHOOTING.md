@@ -163,20 +163,34 @@ carries a bouquet's programme guide, and in `discovery` mode the device's discov
 carries every channel name.
 
 A plugin after 0.4.0 does not send such a payload. It holds every packet to 1,000,000 bytes,
-says in its log which topic was too big - `not publishing channels: 2315478 bytes is over the
-1000000 byte packet limit` - and lists it in `info.not_published`
+says in its log which topic was too big - `not publishing epg_grid/astra: 1204611 bytes is over
+the 1000000 byte packet limit` - and lists it in `info.not_published`
 ([TOPICS.md](TOPICS.md#basenodeinfo)), so the connection stays up and everything else works. The
 log has that line once, when the topic becomes too big, not at every attempt.
 
-What is missing depends on the topic. `channels` or a grid that is too big is not on the broker -
-an older, smaller copy is retracted - so a consumer has no channel list, or no programme guide for
-that bouquet. In `discovery` mode, when it is the device's discovery payload that is too big,
-nothing is taken away: the device and its entities stay, and the channel select keeps the options
-it had before the list outgrew the limit - or, on a first install, the device does not appear in
-Home Assistant until the payload fits. Either way, to get it back:
+What a household sees depends on which payload was too big:
+
+- **The channel list.** `channels` is published without the lists: it still names every bouquet,
+  with `embedded` `false` and how many services each has, and each bouquet's list is on a topic
+  of its own, `channels/<bouquet_slug>` ([TOPICS.md](TOPICS.md#basenodechannels---since-m2)).
+  The log says so once - `the channel list would need a packet of 2315478 bytes; channels is
+  published without the lists, which are on channels/<bouquet_slug>`. A consumer that reads those
+  topics has every channel. One that reads only `channels` - the companion integration up to
+  0.4.0 - has the bouquet names and no channels, so its channel selects are empty until the list
+  is narrowed. Only a single bouquet too big for one packet by itself is missing altogether, and
+  is named in `info.not_published`.
+- **A grid.** An `epg_grid/<bouquet_slug>` that is too big is not on the broker - an older,
+  smaller copy is retracted - so there is no programme guide for that bouquet.
+- **The device's discovery payload**, in `discovery` mode. Nothing is taken away: the device and
+  its entities stay, and the channel select keeps the options it had before the list outgrew the
+  limit - or, on a first install, the device does not appear in Home Assistant until the payload
+  fits.
+
+To get back what is missing:
 
 - set `bouquets_for_select` to the bouquets the household uses - that shrinks the channel list,
-  the grids and the discovery payload at once;
+  the grids and the discovery payload at once, and it is still what a consumer that reads only
+  `channels` needs;
 - lower `epg_grid_events`, the events per channel in the grid; `0` switches the grid off.
 
 Both are on the setup screen and on the plugin's OpenWebif page ([SETUP.md](SETUP.md)). With an

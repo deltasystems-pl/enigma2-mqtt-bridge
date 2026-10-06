@@ -49,6 +49,15 @@ class Publisher:
     # substring of it.
     volatile = ()
 
+    def volatile_for(self, suffix):
+        """The volatile fields of one of this area's topics.
+
+        The same for every topic of an area, unless the area says otherwise:
+        the channel list stamps `generated` on two kinds of topic and means two
+        things by it.
+        """
+        return self.volatile
+
     # Set by a publisher that returns False from `start()` because its feature
     # is switched off in the settings, rather than because this image could not
     # give it the hooks. The two look identical from outside and read very
@@ -100,12 +109,17 @@ class Publisher:
         """One of the plugin's settings, read now rather than cached at start."""
         return None if self.bridge is None else self.bridge.value(name)
 
-    def publish(self, suffix, payload):
-        """Publish this feature area's state - but only when it has changed."""
+    def publish(self, suffix, payload, encoded=None):
+        """Publish this feature area's state - but only when it has changed.
+
+        `encoded` is the payload's JSON when the caller has it already, from
+        measuring it (`Bridge.measure`), so that it is not built twice.
+        """
         if self.bridge is None:
             return None
+        options = {} if encoded is None else {"encoded": encoded}
         return self.bridge.publish_state(
-            suffix, payload, raw=suffix in self.raw, volatile=self.volatile
+            suffix, payload, raw=suffix in self.raw, volatile=self.volatile_for(suffix), **options
         )
 
     def report(self, command, message):

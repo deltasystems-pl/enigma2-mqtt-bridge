@@ -56,6 +56,17 @@ BOUQUET_PREFIX = "userbouquet."
 
 POLL_MILLISECONDS = 60000
 
+# One retained topic for each bouquet, beside `channels`: its size follows the
+# largest bouquet where `channels` follows the sum of all of them.
+LIST_PREFIX = "channels/"
+
+# Claimed with `channels`: the per-bouquet topics are published.
+LISTS_CAPABILITY = "channel_topics"
+
+# The stamp on a bouquet's own topic is left out of the change comparison, as
+# the grid's is - see `ChannelsPublisher.volatile_for`.
+LIST_VOLATILE = ("generated",)
+
 # eServiceReference flags, by value, because the names are only importable on a
 # receiver and the numbers are part of the reference's string form anyway: they
 # are the second colon-separated field, which is why `1:64:` is the spelling of
@@ -275,6 +286,10 @@ class ChannelsPublisher(Publisher):
         self._generated = 0
         self._mtimes = ()
         self._index = {}
+        # Whether `channels` carries each bouquet's list, or only says where it
+        # is. Decided when the bouquets are walked and kept until the next walk,
+        # so a connect does not build megabytes of JSON to learn it again.
+        self._embedded = True
         self._ticker = Ticker(self._poll, "bouquets")
         self._on_change = []
 
@@ -294,6 +309,20 @@ class ChannelsPublisher(Publisher):
         """Tell somebody - the EPG grid - that the bouquets moved."""
         self._on_change.append(callback)
 
+    def extra_capabilities(self):
+        """`channel_topics`: each bouquet's list is on a topic of its own as well."""
+        return [LISTS_CAPABILITY]
+
+    def volatile_for(self, suffix):
+        """`generated` takes no part in the comparison on a bouquet's own topic.
+
+        On `channels` it does, as it always has: that one says when the
+        bouquets were last walked. On `channels/<bouquet_slug>` it is left out,
+        as on the grid, or a change to one bouquet would rewrite the retained
+        list of every other.
+        """
+        return LIST_VOLATILE if suffix.startswith(LIST_PREFIX) else self.volatile
+
     # ------------------------------------------------------------------ reading --
 
     def _selection(self):
@@ -311,8 +340,13 @@ class ChannelsPublisher(Publisher):
         for bouquet in self._bouquets:
             for channel in bouquet["channels"]:
                 self._index.setdefault(identity(channel["sref"]), bouquet["name"])
-        payload = self.payload()
-        self.publish("channels", payload)
+        payload = self._publish_channels()
+        for suffix, one in self._lists().items():
+            self.publish(suffix, one)
+        if self.bridge is not None:
+            # A bouquet that was renamed, removed or deselected has a list of
+            # its own on the broker that nothing above replaced.
+            self.bridge.sync_channel_slugs()
         for callback in list(self._on_change):
             try:
                 callback()
@@ -324,8 +358,74 @@ class ChannelsPublisher(Publisher):
         if self.refresh(force=False) is not None:
             LOG.info("the bouquets changed; the channel list was republished")
 
+    def _publish_channels(self):
+        """Publish `channels`, with every bouquet's list while that fits one packet.
+
+        The bridge measures it, as it measures everything it sends, and the JSON
+        it measured is the JSON it then publishes - one encoding, as before
+        there was a bound. A payload over the bound goes out without the lists
+        instead of not at all: it still names every bouquet, with its slug and
+        how many services it has, and each list is on `channels/<bouquet_slug>`.
+        """
+        was_embedded = self._embedded
+        self._embedded = True
+        payload = self.payload()
+        if self.bridge is None:
+            return payload
+        encoded, size = self.bridge.measure("channels", payload)
+        if size:
+            self._embedded = False
+            payload = self.payload()
+            encoded = None
+            if was_embedded:
+                LOG.warning(
+                    "the channel list would need a packet of %d bytes; channels is published"
+                    " without the lists, which are on channels/<bouquet_slug>", size,
+                )
+        self.publish("channels", payload, encoded)
+        return payload
+
     def payload(self):
-        return {"generated": self._generated, "bouquets": self._bouquets}
+        """What `channels` carries: the bouquets, and their lists when `_embedded` says so."""
+        return {
+            "generated": self._generated,
+            "embedded": self._embedded,
+            "bouquets": [
+                {
+                    "name": bouquet["name"],
+                    "sref": bouquet["sref"],
+                    "slug": slugify(bouquet["name"]),
+                    "count": len(bouquet["channels"]),
+                    "channels": bouquet["channels"] if self._embedded else None,
+                }
+                for bouquet in self._bouquets
+            ],
+        }
+
+    def _lists(self):
+        """{suffix: payload} - `channels/<bouquet_slug>` for each bouquet.
+
+        A bouquet whose name leaves no slug has no topic, as it has no grid.
+        Two bouquets with one slug share a topic and the second wins it, which
+        the payload's `bouquet` shows (`slugify`).
+        """
+        topics = {}
+        for bouquet in self._bouquets:
+            slug = slugify(bouquet["name"])
+            if not slug:
+                continue
+            topics[LIST_PREFIX + slug] = {
+                "bouquet": bouquet["name"],
+                "sref": bouquet["sref"],
+                "generated": self._generated,
+                "channels": bouquet["channels"],
+            }
+        return topics
+
+    @property
+    def published_slugs(self):
+        """The slugs of the `channels/<bouquet_slug>` topics, in bouquet order."""
+        return [suffix[len(LIST_PREFIX):] for suffix in self._lists()]
 
     @property
     def bouquets(self):
@@ -345,7 +445,9 @@ class ChannelsPublisher(Publisher):
     def snapshot(self):
         if not self._bouquets:
             self.refresh()
-        return {"channels": self.payload()}
+        topics = {"channels": self.payload()}
+        topics.update(self._lists())
+        return topics
 
     # ---------------------------------------------------------------- lookups --
 

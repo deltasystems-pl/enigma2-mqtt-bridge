@@ -663,6 +663,7 @@ class StateStore:
         self._components = []
         self._component_keys = {}
         self._grid_slugs = []
+        self._channel_slugs = []
         self._dirty = False
         self.load()
 
@@ -682,10 +683,12 @@ class StateStore:
         topics = raw.get("retained_topics") or []
         components = raw.get("discovery_components") or []
         slugs = raw.get("epg_grid_slugs") or []
+        lists = raw.get("channels_slugs") or []
         keys = raw.get("component_platforms") or {}
         self._topics = {t for t in topics if isinstance(t, str)}
         self._components = [c for c in components if isinstance(c, str)]
         self._grid_slugs = [s for s in slugs if isinstance(s, str)]
+        self._channel_slugs = [s for s in lists if isinstance(s, str)]
         self._component_keys = {
             k: v for k, v in keys.items() if isinstance(k, str) and isinstance(v, str)
         } if isinstance(keys, dict) else {}
@@ -703,6 +706,7 @@ class StateStore:
             "discovery_components": list(self._components),
             "component_platforms": dict(self._component_keys),
             "epg_grid_slugs": list(self._grid_slugs),
+            "channels_slugs": list(self._channel_slugs),
         }
         directory = os.path.dirname(self.path) or "."
         handle = None
@@ -757,11 +761,13 @@ class StateStore:
         return True
 
     def forget_all(self):
-        if self._topics or self._components or self._grid_slugs or self._component_keys:
+        if (self._topics or self._components or self._grid_slugs or self._channel_slugs
+                or self._component_keys):
             self._topics.clear()
             self._components = []
             self._component_keys = {}
             self._grid_slugs = []
+            self._channel_slugs = []
             self._dirty = True
 
     # -------------------------------------------------------------- components --
@@ -810,4 +816,22 @@ class StateStore:
         new = [s for s in slugs if isinstance(s, str)]
         if new != self._grid_slugs:
             self._grid_slugs = new
+            self._dirty = True
+
+    # ------------------------------------------------------------ channel slugs --
+
+    @property
+    def channel_slugs(self):
+        """Which `channels/<slug>` topics this node has published.
+
+        The grid's trap again, on the channel lists: one retained topic for
+        each bouquet, and a bouquet that is renamed or dropped leaves its topic
+        behind unless something remembers the slug.
+        """
+        return list(self._channel_slugs)
+
+    def set_channel_slugs(self, slugs):
+        new = [s for s in slugs if isinstance(s, str)]
+        if new != self._channel_slugs:
+            self._channel_slugs = new
             self._dirty = True

@@ -25,7 +25,7 @@ Conventions that hold everywhere:
 | Timestamps | `begin`, `end`, `generated`, `ts` are **Unix epoch seconds, UTC, integer**. Never a formatted string, never local time. |
 | Absent values | `null` for a field that has no value right now (no next event, no recording). A key is not silently dropped. |
 | Retraction | An empty payload published retained. That is how `last_error` is cleared and how `cmd/reset` and discovery retraction work. |
-| Packet size | No state topic, announcement or discovery payload is published in a packet over **1,000,000 bytes** - the fixed header, the topic and the payload together. (The retractions and the few fixed messages the plugin sends outside that path are small by construction.) That is under Mosquitto 2.1's default `max_packet_size` of 2,000,000 and under the 1 MiB default of other common brokers; a broker closes the connection on a bigger packet, and MQTT 3.1.1 gives a client no way to learn its limit. A payload that would need more is **not published**, and its topic is named in `info.not_published` (§1). A topic under `<base>/<node>/` is also retracted when an earlier, smaller payload was retained there; a topic outside the node's tree - a discovery payload - is left as it was. An event that is not retained and would be too big is dropped, with a line in the log. In practice that is `channels`, an `epg_grid/<bouquet_slug>` or, in discovery mode, the device's discovery payload, on a receiver with a very large channel list. Added after 0.4.0 (unreleased). |
+| Packet size | No state topic, announcement or discovery payload is published in a packet over **1,000,000 bytes** - the fixed header, the topic and the payload together. (The retractions and the few fixed messages the plugin sends outside that path are small by construction.) That is under Mosquitto 2.1's default `max_packet_size` of 2,000,000 and under the 1 MiB default of other common brokers; a broker closes the connection on a bigger packet, and MQTT 3.1.1 gives a client no way to learn its limit. A payload that would need more is **not published**, and its topic is named in `info.not_published` (§1). A topic under `<base>/<node>/` is also retracted when an earlier, smaller payload was retained there; a topic outside the node's tree - a discovery payload - is left as it was. An event that is not retained and would be too big is dropped, with a line in the log. `channels` gives something up before it comes to that: it goes out without its lists, which are on `channels/<bouquet_slug>` (§1). In practice what is not published is the list of a single bouquet that is too big on its own, an `epg_grid/<bouquet_slug>` or, in discovery mode, the device's discovery payload, on a receiver with a very large channel list. Added after 0.4.0 (unreleased). |
 
 Everything the plugin publishes it also publishes again on every `on_connect` - the full state
 snapshot, the announcement and, in discovery mode, the discovery payloads. A broker that lost its
@@ -102,7 +102,7 @@ hold:
    integration's code at the time, and against this plugin's own Home Assistant discovery payloads
    (`discovery.py`), which are a consumer too, and cited by file and line in the table below. No
    other consumer is known to this project; one that becomes known is checked the same way. (None
-   of the five below touches the discovery payloads: they read neither `timers`, `generated`,
+   of the six below touches the discovery payloads: they read neither `timers`, `generated`,
    `channels` nor an `epg_grid` topic -
    "Next timer" reads `recording.next`, `discovery.py` l.332-346 - and carry `bouquet` as reported.)
 2. **Every name and type stays.** An exception changes what something means, never whether it
@@ -130,6 +130,7 @@ hold:
 | `timers-lists-finished` | 0.4.0 | `timers` lists the timers the receiver has finished with - ended, failed and disabled - and not only the pending ones; `state` gains `disabled`, `failed` and `unknown`, and a state number with no word is `unknown` where it used to read `waiting`. A consumer that treated every entry as pending filters on `state` (`waiting`, `prepared`, `running`) | The integration keeps the `timers` payload for its diagnostics only (`box.py` l.1299, `diagnostics.py` l.119) and builds no entity from it; its recording guard reads OpenWebif, not this topic (`installer.py` l.516-532). Decided by the maintainer on 2026-09-26 |
 | `zap-under-popup-recorded` | 0.4.0 | With only an information popup open directly over the info bar, `cmd/zap`, `cmd/zap_history` and the zap `cmd/bouquet` makes go through the channel list: the zap is recorded in the zap history, and a zap outside the bouquet being browsed moves the channel list. 0.3.0 played them directly, as with any screen open | As for `zap-moves-channel-list`: the integration follows `bouquet` and `zap_history` as the receiver reports them (`box.py` l.1291 for `zap_history`) |
 | `oversize-payload-withheld` | unreleased | A retained topic of the node's tree - `channels`, an `epg_grid/<bouquet_slug>` - whose packet would be over 1,000,000 bytes is not published, and a smaller payload retained there earlier is retracted, while its capability stays in `info.capabilities`; `info.not_published` names the topic. Until now it was published whatever its size. A consumer treats the empty retained payload as any other retraction, and reads `info.not_published` to tell "too big to send" from "none" | The integration (0.4.0) reads an empty retained `channels` as no channel list: an empty payload parses to nothing (`box.py` l.289, l.293-305), the dispatcher stores that (`box.py` l.1338-1339) and the bouquet readers answer with an empty list (`box.py` l.925-935), so its channel selects lose their options rather than keep stale ones; an empty `epg_grid/<bouquet_slug>` drops that bouquet's grid (`box.py` l.2135-2142). It does not read `info.not_published`, so it shows the empty list without saying why. The plugin's own discovery payloads read neither topic - the channel select's options are written into the payload (`discovery.py` l.371-382) |
+| `channels-lists-per-bouquet` | unreleased | On a receiver whose complete `channels` packet would be over 1,000,000 bytes, `channels` is published with `embedded` `false` and every `bouquets[].channels` `null`, and each bouquet's list is on `channels/<bouquet_slug>`, which the capability `channel_topics` announces. Until now `bouquets[].channels` was always the list - or, since `oversize-payload-withheld`, the whole topic was absent on such a receiver. Where the packet fits, the lists are in `channels` as before. A consumer that finds `null` reads `channels/<bouquets[].slug>` instead | The integration (0.4.0) skips a bouquet whose `channels` is not a list (`box.py` l.925-935; the test is l.934), so on such a receiver it offers no channels - as it does today, with the topic withheld - and its other readers of a bouquet's channels go through that filter or take `null` for an empty list (`box.py` l.1061-1062). It still lists the bouquet names (`box.py` l.938-953). It does not read `channels/<bouquet_slug>`: its dispatcher stores `channels` by its exact name and ignores a suffix it does not know (`box.py` l.1302-1311, l.1338-1340). The plugin's own discovery payloads read neither topic (`discovery.py` l.371-382) |
 
 The rule was written down after 0.3.0, so the history below classifies the releases before it by
 what they did.
@@ -163,7 +164,7 @@ not by the checker; their types are the tables below.
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
 | 0.3.0 -> 0.4.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3); the read-only setting `update_allowed`, the capability `self_update`, the command `update`, `update.transaction` and the subscription to `enigma2mqtt/integration/<node>` (§3); the event topic `relay_request` and the command `relay`, and `cmd/update`'s refusal `no_relay`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
-| unreleased, on `main` after 0.4.0 | contract 1: an addition and a named exception | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2). **Exceptions**: `oversize-payload-withheld` |
+| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topic `channels/<bouquet_slug>` and the capability `channel_topics`; the `channels` members `embedded`, `bouquets[].slug` and `bouquets[].count`. **Exceptions**: `oversize-payload-withheld`, `channels-lists-per-bouquet` |
 
 ---
 
@@ -210,8 +211,8 @@ announcement retained.
                "epg_import_allowed": false, "uninstall_allowed": false,
                "update_check": false, "update_allowed": false},
   "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
-                   "volume", "hdd", "process", "channels", "bouquet_context", "epg_grid", "keys",
-                   "screenshot", "toast", "message"],
+                   "volume", "hdd", "process", "channels", "channel_topics", "bouquet_context",
+                   "epg_grid", "keys", "screenshot", "toast", "message"],
   "not_published": []
 }
 ```
@@ -268,8 +269,8 @@ plugin detects what it managed to attach and names it here rather than assuming.
 hides what is missing instead of showing a dead entity. The names are the feature areas, and
 nothing else is ever in the list: `power`, `cec_workaround`, `service`, `epg`, `epg_grid`,
 `tuner`, `recording`, `timers`, `volume`, `cam`, `oscam`, `softcam`, `keys`, `screenshot`,
-`toast`, `message`, `hdd`, `process`, `channels`, `bouquet_context`, `zap_history`,
-`history_clear`, `epg_import`, `uninstall`, `self_update`. A build that has bound no
+`toast`, `message`, `hdd`, `process`, `channels`, `channel_topics`, `bouquet_context`,
+`zap_history`, `history_clear`, `epg_import`, `uninstall`, `self_update`. A build that has bound no
 feature area publishes `[]` - the connection, `info` and the commands are the plugin itself and
 are not capabilities. `uninstall` (since 0.3.0) is the one name with no feature area behind it: it
 says the package manager installed this very copy of the plugin, so `cmd/uninstall` can work - opkg
@@ -278,7 +279,10 @@ the running `plugin.py`. A copy unpacked by hand or carried in a firmware image 
 `self_update` (since 0.4.0) has no feature area behind it either: it is `uninstall`'s condition, and
 the receiver can run the update helper outside enigma2 - `/sbin/start-stop-daemon` and
 `/usr/bin/python3` are executable and the helper and the four modules it imports are in the plugin's
-directory - so `cmd/update` can work.
+directory - so `cmd/update` can work. `channel_topics` (added after 0.4.0, unreleased) is not a
+feature area of its own either: it is claimed with `channels`, and says that each bouquet's list
+is on `channels/<bouquet_slug>` as well - which is where a consumer finds it when `channels`
+carries none.
 
 A name is in the list because it **worked on this box**, not because this version of the plugin
 has the code for it. Three things can take one out: the image did not provide the hooks
@@ -356,13 +360,13 @@ connection, and the plugin would send it again on every reconnect. Always presen
 everything fits, otherwise one entry for each such topic, sorted by `topic`:
 
 ```json
-"not_published": [{"topic": "channels", "bytes": 2315478, "limit": 1000000},
+"not_published": [{"topic": "channels/astra", "bytes": 2315478, "limit": 1000000},
                   {"topic": "epg_grid/astra", "bytes": 1204611, "limit": 1000000}]
 ```
 
 | Field | Type | Meaning |
 |---|---|---|
-| `topic` | string | The topic, relative to `<base>/<node>/` - `channels`, `epg_grid/astra` - or in full for a topic outside the node's tree, which is how a discovery payload appears: `homeassistant/device/<node>/config` |
+| `topic` | string | The topic, relative to `<base>/<node>/` - `channels/astra`, `epg_grid/astra` - or in full for a topic outside the node's tree, which is how a discovery payload appears: `homeassistant/device/<node>/config` |
 | `bytes` | int | The size of the packet the payload would have needed - the fixed header counted at its longest, the topic and the payload, in bytes - **measured when the topic was first withheld**, in this run of the plugin. It is not updated while the topic stays in the list, so it says how far over the bound the payload was then, not what it is now |
 | `limit` | int | The bound it was held to, `1000000` |
 
@@ -380,9 +384,13 @@ leaves the list, which for a grid built after the connect is some time after the
 connection - and not while a topic stays in it: a grid that stays too big has another size at every
 pass, and neither `bytes` nor `info` follows. A topic that fitted, was published and is too big
 again is a new entry with a new `bytes`. The receiver's log has one line each time a topic joins
-the list. The remedy is on the
-receiver: `bouquets_for_select` limited to the bouquets in use shrinks `channels`, the grids and
-the discovery payload, and a lower `epg_grid_events` shrinks the grids
+the list.
+
+`channels` itself is rarely in the list: it drops its lists before it is withheld (below), and
+what is listed then is `channels/<bouquet_slug>` for a bouquet whose own list is too big. The
+remedy is on the receiver: `bouquets_for_select` limited to the bouquets in use takes that bouquet
+out and shrinks the grids and the discovery payload, and a lower `epg_grid_events` shrinks the
+grids
 ([TROUBLESHOOTING.md](TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back)).
 
 ### `<base>/<node>/power`
@@ -522,9 +530,12 @@ built from, and it is the list `cmd/zap` by name resolves against.
 ```json
 {
   "generated": 1789459200,
+  "embedded": true,
   "bouquets": [
     {"name": "Ulubione TV",
      "sref": "1:7:1:0:0:0:0:0:0:0:FROM BOUQUET \"userbouquet.ulubione.tv\" ORDER BY bouquet",
+     "slug": "ulubione_tv",
+     "count": 1,
      "channels": [{"sref": "1:0:19:283D:3FB:1:C00000:0:0:0:", "name": "TVP 1 HD"}]}
   ]
 }
@@ -533,9 +544,24 @@ built from, and it is the list `cmd/zap` by name resolves against.
 | Field | Type | Notes |
 |---|---|---|
 | `generated` | int | Epoch seconds, when the bouquets were last walked |
+| `embedded` | bool | Whether the bouquets below carry their lists. `false` only on a receiver whose lists do not fit one packet together - see below. Added after 0.4.0 (unreleased) |
 | `bouquets[].name` | string | As enigma2 spells it |
 | `bouquets[].sref` | string | The bouquet's own reference |
-| `bouquets[].channels[]` | list | In the user's own order, the order the box shows them in |
+| `bouquets[].slug` | string | The `<bouquet_slug>` of this bouquet's own topics, `channels/<bouquet_slug>` and `epg_grid/<bouquet_slug>`; empty for a name with no letter or digit in it, which has neither. Added after 0.4.0 (unreleased) |
+| `bouquets[].count` | int | How many services the bouquet's list has, whether or not the list is here. Added after 0.4.0 (unreleased) |
+| `bouquets[].channels[]` | list or `null` | In the user's own order, the order the box shows them in. `null` when `embedded` is `false` |
+
+**The lists are here while they fit one packet.** Added after 0.4.0 (unreleased), as the named
+in-major exception `channels-lists-per-bouquet`. This payload grows with the sum of all bouquets,
+and on a receiver with a very large channel list its packet would be over the bound of 1,000,000
+bytes (the conventions at the top of this file). There, `embedded` is `false` and **every**
+bouquet's `channels` is `null` - all or none, never some - while `name`, `sref`, `slug` and `count`
+are as always, and each list is on its own topic, `channels/<bouquet_slug>` (below). Everywhere
+else `embedded` is `true` and the payload is the one it has always been, with three more members.
+A consumer reads `bouquets[].channels` when it is a list and `channels/<slug>` when it is `null`;
+one that reads `channels/<bouquet_slug>` whenever `channel_topics` is a capability never has to
+tell the two apart. `cmd/zap` by name resolves against the complete list either way - what
+changes is where the list is published, not what the receiver knows.
 
 Which bouquets appear is the **`bouquets_for_select`** setting: a comma-separated list of bouquet
 names (or of their slugs, which is easier to type on a remote control - „Sport (HD)" and
@@ -553,6 +579,48 @@ serves them on the same address.
 Rebuilt when `bouquets.tv` or any `userbouquet.*` file changes - there is no event for that, so
 their modification times are compared once a minute - and on `cmd/discovery`. The list on a real
 box went from 36 entries to 11 within half an hour once, so nothing may key on position.
+
+### `<base>/<node>/channels/<bouquet_slug>` - added after 0.4.0 (unreleased)
+
+The services of one bouquet, **one retained topic per configured bouquet**, and present when
+`channel_topics` is a capability - which it is whenever `channels` is. The same lists `channels`
+carries, published a second way: the size of this payload follows one bouquet, where the size of
+`channels` follows the sum of all of them, so these are still there on a receiver whose `channels`
+has had to drop its lists. A consumer that wants them all subscribes to
+`<base>/<node>/channels/+`.
+
+**`<bouquet_slug>`** is the slug `epg_grid/<bouquet_slug>` uses, derived from the bouquet's name
+the same way, and it is `bouquets[].slug` in `channels`. A bouquet whose name leaves no slug has
+no topic here, as it has no grid. Two bouquets whose names differ only in punctuation would slug
+the same; the second one to be published wins the topic, which is visible in the payload's
+`bouquet` field rather than silent.
+
+```json
+{
+  "bouquet": "Ulubione TV",
+  "sref": "1:7:1:0:0:0:0:0:0:0:FROM BOUQUET \"userbouquet.ulubione.tv\" ORDER BY bouquet",
+  "generated": 1789459200,
+  "channels": [{"sref": "1:0:19:283D:3FB:1:C00000:0:0:0:", "name": "TVP 1 HD"}]
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `bouquet` | string | The bouquet's name as enigma2 spells it - not the slug |
+| `sref` | string | The bouquet's own reference, `bouquets[].sref` in `channels` |
+| `generated` | int | Epoch seconds, when this bouquet's list last **changed** - as on the grid, it is stamped at every walk and left out of the comparison that decides whether to publish |
+| `channels[]` | list | What `bouquets[].channels[]` holds in `channels`: `sref` and `name`, playable services only, in the user's own order |
+
+Rebuilt when `channels` is, and published only when the bouquet's list changed, so a bouquet
+nobody edited keeps its retained payload - and its `generated` - while another one moves.
+
+**Slugs that stop being configured are retracted**, as the grid's are, from the same state file:
+drop a bouquet from `bouquets_for_select`, remove it, or rename it - which changes its slug - and
+the topic it used to own gets an empty retained payload, at once on an open session and otherwise
+on the next connect, also when the plugin was restarted in between.
+
+A single bouquet whose list does not fit one packet is not published and is named in
+`info.not_published` as `channels/<bouquet_slug>`; the other bouquets are unaffected.
 
 ### `<base>/<node>/bouquet`
 
@@ -1757,7 +1825,7 @@ waits for when it takes a box over.
 Two halves, in this order, on the one session that is already open:
 
 1. **Retract.** An empty retained payload to every retained topic this node owns - all the state
-   topics, every `epg_grid/<bouquet_slug>`, the announcement, and every Home Assistant discovery
+   topics, every `channels/<bouquet_slug>` and `epg_grid/<bouquet_slug>`, the announcement, and every Home Assistant discovery
    payload named in the state file - and then the plugin forgets what it had announced. One
    payload is left alone (added after 0.4.0, unreleased): a discovery payload whose replacement
    would be over the packet bound (the conventions at the top of this file). Step 2 could not put
@@ -1859,8 +1927,8 @@ configuration; `docs/SETUP.md` lists what stays and why.
   "mac": "00:00:5e:00:53:01",
   "ip": "192.0.2.12",
   "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
-                   "volume", "hdd", "process", "channels", "bouquet_context", "epg_grid", "keys",
-                   "screenshot", "toast", "message"],
+                   "volume", "hdd", "process", "channels", "channel_topics", "bouquet_context",
+                   "epg_grid", "keys", "screenshot", "toast", "message"],
   "ha_mode": "discovery"
 }
 ```
@@ -1993,9 +2061,10 @@ topic for them to watch, and a trigger that can never fire is worse than none.
 
 The plugin keeps `/etc/enigma2/mqttbridge-state.json` - beside enigma2's own settings, or beside
 the plugin itself when `/etc/enigma2` will not take a write - and it records **every topic this
-node has published retained**: the state topics, every `epg_grid/<bouquet_slug>`, the
-announcement, and every Home Assistant discovery payload. Beside that list it keeps two indexes
-that a topic name alone cannot answer: the **slugs** of the EPG grids it has published, so a
+node has published retained**: the state topics, every `channels/<bouquet_slug>` and
+`epg_grid/<bouquet_slug>`, the announcement, and every Home Assistant discovery payload. Beside
+that list it keeps indexes that a topic name alone cannot answer: the **slugs** of the EPG grids
+and of the per-bouquet channel lists it has published, so a
 bouquet that is renamed or dropped can be retracted, and the **components** it last announced with
 their platforms, so one that is no longer announced can be removed by name from a payload that
 otherwise contains only the survivors. It is written atomically, through a

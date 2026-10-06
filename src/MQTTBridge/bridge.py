@@ -939,6 +939,11 @@ class Bridge:
         # that outgrew the packet bound with no session open, and that no
         # snapshot carries.
         self._take_back_withheld()
+        # The channel list walks its bouquets while it starts, before there is
+        # a session, so this connect is the first chance to take back the list
+        # of a bouquet that went while nothing was connected - or the plugin
+        # was not running.
+        self.sync_channel_slugs()
         if self.publisher("epg_grid") is None:
             # With a grid publisher this is its business, and it does it at the
             # end of every pass. Doing it here as well would retract each grid
@@ -1126,8 +1131,21 @@ class Bridge:
             return None
         return self._screenshot
 
-    def publish_json(self, topic, payload, retain=True, volatile=()):
+    def measure(self, suffix, payload):
+        """`(encoded, size)` for a state topic's payload, without publishing anything.
+
+        `size` is `_oversize`'s answer - the bytes of the packet when that is
+        over the bound, else 0 - for a publisher that has something smaller to
+        send instead: the channel list without its lists. `encoded` is the JSON
+        that was measured, handed back so that the publish that follows does
+        not build it a second time.
+        """
         encoded = _encoded(payload)
+        return encoded, _oversize(self.topic(suffix), encoded)
+
+    def publish_json(self, topic, payload, retain=True, volatile=(), encoded=None):
+        if encoded is None:
+            encoded = _encoded(payload)
         info = self.publish_raw(
             topic, encoded, retain=retain, change_key=_change_key(encoded, payload, volatile)
         )
@@ -1143,7 +1161,7 @@ class Bridge:
         """
         self._published = {}
 
-    def publish_state(self, suffix, payload, raw=False, retain=True, volatile=()):
+    def publish_state(self, suffix, payload, raw=False, retain=True, volatile=(), encoded=None):
         """A feature area's state topic - published only when it has changed.
 
         `sort_keys` in `_encoded` is what makes the comparison meaningful: two
@@ -1155,11 +1173,13 @@ class Bridge:
         exceptions here.
         A topic that is not retained (`key`) is never compared - every press is
         an event, including the same press twice.
+        `encoded` is the payload's JSON when the caller measured it first
+        (`measure`); it is then not built again here.
         """
         topic = self.topic(suffix)
         if raw:
             encoded = payload
-        else:
+        elif encoded is None:
             encoded = _encoded(payload)
         change_key = _change_key(encoded, payload, volatile)
         if retain and self._published.get(topic) == change_key:
@@ -1244,10 +1264,13 @@ class Bridge:
             try:
                 raw = getattr(publisher, "raw", ())
                 volatile = getattr(publisher, "volatile", ())
+                volatile_for = getattr(publisher, "volatile_for", None)
                 for suffix, payload in publisher.snapshot().items():
                     if suffix in raw:
                         self.publish_raw(self.topic(suffix), payload)
                     else:
+                        if volatile_for is not None:
+                            volatile = volatile_for(suffix)
                         self.publish_json(self.topic(suffix), payload, volatile=volatile)
                     published += 1
                     topic_count += 1
@@ -1380,6 +1403,35 @@ class Bridge:
         self.state.save()
         return len(stale)
 
+    def sync_channel_slugs(self):
+        """Retract the channel list of every bouquet that is no longer configured.
+
+        `channels/<bouquet_slug>` sets the trap `epg_grid/<bouquet_slug>` sets,
+        and the answer is the same: the state file knows the slugs, so a bouquet
+        renamed, removed or left out of `bouquets_for_select` is found from a
+        process restarted since. With no channel list at all, this retracts the
+        lot.
+
+        Only on an open session, and that is where it differs from the grid.
+        The channel list walks its bouquets while it starts, before the client
+        has connected; a retraction then reaches nobody, and forgetting the slug
+        there would leave the topic on the broker with nothing that knows of
+        it. The connect that follows calls this again.
+        """
+        if not self.connected:
+            return 0
+        channels = self.publisher("channels")
+        published = list(getattr(channels, "published_slugs", [])) if channels is not None else []
+        stale = [slug for slug in self.state.channel_slugs if slug not in published]
+        for slug in stale:
+            LOG.info(
+                "retracting the channel list of a bouquet that is no longer configured: %s", slug
+            )
+            self.retract(self.topic("channels/" + slug))
+        self.state.set_channel_slugs(published)
+        self.state.save()
+        return len(stale)
+
     def retract_discovery(self):
         topics = self.state.components
         if not topics:
@@ -1476,6 +1528,7 @@ class Bridge:
         self.publish_raw(self.topic("availability"), ONLINE)
         self.publish_snapshot(info)
         self.sync_grid_slugs()
+        self.sync_channel_slugs()
         self.publish_announcement(info)
         self.publish_discovery(info)
         self.state.save()
