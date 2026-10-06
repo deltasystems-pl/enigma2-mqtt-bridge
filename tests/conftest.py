@@ -3469,6 +3469,22 @@ def settle(bridge, rounds=20):
     return bridge
 
 
+def say_withheld():
+    """Let the `info` that follows a change to `info.not_published` go out now.
+
+    The bridge does not publish it at once: it waits a moment on a timer, so
+    that a burst of changes costs one `info`. A test that is about what that
+    `info` says, and not about the wait, turns the timer by hand here - as
+    `settle` turns the grid's - and, like the main loop, stops a single-shot
+    timer before its callback runs.
+    """
+    for timer in list(eTimer.instances):
+        owners = [getattr(function, "__self__", None) for function in timer.callback]
+        if timer.running and any(getattr(one, "_name", "") == "not published" for one in owners):
+            timer.stopped = True
+            timer.fire()
+
+
 @pytest.fixture
 def live_bridge(make_bridge, factory, settings, receiver):
     """A bridge on a working receiver: every publisher registered and started."""

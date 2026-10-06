@@ -47,7 +47,7 @@ from .diagnostics import LoopMonitor
 from .enigma2 import Ticker
 from .log import configure as configure_logging
 from .log import get_logger, register_secret
-from .mqttclient import BrokerSettings, MqttClient
+from .mqttclient import BrokerSettings, MqttClient, accepted
 from .publisher import Publisher
 from .selfupdate import CAPABILITY as SELF_UPDATE_CAPABILITY
 from .selfupdate import SelfUpdater
@@ -164,6 +164,15 @@ MAX_PACKET_BYTES = 1000000
 # the topic's length. Counted at its largest, so the estimate never runs short.
 PACKET_OVERHEAD_BYTES = 1 + 4 + 2
 
+# How long `info` waits after `not_published` changed before it says so, and
+# the longest it waits when the changes keep coming. Topics become withheld in
+# bursts - at a start the grids are built one after another - and an `info` for
+# each of them is a state change delivered to every consumer several times in a
+# few seconds, for a list that is only true at the end. Every change starts the
+# wait again, up to the second figure, so a burst costs one `info`.
+NOT_PUBLISHED_SETTLE_MILLISECONDS = 2000
+NOT_PUBLISHED_LATEST_SECONDS = 10.0
+
 _DEFAULT_MONITOR = object()
 
 
@@ -232,6 +241,11 @@ class Bridge:
         # this connection, or None before the first one.
         self._not_published = {}
         self._not_published_reported = None
+        # The wait before `info` says that the list changed
+        # (`_report_not_published`), and when the first change it is waiting
+        # over was seen - None while it waits for nothing.
+        self._not_published_ticker = Ticker(self._say_not_published, "not published")
+        self._not_published_since = None
         # Whether the discovery payload last built had to leave the channel
         # select out to fit one packet (`_discovery_components`). Kept so that
         # the log says so when it starts, not on every connect.
@@ -638,6 +652,9 @@ class Bridge:
                 # disconnect keeps the will unsent; the release that starts says `online`.
                 LOG.info("not publishing offline: an update has retracted this node's topics")
             elif self.client.connected:
+                # A change to `not_published` that was still waiting to be
+                # said: the `info` left retained must not be the one before it.
+                self._say_not_published()
                 info = self.client.publish(
                     self.topic("availability"), OFFLINE, qos=STATE_QOS, retain=True
                 )
@@ -673,6 +690,8 @@ class Bridge:
             self._loop_monitor.stop()
         self._build_ticker.stop()
         self._updates.stop()
+        self._not_published_ticker.stop()
+        self._not_published_since = None
 
     def reload(self):
         """Apply changed settings. Called by the setup screen after a save.
@@ -702,6 +721,12 @@ class Bridge:
         try:
             self._stop_timers()
             if self.connected:
+                if self._will_topic == self.topic("availability"):
+                    # What `stop` does, and for its reason: the new session may
+                    # never connect. Not on a rename - the settings already
+                    # carry the new name, and `info` under the old one is about
+                    # to be retracted.
+                    self._say_not_published()
                 self.retract_stale()
                 if self._says_offline_on_reload():
                     self.client.publish(self._will_topic, OFFLINE, qos=STATE_QOS, retain=True)
@@ -915,6 +940,8 @@ class Bridge:
         # This connection has not published `info` yet; until it has, nothing
         # below republishes it over a change to `not_published`.
         self._not_published_reported = None
+        self._not_published_ticker.stop()
+        self._not_published_since = None
         # First, before a single new payload: whatever this node published under
         # an older name is still on the broker and this is the first chance to
         # take it back.
@@ -1099,10 +1126,21 @@ class Bridge:
         left would stay on the broker with nothing left that knows of it. So
         without a session the state file keeps the topic, and the connect that
         follows retracts it (`on_connect`).
+
+        A session that looks open may not be: the socket goes before the
+        disconnect reaches the main thread, and until it does the client answers
+        a publish with "no connection". That retraction was not sent either, so
+        the topic is forgotten only when the client took the publish.
+
+        Nothing is sent while the plugin removes itself or an update has taken
+        this node's topics back, as for any other publish (`publish_raw`).
         """
+        if self._uninstaller.closed or self._self_update.silent:
+            return False
         if not self.connected or not self.state.knows(topic):
             return False
-        self.client.publish(topic, "", qos=STATE_QOS, retain=True)
+        if not accepted(self.client.publish(topic, "", qos=STATE_QOS, retain=True)):
+            return False
         self.state.forget(topic)
         return True
 
@@ -1113,14 +1151,45 @@ class Bridge:
                 self._take_back(topic)
 
     def _report_not_published(self):
-        """Publish `info` again when `not_published` is not what it last said.
+        """See that `info` is published again when `not_published` is not what it last said.
 
         Only on an open session that has published `info` already: before that,
-        the `info` about to go out carries the list anyway. It cannot loop -
+        the `info` about to go out carries the list anyway.
+
+        Not at once. The list changes in bursts, so the publish waits
+        `NOT_PUBLISHED_SETTLE_MILLISECONDS` on a timer and every further change
+        starts that wait again - but never past `NOT_PUBLISHED_LATEST_SECONDS`
+        after the first one, so a list that kept changing could not keep `info`
+        back for good. What goes out is the list as it stands when the timer
+        fires (`_say_not_published`).
+        """
+        if self._not_published_reported is None or not self.connected:
+            return False
+        if self.not_published() == self._not_published_reported:
+            # Back to what `info` says. A wait already running finds that out
+            # for itself.
+            return False
+        now = time.monotonic()
+        if self._not_published_since is None:
+            self._not_published_since = now
+        left = NOT_PUBLISHED_LATEST_SECONDS - (now - self._not_published_since)
+        wait = max(0, min(NOT_PUBLISHED_SETTLE_MILLISECONDS, int(left * 1000)))
+        if not self._not_published_ticker.start(wait, True):
+            # No timer on this image: said now, as it was before there was a wait.
+            return self._say_not_published()
+        return True
+
+    def _say_not_published(self):
+        """Publish `info` when `not_published` is still not what it last said.
+
+        The timer's callback, and what `stop` and `reload` call so that a change
+        still waiting is not lost with the session. It cannot loop:
         `build_info` records what it reports before the publish, so the second
         time round there is nothing left to say.
         """
+        self._not_published_since = None
         if self._not_published_reported is None or not self.connected:
+            # The connect that follows publishes `info` with the list in it.
             return False
         if self.not_published() == self._not_published_reported:
             return False
@@ -1265,11 +1334,20 @@ class Bridge:
         self.publish_json(self.topic("info"), info)
         return True
 
-    def build_info(self):
+    def build_info(self, record=True):
+        """`info` as it stands now - by default for a caller that is about to publish it.
+
+        Building it records what it reports - the build on disk and the list of
+        withheld topics - as said, which is what `check_build_on_disk` and
+        `_report_not_published` later compare with to know whether there is
+        news. A caller that builds it for anything but a publish passes
+        `record=False`, or the news it did not send would never be sent.
+        """
         build = self.build_report()
-        self._build_reported = build
         not_published = self.not_published()
-        self._not_published_reported = not_published
+        if record:
+            self._build_reported = build
+            self._not_published_reported = not_published
         return {
             "image": boxinfo.image_version(),
             "enigma": boxinfo.enigma_version(),
@@ -1440,7 +1518,8 @@ class Bridge:
         """The discovery topics whose payload, built now, would not be sent for its size."""
         if self.value("ha_mode") != "discovery":
             return set()
-        components, encoded = self._discovery_components(self.build_info())
+        # Built to be measured, not published - so nothing is recorded as said.
+        components, encoded = self._discovery_components(self.build_info(record=False))
         return {
             topic for topic, payload in components.items()
             if _oversize(topic, encoded.get(topic) or _encoded(payload))
@@ -1582,6 +1661,9 @@ class Bridge:
         A reset is a cleanup, not a factory reset: settings are untouched and the
         snapshot returns immediately, so it is safe to run at any time and it is
         the documented step before uninstalling.
+
+        Returns how many topics it retracted, which is the number its log line
+        gives: a discovery payload left in place is not one of them.
         """
         topics = self.state.retained_topics
         # The one thing a reset does not take back: a discovery payload it could
@@ -1592,7 +1674,8 @@ class Bridge:
         too_big = self._discovery_too_big()
         kept = [topic for topic in topics if topic in too_big]
         announced = self.state.component_keys
-        LOG.info("reset: retracting %d retained topic(s)", len(topics) - len(kept))
+        retracted = len(topics) - len(kept)
+        LOG.info("reset: retracting %d retained topic(s)", retracted)
         for topic in topics:
             if self.client is not None and topic not in kept:
                 self.client.publish(topic, "", qos=STATE_QOS, retain=True)
@@ -1619,7 +1702,7 @@ class Bridge:
         self.publish_announcement(info)
         self.publish_discovery(info)
         self.state.save()
-        return len(topics)
+        return retracted
 
     # ----------------------------------------------------------------- uninstall --
     # The bridge's half of `uninstall.py`: what only the bridge can reach.

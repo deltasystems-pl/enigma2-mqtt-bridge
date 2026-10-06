@@ -328,6 +328,24 @@ def test_a_build_staged_on_disk_is_published_within_one_check(
     assert factory.client.last(INFO).json()["build"]["on_disk"] is None
 
 
+def test_an_info_built_only_to_be_measured_does_not_count_as_said(
+    make_bridge, factory, settings, tmp_path
+):
+    # `cmd/reset` builds the discovery payload to learn whether it would fit, and that takes an
+    # `info`. Nothing is published from it, so the build on disk is still news afterwards.
+    on_disk = _write(tmp_path / "buildinfo.py", RELEASE)
+    settings.ha_mode.value = "discovery"
+    bridge = _connected(make_bridge, factory, settings, build=RELEASE, build_path=str(on_disk))
+    _write(on_disk, DEVELOPMENT)
+    before = len(factory.client.published)
+
+    assert bridge._discovery_too_big() == set()
+    assert len(factory.client.published) == before
+
+    assert bridge.check_build_on_disk() is True
+    assert factory.client.last(INFO).json()["build"]["on_disk"] == DEVELOPMENT["commit"]
+
+
 def test_a_build_file_that_cannot_be_read_does_not_cost_the_session(
     make_bridge, factory, settings, tmp_path
 ):

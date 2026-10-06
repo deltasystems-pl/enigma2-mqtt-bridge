@@ -88,6 +88,8 @@ def pinned_clock(monkeypatch, now=NOW):
 
 
 def not_published(factory):
+    """What `info` says is withheld, once it has had its moment to say so."""
+    conftest.say_withheld()
     return factory.client.last(INFO).json()["not_published"]
 
 
