@@ -1672,7 +1672,7 @@ class SelfUpdater:
 
     def _begin_retraction(self):
         bridge = self.bridge
-        # S-a: from here nothing is published until `reload()`.
+        # ADR-0015, decision 5: from here nothing is published until `reload()`.
         self.silent = True
         if not bridge.connected:
             self._withdraw("retraction")

@@ -270,6 +270,7 @@ class Bridge:
         self._build_path = build_path if build_path is not None else buildid.ON_DISK_PATH
         self._build_reported = None
         self._build_ticker = Ticker(self.check_build_on_disk, "build")
+        self._capabilities_logged = None
 
     # ----------------------------------------------------------------- settings --
 
@@ -558,8 +559,8 @@ class Bridge:
             return
 
         configure_logging(self.value("log_level"), self._log_path)
-        # Before the provisioning file and before `enabled` (S-h): a new release that is
-        # switched off still confirms to its update helper that it started.
+        # Before the provisioning file and before `enabled` (TRANSACTION.md, section 4): a
+        # new release that is switched off still confirms to its update helper that it started.
         self._self_update.on_start()
 
         # Before anything connects: an installer may have written the broker in.
@@ -651,8 +652,9 @@ class Bridge:
                 self._stop_publishers()
                 return
             if self._self_update.silent:
-                # S-a: a downgrade's retraction is done and nothing more goes out. The clean
-                # disconnect keeps the will unsent; the release that starts says `online`.
+                # ADR-0015, decision 5: a downgrade's retraction is done and nothing more
+                # goes out. The clean disconnect keeps the will unsent; the release that
+                # starts says `online`.
                 LOG.info("not publishing offline: an update has retracted this node's topics")
             elif self.client.connected:
                 # A change to `not_published` that was still waiting to be
@@ -936,8 +938,18 @@ class Bridge:
         `info` and the announcement are published on connect, so a capability
         that appears a few seconds later - a hook that could only bind once
         enigma2 had built the screen behind it - would otherwise stay invisible
-        until the next reconnect.
+        until the next reconnect. The log gets the new count for the same
+        reason: the start line counted what was bound by then. It gets it
+        whether or not a session is up - the connect that follows carries the
+        list - and only when the count is not the one last logged here since
+        the start. A start is told by its client, which each start makes anew,
+        so the first change after any start is logged.
         """
+        count = len(self.capabilities())
+        logged = self._capabilities_logged
+        if logged is None or logged[0] is not self.client or logged[1] != count:
+            self._capabilities_logged = (self.client, count)
+            LOG.info("capabilities=%d now; the start line counted those bound by then", count)
         if not self.connected:
             return False
         info = self.build_info()
@@ -997,9 +1009,10 @@ class Bridge:
         self.publish_announcement(info)
         self.publish_discovery(info)
         self.client.subscribe(self.command_root + "/#", qos=COMMAND_QOS)
-        # The signed release index, relayed by the companion integration for a
-        # receiver without internet. Retained, so a fresh session is handed it at
-        # once; judged like any fetched index, and never obeyed as a command.
+        # The signed release index, relayed by the companion integration to every
+        # receiver on the broker, with internet or without. Retained, so a fresh
+        # session is handed it at once; judged like any fetched index, and never
+        # obeyed as a command.
         self.client.subscribe(RELEASE_INDEX_TOPIC, qos=COMMAND_QOS)
         # The companion integration's version, contract and plugin floor, retained: what
         # the rule of `update.available` and of `cmd/update` judges against once it is known.

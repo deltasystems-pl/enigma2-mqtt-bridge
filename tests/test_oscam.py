@@ -282,6 +282,73 @@ def test_process_scan_reads_comm_only_and_normalizes_the_name(tmp_path):
     assert oscam.process_running(str(tmp_path)) is True
 
 
+def _process(root, pid, comm, exe=None):
+    process = root / str(pid)
+    process.mkdir()
+    (process / "comm").write_text(comm + "\n", encoding="ascii")
+    if exe is not None:
+        (process / "exe").symlink_to(exe)
+
+
+def test_a_binary_named_with_an_underscore_and_a_version_is_found(tmp_path):
+    """`oscam_<version>`: the kernel keeps 15 characters of the name in `comm`."""
+    name = "oscam_11.704-emu-r802-arm"
+    _process(tmp_path, 123, name[:15], "/usr/softcams/" + name)
+    assert oscam.process_running(str(tmp_path)) is True
+
+
+def test_a_replaced_binary_named_with_an_underscore_is_still_found(tmp_path):
+    _process(tmp_path, 123, "oscam_11.704-em", "/usr/softcams/oscam_11.704-emu (deleted)")
+    assert oscam.process_running(str(tmp_path)) is True
+
+
+def test_a_script_named_like_the_cam_is_not_the_cam(tmp_path):
+    """A shell script's `comm` is the script's name; its executable is the shell."""
+    _process(tmp_path, 123, "oscam_watchdog.", "/bin/busybox")
+    _process(tmp_path, 124, "oscam_check.sh")
+    _process(tmp_path, 125, "oscamx", "/usr/bin/oscamx")
+    assert oscam.process_running(str(tmp_path)) is False
+
+
+def test_the_executables_own_name_decides_and_nothing_else_in_its_path(tmp_path):
+    """Its file name has to begin with `oscam`; a directory called that is not enough."""
+    _process(tmp_path, 123, "oscam_11.704-em", "/usr/oscam_11.704-emu/busybox")
+    _process(tmp_path, 124, "oscam_helper", "/usr/softcams/my-oscam_helper")
+    _process(tmp_path, 125, "oscam_helper", "/usr/softcams/ncam_oscam")
+    _process(tmp_path, 126, "oscam_helper", "/usr/bin/oscar")
+    _process(tmp_path, 127, "oscam_helper", "/usr/bin/osca")
+    assert oscam.process_running(str(tmp_path)) is False
+
+
+def test_an_executable_named_oscam_with_any_ending_is_taken(tmp_path):
+    """Started through a link: `comm` is the link's name, the executable the file's."""
+    for pid, executable in enumerate(
+        ("/usr/softcams/oscam", "/usr/softcams/oscam-emu", "/usr/softcams/OSCam_Emu",
+         "/usr/softcams/oscam.bin"), 200,
+    ):
+        root = tmp_path / str(pid)
+        root.mkdir()
+        _process(root, pid, "oscam_current", executable)
+        assert oscam.process_running(str(root)) is True, executable
+
+
+def test_what_the_rule_cannot_tell_apart_is_pinned(tmp_path):
+    """A helper binary named `oscam_...` counts as the cam: the name is all there is to go by."""
+    _process(tmp_path, 123, "oscam_stop", "/usr/bin/oscam_stop")
+    assert oscam.process_running(str(tmp_path)) is True
+
+
+def test_the_process_is_reported_when_the_web_port_is_down(tmp_path):
+    _process(tmp_path, 123, "oscam_11.704-em", "/usr/softcams/oscam_11.704-emu-r802-arm")
+    payload = oscam.probe(
+        8888, salt=SALT, opener=Opener([OSError("connection refused")]),
+        proc_root=str(tmp_path),
+    )
+    assert payload["software_running"] is True
+    assert payload["software"] == "OSCam"
+    assert payload["api_reachable"] is False
+
+
 def test_identity_salt_is_hidden_persisted_and_reused(live_bridge, settings):
     settings.oscam_identity_salt.value = ""
     settings.oscam_identity_salt.saved_value = ""

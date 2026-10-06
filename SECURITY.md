@@ -39,18 +39,42 @@ everything else:
    docs/INSTALL.md therefore tells users to change the root password; the plugin cannot do it for
    them.
 2. **The LAN is the trust boundary.** The plugin connects to the broker the user configures and,
-   since 0.4.0, for updates of itself only, to two more places:
-   - its release origin, `https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/`, over HTTPS
-     with a verified certificate and no redirects: once a day when the receiver-only setting
-     `update_check` is on (off by default), on `cmd/update_check` over MQTT (refused unless
-     `update_check` is on), when a person presses *check* on the television or the OpenWebif page,
-     and for an install - asked for there, or over MQTT with the receiver-only permission
-     `update_allowed` - that does not go through Home Assistant's relay;
+   since 0.4.0, for updates of itself only, to three more places:
+   - its release origin, `https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/`, on GitHub
+     Pages, over HTTPS with a verified certificate and no redirects. How often:
+     - **a check** asks for two small files, the index and its signature, and for both once more
+       when the pair does not verify. With the receiver-only setting `update_check` on (off by
+       default) there is one when the last check of any kind is a day old - the plugin looks
+       once an hour whether it is, and not before the receiver's clock has been set - and one on
+       `cmd/update_check` over MQTT (refused unless `update_check` is on). A person pressing
+       *check* on the television or the OpenWebif page gets one whatever the setting says. A
+       check asked for within ten minutes after the last one, by the receiver's clock and the
+       time of the last check it keeps in a file, is answered from that check's result and
+       connects to nothing. Three things let one through sooner: a clock that was set back to
+       before the last check; the first moments after a start, until that file has been read;
+       and a file that is missing or cannot be read;
+     - **an install asked for at the television or on the page** first asks for the signature
+       file alone, once, to learn whether the receiver can fetch the release itself - unless a
+       check or a probe of the last ten minutes has already said, or an install ended in the
+       last twenty minutes because the origin gave no answer, which is taken as the origin's
+       word for that long;
+     - **an install that does not go through Home Assistant's relay** - asked for there, or over
+       MQTT with the receiver-only permission `update_allowed` - asks for the index and its
+       signature again, and for the package;
+   - for that last kind of install only, GitHub's API, once:
+     `https://api.github.com/repos/deltasystems-pl/enigma2-mqtt-bridge/releases/tags/v<version>`,
+     with the same certificate check and no redirects, to compare the digest GitHub publishes for
+     the release's package with the signed one. Nothing of the receiver's is sent to either
+     address but the request itself, with the user agent `enigma2-mqtt-bridge`;
    - for an install Home Assistant starts, or one on a receiver without internet, the Home
      Assistant relay address the companion integration gives it over MQTT: a fixed path,
      `/api/enigma2_mqtt/relay/<token>`, fetched over plain HTTP or over HTTPS without checking
      the certificate. That is enough because what it serves is checked against the signed index
      (below) before anything is installed.
+
+   One command makes the image connect, not the plugin: `cmd/epg_import` (since 0.3.0, refused
+   over MQTT unless the receiver-only permission `epg_import_allowed` is on; off by default)
+   starts the image's own EPG importer, which downloads from the sources selected in it.
 
    There is no telemetry and no cloud service. TLS to the broker is supported; client
    certificates are not in v1.

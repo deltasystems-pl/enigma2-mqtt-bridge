@@ -809,3 +809,110 @@ def test_startup_lifecycle_log_omits_node_and_broker_identity(
     assert "starting: ha_mode=" in text
     assert "private-broker.example" not in text
     assert "private-node" not in text
+
+
+def _late_binder():
+    class Late(Publisher):
+        name = "zap_history"
+        bound = False
+
+        def claimed(self):
+            return self.bound
+
+        def extra_capabilities(self):
+            return ["history_clear"] if self.bound else []
+
+    return Late()
+
+
+def test_the_log_counts_the_capabilities_again_after_a_late_bind(
+    make_bridge, factory, settings, plugin_log
+):
+    """The start line counts what was bound at the start; a later line gives the new count."""
+    settings.host.value = "192.0.2.2"
+    settings.node_id.value = NODE
+    bridge = make_bridge()
+    late = _late_binder()
+    bridge.register_publisher(late)
+    bridge.start()
+    factory.client.fire_connect()
+
+    assert factory.client.last(INFO).json()["capabilities"] == []
+    assert " capabilities=0 build=" in plugin_log()
+    assert "capabilities=2 " not in plugin_log()
+
+    late.bound = True
+    bridge.announce_capabilities()
+
+    assert factory.client.last(INFO).json()["capabilities"] == ["zap_history", "history_clear"]
+    assert "capabilities=2 now" in plugin_log()
+
+
+def test_a_late_bind_before_the_connect_is_counted_in_the_log_too(
+    make_bridge, factory, settings, plugin_log
+):
+    settings.host.value = "192.0.2.2"
+    settings.node_id.value = NODE
+    bridge = make_bridge()
+    late = _late_binder()
+    bridge.register_publisher(late)
+    bridge.start()
+
+    late.bound = True
+    assert bridge.announce_capabilities() is False
+
+    assert "capabilities=2 now" in plugin_log()
+    factory.client.fire_connect()
+    assert factory.client.last(INFO).json()["capabilities"] == ["zap_history", "history_clear"]
+
+
+def test_the_count_is_logged_once_for_each_change_and_not_for_each_call(
+    make_bridge, factory, settings, plugin_log
+):
+    settings.host.value = "192.0.2.2"
+    settings.node_id.value = NODE
+    bridge = make_bridge()
+    late = _late_binder()
+    bridge.register_publisher(late)
+    bridge.start()
+    factory.client.fire_connect()
+
+    late.bound = True
+    for _ in range(3):
+        assert bridge.announce_capabilities() is True
+    assert plugin_log().count("capabilities=2 now") == 1
+
+    late.bound = False
+    bridge.announce_capabilities()
+    bridge.announce_capabilities()
+    assert plugin_log().count("capabilities=0 now") == 1
+
+    late.bound = True
+    bridge.announce_capabilities()
+    assert plugin_log().count("capabilities=2 now") == 2
+
+
+def test_the_first_change_after_another_start_is_logged_again(
+    make_bridge, factory, settings, plugin_log
+):
+    """The start line counted two fewer again, so the same count is news again."""
+    settings.host.value = "192.0.2.2"
+    settings.node_id.value = NODE
+    bridge = make_bridge()
+    late = _late_binder()
+    bridge.register_publisher(late)
+    bridge.start()
+    late.bound = True
+    bridge.announce_capabilities()
+    assert plugin_log().count("capabilities=2 now") == 1
+
+    bridge.stop()
+    late.bound = False
+    bridge.register_publisher(late)
+    bridge.start()
+    assert plugin_log().count(" capabilities=0 build=") == 2
+    late.bound = True
+    bridge.announce_capabilities()
+    bridge.announce_capabilities()
+
+    assert plugin_log().count("capabilities=2 now") == 2

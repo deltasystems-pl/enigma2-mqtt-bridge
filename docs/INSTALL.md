@@ -127,6 +127,15 @@ From the feed: `opkg update && opkg upgrade enigma2-plugin-extensions-mqttbridge
 the GUI. Settings survive an upgrade; they live in enigma2's own settings file, not in the
 package.
 
+Since 0.4.0 the plugin can also install its own releases, started from Home Assistant, the
+television or the OpenWebif page
+([SETUP.md](SETUP.md#installing-a-release-from-the-receiver)). The receiver then fetches from the
+release origin over HTTPS and checks the certificate against the image's own CA certificates. An
+image whose CA bundle is old or missing fails that check, which looks like no internet, and such a
+receiver updates through Home Assistant's relay - the companion integration - or by one of the
+installs on this page
+([TROUBLESHOOTING.md](TROUBLESHOOTING.md#the-update-check-says-the-origin-cannot-be-reached)).
+
 On some images every restart of the interface leaves one more copy of the softcam (OSCam, for
 example) running, and an update's restart is no exception: with `softcam_restart_allowed` on, the
 plugin restarts the softcam once after a self-update it has proved, and otherwise the extra copy

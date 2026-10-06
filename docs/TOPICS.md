@@ -1505,10 +1505,10 @@ refusal above, the receiver looks at `update.origin` (§1). A probe's word of th
 is taken as it is; otherwise - `unknown`, the default on a receiver that has never checked, a word
 read back after a restart, or an older one - it probes once first: the check's own request for the
 signature file, five seconds, while the install waits (at most 60 s, for a check that may already
-be running). Starting the install is the consent to that probe (spec: "an explicit TV/page
-action"); nothing else probes, and a `cmd/update` over MQTT never does. `reachable`: the update
-helper fetches the release itself. `unreachable`: the receiver asks Home Assistant for the
-package. An update helper whose download from the origin got no answer at all makes
+be running). Starting the install is the consent to that probe - an explicit action at the
+television or on the page; nothing else probes, and a `cmd/update` over MQTT never does.
+`reachable`: the update helper fetches the release itself. `unreachable`: the receiver asks Home
+Assistant for the package. An update helper whose download from the origin got no answer at all makes
 `update.origin` `unreachable` as well. Its failed end starts the ten-minute limit between updates,
 so that word is taken for the limit and ten minutes more: the next install at the television that
 the limit lets through asks Home Assistant without probing. After that, or after a restart, the
@@ -1861,9 +1861,15 @@ writing it are two different permissions. Home Assistant mode has its dedicated 
 context has `cmd/bouquet`; neither broadens this settings API. The command accepts the three original keys plus independently optional `screenshot_delay`,
 `cam_telemetry`, `oscam_telemetry`, `softcam_autoheal` and `softcam_autoheal_seconds`,
 with their JSON types unchanged. An object holding any other key is refused whole, with
-`last_error` "the config object contains unknown settings" - which names none of them, so compare
-the payload with this list. The two softcam keys only *tune* a restart the receiver has
-already permitted; with `softcam_restart_allowed` off they change nothing, because the
+`last_error` "the config object contains unknown settings: " and the keys it refused, as in
+`the config object contains unknown settings: 'host', 'update_allowed'`. Their names only, never
+a value: each in single quotes, sorted, separated by a comma and a space; the first five, and
+then " and N more" for the rest. A name longer than 32 characters is cut to 32 and an ellipsis.
+A character in a name that cannot be printed, and an apostrophe, is shown as `?`, so what is
+between two quotes is always one name; a broker or OSCam password sent as a name, or inside one,
+is shown as `***`. Up to 0.4.0 the sentence ended at "settings" and named none of them. The two
+softcam keys only *tune* a restart the receiver has already permitted; with
+`softcam_restart_allowed` off they change nothing, because the
 permission is the gate. The plugin validates the whole object before assigning anything,
 persists the values through enigma2's settings store, then rebinds only the affected publishers
 so the new behaviour is immediate. A fresh `info.settings` object is the by-effect acknowledgement.

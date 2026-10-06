@@ -304,8 +304,29 @@ def normalize(status_document, readers_document, salt, process_running=True):
     }
 
 
+def _runs_an_oscam_binary(proc_root, pid):
+    """Whether the process was started from a file whose own name begins with `oscam`.
+
+    A shell script's `comm` is the script's name and its executable is the
+    shell, so this is what tells `oscam_11.704-emu` from an `oscam_watchdog.sh`.
+    The link is not argv, and nothing of it is published. A replaced binary
+    reads `<path> (deleted)`, which still begins with the name.
+    """
+    try:
+        link = os.readlink(os.path.join(proc_root, pid, "exe"))
+    except OSError:
+        return False
+    return os.path.basename(link).lower().startswith("oscam")
+
+
 def process_running(proc_root="/proc"):
-    """Whether an OSCam process exists, without reading argv or publishing its name."""
+    """Whether an OSCam process exists, without reading argv or publishing its name.
+
+    `comm` is all the kernel kept of the name - 15 characters - so a binary
+    named `oscam_<version>` is known by its first fifteen. `oscam` and `oscam-...`
+    are taken at their word, as they always were; `oscam_...` also has to run a
+    binary of that name.
+    """
     try:
         names = os.listdir(proc_root)[:4096]
     except OSError:
@@ -319,6 +340,8 @@ def process_running(proc_root="/proc"):
         except (OSError, UnicodeError):
             continue
         if command == "oscam" or command.startswith("oscam-"):
+            return True
+        if command.startswith("oscam_") and _runs_an_oscam_binary(proc_root, name):
             return True
     return False
 

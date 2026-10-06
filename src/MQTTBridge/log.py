@@ -55,7 +55,9 @@ def redact(text):
     """Replace every registered secret in `text`."""
     if not isinstance(text, str):
         text = str(text)
-    for secret in _secrets:
+    # Longest first: a secret that contains another would otherwise keep its
+    # head and tail once the shorter one inside it had been replaced.
+    for secret in sorted(_secrets, key=len, reverse=True):
         if secret and secret in text:
             text = text.replace(secret, REDACTED)
     return text

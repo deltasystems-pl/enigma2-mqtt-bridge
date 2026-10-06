@@ -105,6 +105,13 @@ changelog.
 Translations work the same way: the source strings are English, Polish is reviewed, and German is
 drafted and marked `# needs-review` until a native speaker confirms it.
 
+Two Polish terms are easy to mix up, because both are the receiver being "off": standby - the
+interface asleep, the receiver still on the network - is „uśpienie", and deep standby - the
+receiver powered down, which may not wake over the network - is „Głębokie uśpienie". The Polish
+catalogue does not hold to this yet: it has „Głębokie uśpienie" for deep standby, „uśpienie" in one
+setting's label, and „Czuwanie" and „w trybie czuwania" in two other strings for standby. A new or
+changed Polish string uses the first pair.
+
 ## Pull requests
 
 - Branch off `main`, one concern per pull request.

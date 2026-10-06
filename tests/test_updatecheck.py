@@ -113,7 +113,7 @@ def test_cmd_config_cannot_switch_it_on(box, factory, settings):
                     "update_check": True}),
     )
     assert settings.update_check.value is False
-    assert "unknown settings" in last_error(factory)["error"]
+    assert last_error(factory)["error"].endswith("unknown settings: 'update_check'")
 
 
 def test_info_settings_echoes_it_read_only(box, settings):

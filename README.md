@@ -104,8 +104,9 @@ land on the broker and, by default, in Home Assistant's recorder.
 [docs/SETUP.md](docs/SETUP.md#privacy) lists what to switch off or exclude. The plugin has no
 telemetry and no cloud part. Besides your broker it connects only to check for or install an
 update of itself - daily with `update_check` on, otherwise only when asked - and then only to its
-release origin, or, for an install Home Assistant starts or one without internet, to Home
-Assistant's relay ([SECURITY.md](SECURITY.md#threat-model)).
+release origin and, for an install it fetches itself, once to GitHub's API, or, for an install
+Home Assistant starts or one without internet, to Home Assistant's relay
+([SECURITY.md](SECURITY.md#threat-model) says how often).
 
 ## Documentation
 

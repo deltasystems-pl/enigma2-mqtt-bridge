@@ -33,6 +33,7 @@ export MSYS_NO_PATHCONV=1
 
 PLUGIN_DIR=/usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge
 BACKUP_DIR=/home/root/mqttbridge-backups
+BACKUPS_KEPT=3
 PROVISION_TARGET=/etc/enigma2/mqttbridge.json
 LOG_PATH=/home/root/mqttbridge.log
 
@@ -177,17 +178,20 @@ say "backing up the installed plugin"
 STAMP=$(date +%Y%m%d-%H%M%S)
 # Outside Extensions/ on purpose: enigma2 walks that directory at start-up and
 # tries to import every subdirectory in it as a plugin.
-# Three kept, older ones removed: a receiver's flash is small and a backup of a
-# build from six deploys ago is not something anyone will roll back to. The
-# stamp sorts chronologically, so `sort -r | tail -n +4` is everything but the
-# three newest - and `tail -n +N` is the form busybox has.
+# Three of this script's own backups are kept and its older ones removed; a
+# backup somebody made by hand under another name is never touched. The rule
+# and the reasons are in tools/rotate-box-backups.sh, whose text is run on the
+# receiver as it stands - in a subshell, with its two arguments set in front of
+# it - so what the tests run is what the receiver runs.
+ROTATE=$(cat "$REPO_ROOT/tools/rotate-box-backups.sh")
 box_ssh "set -e
          if [ -d '$PLUGIN_DIR' ]; then
              mkdir -p '$BACKUP_DIR'
              cp -a '$PLUGIN_DIR' '$BACKUP_DIR/MQTTBridge.bak-$STAMP'
+             ( set -- '$BACKUP_DIR' '$BACKUPS_KEPT'
+$ROTATE
+             )
              cd '$BACKUP_DIR'
-             ls -1d MQTTBridge.bak-* 2>/dev/null | sort -r | tail -n +4 |
-                 while read -r old; do rm -rf \"\$old\"; done
              ls -1d MQTTBridge.bak-*
          else
              echo '   nothing installed yet'
