@@ -88,6 +88,8 @@ def pinned_clock(monkeypatch, now=NOW):
 
 
 def not_published(factory):
+    """What `info` says is withheld, once it has had its moment to say so."""
+    conftest.say_withheld()
     return factory.client.last(INFO).json()["not_published"]
 
 
@@ -262,9 +264,43 @@ def test_the_json_put_together_by_hand_is_the_encoders(live_bridge, factory, rec
         assert sent
         for one in sent:
             assert one.text == bridge_module._encoded(one.json())
-    names = [c["name"] for c in factory.client.last(ROOT + "/channels/ulubione_tv_zolc").json()[
+        # And it is the payload a caller is handed for that topic, stamp and all.
+        payload = live_bridge.publisher("channels").snapshot()[topic[len(ROOT) + 1:]]
+        assert sent[-1].text == bridge_module._encoded(payload)
+    names =[c["name"] for c in factory.client.last(ROOT + "/channels/ulubione_tv_zolc").json()[
         "channels"]]
     assert names[:4] == awkward[:4]
+
+
+def test_the_json_put_together_by_hand_is_the_payload_a_caller_gets(live_bridge, factory,
+                                                                    receiver, monkeypatch):
+    """Stamp included: the dictionary and the text are two views of one payload.
+
+    The stamp of a bouquet nobody edited is older than the walk's, so the two
+    disagree the moment either takes it from the wrong place.
+    """
+    first = factory.client.last(ULUBIONE).json()["generated"]
+    clock = pinned_clock(monkeypatch, first + 1000)
+    publisher = live_bridge.publisher("channels")
+    receiver.service_center.contents[SECOND_BOUQUET].append((TVN, "TVN HD"))
+    publisher.refresh()
+    # And a walk that finds nothing new, so the index too is older than the walk.
+    clock[0] += 500
+    publisher.refresh()
+    factory.client.clear()
+
+    payloads = publisher.snapshot()
+    factory.client.fire_connect()
+
+    assert payloads["channels/ulubione_tv"]["generated"] == first
+    assert payloads["channels/sport_hd"]["generated"] == first + 1000
+    assert payloads["bouquets"]["generated"] == first + 1000
+    assert payloads["channels"]["generated"] == first + 1500
+    for suffix in ("channels/ulubione_tv", "channels/sport_hd", "bouquets", "channels"):
+        sent = factory.client.last(ROOT + "/" + suffix)
+        assert sent.text == bridge_module._encoded(payloads[suffix]), suffix
+        encoded, _key = publisher.prepared(suffix, payloads[suffix])
+        assert encoded in (None, sent.text), suffix
 
 
 def test_a_bouquet_nobody_edited_is_not_republished(live_bridge, factory, receiver, monkeypatch):
@@ -463,6 +499,38 @@ def test_a_list_that_outgrows_the_bound_takes_channels_back_and_returns_it(
     assert [len(b["channels"]) for b in factory.client.last(CHANNELS).json()["bouquets"]] == [
         300, 3]
     assert not_published(factory) == []
+
+
+def test_channels_that_fits_again_stays_published_across_a_reconnect(
+    make_bridge, factory, settings, receiver, monkeypatch
+):
+    """The size kept from the walk that found it too big goes with the walk that finds it fits.
+
+    Kept past that walk, the connect would leave `channels` out of the snapshot
+    and withhold it from a size that is no longer true - retracting the list
+    the walk had just published.
+    """
+    two_bouquets_too_big_together(receiver, monkeypatch)
+    bridge = start(make_bridge, factory, settings, receiver)
+    publisher = bridge.publisher("channels")
+    assert factory.client.all_for(CHANNELS) == []
+    assert publisher.too_big() != {}
+
+    fill(receiver, SECOND_BOUQUET, 3, "B")
+    publisher.refresh()
+    assert [len(b["channels"]) for b in factory.client.last(CHANNELS).json()["bouquets"]] == [
+        300, 3]
+    assert publisher.too_big() == {}
+    factory.client.clear()
+
+    factory.client.fire_connect()
+    factory.client.fire_connect()
+
+    # Sent on each connect, and never taken back.
+    assert [bool(sent.text) for sent in factory.client.all_for(CHANNELS)] == [True, True]
+    assert bridge.state.knows(CHANNELS)
+    assert bridge.not_published() == []
+    assert [sent.json()["not_published"] for sent in factory.client.all_for(INFO)] == [[], []]
 
 
 def test_the_receiver_still_knows_every_channel(make_bridge, factory, settings, receiver,

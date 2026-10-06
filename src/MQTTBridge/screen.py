@@ -25,6 +25,7 @@ from itertools import count
 
 from .enigma2 import Ticker, enigma_attribute
 from .log import get_logger
+from .mqttclient import accepted
 from .publisher import Publisher
 
 LOG = get_logger("screen")
@@ -357,9 +358,16 @@ class ScreenPublisher(Publisher):
             # two byte-identical captures are two completed commands, so this
             # topic deliberately bypasses the state de-duplication used by the
             # periodic publishers.
+            sent = None
             if self.bridge is not None:
-                self.bridge.publish_raw(self.bridge.topic("screen"), data)
-            LOG.info("published a %d byte screenshot", len(data))
+                sent = self.bridge.publish_raw(self.bridge.topic("screen"), data)
+            if accepted(sent):
+                LOG.info("published a %d byte screenshot", len(data))
+            else:
+                # Withheld for its size, no session to send it on, or nothing
+                # may go out any more. The bridge logs the first of these
+                # itself; what this line must not do is say the opposite.
+                LOG.info("took a %d byte screenshot; it was not published", len(data))
         except Exception:
             LOG.exception("handling a finished screenshot raised")
         finally:

@@ -328,6 +328,81 @@ def test_a_build_staged_on_disk_is_published_within_one_check(
     assert factory.client.last(INFO).json()["build"]["on_disk"] is None
 
 
+def test_an_info_built_only_to_be_measured_does_not_count_as_said(
+    make_bridge, factory, settings, tmp_path
+):
+    # `cmd/reset` builds the discovery payload to learn whether it would fit, and that takes an
+    # `info`. Nothing is published from it, so the build on disk is still news afterwards.
+    on_disk = _write(tmp_path / "buildinfo.py", RELEASE)
+    settings.ha_mode.value = "discovery"
+    bridge = _connected(make_bridge, factory, settings, build=RELEASE, build_path=str(on_disk))
+    _write(on_disk, DEVELOPMENT)
+    before = len(factory.client.published)
+
+    assert bridge._discovery_too_big() == set()
+    assert len(factory.client.published) == before
+
+    assert bridge.check_build_on_disk() is True
+    assert factory.client.last(INFO).json()["build"]["on_disk"] == DEVELOPMENT["commit"]
+
+
+def test_cmd_discovery_does_not_swallow_a_build_staged_on_disk(
+    make_bridge, factory, settings, tmp_path
+):
+    # The command builds an `info` for the announcement and publishes no `info`. What `info`
+    # last said is recorded where it is published, so the check that follows still has news.
+    on_disk = _write(tmp_path / "buildinfo.py", RELEASE)
+    bridge = _connected(make_bridge, factory, settings, build=RELEASE, build_path=str(on_disk))
+    _write(on_disk, DEVELOPMENT)
+    before = len(factory.client.all_for(INFO))
+
+    factory.client.fire_message("enigma2/" + NODE + "/cmd/discovery", b"")
+    assert len(factory.client.all_for(INFO)) == before
+
+    assert bridge.check_build_on_disk() is True
+    assert factory.client.last(INFO).json()["build"]["on_disk"] == DEVELOPMENT["commit"]
+
+
+def test_a_build_the_client_did_not_take_is_said_at_the_next_check(
+    make_bridge, factory, settings, tmp_path
+):
+    on_disk = _write(tmp_path / "buildinfo.py", RELEASE)
+    bridge = _connected(make_bridge, factory, settings, build=RELEASE, build_path=str(on_disk))
+    _write(on_disk, DEVELOPMENT)
+
+    factory.client.publish_rc = 4
+    bridge.check_build_on_disk()
+    factory.client.publish_rc = 0
+    before = len(factory.client.all_for(INFO))
+
+    assert bridge.check_build_on_disk() is True
+    assert len(factory.client.all_for(INFO)) == before + 1
+
+
+def test_a_build_that_cannot_be_published_is_logged_once(
+    make_bridge, factory, settings, tmp_path, plugin_log
+):
+    # While an update has gone silent the publish is refused and the build stays unreported, so
+    # every ten-minute check finds it again. The log says it once for each build, not each time.
+    on_disk = _write(tmp_path / "buildinfo.py", RELEASE)
+    bridge = _connected(make_bridge, factory, settings, build=RELEASE, build_path=str(on_disk))
+    _write(on_disk, DEVELOPMENT)
+    bridge.self_update.silent = True
+
+    assert [bridge.check_build_on_disk() for _ in range(3)] == [True, True, True]
+    assert plugin_log().count("the build on disk changed") == 1
+
+    # Said at last, then another build: that one is logged again.
+    bridge.self_update.silent = False
+    bridge.check_build_on_disk()
+    assert plugin_log().count("the build on disk changed") == 1
+    _write(on_disk, RELEASE)
+    bridge.check_build_on_disk()
+    _write(on_disk, DEVELOPMENT)
+    bridge.check_build_on_disk()
+    assert plugin_log().count("the build on disk changed") == 3
+
+
 def test_a_build_file_that_cannot_be_read_does_not_cost_the_session(
     make_bridge, factory, settings, tmp_path
 ):

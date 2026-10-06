@@ -74,7 +74,32 @@ version that has no section here.
   ([TOPICS.md, Contract version](docs/TOPICS.md#contract-version)): `channels` and
   `epg_grid/<bouquet_slug>` used to be published whatever their size; over the bound they are
   now absent - retracted - while their capability stays claimed. A consumer treats the empty
-  retained payload as a retraction and reads `info.not_published` for the reason.
+  retained payload as a retraction and reads `info.not_published` for the reason. The bound is not
+  theirs alone: every retained topic of the node's tree is held to it the same way, `screen` and
+  `channels/<bouquet_slug>` included, and the exception's row now says so.
+- `info` is published once for a burst of changes to `not_published`. At a start the topics that
+  are too big are found one after another, and each of them republished `info` - four times in
+  four seconds on a receiver with several large grids. `info` now follows a change by two
+  seconds, a further change within them starts the two seconds again, for at most ten from the
+  first, and a topic that joined the list and left it within that time is not announced. The
+  first `info` of a connection is not delayed, and a change still waiting when the plugin stops
+  or its settings are saved is published before the session ends
+  ([TOPICS.md](docs/TOPICS.md#basenodeinfo)).
+- A copy of a withheld topic could stay on the broker with nothing left that knew of it. When the
+  connection had just dropped and the plugin had not yet been told, the retraction of the smaller
+  copy was refused by the MQTT client and the topic was forgotten all the same. It is now
+  forgotten only when the client took the retraction; otherwise the next connect retracts it.
+- The retraction a connect makes for a topic withheld while there was no session is not sent
+  while the plugin removes itself or after an update has taken the node's topics back, as no
+  other publish is.
+- The log no longer says `published a <n> byte screenshot` for a picture that did not go out -
+  withheld for its size, no connection, or the plugin removing itself. It says `took a <n> byte
+  screenshot; it was not published`.
+- `cmd/discovery` no longer hides a change `info` had still to announce. What `info` last said -
+  the build on disk and the list of withheld topics - was recorded when an `info` was built, and
+  `cmd/discovery` builds one for the announcement without publishing it: a build staged on disk,
+  or a topic that had just become too big or fitted again, then stayed unannounced until the
+  next connect. It is now recorded when `info` is published and the client took it.
 
 ### Documentation
 

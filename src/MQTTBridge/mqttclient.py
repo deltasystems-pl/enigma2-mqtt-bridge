@@ -207,6 +207,18 @@ def reason_is_success(reason_code):
         return True
 
 
+def accepted(info):
+    """Whether a publish was taken, as far as the answer `MqttClient.publish` gave says.
+
+    paho answers a publish it could not hand to the socket with a result whose
+    `rc` says why - no connection, a full queue - and `publish` answers None
+    when there is no session or the call raised. Neither is a message the
+    broker will see. A caller that would otherwise forget something, or say
+    in the log that it was sent, asks this first.
+    """
+    return info is not None and not getattr(info, "rc", 0)
+
+
 class MqttClient:
     """A thin wrapper: connection lifecycle, the will, and the thread bridge."""
 

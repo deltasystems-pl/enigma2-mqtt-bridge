@@ -7,6 +7,7 @@ given up, by name when Home Assistant already had it, and it returns when the
 names fit again.
 """
 
+import conftest
 import test_channel_topics
 from conftest import FIRST_BOUQUET, POLSAT, SECOND_BOUQUET
 from test_packet_size import DEVICE, INFO, LIMIT, NODE, ROOT, SMALL, Channels, Padding, connect
@@ -31,6 +32,8 @@ def components(factory):
 
 
 def not_published(factory):
+    """What `info` says is withheld, once it has had its moment to say so."""
+    conftest.say_withheld()
     return factory.client.last(INFO).json()["not_published"]
 
 

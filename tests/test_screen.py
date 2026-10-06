@@ -4,6 +4,7 @@ import os
 
 from conftest import ConsoleAppContainer
 
+from MQTTBridge import bridge as bridge_module
 from MQTTBridge import screen as screen_module
 
 NODE = "vuuno4kse_005301"
@@ -186,6 +187,64 @@ def test_an_oversized_capture_is_refused_rather_than_retained(live_bridge, facto
     ConsoleAppContainer.instances[-1].finish(0)
     assert factory.client.all_for(SCREEN) == []
     assert "over the" in factory.client.last(LAST_ERROR).json()["error"]
+
+
+# ---------------------------------------------------------- what the log says of it --
+
+
+def finish_a_capture(bridge, tmp_path, data=JPEG):
+    found = publisher(bridge, tmp_path)
+    found.capture(commanded=True)
+    write_a_picture(found.path, data)
+    ConsoleAppContainer.instances[-1].finish(0)
+
+
+def test_the_log_says_a_picture_was_published(live_bridge, tmp_path, plugin_log):
+    finish_a_capture(live_bridge, tmp_path)
+
+    assert f"published a {len(JPEG)} byte screenshot" in plugin_log()
+    assert "was not published" not in plugin_log()
+
+
+def test_the_log_does_not_say_published_for_a_picture_that_was_withheld(
+    live_bridge, factory, tmp_path, plugin_log, monkeypatch
+):
+    """Over the packet bound the bridge keeps it off the wire; "published" would be untrue."""
+    # A bound everything else this bridge publishes is under, and the picture's packet is not.
+    picture = JPEG + b"x" * 20000
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", len(picture))
+    factory.client.clear()
+
+    finish_a_capture(live_bridge, tmp_path, picture)
+
+    assert factory.client.all_for(SCREEN) == []
+    written = plugin_log()
+    assert written.count("not publishing") == 1 and "not publishing screen:" in written
+    assert f"took a {len(picture)} byte screenshot; it was not published" in written
+    assert "published a " not in written
+
+
+def test_the_log_does_not_say_published_without_a_connection(live_bridge, factory, tmp_path,
+                                                             plugin_log):
+    """paho's answer to a publish while the socket is gone: taken by nobody."""
+    factory.client.publish_rc = 4
+
+    finish_a_capture(live_bridge, tmp_path)
+
+    assert f"took a {len(JPEG)} byte screenshot; it was not published" in plugin_log()
+    assert "published a " not in plugin_log()
+
+
+def test_the_log_does_not_say_published_while_the_plugin_removes_itself(live_bridge, factory,
+                                                                        tmp_path, plugin_log):
+    live_bridge.uninstaller.closed = True
+    factory.client.clear()
+
+    finish_a_capture(live_bridge, tmp_path)
+
+    assert factory.client.published == []
+    assert f"took a {len(JPEG)} byte screenshot; it was not published" in plugin_log()
+    assert "published a " not in plugin_log()
 
 
 def test_a_second_capture_within_five_seconds_is_refused(live_bridge, tmp_path):
