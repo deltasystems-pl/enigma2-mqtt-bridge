@@ -9,6 +9,32 @@ version that has no section here.
 
 ## [Unreleased]
 
+### Fixed
+
+- A receiver with a very large channel list could knock itself off the broker over and over.
+  Mosquitto 2.1 - the version in the current Home Assistant add-on - closes the connection on a
+  packet over 2,000,000 bytes ("disconnected: oversize packet" in its log), and `channels` with
+  every bouquet, an `epg_grid/<bouquet_slug>` or, in discovery mode, the device's discovery payload
+  can be bigger than that. The last will then said `offline`, the plugin reconnected a second
+  later and sent the same payload again, so the entities went unavailable and came back for as
+  long as the receiver was on, and the receiver slowed down from building the payload each time.
+  A payload whose packet would be over 1,000,000 bytes is now not sent at all: the log says so
+  once when a topic becomes too big, a smaller payload this node had retained on that topic under
+  its own tree is retracted rather than left to look current - at once on an open session,
+  otherwise on the next connect - and `info` gains `not_published`, which lists each such topic
+  with the size first measured and the limit and is empty otherwise. A discovery payload is
+  never retracted for its size, by `cmd/reset` either - that would delete the device in Home
+  Assistant - so the entities stay and the channel select keeps the options it had. Everything
+  else is published as before. To get the topic back, limit `bouquets_for_select` to the
+  bouquets in use, or lower `epg_grid_events` - 0 switches the grid off
+  ([TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back),
+  [TOPICS.md](docs/TOPICS.md)).
+  **Behaviour change, named in-major exception `oversize-payload-withheld`**
+  ([TOPICS.md, Contract version](docs/TOPICS.md#contract-version)): `channels` and
+  `epg_grid/<bouquet_slug>` used to be published whatever their size; over the bound they are
+  now absent - retracted - while their capability stays claimed. A consumer treats the empty
+  retained payload as a retraction and reads `info.not_published` for the reason.
+
 ### Documentation
 
 - TRANSACTION.md treats the companion integration's 0.4.0 as released, and says which of its
