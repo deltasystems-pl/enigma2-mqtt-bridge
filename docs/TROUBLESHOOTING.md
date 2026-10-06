@@ -34,8 +34,11 @@ capabilities bound at that moment. Some bind only once enigma2 has built the scr
 after an interface restart the start line can count fewer than `info.capabilities` holds once
 they bind (22 against 25 on the receiver this was seen on), and a start inside a running
 interface - after the settings were saved - counts them all. `info` is published again when a
-late one arrives ([TOPICS.md](TOPICS.md#1-state-topics), "A capability can also arrive late"), so
-`info.capabilities` is the list to go by.
+late one arrives ([TOPICS.md](TOPICS.md#1-state-topics), "A capability can also arrive late"),
+and the log then has a line of its own, `capabilities=<n> now; the start line counted those bound
+by then`, with the count `info` carries from that moment - the last such line after a start is
+the one that matches `info.capabilities`. A release up to 0.4.0 logs the start line only, so
+there `info.capabilities` is the list to go by.
 
 ## Nothing happens at all
 

@@ -54,6 +54,13 @@ version that has no section here.
   names: a value is never echoed. The OpenWebif page's settings form answers with the same
   sentence. No reason code is added or changed
   ([TOPICS.md](docs/TOPICS.md#cmdconfig-semantics)).
+- The log counts the capabilities again when one binds late. The start line's `capabilities=<n>`
+  is the number bound at the start, and after an interface restart `bouquet_context`,
+  `zap_history` and `history_clear` bind a few seconds later, so the line said 22 on a receiver
+  whose `info.capabilities` then held 25. Each time `info` is republished for such a change the
+  log now has `capabilities=<n> now; the start line counted those bound by then`, and the last of
+  those lines is the count `info` carries. The start line is unchanged
+  ([TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#the-log)).
 
 ### Fixed
 

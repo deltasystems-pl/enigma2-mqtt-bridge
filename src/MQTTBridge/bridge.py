@@ -899,8 +899,11 @@ class Bridge:
         `info` and the announcement are published on connect, so a capability
         that appears a few seconds later - a hook that could only bind once
         enigma2 had built the screen behind it - would otherwise stay invisible
-        until the next reconnect.
+        until the next reconnect. The log gets the new count for the same
+        reason: the start line counted what was bound by then.
         """
+        LOG.info("capabilities=%d now; the start line counted those bound by then",
+                 len(self.capabilities()))
         if not self.connected:
             return False
         info = self.build_info()
