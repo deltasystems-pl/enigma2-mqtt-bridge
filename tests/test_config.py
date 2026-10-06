@@ -166,6 +166,66 @@ def test_remote_settings_reject_partial_unknown_or_invalid_values(payload):
         settings_module.validate_remote_settings(payload)
 
 
+def test_an_unknown_remote_setting_is_named_in_the_refusal():
+    with pytest.raises(ValueError) as refused:
+        settings_module.validate_remote_settings({
+            "publish_keys": True, "screenshot": "off", "screenshot_interval": 60,
+            "update_allowed": True,
+        })
+    assert str(refused.value) == (
+        "the config object contains unknown settings: update_allowed"
+    )
+
+
+def test_several_unknown_remote_settings_are_all_named_in_order():
+    with pytest.raises(ValueError) as refused:
+        settings_module.validate_remote_settings({
+            "wol_arm": True, "publish_keys": True, "deep_standby_allowed": True,
+            "screenshot": "off", "screenshot_interval": 60, "host": "192.0.2.1",
+        })
+    assert str(refused.value) == (
+        "the config object contains unknown settings: deep_standby_allowed, host, wol_arm"
+    )
+
+
+def test_the_refusal_names_a_bounded_number_of_unknown_settings():
+    payload = {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60}
+    payload.update({f"key_{index:02d}": 1 for index in range(40)})
+    with pytest.raises(ValueError) as refused:
+        settings_module.validate_remote_settings(payload)
+    named = settings_module.UNKNOWN_SETTINGS_NAMED
+    assert str(refused.value) == (
+        "the config object contains unknown settings: "
+        + ", ".join(f"key_{index:02d}" for index in range(named))
+        + " and " + str(40 - named) + " more"
+    )
+
+
+def test_an_unknown_setting_name_is_cut_and_made_printable():
+    """The name comes from whoever published the command, so it is not trusted as text."""
+    limit = settings_module.UNKNOWN_SETTING_NAME_LIMIT
+    with pytest.raises(ValueError) as refused:
+        settings_module.validate_remote_settings({
+            "publish_keys": True, "screenshot": "off", "screenshot_interval": 60,
+            "a\nb\x00c\u2028d": 1, "x" * (limit + 50): 1,
+        })
+    assert str(refused.value) == (
+        "the config object contains unknown settings: a?b?c?d, " + "x" * limit + "\u2026"
+    )
+
+
+def test_a_secret_sent_as_a_setting_name_is_not_echoed():
+    from MQTTBridge import log as log_module
+
+    log_module.register_secret("correct-horse")
+    with pytest.raises(ValueError) as refused:
+        settings_module.validate_remote_settings({
+            "publish_keys": True, "screenshot": "off", "screenshot_interval": 60,
+            "correct-horse": 1,
+        })
+    assert str(refused.value) == "the config object contains unknown settings: ***"
+
+
 def test_save_writes_enigma2s_settings_file():
     from Components.config import configfile
 

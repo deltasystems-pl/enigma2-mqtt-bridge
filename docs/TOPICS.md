@@ -1856,9 +1856,10 @@ writing it are two different permissions. Home Assistant mode has its dedicated 
 context has `cmd/bouquet`; neither broadens this settings API. The command accepts the three original keys plus independently optional `screenshot_delay`,
 `cam_telemetry`, `oscam_telemetry`, `softcam_autoheal` and `softcam_autoheal_seconds`,
 with their JSON types unchanged. An object holding any other key is refused whole, with
-`last_error` "the config object contains unknown settings" - which names none of them, so compare
-the payload with this list. The two softcam keys only *tune* a restart the receiver has
-already permitted; with `softcam_restart_allowed` off they change nothing, because the
+`last_error` "the config object contains unknown settings: " and the keys it refused - their
+names only, never a value, sorted, the first five and then "and N more", a name longer than 32
+characters cut. Up to 0.4.0 the sentence ended at "settings" and named none of them. The two
+softcam keys only *tune* a restart the receiver has already permitted; with `softcam_restart_allowed` off they change nothing, because the
 permission is the gate. The plugin validates the whole object before assigning anything,
 persists the values through enigma2's settings store, then rebinds only the affected publishers
 so the new behaviour is immediate. A fresh `info.settings` object is the by-effect acknowledgement.

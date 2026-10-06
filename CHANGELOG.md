@@ -47,6 +47,13 @@ version that has no section here.
   entity and later creates a new one, so a customisation of it is lost. The log says once that it
   was left out. A payload too big even without the select is withheld as before
   ([TOPICS.md](docs/TOPICS.md#4-home-assistant-discovery)).
+- `cmd/config`'s refusal of a key outside its list names the key. The sentence on `last_error`
+  was "the config object contains unknown settings" and left the reader to compare the payload
+  with the list; it now goes on with the keys it refused - "...unknown settings: update_allowed" -
+  sorted, the first five and then "and N more", a name longer than 32 characters cut. Only the
+  names: a value is never echoed. The OpenWebif page's settings form answers with the same
+  sentence. No reason code is added or changed
+  ([TOPICS.md](docs/TOPICS.md#cmdconfig-semantics)).
 
 ### Fixed
 
@@ -88,7 +95,6 @@ version that has no section here.
   the softcam after a restart, and why a cleanup must stop every copy and start one; installs
   refused for standby after the television switched the receiver off over HDMI-CEC; an image
   whose CA certificates cannot verify the release origin.
-- `cmd/config`'s refusal of a key outside its list does not name the key (TOPICS.md, SETUP.md).
 - The 0.4.0 notes link to the files as released rather than to `main`.
 
 ## [0.4.0] - 2026-09-29

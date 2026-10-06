@@ -286,7 +286,9 @@ def test_the_permission_is_published_read_only(connected_bridge, factory, settin
         b'{"publish_keys":true,"screenshot":"on_zap","screenshot_interval":60,'
         b'"uninstall_allowed":true}',
     )
-    assert error(factory.client) == "the config object contains unknown settings"
+    assert error(factory.client) == (
+        "the config object contains unknown settings: uninstall_allowed"
+    )
     assert settings.uninstall_allowed.value is False
 
 

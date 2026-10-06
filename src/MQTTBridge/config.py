@@ -27,7 +27,7 @@ from Components.config import (
 )
 
 from .i18n import _
-from .log import get_logger
+from .log import get_logger, redact
 
 LOG = get_logger("config")
 
@@ -62,6 +62,10 @@ READ_ONLY_SETTING_NAMES = (
     "deep_standby_allowed", "softcam_restart_allowed", "epg_import_allowed",
     "uninstall_allowed", "update_check", "update_allowed",
 )
+# A refusal names the keys it refused, and they are the sender's words: this many
+# of them, each cut to this length, so the sentence on `last_error` stays short.
+UNKNOWN_SETTINGS_NAMED = 5
+UNKNOWN_SETTING_NAME_LIMIT = 32
 SCREENSHOT_INTERVAL_LIMITS = (5, 3600)
 SCREENSHOT_DELAY_LIMITS = (1, 30)
 # Below thirty seconds the detector would be reading noise: a healthy encrypted
@@ -446,6 +450,30 @@ def save_settings(values, section=None):
     return True
 
 
+def _named(name):
+    """A key somebody sent, as it may be shown: printable and of bounded length."""
+    text = "".join(
+        character if character.isprintable() else "?" for character in str(name)
+    )
+    if len(text) > UNKNOWN_SETTING_NAME_LIMIT:
+        text = text[:UNKNOWN_SETTING_NAME_LIMIT] + "\u2026"
+    return text
+
+
+def unknown_settings_refusal(unknown):
+    """The sentence that refuses `unknown`, the sorted keys outside the allowlist.
+
+    It names them, because "unknown settings" alone left the reader to compare
+    the payload with the list by hand. Only the names: a value is never echoed.
+    """
+    sentence = "the config object contains unknown settings: " + ", ".join(
+        _named(name) for name in unknown[:UNKNOWN_SETTINGS_NAMED]
+    )
+    if len(unknown) > UNKNOWN_SETTINGS_NAMED:
+        sentence += " and " + str(len(unknown) - UNKNOWN_SETTINGS_NAMED) + " more"
+    return redact(sentence)
+
+
 def validate_remote_settings(raw, section=None):
     """Validate the complete, deliberately small remotely writable subset.
 
@@ -460,7 +488,7 @@ def validate_remote_settings(raw, section=None):
     required = {"publish_keys", "screenshot", "screenshot_interval"}
     missing = sorted(required - set(raw))
     if unknown:
-        raise ValueError("the config object contains unknown settings")
+        raise ValueError(unknown_settings_refusal(unknown))
     if missing:
         raise ValueError("missing setting(s): " + ", ".join(missing))
     publish_keys = raw["publish_keys"]

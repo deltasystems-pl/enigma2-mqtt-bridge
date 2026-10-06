@@ -314,8 +314,8 @@ There is no acknowledgement topic. A command's answer is the state topic changin
    unless exactly one service matches within the configured bouquets; `cmd/key` is refused for an
    unknown key name. `cmd/config` refuses the whole object when one key is not on its list - the
    receiver-only permissions such as `update_allowed` included - with "the config object contains
-   unknown settings", which does not say which key; compare the payload with the list in
-   [TOPICS.md](TOPICS.md#cmdconfig-semantics).
+   unknown settings: " and the keys it refused (up to 0.4.0 the sentence names none); the keys it
+   takes are listed in [TOPICS.md](TOPICS.md#cmdconfig-semantics).
 3. Check `info.capabilities`. If the hook a command needs is not in that list, this image did not
    give it to the plugin and the command cannot work - say so in an issue with your image name.
 4. Make sure you are not publishing the command **retained**. The plugin logs a retained command

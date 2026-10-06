@@ -49,8 +49,8 @@ and settings survive a plugin upgrade.
 set on the receiver - here, in the provisioning file, or on the [OpenWebif page](#the-openwebif-page)
 - and published in `info.settings` so that a consumer can hide a control the box would always
 refuse, but `cmd/config` rejects them like any other key outside its allowlist - the whole command,
-with "the config object contains unknown settings" on `last_error`, a sentence that does not name
-the key. The rule is the
+with "the config object contains unknown settings: " and the name of each key it refused on
+`last_error`. The rule is the
 same for all of them: a setting that **enables** a command is granted on the receiver, and a setting
 that only **tunes** a command already permitted - `softcam_autoheal` and its delay - may be
 changed from the broker. `update_check` enables no command on the receiver, but it is what lets

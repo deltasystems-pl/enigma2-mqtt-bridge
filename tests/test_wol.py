@@ -438,7 +438,7 @@ def test_wol_arm_is_refused_over_mqtt(connected_bridge, factory, settings):
         b'"wol_arm":true}',
     )
     assert factory.client.last(LAST_ERROR).json()["error"] == (
-        "the config object contains unknown settings"
+        "the config object contains unknown settings: wol_arm"
     )
     assert settings.wol_arm.value is False
 

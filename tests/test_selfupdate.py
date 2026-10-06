@@ -251,7 +251,9 @@ def test_update_allowed_is_off_read_only_and_refused_by_cmd_config(box, factory,
     factory.client.fire_message(ROOT + "/cmd/config", json.dumps({
         "publish_keys": True, "screenshot": "on_zap", "screenshot_interval": 60,
         "update_allowed": True}).encode())
-    assert refusal(factory.client)[1] == "the config object contains unknown settings"
+    assert refusal(factory.client)[1] == (
+        "the config object contains unknown settings: update_allowed"
+    )
     assert settings.update_allowed.value is False
 
 
