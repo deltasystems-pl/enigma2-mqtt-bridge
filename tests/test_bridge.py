@@ -1129,3 +1129,64 @@ def test_a_success_whose_retraction_was_not_taken_leaves_the_error_known(connect
 
     assert factory.client.last(LAST_ERROR).text == ""
     assert connected_bridge.last_error() is None
+
+
+def _said(client):
+    return [entry.json()["error"] for entry in client.all_for(LAST_ERROR) if entry.text]
+
+
+def test_an_error_waiting_for_a_session_waits_until_a_publish_was_taken(
+        make_bridge, factory, settings):
+    """How an update ended is said once - so not at a connect that could not say it."""
+    bridge = _a_new_process(make_bridge, settings)
+    bridge._pending_error = ("update", "the previous version 0.4.0 is back")
+    factory.client.publish_rc = NO_CONNECTION
+
+    factory.client.fire_connect()
+
+    assert bridge._pending_error == ("update", "the previous version 0.4.0 is back")
+
+    factory.client.fire_disconnect(reason_code=7)
+    factory.client.publish_rc = 0
+    factory.client.clear()
+    factory.client.fire_connect()
+
+    assert _said(factory.client) == ["the previous version 0.4.0 is back"]
+    assert bridge._pending_error is None
+    factory.client.fire_disconnect(reason_code=7)
+    factory.client.clear()
+    factory.client.fire_connect()
+    assert _said(factory.client) == []
+
+
+def test_an_error_waiting_for_a_session_is_said_once_when_the_connect_is_sound(
+        make_bridge, factory, settings):
+    bridge = _a_new_process(make_bridge, settings)
+    bridge._pending_error = ("update", "the previous version 0.4.0 is back")
+
+    factory.client.fire_connect()
+
+    assert _said(factory.client) == ["the previous version 0.4.0 is back"]
+    assert bridge._pending_error is None
+    factory.client.fire_disconnect(reason_code=7)
+    factory.client.fire_connect()
+    assert _said(factory.client) == ["the previous version 0.4.0 is back"]
+
+
+def test_an_earlier_runs_error_is_replaced_by_the_one_that_had_to_wait_a_connect(
+        make_bridge, factory, settings, state_path):
+    """Both at once: the leftover is never emptied, and the report replaces it late."""
+    _left_by_an_earlier_run(state_path)
+    bridge = _a_new_process(make_bridge, settings)
+    bridge._pending_error = ("update", "the previous version 0.4.0 is back")
+    factory.client.publish_rc = NO_CONNECTION
+    factory.client.fire_connect()
+    factory.client.fire_disconnect(reason_code=7)
+    factory.client.publish_rc = 0
+    factory.client.clear()
+
+    factory.client.fire_connect()
+
+    entries = factory.client.all_for(LAST_ERROR)
+    assert [entry.text != "" for entry in entries] == [True]
+    assert entries[0].json()["cmd"] == "update"

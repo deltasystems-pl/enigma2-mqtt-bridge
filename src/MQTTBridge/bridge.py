@@ -1027,9 +1027,12 @@ class Bridge:
         self._clear_earlier_runs_error()
         self.state.save()
         if self._pending_error is not None:
+            # Said once, so only a publish the client took counts as said: a
+            # connect whose socket was gone again leaves it for the next one.
+            # Nothing else would say it - the marker it was read from is gone.
             command, message = self._pending_error
-            self._pending_error = None
-            self.publish_last_error(command, message)
+            if accepted(self.publish_last_error(command, message)):
+                self._pending_error = None
 
     def on_message(self, topic, payload, retain):
         if self._uninstaller.closed:
@@ -1674,8 +1677,9 @@ class Bridge:
         if reason:
             payload["reason"] = str(reason)
         LOG.warning("cmd/%s refused: %s", payload["cmd"], message)
-        self.publish_json(self.topic("last_error"), payload)
+        info = self.publish_json(self.topic("last_error"), payload)
         self._last_error_published = True
+        return info
 
     def clear_last_error(self):
         if not self._last_error_published:

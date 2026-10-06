@@ -1085,6 +1085,26 @@ def test_an_updates_end_read_at_the_start_is_not_cleared_as_an_earlier_runs_erro
         "not_started", "the new plugin did not start; the previous version 0.2.0 is back")
 
 
+def test_an_updates_end_is_not_lost_to_a_connect_whose_socket_was_gone(starting, factory):
+    """The end is read once, at the start, and the marker goes with it: a first connect that
+    could publish nothing must not be the only time it was said."""
+    starting(prepare=lambda root: marker(
+        root, phase="finished", result="rolled_back", reason="not_started",
+        error="the new plugin did not start; the previous version 0.2.0 is back",
+        finished=NOW))
+    factory.client.publish_rc = 4
+    factory.client.fire_connect()
+    factory.client.fire_disconnect(7)
+    factory.client.publish_rc = 0
+    factory.client.clear()
+
+    factory.client.fire_connect()
+
+    assert refusal(factory.client) == (
+        "not_started", "the new plugin did not start; the previous version 0.2.0 is back")
+    assert len(factory.client.all_for(LAST_ERROR)) == 1
+
+
 def test_an_update_that_installed_leaves_no_earlier_runs_error_behind(starting, factory,
                                                                       state_path):
     """`installed` has nothing to say on `last_error`, so what the process before the restart
