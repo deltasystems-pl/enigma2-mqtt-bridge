@@ -9,7 +9,7 @@ names fit again.
 
 import test_channel_topics
 from conftest import FIRST_BOUQUET, POLSAT, SECOND_BOUQUET
-from test_packet_size import DEVICE, INFO, LIMIT, NODE, ROOT, SMALL, Padding, connect
+from test_packet_size import DEVICE, INFO, LIMIT, NODE, ROOT, SMALL, Channels, Padding, connect
 
 from MQTTBridge import bridge as bridge_module
 
@@ -141,6 +141,41 @@ def test_it_is_logged_when_it_starts_and_not_at_every_connect(make_bridge, facto
     publisher.names = MANY
     bridge.publish_discovery()
     assert plugin_log().count(LEFT_OUT) == 2
+
+
+def test_a_settings_save_says_it_again_when_it_is_still_so(make_bridge, factory, settings,
+                                                           plugin_log):
+    """A save starts a new session, which measures everything again and reports what it finds."""
+    bridge, _publisher = discovery_box(make_bridge, factory, settings, MANY)
+    assert plugin_log().count(LEFT_OUT) == 1
+
+    bridge.reload()
+    bridge.register_publisher(Channels(SMALL, MANY))
+    factory.client.fire_connect()
+
+    assert "channel_select" not in components(factory)
+    assert plugin_log().count(LEFT_OUT) == 2
+
+
+def test_a_device_payload_that_fits_is_encoded_once(make_bridge, factory, settings, monkeypatch):
+    """Measured and published from the same JSON, so the bound costs it nothing."""
+    bridge, publisher = discovery_box(make_bridge, factory, settings, FEW)
+    built = []
+    encode = bridge_module._encoded
+
+    def watching(payload):
+        if isinstance(payload, dict) and "cmps" in payload:
+            built.append(sorted(payload["cmps"]))
+        return encode(payload)
+
+    monkeypatch.setattr(bridge_module, "_encoded", watching)
+    publisher.names = ["One", "Two", "Three"]
+    factory.client.clear()
+
+    bridge.publish_discovery()
+
+    assert components(factory)["channel_select"]["ops"] == ["One", "Two", "Three"]
+    assert len(built) == 1
 
 
 def test_a_reconnect_without_the_select_sends_nothing_over_the_bound(make_bridge, factory,
