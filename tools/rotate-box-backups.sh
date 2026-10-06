@@ -30,14 +30,29 @@
 #     modification time is not used, because `cp -a` gives every backup the
 #     time of the plugin directory it copied;
 #   * nothing outside the directory given is read or removed, and a directory
-#     that cannot be entered removes nothing.
+#     that cannot be entered removes nothing. A relative directory is the one
+#     under the working directory, whatever CDPATH says;
+#   * the number to keep is a plain decimal number from 1 to 999. Anything
+#     else - 0, a leading zero, a sign, a space - removes nothing and exits 2.
 
 directory="${1:-}"
 keep="${2:-3}"
 
 [ -n "$directory" ] || { echo "rotate-box-backups.sh: no backup directory given" >&2; exit 2; }
+# A plain decimal number from 1 to 999. Not 0: keeping none would remove the
+# backup just made. Not a leading zero: the shell's arithmetic reads `010` as
+# eight and stops at `08`. Not longer: a number the arithmetic cannot hold.
 case "$keep" in
-    ''|*[!0-9]*) echo "rotate-box-backups.sh: '$keep' is not a number to keep" >&2; exit 2 ;;
+    ''|*[!0-9]*|0*|????*)
+        echo "rotate-box-backups.sh: '$keep' is not a number of backups to keep (1-999)" >&2
+        exit 2 ;;
+esac
+# `cd` looks a relative name up in CDPATH first, and would then rotate a
+# directory of that name somewhere else. A name is made a path, so it is not
+# looked up at all - and one that starts with `-` is not read as an option.
+case "$directory" in
+    /*) ;;
+    *) directory="./$directory" ;;
 esac
 cd "$directory" 2>/dev/null || { echo "rotate-box-backups.sh: cannot enter $directory" >&2; exit 2; }
 

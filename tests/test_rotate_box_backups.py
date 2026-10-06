@@ -81,10 +81,15 @@ def make(directory, *names):
         (backup / "plugin.py").write_text(name, encoding="utf-8")
 
 
-def run(shell, *arguments, cwd=None):
+def run(shell, *arguments, cwd=None, environment=None):
+    env = dict(os.environ)
+    # Cleared rather than assumed absent, so the suite cannot be steered by whoever runs it.
+    env.pop("CDPATH", None)
+    env.update(environment or {})
     return subprocess.run(
         shell + [str(ROTATE)] + [str(argument) for argument in arguments],
         cwd=None if cwd is None else str(cwd),
+        env=env,
         capture_output=True,
         text=True,
         timeout=60,
@@ -250,6 +255,64 @@ def test_a_bad_call_removes_nothing(shell, backups, arguments):
     assert snapshot(backups) == before
 
 
+@pytest.mark.parametrize("keep", ["0", "00", "010", "08", "09", "03", "1000", "0x3",
+                                  "99999999999999999999", "+3", " 3", "3 "])
+def test_a_count_that_is_not_a_plain_number_from_1_to_999_removes_nothing(shell, backups, keep):
+    """`010` is eight to the shell's arithmetic and `08` is an error; neither is asked."""
+    names_made = [f"MQTTBridge.bak-202601{day:02d}-000000" for day in range(1, 13)]
+    make(backups, *names_made)
+    before = snapshot(backups)
+
+    result = run(shell, backups, keep)
+
+    assert result.returncode == 2
+    assert result.stderr.startswith("rotate-box-backups.sh: ")
+    assert "not a number of backups to keep (1-999)" in result.stderr
+    assert snapshot(backups) == before
+
+
+@pytest.mark.parametrize("keep, left", [("1", 1), ("9", 9), ("10", 10), ("11", 11), ("999", 12)])
+def test_a_plain_count_keeps_that_many(shell, backups, keep, left):
+    names_made = [f"MQTTBridge.bak-202601{day:02d}-000000" for day in range(1, 13)]
+    make(backups, *names_made)
+
+    result = run(shell, backups, keep)
+
+    assert result.returncode == 0, result.stderr
+    assert names(backups) == names_made[-left:]
+
+
+def test_a_relative_directory_is_not_looked_up_in_cdpath(shell, backups, tmp_path):
+    """`cd name` looks in CDPATH before the working directory, and would rotate that one."""
+    make(backups, *DATED)
+    make(backups, "MQTTBridge.bak-20260101-000000")
+    decoy = tmp_path / "somewhere else" / backups.name
+    decoy.mkdir(parents=True)
+    make(decoy, *DATED)
+    make(decoy, "MQTTBridge.bak-20260101-000000")
+    before = snapshot(decoy)
+
+    result = run(shell, backups.name, cwd=backups.parent,
+                 environment={"CDPATH": str(decoy.parent)})
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert snapshot(decoy) == before
+    assert names(backups) == sorted(DATED)
+
+
+def test_a_relative_directory_that_starts_with_a_dash_is_a_directory(shell, tmp_path):
+    directory = tmp_path / "-backups"
+    directory.mkdir()
+    make(directory, *DATED)
+    make(directory, "MQTTBridge.bak-20260101-000000")
+
+    result = run(shell, "-backups", cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert names(directory) == sorted(DATED)
+
+
 # ------------------------------------------------- the form the receiver runs --
 
 
@@ -266,6 +329,41 @@ def test_the_text_runs_inside_the_command_the_deploy_script_sends(shell, backups
     assert result.returncode == 0, result.stderr
     assert result.stdout == "carried on\n"
     assert names(backups) == sorted(NAMED + DATED[1:] + ("MQTTBridge.bak-20260812-120000",))
+
+
+def _sent(shell, directory, keep, environment=None):
+    command = (
+        f"set -e\n( set -- '{directory}' '{keep}'\n{ROTATE.read_text(encoding='utf-8')}\n)\n"
+        "echo carried on\n"
+    )
+    env = dict(os.environ)
+    env.pop("CDPATH", None)
+    env.update(environment or {})
+    return subprocess.run(shell + ["-c", command], capture_output=True, text=True, timeout=60,
+                          env=env)
+
+
+def test_the_sent_form_stops_the_deploy_on_a_count_it_refuses(shell, backups):
+    make(backups, *DATED)
+    make(backups, "MQTTBridge.bak-20260101-000000")
+    before = snapshot(backups)
+
+    result = _sent(shell, backups, "010")
+
+    assert result.returncode == 2
+    assert "carried on" not in result.stdout
+    assert snapshot(backups) == before
+
+
+def test_the_sent_form_ignores_cdpath_and_leaves_the_callers_alone(shell, backups, tmp_path):
+    make(backups, *DATED)
+    make(backups, "MQTTBridge.bak-20260101-000000")
+
+    result = _sent(shell, backups, "3", {"CDPATH": str(tmp_path)})
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "carried on\n"
+    assert names(backups) == sorted(DATED)
 
 
 def test_the_deploy_script_sends_this_text_and_rotates_no_other_way():
