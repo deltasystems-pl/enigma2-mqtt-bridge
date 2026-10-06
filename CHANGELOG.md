@@ -65,10 +65,15 @@ version that has no section here.
   refusal of its own to report - how an update ended - that one is published instead and nothing
   is emptied first. And it is left alone while the last update's record ends in a restore that
   did not complete (`restore_failed`, `restore_incomplete`): "install the plugin again" is not
-  made untrue by a restart. Nothing is published when there was nothing to clear. The plugin knows of the
-  earlier error from its state file, which is not written at every refusal - a connect and a
-  clean stop write it - so an error published shortly before the interface was killed can still
-  be left behind; `cmd/clear_error` (Added, above) clears that one.
+  made untrue by a restart. The empty payload goes out before `availability` says `online`, and
+  only when the plugin knows of an error - which is not always what the broker holds. The plugin
+  knows from its state file, which is not written at every refusal - a connect and a clean stop
+  write it - so an error published shortly before the interface was killed can still be left
+  behind; `cmd/clear_error` (Added, above) clears that one. The other way round, one empty
+  message goes to a topic the broker holds nothing on when the state file knows of an error the
+  broker has lost, or when the only refusal was made before this run had a session. A clearing
+  counts only when the client took the message: with the socket gone, nothing is forgotten and
+  the next connect, or the next clearing, sends it again - after a command that succeeds too.
   **Behaviour change, named in-major exception `last-error-cleared-at-start`**
   ([TOPICS.md, Contract version](docs/TOPICS.md#contract-version)): a consumer that wants the
   last refusal across a restart of the receiver keeps it itself when it arrives, as it already
@@ -94,6 +99,11 @@ version that has no section here.
 
 ### Fixed
 
+- The outcome of an update, or the reason a removal stopped, is no longer lost to a connect that
+  could not send it. An error carried to the next session was dropped at the first connect
+  whether or not its publish left the receiver; when the socket was gone again before the
+  connect had finished, nothing was said and nothing said it later. It now waits until the
+  client has taken a publish of it, and is said once, at the connect that can.
 - A password that contains another registered password is kept out of the log whole. The log's
   redaction replaced the registered values in no particular order, so with a broker password
   that held the OSCam password inside it - or the other way round - the longer one could come

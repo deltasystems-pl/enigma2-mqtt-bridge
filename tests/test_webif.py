@@ -1173,6 +1173,10 @@ def test_an_idle_bridge_offers_its_settings_and_disables_its_commands(make_bridg
     assert b"no broker address is configured" in body
     request, _body = post(resource, session, action_fields("discovery"))
     assert request.response_code == 409
+    # Clearing the last error is refused the same way, never answered "Done" with nothing sent.
+    request, body = post(resource, session, action_fields("clear_error"))
+    assert request.response_code == 409
+    assert b"Done" not in body
 
     # The recovery path: the broker is set from the page and the bridge starts.
     request, body = post(resource, session,
