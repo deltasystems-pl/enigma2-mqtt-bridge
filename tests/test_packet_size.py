@@ -1001,3 +1001,144 @@ def test_the_wait_stops_with_the_session(connected_bridge):
     connected_bridge.stop()
 
     assert not timer.running
+
+
+# ------------------------------------------- said is what was published, not what was built --
+#
+# What `info` last said is recorded where `info` is published. A caller that
+# builds one for something else - `cmd/discovery` builds it for the announcement
+# - must not leave a change looking as if it had been said.
+
+
+def test_cmd_discovery_inside_the_wait_does_not_swallow_a_new_entry(connected_bridge, factory):
+    connected_bridge.publish_raw(ROOT + "/late", b"\xff" * LIMIT)
+    factory.client.clear()
+
+    factory.client.fire_message(ROOT + "/cmd/discovery", b"")
+    assert factory.client.all_for(INFO) == []
+    conftest.MainLoop.advance(SETTLE)
+
+    assert [[one["topic"] for one in listed] for listed in infos(factory)] == [["late"]]
+
+
+def test_cmd_discovery_inside_the_wait_does_not_keep_an_entry_that_left(connected_bridge,
+                                                                        factory):
+    topic = ROOT + "/late"
+    connected_bridge.publish_raw(topic, b"\xff" * LIMIT)
+    assert [one["topic"] for one in not_published(factory)] == ["late"]
+    factory.client.clear()
+
+    connected_bridge.publish_raw(topic, "small")
+    factory.client.fire_message(ROOT + "/cmd/discovery", b"")
+    conftest.MainLoop.advance(SETTLE)
+
+    assert infos(factory) == [[]]
+
+
+def test_measuring_discovery_inside_the_wait_does_not_swallow_the_change(make_bridge, factory,
+                                                                         settings):
+    """The withheld half of what `cmd/reset`'s measurement must leave alone."""
+    bridge, _publisher = connect(make_bridge, factory, settings, SMALL, ha_mode="discovery",
+                                 names=["One", "Two"])
+    bridge.publish_raw(ROOT + "/late", b"\xff" * LIMIT)
+    factory.client.clear()
+
+    assert bridge._discovery_too_big() == set()
+    conftest.MainLoop.advance(SETTLE)
+
+    assert [[one["topic"] for one in listed] for listed in infos(factory)] == [["late"]]
+
+
+def test_an_info_the_client_did_not_take_is_not_counted_as_said(connected_bridge, factory):
+    """The timer fires with the socket gone; whoever publishes `info` next still has the news."""
+    connected_bridge.publish_raw(ROOT + "/late", b"\xff" * LIMIT)
+    factory.client.publish_rc = NO_CONNECTION
+    conftest.MainLoop.advance(SETTLE)
+    factory.client.publish_rc = 0
+    factory.client.clear()
+
+    connected_bridge.stop()
+
+    assert [[one["topic"] for one in listed] for listed in infos(factory)] == [["late"]]
+
+
+def test_an_info_too_big_for_a_packet_does_not_ask_for_itself_again(connected_bridge, factory,
+                                                                    monkeypatch, plugin_log):
+    """`info` cannot announce that `info` is missing; trying would start the wait for ever."""
+    connected_bridge.publish_raw(ROOT + "/late", b"\xff" * LIMIT)
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", 200)
+    factory.client.clear()
+
+    conftest.MainLoop.advance(SETTLE)
+    assert plugin_log().count("not publishing info:") == 1
+    timer = connected_bridge._not_published_ticker.timer
+    assert not timer.running
+
+    conftest.MainLoop.advance(SETTLE * 5)
+    assert not timer.running
+    assert [sent for sent in factory.client.all_for(INFO) if sent.text] == []
+
+
+def test_the_wait_is_one_shot(connected_bridge):
+    """A timer that repeated would wake the receiver every two seconds for nothing."""
+    connected_bridge.publish_raw(ROOT + "/late", b"\xff" * LIMIT)
+
+    assert connected_bridge._not_published_ticker.timer.started == (2000, True)
+
+
+def test_an_image_without_a_timer_says_it_at_once(connected_bridge, factory, monkeypatch):
+    monkeypatch.delattr(conftest.enigma, "eTimer")
+    factory.client.clear()
+
+    connected_bridge.publish_raw(ROOT + "/late", b"\xff" * LIMIT)
+
+    assert [[one["topic"] for one in listed] for listed in infos(factory)] == [["late"]]
+
+
+def test_a_stop_says_offline_although_the_waiting_info_raises(connected_bridge, factory,
+                                                              monkeypatch, plugin_log):
+    connected_bridge.publish_raw(ROOT + "/late", b"\xff" * LIMIT)
+    client = factory.client
+    client.clear()
+    publish_json = connected_bridge.publish_json
+
+    def failing(topic, *arguments, **options):
+        if topic == INFO:
+            raise RuntimeError("no info today")
+        return publish_json(topic, *arguments, **options)
+
+    monkeypatch.setattr(connected_bridge, "publish_json", failing)
+
+    connected_bridge.stop()
+
+    assert client.last(AVAILABILITY).text == "offline"
+    assert client.client_disconnected()
+    assert connected_bridge.client is None
+    assert "no info today" in plugin_log()
+
+
+def test_a_reload_after_everything_was_retracted_publishes_no_info(connected_bridge, factory):
+    """A downgrade that failed after its retraction reloads; the old session stays silent.
+
+    The retraction took `info` back with the rest, so there is no `info` of
+    this session on the broker for a waiting change to correct.
+    """
+    connected_bridge.publish_raw(ROOT + "/late", b"\xff" * LIMIT)
+    assert [one["topic"] for one in not_published(factory)] == ["late"]
+    old = factory.client
+    connected_bridge.forget_everything_published()
+    old.clear()
+
+    connected_bridge.reload()
+
+    assert old.all_for(INFO) == []
+
+
+def test_reset_without_a_session_says_it_retracted_nothing(make_bridge, factory, settings,
+                                                           plugin_log):
+    bridge, _publisher = connect(make_bridge, factory, settings, SMALL)
+    bridge.stop()
+    bridge.state.remember(CHANNELS)
+
+    assert bridge.reset_retained() == 0
+    assert "reset: retracting 0 retained topic(s)" in plugin_log()

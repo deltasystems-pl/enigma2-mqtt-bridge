@@ -335,7 +335,7 @@ class Bridge:
         # the node retracts before it announces, as a mode switch does.
         self.retract_stale()
         info = self.build_info()
-        self.publish_json(self.topic("info"), info)
+        self.publish_info(info)
         self.publish_discovery(info)
         return None
 
@@ -654,7 +654,12 @@ class Bridge:
             elif self.client.connected:
                 # A change to `not_published` that was still waiting to be
                 # said: the `info` left retained must not be the one before it.
-                self._say_not_published()
+                # Guarded by itself, because what follows is the `offline` and
+                # the disconnect, and neither may depend on it.
+                try:
+                    self._say_not_published()
+                except Exception:
+                    LOG.exception("could not publish the info that was waiting")
                 info = self.client.publish(
                     self.topic("availability"), OFFLINE, qos=STATE_QOS, retain=True
                 )
@@ -929,7 +934,7 @@ class Bridge:
         if not self.connected:
             return False
         info = self.build_info()
-        self.publish_json(self.topic("info"), info)
+        self.publish_info(info)
         self.publish_announcement(info)
         self.publish_discovery(info)
         return True
@@ -1100,7 +1105,10 @@ class Bridge:
             self._take_back(topic)
             self._published.pop(topic, None)
             self._forget(topic)
-        self._report_not_published()
+        if topic != self.topic("info"):
+            # `info` cannot say that `info` is missing: the publish it would
+            # wait for is the one that was just withheld, every time.
+            self._report_not_published()
         return None
 
     def withhold_state(self, suffix, size):
@@ -1183,9 +1191,9 @@ class Bridge:
         """Publish `info` when `not_published` is still not what it last said.
 
         The timer's callback, and what `stop` and `reload` call so that a change
-        still waiting is not lost with the session. It cannot loop:
-        `build_info` records what it reports before the publish, so the second
-        time round there is nothing left to say.
+        still waiting is not lost with the session. It cannot loop: an `info`
+        that went out is recorded as said (`publish_info`), and one that did
+        not go out starts no wait of its own (`_withhold`).
         """
         self._not_published_since = None
         if self._not_published_reported is None or not self.connected:
@@ -1193,7 +1201,7 @@ class Bridge:
             return False
         if self.not_published() == self._not_published_reported:
             return False
-        self.publish_json(self.topic("info"), self.build_info())
+        self.publish_info()
         return True
 
     def _record_screenshot(self, payload):
@@ -1331,23 +1339,32 @@ class Bridge:
             return False
         info = self.build_info()
         LOG.info("the build on disk changed: on_disk=%s", info["build"]["on_disk"] or "-")
-        self.publish_json(self.topic("info"), info)
+        self.publish_info(info)
         return True
 
-    def build_info(self, record=True):
-        """`info` as it stands now - by default for a caller that is about to publish it.
+    def publish_info(self, info=None):
+        """Publish `info`, and record what it said - here, and nowhere else.
 
-        Building it records what it reports - the build on disk and the list of
-        withheld topics - as said, which is what `check_build_on_disk` and
-        `_report_not_published` later compare with to know whether there is
-        news. A caller that builds it for anything but a publish passes
-        `record=False`, or the news it did not send would never be sent.
+        `check_build_on_disk` and `_report_not_published` know whether there is
+        news by comparing with what `info` last said: the build on disk and
+        the list of withheld topics. That is recorded where `info` goes out,
+        from the payload that went out, and only when the client took it. A
+        caller that builds an `info` for something else - the announcement,
+        a measurement - therefore cannot make a change look as if it had been
+        said, and neither can a publish that was refused.
         """
+        if info is None:
+            info = self.build_info()
+        sent = self.publish_json(self.topic("info"), info)
+        if accepted(sent):
+            self._build_reported = info.get("build")
+            self._not_published_reported = info.get("not_published")
+        return sent
+
+    def build_info(self):
+        """`info` as it stands now. It reads and records nothing (`publish_info`)."""
         build = self.build_report()
         not_published = self.not_published()
-        if record:
-            self._build_reported = build
-            self._not_published_reported = not_published
         return {
             "image": boxinfo.image_version(),
             "enigma": boxinfo.enigma_version(),
@@ -1373,7 +1390,7 @@ class Bridge:
         """Everything this node knows, as a consumer would want it on subscribe."""
         snapshot_started = time.monotonic()
         topic_count = 1
-        self.publish_json(self.topic("info"), info if info is not None else self.build_info())
+        self.publish_info(info)
         for publisher in self._publishers:
             publisher_started = time.monotonic()
             published = 0
@@ -1518,8 +1535,7 @@ class Bridge:
         """The discovery topics whose payload, built now, would not be sent for its size."""
         if self.value("ha_mode") != "discovery":
             return set()
-        # Built to be measured, not published - so nothing is recorded as said.
-        components, encoded = self._discovery_components(self.build_info(record=False))
+        components, encoded = self._discovery_components(self.build_info())
         return {
             topic for topic, payload in components.items()
             if _oversize(topic, encoded.get(topic) or _encoded(payload))
@@ -1648,7 +1664,7 @@ class Bridge:
         if mode != "discovery":
             self.retract_discovery()
         info = self.build_info()
-        self.publish_json(self.topic("info"), info)
+        self.publish_info(info)
         self.publish_announcement(info)
         self.publish_discovery(info)
         # Which releases are compatible depends on whether an integration is in use.
@@ -1663,7 +1679,8 @@ class Bridge:
         the documented step before uninstalling.
 
         Returns how many topics it retracted, which is the number its log line
-        gives: a discovery payload left in place is not one of them.
+        gives: a discovery payload left in place is not one of them, and
+        without a session it is none.
         """
         topics = self.state.retained_topics
         # The one thing a reset does not take back: a discovery payload it could
@@ -1674,7 +1691,8 @@ class Bridge:
         too_big = self._discovery_too_big()
         kept = [topic for topic in topics if topic in too_big]
         announced = self.state.component_keys
-        retracted = len(topics) - len(kept)
+        # Without a session nothing is sent, and the count says so.
+        retracted = len(topics) - len(kept) if self.client is not None else 0
         LOG.info("reset: retracting %d retained topic(s)", retracted)
         for topic in topics:
             if self.client is not None and topic not in kept:
@@ -1712,6 +1730,9 @@ class Bridge:
         self.state.forget_all()
         self.forget_published()
         self._not_published = {}
+        # `info` went with the rest, so this session has said nothing that a
+        # waiting change could correct - until a connect publishes it again.
+        self._not_published_reported = None
         self._last_json.clear()
         self._raw_topics.clear()
         self._screenshot = None

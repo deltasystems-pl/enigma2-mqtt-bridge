@@ -95,6 +95,11 @@ version that has no section here.
 - The log no longer says `published a <n> byte screenshot` for a picture that did not go out -
   withheld for its size, no connection, or the plugin removing itself. It says `took a <n> byte
   screenshot; it was not published`.
+- `cmd/discovery` no longer hides a change `info` had still to announce. What `info` last said -
+  the build on disk and the list of withheld topics - was recorded when an `info` was built, and
+  `cmd/discovery` builds one for the announcement without publishing it: a build staged on disk,
+  or a topic that had just become too big or fitted again, then stayed unannounced until the
+  next connect. It is now recorded when `info` is published and the client took it.
 
 ### Documentation
 

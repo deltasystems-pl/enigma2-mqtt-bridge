@@ -346,6 +346,39 @@ def test_an_info_built_only_to_be_measured_does_not_count_as_said(
     assert factory.client.last(INFO).json()["build"]["on_disk"] == DEVELOPMENT["commit"]
 
 
+def test_cmd_discovery_does_not_swallow_a_build_staged_on_disk(
+    make_bridge, factory, settings, tmp_path
+):
+    # The command builds an `info` for the announcement and publishes no `info`. What `info`
+    # last said is recorded where it is published, so the check that follows still has news.
+    on_disk = _write(tmp_path / "buildinfo.py", RELEASE)
+    bridge = _connected(make_bridge, factory, settings, build=RELEASE, build_path=str(on_disk))
+    _write(on_disk, DEVELOPMENT)
+    before = len(factory.client.all_for(INFO))
+
+    factory.client.fire_message("enigma2/" + NODE + "/cmd/discovery", b"")
+    assert len(factory.client.all_for(INFO)) == before
+
+    assert bridge.check_build_on_disk() is True
+    assert factory.client.last(INFO).json()["build"]["on_disk"] == DEVELOPMENT["commit"]
+
+
+def test_a_build_the_client_did_not_take_is_said_at_the_next_check(
+    make_bridge, factory, settings, tmp_path
+):
+    on_disk = _write(tmp_path / "buildinfo.py", RELEASE)
+    bridge = _connected(make_bridge, factory, settings, build=RELEASE, build_path=str(on_disk))
+    _write(on_disk, DEVELOPMENT)
+
+    factory.client.publish_rc = 4
+    bridge.check_build_on_disk()
+    factory.client.publish_rc = 0
+    before = len(factory.client.all_for(INFO))
+
+    assert bridge.check_build_on_disk() is True
+    assert len(factory.client.all_for(INFO)) == before + 1
+
+
 def test_a_build_file_that_cannot_be_read_does_not_cost_the_session(
     make_bridge, factory, settings, tmp_path
 ):
