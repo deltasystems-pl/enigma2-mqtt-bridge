@@ -1740,6 +1740,13 @@ class Bridge:
         the page, with the broker away - was not sent, and goes the same way:
         `last_error()` is what stands on the broker.
 
+        Nor while the last update's record says the receiver still needs
+        somebody: after a restore that did not complete the earlier run's
+        sentence is "install the plugin again", and restarting the interface
+        has not done that (`SelfUpdater.needs_reinstall`). It stays until a
+        command succeeds or `cmd/clear_error` takes it back, as it did before
+        this clearing existed.
+
         The connect counts as the first one until the question is settled:
         answered with "nothing to clear", or with a retraction the client took.
         A connect whose socket was gone again before the retraction could be
@@ -1749,6 +1756,11 @@ class Bridge:
             return False
         if self._pending_error is not None or not self._last_error_published:
             self._first_connect = False
+            return False
+        if self._self_update.needs_reinstall():
+            self._first_connect = False
+            LOG.info("keeping the last_error an earlier run left: the last update's record "
+                     "says the plugin has to be installed again")
             return False
         if not self._retract_last_error():
             return False

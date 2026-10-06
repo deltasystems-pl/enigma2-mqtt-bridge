@@ -518,6 +518,21 @@ class SelfUpdater:
     def transaction_payload(self):
         return dict(self._transaction) if self._transaction is not None else None
 
+    def needs_reinstall(self):
+        """Whether the last transaction ended in a restore that did not complete.
+
+        Read from the transaction this process holds - at a start that is the
+        last-transaction record - by the helper's own reason codes
+        (`RESTORE_REASONS`): the previous version was not put back, or not all
+        of its package records, and only installing the plugin again repairs
+        that. A restart does not, so a process that starts after one leaves the
+        sentence that says so on `last_error` (`Bridge._clear_earlier_runs_error`).
+        The record stays as it is until the next transaction ends, a reinstall
+        included: nothing here can tell that somebody has repaired the receiver.
+        """
+        record = self._transaction
+        return isinstance(record, dict) and record.get("reason") in RESTORE_REASONS
+
     def doors_refusal(self, command=None):
         """The sentence `command` gets while the doors are closed, or None.
 

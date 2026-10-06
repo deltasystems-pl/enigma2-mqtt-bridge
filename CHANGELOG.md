@@ -63,7 +63,9 @@ version that has no section here.
   it. A reconnect after a broker outage does not, and neither does the new session a settings
   save opens: the refusal of the run that is still going stays. When the starting plugin has a
   refusal of its own to report - how an update ended - that one is published instead and nothing
-  is emptied first. Nothing is published when there was nothing to clear. The plugin knows of the
+  is emptied first. And it is left alone while the last update's record ends in a restore that
+  did not complete (`restore_failed`, `restore_incomplete`): "install the plugin again" is not
+  made untrue by a restart. Nothing is published when there was nothing to clear. The plugin knows of the
   earlier error from its state file, which is not written at every refusal - a connect and a
   clean stop write it - so an error published shortly before the interface was killed can still
   be left behind; `cmd/clear_error` (Added, above) clears that one.
