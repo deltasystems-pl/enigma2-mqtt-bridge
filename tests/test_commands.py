@@ -488,6 +488,30 @@ def test_clear_error_leaves_the_state_file_without_the_topic(connected_bridge, f
     assert not StateStore(path=state_path).knows(LAST_ERROR)
 
 
+def test_a_clear_error_the_client_did_not_take_forgets_nothing(connected_bridge, factory,
+                                                           state_path):
+    """The socket is gone and the main thread has not heard yet: the retraction was not sent,
+    so the state file keeps the topic and the error is still there to clear."""
+    from MQTTBridge.discovery import StateStore
+
+    send(factory, "teleport", b"PRESS")
+    factory.client.publish_rc = 4
+
+    send(factory, "clear_error", b"PRESS")
+
+    assert connected_bridge.state.knows(LAST_ERROR)
+    assert connected_bridge.last_error() is not None
+    connected_bridge.state.save()
+    assert StateStore(path=state_path).knows(LAST_ERROR)
+
+    factory.client.publish_rc = 0
+    factory.client.clear()
+    send(factory, "clear_error", b"PRESS")
+    assert len(retractions(factory)) == 1
+    assert connected_bridge.last_error() is None
+    assert not connected_bridge.state.knows(LAST_ERROR)
+
+
 def test_an_error_after_clear_error_is_published_and_cleared_as_ever(connected_bridge, factory):
     send(factory, "clear_error", b"PRESS")
     send(factory, "teleport", b"PRESS")

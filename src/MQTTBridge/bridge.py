@@ -1680,7 +1680,31 @@ class Bridge:
     def clear_last_error(self):
         if not self._last_error_published:
             return False
-        self.retract(self.topic("last_error"))
+        return self._retract_last_error()
+
+    def _retract_last_error(self):
+        """The empty retained payload to `last_error`; whether the client took it.
+
+        Forgetting the error is only true when the retraction was sent
+        (`_take_back` has the same rule, for the same reason): a session that
+        looks open may have lost its socket already, and the client then
+        answers "no connection". Forgetting there would leave the refusal on
+        the broker with nothing here that knows of it - not the state file, so
+        not the next start either, and not the next command that succeeds. So
+        without an accepted publish everything stays as it was, and whoever
+        clears next sends it again.
+
+        Nothing is sent while the plugin removes itself or an update has taken
+        this node's topics back, as for any other publish (`publish_raw`).
+        """
+        topic = self.topic("last_error")
+        if self.client is None or self._uninstaller.closed or self._self_update.silent:
+            return False
+        if not accepted(self.client.publish(topic, "", qos=STATE_QOS, retain=True)):
+            return False
+        self.state.forget(topic)
+        self._published.pop(topic, None)
+        self._forget(topic)
         self._last_error_published = False
         return True
 
@@ -1705,14 +1729,20 @@ class Bridge:
         A refusal this process made before it had a session - a command from
         the page, with the broker away - was not sent, and goes the same way:
         `last_error()` is what stands on the broker.
+
+        The connect counts as the first one until the question is settled:
+        answered with "nothing to clear", or with a retraction the client took.
+        A connect whose socket was gone again before the retraction could be
+        handed over settles nothing, and the next one asks again.
         """
         if not self._first_connect:
             return False
+        if self._pending_error is not None or not self._last_error_published:
+            self._first_connect = False
+            return False
+        if not self._retract_last_error():
+            return False
         self._first_connect = False
-        if self._pending_error is not None:
-            return False
-        if not self.clear_last_error():
-            return False
         LOG.info("clearing the last_error an earlier run left retained")
         return True
 
@@ -1723,10 +1753,10 @@ class Bridge:
         right after every other command and wrong for this one: the state file
         is not written at every refusal, so an interface that was killed before
         the next write leaves a retained refusal nothing here knows of, and this
-        command is how somebody takes it back.
+        command is how somebody takes it back. Whether the client took the
+        retraction; when it did not, nothing is forgotten (`_retract_last_error`).
         """
-        self.retract(self.topic("last_error"))
-        self._last_error_published = False
+        return self._retract_last_error()
 
     def set_ha_mode(self, mode):
         """The republished `info` is the acknowledgement; there is no ack topic."""

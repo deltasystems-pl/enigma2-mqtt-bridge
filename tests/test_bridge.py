@@ -1064,3 +1064,68 @@ def test_a_process_that_starts_idle_clears_at_the_first_connect_it_ever_makes(
 
     assert len(_cleared(factory.client)) == 1
     assert bridge.last_error() is None
+
+
+# The socket goes before the disconnect reaches the main thread; until it does the client
+# answers every publish with "no connection" (rc 4), a connect's own included.
+NO_CONNECTION = 4
+
+
+def test_a_first_connect_that_could_not_send_the_retraction_leaves_it_to_the_next(
+        make_bridge, factory, settings, state_path):
+    _left_by_an_earlier_run(state_path)
+    bridge = _a_new_process(make_bridge, settings)
+    factory.client.publish_rc = NO_CONNECTION
+
+    factory.client.fire_connect()
+
+    # Nothing was taken back, so nothing is forgotten - here or in the file.
+    assert bridge.state.knows(LAST_ERROR)
+    assert discovery.StateStore(path=state_path).knows(LAST_ERROR)
+
+    factory.client.fire_disconnect(reason_code=7)
+    factory.client.publish_rc = 0
+    factory.client.clear()
+    factory.client.fire_connect()
+
+    assert [(entry.text, entry.retain) for entry in factory.client.all_for(LAST_ERROR)] == [
+        ("", True)]
+    assert not discovery.StateStore(path=state_path).knows(LAST_ERROR)
+    assert bridge.last_error() is None
+    # Once: the connect after that one has nothing left to take back.
+    factory.client.fire_disconnect(reason_code=7)
+    factory.client.clear()
+    factory.client.fire_connect()
+    assert LAST_ERROR not in factory.client.topics()
+
+
+def test_an_earlier_runs_error_that_was_never_taken_back_is_still_cleared_by_a_success(
+        make_bridge, factory, settings, state_path):
+    """As before the clearing at a start existed: the first command that works clears it."""
+    _left_by_an_earlier_run(state_path)
+    bridge = _a_new_process(make_bridge, settings)
+    factory.client.publish_rc = NO_CONNECTION
+    factory.client.fire_connect()
+    factory.client.publish_rc = 0
+    factory.client.clear()
+
+    bridge.on_message("enigma2/" + NODE + "/cmd/discovery", b"", False)
+
+    assert factory.client.last(LAST_ERROR).text == ""
+    assert not bridge.state.knows(LAST_ERROR)
+
+
+def test_a_success_whose_retraction_was_not_taken_leaves_the_error_known(connected_bridge,
+                                                                         factory):
+    connected_bridge.on_message("enigma2/" + NODE + "/cmd/nonsense", b"", False)
+    factory.client.publish_rc = NO_CONNECTION
+    connected_bridge.on_message("enigma2/" + NODE + "/cmd/discovery", b"", False)
+    assert connected_bridge.state.knows(LAST_ERROR)
+    assert connected_bridge.last_error() is not None
+
+    factory.client.publish_rc = 0
+    factory.client.clear()
+    connected_bridge.on_message("enigma2/" + NODE + "/cmd/discovery", b"", False)
+
+    assert factory.client.last(LAST_ERROR).text == ""
+    assert connected_bridge.last_error() is None
