@@ -1142,3 +1142,43 @@ def test_reset_without_a_session_says_it_retracted_nothing(make_bridge, factory,
 
     assert bridge.reset_retained() == 0
     assert "reset: retracting 0 retained topic(s)" in plugin_log()
+
+
+# ----------------------------------------------------------------- the delta review --
+
+
+def test_a_reload_goes_through_although_the_waiting_info_raises(make_bridge, factory, settings,
+                                                                monkeypatch, plugin_log):
+    """The old client is stopped, the saved settings are applied, a new session starts."""
+    bridge, _publisher = connect(make_bridge, factory, settings, SMALL)
+    bridge.publish_raw(ROOT + "/late", b"\xff" * LIMIT)
+    old = factory.client
+    publish_json = bridge.publish_json
+
+    def failing(topic, *arguments, **options):
+        if topic == INFO:
+            raise RuntimeError("no info today")
+        return publish_json(topic, *arguments, **options)
+
+    monkeypatch.setattr(bridge, "publish_json", failing)
+
+    settings.host.value = "10.0.0.6"
+    bridge.reload()
+
+    assert old.client_disconnected()
+    assert factory.client is not old
+    assert factory.client.connect_calls[0][0] == "10.0.0.6"
+    assert bridge.running and bridge.client is not None
+    assert "no info today" in plugin_log()
+
+
+def test_publish_info_records_the_payload_it_was_handed(connected_bridge, factory):
+    """Built before a change and published after it: the change is still news."""
+    info = connected_bridge.build_info()
+    connected_bridge.publish_raw(ROOT + "/late", b"\xff" * LIMIT)
+    factory.client.clear()
+
+    connected_bridge.publish_info(info)
+    conftest.MainLoop.advance(SETTLE)
+
+    assert [[one["topic"] for one in listed] for listed in infos(factory)] == [[], ["late"]]

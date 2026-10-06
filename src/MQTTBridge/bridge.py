@@ -246,6 +246,9 @@ class Bridge:
         # over was seen - None while it waits for nothing.
         self._not_published_ticker = Ticker(self._say_not_published, "not published")
         self._not_published_since = None
+        # The build on disk the log last named (`check_build_on_disk`), so a
+        # build that cannot be published is logged once and not at every check.
+        self._build_logged = None
         # Whether the discovery payload last built had to leave the channel
         # select out to fit one packet (`_discovery_components`). Kept so that
         # the log says so when it starts, not on every connect.
@@ -730,8 +733,12 @@ class Bridge:
                     # What `stop` does, and for its reason: the new session may
                     # never connect. Not on a rename - the settings already
                     # carry the new name, and `info` under the old one is about
-                    # to be retracted.
-                    self._say_not_published()
+                    # to be retracted. Guarded by itself, as in `stop`: the old
+                    # client's stop and the new session may not depend on it.
+                    try:
+                        self._say_not_published()
+                    except Exception:
+                        LOG.exception("could not publish the info that was waiting")
                 self.retract_stale()
                 if self._says_offline_on_reload():
                     self.client.publish(self._will_topic, OFFLINE, qos=STATE_QOS, retain=True)
@@ -1338,7 +1345,11 @@ class Bridge:
         if self.build_report() == self._build_reported:
             return False
         info = self.build_info()
-        LOG.info("the build on disk changed: on_disk=%s", info["build"]["on_disk"] or "-")
+        if info["build"] != self._build_logged:
+            # Once for each build: while the publish is refused - an update
+            # that has gone silent - this is reached at every check.
+            self._build_logged = info["build"]
+            LOG.info("the build on disk changed: on_disk=%s", info["build"]["on_disk"] or "-")
         self.publish_info(info)
         return True
 

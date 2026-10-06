@@ -379,6 +379,30 @@ def test_a_build_the_client_did_not_take_is_said_at_the_next_check(
     assert len(factory.client.all_for(INFO)) == before + 1
 
 
+def test_a_build_that_cannot_be_published_is_logged_once(
+    make_bridge, factory, settings, tmp_path, plugin_log
+):
+    # While an update has gone silent the publish is refused and the build stays unreported, so
+    # every ten-minute check finds it again. The log says it once for each build, not each time.
+    on_disk = _write(tmp_path / "buildinfo.py", RELEASE)
+    bridge = _connected(make_bridge, factory, settings, build=RELEASE, build_path=str(on_disk))
+    _write(on_disk, DEVELOPMENT)
+    bridge.self_update.silent = True
+
+    assert [bridge.check_build_on_disk() for _ in range(3)] == [True, True, True]
+    assert plugin_log().count("the build on disk changed") == 1
+
+    # Said at last, then another build: that one is logged again.
+    bridge.self_update.silent = False
+    bridge.check_build_on_disk()
+    assert plugin_log().count("the build on disk changed") == 1
+    _write(on_disk, RELEASE)
+    bridge.check_build_on_disk()
+    _write(on_disk, DEVELOPMENT)
+    bridge.check_build_on_disk()
+    assert plugin_log().count("the build on disk changed") == 3
+
+
 def test_a_build_file_that_cannot_be_read_does_not_cost_the_session(
     make_bridge, factory, settings, tmp_path
 ):
