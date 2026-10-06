@@ -935,6 +935,10 @@ class Bridge:
         info = self.build_info()
         self.publish_raw(self.topic("availability"), ONLINE)
         self.publish_snapshot(info)
+        # After the snapshot, which retracts what it measured itself: a topic
+        # that outgrew the packet bound with no session open, and that no
+        # snapshot carries.
+        self._take_back_withheld()
         if self.publisher("epg_grid") is None:
             # With a grid publisher this is its business, and it does it at the
             # end of every pass. Doing it here as well would retract each grid
@@ -987,7 +991,7 @@ class Bridge:
             return None
         size = _oversize(topic, payload)
         if size:
-            return self._withhold(topic, size)
+            return self._withhold(topic, size, retain)
         info = self.client.publish(topic, payload, qos=STATE_QOS, retain=retain)
         if retain:
             self.state.remember(topic)
@@ -1022,7 +1026,7 @@ class Bridge:
             key=lambda entry: entry["topic"],
         )
 
-    def _withhold(self, topic, size):
+    def _withhold(self, topic, size, retain=True):
         """Keep a payload whose packet is over `MAX_PACKET_BYTES` off the wire.
 
         Handing it to the client is what must not happen: the broker answers
@@ -1041,22 +1045,49 @@ class Bridge:
         the Home Assistant discovery payloads, and an empty retained device
         payload deletes the device and all its entities there; a select that
         keeps the options it had is the lesser harm.
+
+        An event - a publish that is not retained - is dropped and logged, and
+        that is all: it has no retained copy, and is not a topic a consumer
+        could find missing.
         """
-        if topic not in self._not_published:
+        if not retain or topic not in self._not_published:
             LOG.warning(
                 "not publishing %s: %d bytes is over the %d byte packet limit",
                 self._topic_label(topic), size, MAX_PACKET_BYTES,
             )
-            self._not_published[topic] = size
+        if not retain:
+            return None
+        self._not_published.setdefault(topic, size)
         if self._topic_label(topic) != topic:
             # Under the node's own tree.
-            if self.state.knows(topic):
-                self.client.publish(topic, "", qos=STATE_QOS, retain=True)
-                self.state.forget(topic)
+            self._take_back(topic)
             self._published.pop(topic, None)
             self._forget(topic)
         self._report_not_published()
         return None
+
+    def _take_back(self, topic):
+        """Retract the retained copy of a withheld topic - once the broker can be told.
+
+        Forgetting the topic is only true when the retraction was sent. A
+        publisher that publishes while it starts does so before the session
+        exists, and a timer does not stop for an outage: retracting then would
+        send nothing and still forget the topic, and the copy an earlier process
+        left would stay on the broker with nothing left that knows of it. So
+        without a session the state file keeps the topic, and the connect that
+        follows retracts it (`on_connect`).
+        """
+        if not self.connected or not self.state.knows(topic):
+            return False
+        self.client.publish(topic, "", qos=STATE_QOS, retain=True)
+        self.state.forget(topic)
+        return True
+
+    def _take_back_withheld(self):
+        """On a connect: retract what was withheld while there was no session to say so."""
+        for topic in sorted(self._not_published):
+            if self._topic_label(topic) != topic:
+                self._take_back(topic)
 
     def _report_not_published(self):
         """Publish `info` again when `not_published` is not what it last said.
@@ -1281,12 +1312,9 @@ class Bridge:
                     names.append(name)
         return names
 
-    def publish_discovery(self, info=None):
-        if self.value("ha_mode") != "discovery":
-            return
-        if info is None:
-            info = self.build_info()
-        components = discovery.build_discovery_components(
+    def _discovery_components(self, info):
+        """{topic: payload} for every Home Assistant discovery payload, as it stands now."""
+        return discovery.build_discovery_components(
             self.node_id,
             self.value("friendly_name"),
             self.base_topic,
@@ -1302,14 +1330,35 @@ class Bridge:
             epg_import_allowed=bool(info.get("settings", {}).get("epg_import_allowed")),
             previous=self.state.component_keys,
         )
+
+    def _discovery_too_big(self):
+        """The discovery topics whose payload, built now, would not be sent for its size."""
+        if self.value("ha_mode") != "discovery":
+            return set()
+        components = self._discovery_components(self.build_info())
+        return {
+            topic for topic, payload in components.items() if _oversize(topic, _encoded(payload))
+        }
+
+    def publish_discovery(self, info=None):
+        if self.value("ha_mode") != "discovery":
+            return
+        if info is None:
+            info = self.build_info()
+        components = self._discovery_components(info)
         if not components:
             LOG.debug("this build publishes no Home Assistant discovery payloads")
             return
         for topic, payload in sorted(components.items()):
             self.publish_json(topic, payload)
         self.state.set_components(sorted(components))
-        device = components.get(discovery.device_topic(self.discovery_prefix, self.node_id))
-        self.state.set_component_keys(discovery.component_platforms(device))
+        device_topic = discovery.device_topic(self.discovery_prefix, self.node_id)
+        if device_topic in self._not_published:
+            # Not sent, so what Home Assistant holds is still the payload before
+            # it. Recording this one's components would forget those it dropped,
+            # and a component nobody remembers is never removed by name.
+            return
+        self.state.set_component_keys(discovery.component_platforms(components.get(device_topic)))
 
     def sync_grid_slugs(self):
         """Retract the EPG grid of every bouquet that is no longer configured.
@@ -1396,11 +1445,23 @@ class Bridge:
         the documented step before uninstalling.
         """
         topics = self.state.retained_topics
-        LOG.info("reset: retracting %d retained topic(s)", len(topics))
+        # The one thing a reset does not take back: a discovery payload it could
+        # not put back, because what would replace it is over the packet bound.
+        # Emptied, it deletes the device and its entities in Home Assistant, and
+        # nothing would follow. It stays, and stays remembered - with the
+        # components it announced, which is what is still on the broker.
+        too_big = self._discovery_too_big()
+        kept = [topic for topic in topics if topic in too_big]
+        announced = self.state.component_keys
+        LOG.info("reset: retracting %d retained topic(s)", len(topics) - len(kept))
         for topic in topics:
-            if self.client is not None:
+            if self.client is not None and topic not in kept:
                 self.client.publish(topic, "", qos=STATE_QOS, retain=True)
         self.state.forget_all()
+        for topic in kept:
+            self.state.remember(topic)
+        if kept:
+            self.state.set_component_keys(announced)
         self.state.save(force=True)
         self._last_error_published = False
         # Everything on the broker was just emptied, so nothing this process

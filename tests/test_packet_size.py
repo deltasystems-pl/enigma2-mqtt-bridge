@@ -415,3 +415,224 @@ def test_a_grid_too_big_is_reported_when_its_timer_publishes_it(live_bridge, fac
     conftest.settle(live_bridge)
     assert factory.client.all_for(ULUBIONE) == []
     assert factory.client.all_for(INFO) == []
+
+
+# --------------------------------------------------- a retraction that cannot be sent --
+#
+# Forgetting a topic is only true once the broker was told. A publisher that
+# publishes while it starts does so before the session exists, and a timer does
+# not stop for an outage; in both cases the retained copy is still on the broker.
+
+
+def test_a_copy_an_earlier_process_left_is_retracted_although_the_publisher_starts_first(
+    make_bridge, factory, settings, receiver
+):
+    """The real channel list publishes in `start()`, before the client has a session."""
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    settings.ha_mode.value = "integration"
+    settings.epg_grid_events.value = 0
+    first = make_bridge(session=receiver.session)
+    first.start()
+    factory.client.fire_connect()
+    assert factory.client.last(CHANNELS).json()["bouquets"]
+    first.stop()
+
+    receiver.service_center.contents[conftest.FIRST_BOUQUET].append(
+        (conftest.POLSAT, "x" * (LIMIT + 1000))
+    )
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+    client = factory.client
+    # Nothing could be sent yet, so the state file still has to know the topic.
+    assert client.all_for(CHANNELS) == []
+    assert bridge.state.knows(CHANNELS)
+
+    client.fire_connect()
+
+    assert [sent.text for sent in client.all_for(CHANNELS)] == [""]
+    assert not bridge.state.knows(CHANNELS)
+    # It was measured before the connect, so the first `info` already names it.
+    lists = [sent.json()["not_published"] for sent in client.all_for(INFO)]
+    assert [[one["topic"] for one in listed] for listed in lists] == [["channels"]]
+
+
+def test_a_topic_that_outgrew_the_bound_during_an_outage_is_retracted_on_the_connect(
+    make_bridge, factory, settings
+):
+    bridge, publisher = connect(make_bridge, factory, settings, SMALL)
+    factory.client.fire_disconnect(7)
+
+    publisher.payload = BIG
+    publisher.publish("channels", BIG)
+    # The fake takes a publish without a session; the broker would never see it.
+    assert bridge.state.knows(CHANNELS)
+    factory.client.clear()
+
+    factory.client.fire_connect()
+
+    assert [sent.text for sent in factory.client.all_for(CHANNELS)] == [""]
+    assert not bridge.state.knows(CHANNELS)
+
+
+def test_a_withheld_topic_no_snapshot_carries_is_retracted_on_the_connect(connected_bridge,
+                                                                          factory):
+    topic = ROOT + "/late"
+    connected_bridge.publish_raw(topic, "small")
+    factory.client.fire_disconnect(7)
+    connected_bridge.publish_raw(topic, b"\xff" * LIMIT)
+    factory.client.clear()
+
+    factory.client.fire_connect()
+
+    assert [sent.text for sent in factory.client.all_for(topic)] == [""]
+    assert not connected_bridge.state.knows(topic)
+    assert [one["topic"] for one in not_published(factory)] == ["late"]
+
+
+def test_the_same_small_payload_is_published_again_after_a_big_one(make_bridge, factory,
+                                                                   settings):
+    """The copy that fitted was retracted, so "unchanged" is not a reason to keep quiet."""
+    _bridge, publisher = connect(make_bridge, factory, settings, SMALL)
+    publisher.publish("channels", BIG)
+    factory.client.clear()
+
+    publisher.publish("channels", SMALL)
+
+    assert [sent.json() for sent in factory.client.all_for(CHANNELS)] == [SMALL]
+
+
+# ------------------------------------------------------------------- discovery --
+
+
+def test_reset_leaves_a_discovery_payload_it_could_not_replace(make_bridge, factory, settings):
+    """A reset retracts and republishes; a device it cannot republish it must not delete."""
+    bridge, publisher = connect(make_bridge, factory, settings, SMALL, ha_mode="discovery",
+                                names=["One", "Two"])
+    publisher.names = [f"{number:04d} " + "n" * 2000 for number in range(600)]
+    factory.client.clear()
+
+    bridge.reset_retained()
+
+    assert factory.client.all_for(DEVICE) == []
+    assert bridge.state.knows(DEVICE)
+    assert "channel_select" in bridge.state.component_keys
+    assert [one["topic"] for one in not_published(factory)] == [DEVICE]
+    # Everything else is retracted and put back, as a reset always did.
+    assert [bool(sent.text) for sent in factory.client.all_for(CHANNELS)] == [False, True]
+    assert [bool(sent.text) for sent in factory.client.all_for(ANNOUNCEMENT)] == [False, True]
+
+
+def test_reset_still_replaces_a_discovery_payload_that_fits(make_bridge, factory, settings):
+    bridge, _publisher = connect(make_bridge, factory, settings, SMALL, ha_mode="discovery",
+                                 names=["One", "Two"])
+    factory.client.clear()
+
+    bridge.reset_retained()
+
+    assert [bool(sent.text) for sent in factory.client.all_for(DEVICE)] == [False, True]
+
+
+def test_a_withheld_discovery_payload_does_not_forget_what_was_announced(make_bridge, factory,
+                                                                         settings):
+    """What Home Assistant still has is the last payload that was sent, not the last one built."""
+    bridge, publisher = connect(make_bridge, factory, settings, SMALL, ha_mode="discovery",
+                                names=["One", "Two"])
+    announced = bridge.state.component_keys
+    assert "channel_select" in announced
+    # A component the device payload on the broker carries, and the next one will not.
+    bridge.state.set_component_keys(dict(announced, gone="sensor"))
+
+    publisher.names = [f"{number:04d} " + "n" * 2000 for number in range(600)]
+    bridge.publish_discovery()
+    assert bridge.state.component_keys.get("gone") == "sensor"
+
+    publisher.names = ["One"]
+    bridge.publish_discovery()
+    assert factory.client.last(DEVICE).json()["cmps"]["gone"] == {"p": "sensor"}
+    assert "gone" not in bridge.state.component_keys
+
+
+# ----------------------------------------------------------------- the measure --
+
+
+def test_four_byte_characters_are_counted_as_four(connected_bridge, factory):
+    topic = ROOT + "/pictures"
+    count = 300000
+    assert count * 3 < LIMIT < count * 4
+
+    connected_bridge.publish_raw(topic, chr(0x1F4FA) * count)
+
+    assert factory.client.all_for(topic) == []
+    assert not_published(factory) == [
+        {"topic": "pictures", "bytes": OVERHEAD + len(topic) + count * 4, "limit": LIMIT}
+    ]
+
+
+def test_the_topic_is_measured_in_bytes_too(connected_bridge, factory):
+    topic = ROOT + "/" + chr(0x142) * 8
+    assert len(topic.encode("utf-8")) == len(topic) + 8
+
+    connected_bridge.publish_raw(topic, b"\xff" * (LIMIT + 1 - packet_bytes(topic, b"")))
+
+    assert factory.client.all_for(topic) == []
+
+
+def test_a_bytearray_is_measured_as_the_bytes_it_is(connected_bridge, factory):
+    topic = ROOT + "/buffer"
+    fits = bytearray(b"\xff" * (LIMIT - packet_bytes(topic, b"")))
+
+    connected_bridge.publish_raw(topic, fits)
+
+    assert len(factory.client.last(topic).payload) == len(fits)
+
+
+def test_an_event_too_big_is_dropped_and_takes_nothing_back(connected_bridge, factory,
+                                                            plugin_log):
+    """A publish that is not retained has no retained copy of its own to retract."""
+    topic = ROOT + "/key"
+    connected_bridge.publish_raw(topic, "retained")
+    factory.client.clear()
+
+    connected_bridge.publish_raw(topic, b"\xff" * LIMIT, retain=False)
+
+    assert factory.client.published == []
+    assert connected_bridge.state.knows(topic)
+    assert connected_bridge.not_published() == []
+    assert "not publishing key" in plugin_log()
+
+
+def test_every_event_too_big_is_logged(connected_bridge, plugin_log):
+    """An event is not a state that stays withheld: each one dropped is one line."""
+    topic = ROOT + "/key"
+    connected_bridge.publish_raw(topic, b"\xff" * LIMIT)
+    assert plugin_log().count("not publishing key") == 1
+
+    connected_bridge.publish_raw(topic, b"\xff" * LIMIT, retain=False)
+    connected_bridge.publish_raw(topic, b"\xff" * LIMIT, retain=False)
+
+    assert plugin_log().count("not publishing key") == 3
+
+
+def test_the_list_is_sorted_by_topic(connected_bridge, factory):
+    for suffix in ("zebra", "alpha", "middle"):
+        connected_bridge.publish_raw(ROOT + "/" + suffix, b"\xff" * LIMIT)
+
+    assert [one["topic"] for one in not_published(factory)] == ["alpha", "middle", "zebra"]
+
+
+def test_json_too_big_is_not_kept_for_the_page(connected_bridge):
+    topic = ROOT + "/never_published"
+
+    connected_bridge.publish_json(topic, BIG)
+
+    assert topic not in [name for name, _payload in connected_bridge.last_payloads()]
+
+
+def test_a_removal_forgets_the_list_with_everything_else(make_bridge, factory, settings):
+    bridge, _publisher = connect(make_bridge, factory, settings, BIG)
+    assert bridge.not_published() != []
+
+    bridge.forget_everything_published()
+
+    assert bridge.not_published() == []

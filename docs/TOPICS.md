@@ -25,7 +25,7 @@ Conventions that hold everywhere:
 | Timestamps | `begin`, `end`, `generated`, `ts` are **Unix epoch seconds, UTC, integer**. Never a formatted string, never local time. |
 | Absent values | `null` for a field that has no value right now (no next event, no recording). A key is not silently dropped. |
 | Retraction | An empty payload published retained. That is how `last_error` is cleared and how `cmd/reset` and discovery retraction work. |
-| Packet size | No packet the plugin sends is over **1,000,000 bytes** - the fixed header, the topic and the payload together. That is under Mosquitto 2.1's default `max_packet_size` of 2,000,000 and under the 1 MiB default of other common brokers; a broker closes the connection on a bigger packet, and MQTT 3.1.1 gives a client no way to learn its limit. A payload that would need more is **not published**, and its topic is named in `info.not_published` (§1). A topic under `<base>/<node>/` is also retracted when an earlier, smaller payload was retained there; a topic outside the node's tree - a discovery payload - is left as it was. In practice that is `channels`, an `epg_grid/<bouquet_slug>` or, in discovery mode, the device's discovery payload, on a receiver with a very large channel list. Added after 0.4.0 (unreleased). |
+| Packet size | No state topic, announcement or discovery payload is published in a packet over **1,000,000 bytes** - the fixed header, the topic and the payload together. (The retractions and the few fixed messages the plugin sends outside that path are small by construction.) That is under Mosquitto 2.1's default `max_packet_size` of 2,000,000 and under the 1 MiB default of other common brokers; a broker closes the connection on a bigger packet, and MQTT 3.1.1 gives a client no way to learn its limit. A payload that would need more is **not published**, and its topic is named in `info.not_published` (§1). A topic under `<base>/<node>/` is also retracted when an earlier, smaller payload was retained there; a topic outside the node's tree - a discovery payload - is left as it was. An event that is not retained and would be too big is dropped, with a line in the log. In practice that is `channels`, an `epg_grid/<bouquet_slug>` or, in discovery mode, the device's discovery payload, on a receiver with a very large channel list. Added after 0.4.0 (unreleased). |
 
 Everything the plugin publishes it also publishes again on every `on_connect` - the full state
 snapshot, the announcement and, in discovery mode, the discovery payloads. A broker that lost its
@@ -102,7 +102,8 @@ hold:
    integration's code at the time, and against this plugin's own Home Assistant discovery payloads
    (`discovery.py`), which are a consumer too, and cited by file and line in the table below. No
    other consumer is known to this project; one that becomes known is checked the same way. (None
-   of the four below touches the discovery payloads: they read neither `timers` nor `generated` -
+   of the five below touches the discovery payloads: they read neither `timers`, `generated`,
+   `channels` nor an `epg_grid` topic -
    "Next timer" reads `recording.next`, `discovery.py` l.332-346 - and carry `bouquet` as reported.)
 2. **Every name and type stays.** An exception changes what something means, never whether it
    exists or what type it has - [`contract.json`](contract.json) does not change for it. A removal or
@@ -128,6 +129,7 @@ hold:
 | `epg-grid-generated-means-changed` | 0.3.0 | `epg_grid/<bouquet_slug>`'s `generated` means when the grid last changed, not when it was last built | The integration reads `generated` only into its diagnostics (`diagnostics.py` l.144). Recorded after the fact, as above |
 | `timers-lists-finished` | 0.4.0 | `timers` lists the timers the receiver has finished with - ended, failed and disabled - and not only the pending ones; `state` gains `disabled`, `failed` and `unknown`, and a state number with no word is `unknown` where it used to read `waiting`. A consumer that treated every entry as pending filters on `state` (`waiting`, `prepared`, `running`) | The integration keeps the `timers` payload for its diagnostics only (`box.py` l.1299, `diagnostics.py` l.119) and builds no entity from it; its recording guard reads OpenWebif, not this topic (`installer.py` l.516-532). Decided by the maintainer on 2026-09-26 |
 | `zap-under-popup-recorded` | 0.4.0 | With only an information popup open directly over the info bar, `cmd/zap`, `cmd/zap_history` and the zap `cmd/bouquet` makes go through the channel list: the zap is recorded in the zap history, and a zap outside the bouquet being browsed moves the channel list. 0.3.0 played them directly, as with any screen open | As for `zap-moves-channel-list`: the integration follows `bouquet` and `zap_history` as the receiver reports them (`box.py` l.1291 for `zap_history`) |
+| `oversize-payload-withheld` | unreleased | A retained topic of the node's tree - `channels`, an `epg_grid/<bouquet_slug>` - whose packet would be over 1,000,000 bytes is not published, and a smaller payload retained there earlier is retracted, while its capability stays in `info.capabilities`; `info.not_published` names the topic. Until now it was published whatever its size. A consumer treats the empty retained payload as any other retraction, and reads `info.not_published` to tell "too big to send" from "none" | The integration (0.4.0) reads an empty retained `channels` as no channel list: an empty payload parses to nothing (`box.py` l.289, l.293-305), the dispatcher stores that (`box.py` l.1338-1339) and the bouquet readers answer with an empty list (`box.py` l.925-935), so its channel selects lose their options rather than keep stale ones; an empty `epg_grid/<bouquet_slug>` drops that bouquet's grid (`box.py` l.2135-2142). It does not read `info.not_published`, so it shows the empty list without saying why. The plugin's own discovery payloads read neither topic - the channel select's options are written into the payload (`discovery.py` l.371-382) |
 
 The rule was written down after 0.3.0, so the history below classifies the releases before it by
 what they did.
@@ -160,8 +162,8 @@ not by the checker; their types are the tables below.
 |---|---|---|
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
-| unreleased, on `main` after 0.4.0 | contract 1: an addition | **Added**: the `info` member `not_published`, and the bound behind it - a payload whose packet would be over 1,000,000 bytes is not published, and a smaller payload retained earlier on its topic under `<base>/<node>/` is retracted (the conventions at the top of this file). Until now such a payload was sent, and a broker with a lower limit closed the connection on it |
 | 0.3.0 -> 0.4.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3); the read-only setting `update_allowed`, the capability `self_update`, the command `update`, `update.transaction` and the subscription to `enigma2mqtt/integration/<node>` (§3); the event topic `relay_request` and the command `relay`, and `cmd/update`'s refusal `no_relay`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
+| unreleased, on `main` after 0.4.0 | contract 1: an addition and a named exception | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2). **Exceptions**: `oversize-payload-withheld` |
 
 ---
 
@@ -365,8 +367,9 @@ everything fits, otherwise one entry for each such topic, sorted by `topic`:
 | `limit` | int | The bound it was held to, `1000000` |
 
 A topic of the node's own tree that is in the list is **not on the broker**: when this node had
-published a smaller payload there earlier, that copy is retracted, so a consumer never reads an old
-channel list as the current one. A topic outside the tree is never retracted for its size: an empty
+published a smaller payload there earlier, that copy is retracted - at once on an open session,
+otherwise on the connect that follows - so a consumer never reads an old channel list as the
+current one. A topic outside the tree is never retracted for its size: an empty
 retained device payload would delete the device and all its entities in Home Assistant, so the
 discovery payload published earlier stays, with the channel names it had, and a first install has
 none until the payload fits.
@@ -1755,7 +1758,10 @@ Two halves, in this order, on the one session that is already open:
 
 1. **Retract.** An empty retained payload to every retained topic this node owns - all the state
    topics, every `epg_grid/<bouquet_slug>`, the announcement, and every Home Assistant discovery
-   payload named in the state file - and then the plugin forgets what it had announced.
+   payload named in the state file - and then the plugin forgets what it had announced. One
+   payload is left alone (added after 0.4.0, unreleased): a discovery payload whose replacement
+   would be over the packet bound (the conventions at the top of this file). Step 2 could not put
+   it back, and emptying it deletes the device and its entities in Home Assistant.
 2. **Republish, immediately.** `availability: online`, the full state snapshot, the announcement
    and, in `discovery` mode, the discovery payloads - **the same sequence as `on_connect`**, run
    straight away rather than waited for. The state file is written again with what was just
