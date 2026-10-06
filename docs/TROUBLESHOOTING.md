@@ -163,24 +163,53 @@ carries a bouquet's programme guide, and in `discovery` mode the device's discov
 carries every channel name.
 
 A plugin after 0.4.0 does not send such a payload. It holds every packet to 1,000,000 bytes,
-says in its log which topic was too big - `not publishing channels: 2315478 bytes is over the
-1000000 byte packet limit` - and lists it in `info.not_published`
+says in its log which topic was too big - `not publishing epg_grid/astra: 1204611 bytes is over
+the 1000000 byte packet limit` - and lists it in `info.not_published`
 ([TOPICS.md](TOPICS.md#basenodeinfo)), so the connection stays up and everything else works. The
 log has that line once, when the topic becomes too big, not at every attempt.
 
-What is missing depends on the topic. `channels` or a grid that is too big is not on the broker -
-an older, smaller copy is retracted - so a consumer has no channel list, or no programme guide for
-that bouquet. In `discovery` mode, when it is the device's discovery payload that is too big,
-nothing is taken away: the device and its entities stay, and the channel select keeps the options
-it had before the list outgrew the limit - or, on a first install, the device does not appear in
-Home Assistant until the payload fits. Either way, to get it back:
+What a household sees depends on which payload was too big:
+
+- **The channel list.** `channels` - every bouquet with its list - is not on the broker, and is
+  named in `info.not_published`; an older, smaller copy is retracted. The lists are still
+  published, one bouquet a topic, on `channels/<bouquet_slug>`, and `bouquets` is their index:
+  every bouquet with the slug of its topic and how many services it has
+  ([TOPICS.md](TOPICS.md#basenodechannels---since-m2)). A consumer that reads those has every
+  channel. One that reads only `channels` - the companion integration up to 0.4.0 - has no
+  channel list, so its channel selects are empty until the list is narrowed. A single bouquet too
+  big for one packet by itself is missing from `channels/<bouquet_slug>` as well, and named there
+  too.
+- **A grid.** An `epg_grid/<bouquet_slug>` that is too big is cut to fewer events per channel -
+  the most that fits one packet - and published; its `events_per_channel` says how many, and the
+  log has `epg grid: Astra is cut from 4 to 2 event(s) per channel to fit one packet`. The guide
+  for that bouquet is shorter, and the other bouquets keep theirs. Only a grid that does not fit
+  with one event on each channel is not on the broker - an older, smaller copy is retracted - and
+  is named in `info.not_published`.
+- **The device's discovery payload**, in `discovery` mode. It is published without the channel
+  select, whose options - every channel name - are what made it too big. The device and all its
+  other entities are there, also on a first install; the "Channel list" select is missing, or
+  disappears if it was there before, and the log says `the channel select is left out of the
+  discovery payload`. It comes back by itself once the names fit. Zapping by name still works,
+  from an automation or a script publishing `cmd/zap`.
+
+To get back what is missing:
 
 - set `bouquets_for_select` to the bouquets the household uses - that shrinks the channel list,
-  the grids and the discovery payload at once;
-- lower `epg_grid_events`, the events per channel in the grid; `0` switches the grid off.
+  the grids and the discovery payload at once. It is still needed for the channel select in
+  `discovery` mode, for a consumer that reads only `channels`, and for a guide with all its
+  events;
+- split a bouquet that is in `info.not_published` by itself into smaller ones, or leave it out;
+- `epg_grid_events` no longer needs lowering for the size - the plugin cuts a grid that is too
+  big by itself - and `0` still switches the grid off.
 
-Both are on the setup screen and on the plugin's OpenWebif page ([SETUP.md](SETUP.md)). With an
-older plugin, the same two settings are the way out, or a higher `max_packet_size` on the broker.
+Both settings are on the setup screen and on the plugin's OpenWebif page ([SETUP.md](SETUP.md)).
+With a plugin up to 0.4.0, `bouquets_for_select` and a lower `epg_grid_events` are the way out, or
+a higher `max_packet_size` on the broker.
+
+**After going back to 0.4.0 by hand**, `bouquets` and the `channels/<bouquet_slug>` topics stay on
+the broker, retained, with the lists they had: 0.4.0 does not publish them, so it does not update
+them either, though it still knows their names from the state file. `cmd/reset` on the downgraded
+plugin retracts them, and so does an uninstall.
 
 ## Entities Home Assistant will never update again
 

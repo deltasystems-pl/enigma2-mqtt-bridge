@@ -11,6 +11,7 @@ import conftest
 from conftest import TVP1, Event
 
 from MQTTBridge import bridge as bridge_module
+from MQTTBridge import discovery
 from MQTTBridge.bridge import Publisher
 
 NODE = "vuuno4kse_005301"
@@ -22,6 +23,7 @@ VOLUME = ROOT + "/volume"
 ANNOUNCEMENT = "enigma2mqtt/discovery/" + NODE + "/config"
 DEVICE = "homeassistant/device/" + NODE + "/config"
 ULUBIONE = ROOT + "/epg_grid/ulubione_tv"
+ULUBIONE_LIST = ROOT + "/channels/ulubione_tv"
 SPORT = ROOT + "/epg_grid/sport_hd"
 
 # Written out rather than read from the module: the number is the promise.
@@ -80,6 +82,29 @@ def connect(make_bridge, factory, settings, payload, ha_mode="integration", name
 
 def not_published(factory):
     return factory.client.last(INFO).json().get("not_published")
+
+
+class Padding:
+    """A device discovery payload too big whatever its channel select holds.
+
+    The select is the component that grows with the receiver, and the bridge
+    leaves it out before it withholds the payload (`test_discovery_fit.py`). So
+    a payload that is still too big is made here from the other end: the
+    origin's URL, which no component reads, is padded past the bound while
+    `on` is set.
+    """
+
+    def __init__(self, monkeypatch):
+        self.on = True
+        build = discovery.build_discovery_components
+
+        def padded(*args, **kwargs):
+            topics = build(*args, **kwargs)
+            if self.on:
+                topics[DEVICE]["o"]["url"] += "/" + "p" * (LIMIT + 1000)
+            return topics
+
+        monkeypatch.setattr(discovery, "build_discovery_components", padded)
 
 
 def entry(suffix, topic, payload):
@@ -354,10 +379,10 @@ def test_a_payload_is_measured_in_bytes_not_characters(connected_bridge, factory
 
 
 def test_an_oversized_discovery_payload_is_named_by_its_full_topic(make_bridge, factory,
-                                                                    settings):
-    """Every channel name is an option of the select, so the device payload grows with them."""
-    names = [f"{number:04d} " + "n" * 2000 for number in range(600)]
-    connect(make_bridge, factory, settings, SMALL, ha_mode="discovery", names=names)
+                                                                    settings, monkeypatch):
+    """A device payload too big even without its channel select is not sent."""
+    Padding(monkeypatch)
+    connect(make_bridge, factory, settings, SMALL, ha_mode="discovery", names=["One", "Two"])
 
     assert factory.client.all_for(DEVICE) == []
     assert factory.client.last(CHANNELS).json() == SMALL
@@ -368,15 +393,17 @@ def test_an_oversized_discovery_payload_is_named_by_its_full_topic(make_bridge, 
 
 
 def test_a_discovery_payload_on_the_broker_is_never_retracted(make_bridge, factory, settings,
-                                                              plugin_log):
+                                                              plugin_log, monkeypatch):
     """An empty retained device payload deletes the device and every entity it has."""
-    bridge, publisher = connect(make_bridge, factory, settings, SMALL, ha_mode="discovery",
-                                names=["One", "Two"])
+    padding = Padding(monkeypatch)
+    padding.on = False
+    bridge, _publisher = connect(make_bridge, factory, settings, SMALL, ha_mode="discovery",
+                                 names=["One", "Two"])
     assert factory.client.last(DEVICE).json()
     assert bridge.state.knows(DEVICE)
     factory.client.clear()
 
-    publisher.names = [f"{number:04d} " + "n" * 2000 for number in range(600)]
+    padding.on = True
     bridge.publish_discovery()
 
     # Neither the payload nor a retraction: the device keeps the options it had.
@@ -427,7 +454,11 @@ def test_a_grid_too_big_is_reported_when_its_timer_publishes_it(live_bridge, fac
 def test_a_copy_an_earlier_process_left_is_retracted_although_the_publisher_starts_first(
     make_bridge, factory, settings, receiver
 ):
-    """The real channel list publishes in `start()`, before the client has a session."""
+    """The real channel list publishes in `start()`, before the client has a session.
+
+    One name of a megabyte is too much for `channels` and for the list of the
+    bouquet it is in, `channels/ulubione_tv`; both are withheld the same way.
+    """
     settings.host.value = "10.0.0.5"
     settings.node_id.value = NODE
     settings.ha_mode.value = "integration"
@@ -436,6 +467,7 @@ def test_a_copy_an_earlier_process_left_is_retracted_although_the_publisher_star
     first.start()
     factory.client.fire_connect()
     assert factory.client.last(CHANNELS).json()["bouquets"]
+    assert factory.client.last(ULUBIONE_LIST).json()["channels"]
     first.stop()
 
     receiver.service_center.contents[conftest.FIRST_BOUQUET].append(
@@ -444,17 +476,21 @@ def test_a_copy_an_earlier_process_left_is_retracted_although_the_publisher_star
     bridge = make_bridge(session=receiver.session)
     bridge.start()
     client = factory.client
-    # Nothing could be sent yet, so the state file still has to know the topic.
-    assert client.all_for(CHANNELS) == []
-    assert bridge.state.knows(CHANNELS)
+    # Nothing could be sent yet, so the state file still has to know the topics.
+    for topic in (CHANNELS, ULUBIONE_LIST):
+        assert client.all_for(topic) == []
+        assert bridge.state.knows(topic)
 
     client.fire_connect()
 
-    assert [sent.text for sent in client.all_for(CHANNELS)] == [""]
-    assert not bridge.state.knows(CHANNELS)
-    # It was measured before the connect, so the first `info` already names it.
+    for topic in (CHANNELS, ULUBIONE_LIST):
+        assert [sent.text for sent in client.all_for(topic)] == [""]
+        assert not bridge.state.knows(topic)
+    # They were measured before the connect, so the first `info` already names them.
     lists = [sent.json()["not_published"] for sent in client.all_for(INFO)]
-    assert [[one["topic"] for one in listed] for listed in lists] == [["channels"]]
+    assert [[one["topic"] for one in listed] for listed in lists] == [
+        ["channels", "channels/ulubione_tv"]
+    ]
 
 
 def test_a_topic_that_outgrew_the_bound_during_an_outage_is_retracted_on_the_connect(
@@ -505,11 +541,14 @@ def test_the_same_small_payload_is_published_again_after_a_big_one(make_bridge, 
 # ------------------------------------------------------------------- discovery --
 
 
-def test_reset_leaves_a_discovery_payload_it_could_not_replace(make_bridge, factory, settings):
+def test_reset_leaves_a_discovery_payload_it_could_not_replace(make_bridge, factory, settings,
+                                                               monkeypatch):
     """A reset retracts and republishes; a device it cannot republish it must not delete."""
-    bridge, publisher = connect(make_bridge, factory, settings, SMALL, ha_mode="discovery",
-                                names=["One", "Two"])
-    publisher.names = [f"{number:04d} " + "n" * 2000 for number in range(600)]
+    padding = Padding(monkeypatch)
+    padding.on = False
+    bridge, _publisher = connect(make_bridge, factory, settings, SMALL, ha_mode="discovery",
+                                 names=["One", "Two"])
+    padding.on = True
     factory.client.clear()
 
     bridge.reset_retained()
@@ -534,8 +573,10 @@ def test_reset_still_replaces_a_discovery_payload_that_fits(make_bridge, factory
 
 
 def test_a_withheld_discovery_payload_does_not_forget_what_was_announced(make_bridge, factory,
-                                                                         settings):
+                                                                         settings, monkeypatch):
     """What Home Assistant still has is the last payload that was sent, not the last one built."""
+    padding = Padding(monkeypatch)
+    padding.on = False
     bridge, publisher = connect(make_bridge, factory, settings, SMALL, ha_mode="discovery",
                                 names=["One", "Two"])
     announced = bridge.state.component_keys
@@ -543,10 +584,12 @@ def test_a_withheld_discovery_payload_does_not_forget_what_was_announced(make_br
     # A component the device payload on the broker carries, and the next one will not.
     bridge.state.set_component_keys(dict(announced, gone="sensor"))
 
-    publisher.names = [f"{number:04d} " + "n" * 2000 for number in range(600)]
+    padding.on = True
     bridge.publish_discovery()
     assert bridge.state.component_keys.get("gone") == "sensor"
+    assert "channel_select" in bridge.state.component_keys
 
+    padding.on = False
     publisher.names = ["One"]
     bridge.publish_discovery()
     assert factory.client.last(DEVICE).json()["cmps"]["gone"] == {"p": "sensor"}

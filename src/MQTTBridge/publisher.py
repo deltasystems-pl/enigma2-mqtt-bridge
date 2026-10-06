@@ -49,6 +49,18 @@ class Publisher:
     # substring of it.
     volatile = ()
 
+    def prepared(self, suffix, payload):
+        """`(encoded, change_key)` for a topic whose JSON this area has built itself.
+
+        `(None, None)` for every other topic, which is nearly all of them: the
+        bridge then encodes the payload, and encodes it a second time without
+        its `volatile` fields to have something to compare. For a payload of a
+        megabyte that second encoding is worth avoiding, and an area that
+        already holds the JSON - and a key that says whether it differs -
+        hands both over here, on a state publish and on the snapshot alike.
+        """
+        return None, None
+
     # Set by a publisher that returns False from `start()` because its feature
     # is switched off in the settings, rather than because this image could not
     # give it the hooks. The two look identical from outside and read very
@@ -100,12 +112,23 @@ class Publisher:
         """One of the plugin's settings, read now rather than cached at start."""
         return None if self.bridge is None else self.bridge.value(name)
 
-    def publish(self, suffix, payload):
-        """Publish this feature area's state - but only when it has changed."""
+    def publish(self, suffix, payload, encoded=None):
+        """Publish this feature area's state - but only when it has changed.
+
+        `encoded` is the payload's JSON when the caller has it already, from
+        measuring it (`Bridge.measure`), so that it is not built twice.
+        """
         if self.bridge is None:
             return None
+        options = {}
+        if encoded is None:
+            encoded, change_key = self.prepared(suffix, payload)
+            if change_key is not None:
+                options["change_key"] = change_key
+        if encoded is not None:
+            options["encoded"] = encoded
         return self.bridge.publish_state(
-            suffix, payload, raw=suffix in self.raw, volatile=self.volatile
+            suffix, payload, raw=suffix in self.raw, volatile=self.volatile, **options
         )
 
     def report(self, command, message):

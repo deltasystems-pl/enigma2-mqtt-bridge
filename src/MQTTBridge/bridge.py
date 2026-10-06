@@ -232,6 +232,10 @@ class Bridge:
         # this connection, or None before the first one.
         self._not_published = {}
         self._not_published_reported = None
+        # Whether the discovery payload last built had to leave the channel
+        # select out to fit one packet (`_discovery_components`). Kept so that
+        # the log says so when it starts, not on every connect.
+        self._select_left_out = False
         # The last picture this process put on `screen`, and when it was taken,
         # for the OpenWebif page. Held here and not on the publisher, because
         # the publisher is replaced by every settings save while the retained
@@ -710,6 +714,7 @@ class Bridge:
             # The save may have renamed the node or narrowed what is published,
             # and the new session measures everything again.
             self._not_published = {}
+            self._select_left_out = False
         except Exception:
             LOG.exception("could not shut the old session down cleanly")
         return self.start()
@@ -939,6 +944,11 @@ class Bridge:
         # that outgrew the packet bound with no session open, and that no
         # snapshot carries.
         self._take_back_withheld()
+        # The channel list walks its bouquets while it starts, before there is
+        # a session, so this connect is the first chance to take back the list
+        # of a bouquet that went while nothing was connected - or the plugin
+        # was not running.
+        self.sync_channel_slugs()
         if self.publisher("epg_grid") is None:
             # With a grid publisher this is its business, and it does it at the
             # end of every pass. Doing it here as well would retract each grid
@@ -1066,6 +1076,19 @@ class Bridge:
         self._report_not_published()
         return None
 
+    def withhold_state(self, suffix, size):
+        """Withhold a state topic its publisher already knows is over the bound.
+
+        For a payload measured when it was built and not changed since: the
+        snapshot leaves it out, and this does what `publish_raw` would have
+        done had it been handed the payload and measured it again - under the
+        same conditions, and with the size that measurement would have found.
+        It spares a connect the encoding of megabytes that cannot be sent.
+        """
+        if self.client is None or self._uninstaller.closed or self._self_update.silent:
+            return None
+        return self._withhold(self.topic(suffix), size)
+
     def _take_back(self, topic):
         """Retract the retained copy of a withheld topic - once the broker can be told.
 
@@ -1126,11 +1149,39 @@ class Bridge:
             return None
         return self._screenshot
 
-    def publish_json(self, topic, payload, retain=True, volatile=()):
+    def measure(self, suffix, payload):
+        """`(encoded, size)` for a state topic's payload, without publishing anything.
+
+        `size` is `_oversize`'s answer - the bytes of the packet when that is
+        over the bound, else 0 - for a publisher that has something smaller to
+        send instead: the channel list without its lists, a grid with fewer
+        events. `encoded` is the JSON that was measured, handed back so that
+        the publish that follows does not build it a second time.
+        """
         encoded = _encoded(payload)
-        info = self.publish_raw(
-            topic, encoded, retain=retain, change_key=_change_key(encoded, payload, volatile)
-        )
+        return encoded, _oversize(self.topic(suffix), encoded)
+
+    def encode(self, value):
+        """The canonical JSON for a value, for a publisher that builds a payload in parts."""
+        return _encoded(value)
+
+    def exceeds(self, suffix, least):
+        """Whether a payload of at least `least` bytes is certainly over the bound here.
+
+        For a publisher that can put a floor under a payload's size without
+        encoding it, and so need not encode what cannot fit. It only ever says
+        "too big": that something fits is `measure`'s to say.
+        """
+        topic = self.topic(suffix)
+        return PACKET_OVERHEAD_BYTES + len(topic.encode("utf-8")) + least > MAX_PACKET_BYTES
+
+    def publish_json(self, topic, payload, retain=True, volatile=(), encoded=None,
+                     change_key=None):
+        if encoded is None:
+            encoded = _encoded(payload)
+        if change_key is None:
+            change_key = _change_key(encoded, payload, volatile)
+        info = self.publish_raw(topic, encoded, retain=retain, change_key=change_key)
         if retain and self.client is not None and topic not in self._not_published:
             self._remember(topic, encoded)
         return info
@@ -1143,7 +1194,8 @@ class Bridge:
         """
         self._published = {}
 
-    def publish_state(self, suffix, payload, raw=False, retain=True, volatile=()):
+    def publish_state(self, suffix, payload, raw=False, retain=True, volatile=(), encoded=None,
+                      change_key=None):
         """A feature area's state topic - published only when it has changed.
 
         `sort_keys` in `_encoded` is what makes the comparison meaningful: two
@@ -1155,13 +1207,19 @@ class Bridge:
         exceptions here.
         A topic that is not retained (`key`) is never compared - every press is
         an event, including the same press twice.
+        `encoded` is the payload's JSON when the caller measured it first
+        (`measure`); it is then not built again here. `change_key` is what the
+        comparison is made on when the publisher has one of its own
+        (`Publisher.prepared`), which saves encoding the payload a second time
+        without its stamps.
         """
         topic = self.topic(suffix)
         if raw:
             encoded = payload
-        else:
+        elif encoded is None:
             encoded = _encoded(payload)
-        change_key = _change_key(encoded, payload, volatile)
+        if change_key is None:
+            change_key = _change_key(encoded, payload, volatile)
         if retain and self._published.get(topic) == change_key:
             return None
         info = self.publish_raw(topic, encoded, retain=retain, change_key=change_key)
@@ -1244,13 +1302,24 @@ class Bridge:
             try:
                 raw = getattr(publisher, "raw", ())
                 volatile = getattr(publisher, "volatile", ())
+                prepared = getattr(publisher, "prepared", None)
                 for suffix, payload in publisher.snapshot().items():
                     if suffix in raw:
                         self.publish_raw(self.topic(suffix), payload)
                     else:
-                        self.publish_json(self.topic(suffix), payload, volatile=volatile)
+                        # The JSON and the key a publisher holds already are
+                        # the ones a state publish would use, so what this
+                        # records as sent is what the next one is judged by.
+                        encoded, key = prepared(suffix, payload) if prepared else (None, None)
+                        self.publish_json(self.topic(suffix), payload, volatile=volatile,
+                                          encoded=encoded, change_key=key)
                     published += 1
                     topic_count += 1
+                # What the publisher measured over the bound when it built it,
+                # and left out above: withheld as if it had been measured here.
+                too_big = getattr(publisher, "too_big", None)
+                for suffix, size in (too_big() if too_big else {}).items():
+                    self.withhold_state(suffix, size)
             except Exception:
                 LOG.exception("the %s publisher could not produce a snapshot", publisher.name)
             finally:
@@ -1313,14 +1382,50 @@ class Bridge:
         return names
 
     def _discovery_components(self, info):
-        """{topic: payload} for every Home Assistant discovery payload, as it stands now."""
+        """`(components, encoded)` for the Home Assistant discovery payloads, as they stand now.
+
+        `components` is {topic: payload}; `encoded` holds the JSON of the device
+        payload, which was built to be measured and need not be built again.
+
+        The channel select is the one component that grows with the receiver:
+        its options are every channel name. When the device payload with it
+        would be over the packet bound, the payload is built without it - which
+        costs one entity, where a payload that is not sent costs a first install
+        the whole device. A select announced earlier is then in `previous` and
+        absent here, so the builder writes its removal, as for any component
+        that is no longer announced, and it comes back the same way once the
+        names fit.
+        """
+        topic = discovery.device_topic(self.discovery_prefix, self.node_id)
+        options = self.channel_options()
+        components = self._build_discovery(info, options)
+        encoded = {}
+        left_out = False
+        if topic in components:
+            encoded[topic] = _encoded(components[topic])
+            if options and _oversize(topic, encoded[topic]):
+                components = self._build_discovery(info, ())
+                encoded[topic] = _encoded(components[topic])
+                # Too big even so: the smaller payload is the one withheld,
+                # and the select has not been left out of anything sent.
+                left_out = not _oversize(topic, encoded[topic])
+        if left_out and not self._select_left_out:
+            LOG.warning(
+                "the channel select is left out of the discovery payload: with %d channel"
+                " name(s) it would be over the %d byte packet limit",
+                len(options), MAX_PACKET_BYTES,
+            )
+        self._select_left_out = left_out
+        return components, encoded
+
+    def _build_discovery(self, info, channel_options):
         return discovery.build_discovery_components(
             self.node_id,
             self.value("friendly_name"),
             self.base_topic,
             info,
             prefix=self.discovery_prefix,
-            channel_options=self.channel_options(),
+            channel_options=channel_options,
             # From the same payload the announcement carries, so what is
             # announced and what is published cannot disagree about it.
             deep_standby_allowed=bool(info.get("settings", {}).get("deep_standby_allowed")),
@@ -1335,9 +1440,10 @@ class Bridge:
         """The discovery topics whose payload, built now, would not be sent for its size."""
         if self.value("ha_mode") != "discovery":
             return set()
-        components = self._discovery_components(self.build_info())
+        components, encoded = self._discovery_components(self.build_info())
         return {
-            topic for topic, payload in components.items() if _oversize(topic, _encoded(payload))
+            topic for topic, payload in components.items()
+            if _oversize(topic, encoded.get(topic) or _encoded(payload))
         }
 
     def publish_discovery(self, info=None):
@@ -1345,12 +1451,12 @@ class Bridge:
             return
         if info is None:
             info = self.build_info()
-        components = self._discovery_components(info)
+        components, encoded = self._discovery_components(info)
         if not components:
             LOG.debug("this build publishes no Home Assistant discovery payloads")
             return
         for topic, payload in sorted(components.items()):
-            self.publish_json(topic, payload)
+            self.publish_json(topic, payload, encoded=encoded.get(topic))
         self.state.set_components(sorted(components))
         device_topic = discovery.device_topic(self.discovery_prefix, self.node_id)
         if device_topic in self._not_published:
@@ -1377,6 +1483,39 @@ class Bridge:
             LOG.info("retracting the EPG grid of a bouquet that is no longer configured: %s", slug)
             self.retract(self.topic("epg_grid/" + slug))
         self.state.set_grid_slugs(published)
+        self.state.save()
+        return len(stale)
+
+    def sync_channel_slugs(self):
+        """Retract the channel list of every bouquet that is no longer configured.
+
+        `channels/<bouquet_slug>` sets the trap `epg_grid/<bouquet_slug>` sets,
+        and the answer is the same: the state file knows the slugs, so a bouquet
+        renamed, removed or left out of `bouquets_for_select` is found from a
+        process restarted since. With no channel list at all, this retracts the
+        lot.
+
+        Only on an open session, and that is where it differs from the grid.
+        The channel list walks its bouquets while it starts, before the client
+        has connected; a retraction then reaches nobody, and forgetting the slug
+        there would leave the topic on the broker with nothing that knows of
+        it. The connect that follows calls this again.
+        """
+        if not self.connected:
+            return 0
+        channels = self.publisher("channels")
+        published = list(getattr(channels, "published_slugs", [])) if channels is not None else []
+        stale = [slug for slug in self.state.channel_slugs if slug not in published]
+        for slug in stale:
+            LOG.info(
+                "retracting the channel list of a bouquet that is no longer configured: %s", slug
+            )
+            self.retract(self.topic("channels/" + slug))
+        index = self.topic("bouquets")
+        if channels is None and self.state.knows(index):
+            # The index of topics that have all just gone.
+            self.retract(index)
+        self.state.set_channel_slugs(published)
         self.state.save()
         return len(stale)
 
@@ -1476,6 +1615,7 @@ class Bridge:
         self.publish_raw(self.topic("availability"), ONLINE)
         self.publish_snapshot(info)
         self.sync_grid_slugs()
+        self.sync_channel_slugs()
         self.publish_announcement(info)
         self.publish_discovery(info)
         self.state.save()

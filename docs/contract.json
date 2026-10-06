@@ -33,6 +33,14 @@
       "retained": true,
       "since": "0.2.0"
     },
+    "bouquets": {
+      "payload": "json",
+      "retained": true
+    },
+    "channels/<bouquet_slug>": {
+      "payload": "json",
+      "retained": true
+    },
     "bouquet": {
       "payload": "json",
       "retained": true
@@ -254,6 +262,7 @@
     "bouquet_context",
     "cam",
     "cec_workaround",
+    "channel_topics",
     "channels",
     "epg",
     "epg_grid",

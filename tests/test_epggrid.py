@@ -65,8 +65,9 @@ def test_a_polish_bouquet_name_slugs_to_ascii(live_bridge, factory, receiver):
 
 def test_the_payload_has_the_documented_shape(live_bridge, factory):
     payload = factory.client.last(ULUBIONE).json()
-    assert set(payload) == {"bouquet", "generated", "channels"}
+    assert set(payload) == {"bouquet", "generated", "events_per_channel", "channels"}
     assert isinstance(payload["generated"], int)
+    assert isinstance(payload["events_per_channel"], int)
     channel = payload["channels"][0]
     assert set(channel) == {"sref", "name", "events"}
     assert set(channel["events"][0]) == {"title", "begin", "end", "event_id"}

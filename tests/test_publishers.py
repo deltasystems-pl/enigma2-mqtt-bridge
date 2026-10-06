@@ -36,10 +36,12 @@ def test_capabilities_name_the_areas_that_bound(live_bridge, factory):
     # popup machinery being importable. `bouquet_context` and `zap_history` are
     # registered on this receiver and absent from the list, because nothing has
     # built the channel list yet and a list that cannot be read is not a
-    # capability.
+    # capability. `channel_topics` is the channel list's second name, claimed
+    # with it.
     assert capabilities == [
         "power", "service", "epg", "tuner", "recording", "timers", "volume", "hdd",
-        "process", "channels", "epg_grid", "keys", "screenshot", "toast", "message",
+        "process", "channels", "channel_topics", "epg_grid", "keys", "screenshot", "toast",
+        "message",
     ]
     assert live_bridge.publisher("bouquet_context") is not None
     assert live_bridge.publisher("zap_history") is not None
