@@ -736,6 +736,21 @@ def test_behind_closed_doors_every_command_gets_the_sentence(box, factory):
     assert bridge.apply_settings({"log_level": "debug"}) == DOORS
 
 
+def test_behind_closed_doors_clear_error_is_refused_like_every_command(box, factory):
+    """It clears nothing there, and its refusal is the doors' sentence on `last_error`."""
+    bridge = box()
+    restarting(bridge, factory)
+    factory.client.fire_message(ROOT + "/cmd/power", b"standby")
+    factory.client.clear()
+
+    factory.client.fire_message(ROOT + "/cmd/clear_error", b"PRESS")
+
+    entries = factory.client.all_for(LAST_ERROR)
+    assert [entry.json()["cmd"] for entry in entries] == ["clear_error"]
+    assert entries[0].json()["error"] == DOORS
+    assert bridge.run_command("clear_error", "", PAGE) == DOORS
+
+
 def test_behind_closed_doors_the_page_and_the_setup_screen_say_only_that(box, factory,
                                                                          monkeypatch, settings):
     from test_setup_screen import FakeSession
@@ -808,6 +823,7 @@ def test_after_the_retraction_nothing_is_published_until_the_reload(box, factory
     assert bridge.self_update.silent
     quiet = len(factory.client.published)
     factory.client.fire_message(ROOT + "/cmd/power", b"standby")
+    factory.client.fire_message(ROOT + "/cmd/clear_error", b"PRESS")
     helper_says(directory, phase="restarting", restart="requested")
     tick(3)
     bridge.check_build_on_disk()
@@ -1043,6 +1059,48 @@ def test_a_finished_marker_is_reported_once_and_removed(starting, factory):
     assert transaction(factory.client)["result"] == "rolled_back"
     assert refusal(factory.client)[0] == "not_started"
     assert not (bridge.root / updatehelper.MARKER).exists()
+
+
+def test_an_updates_end_read_at_the_start_is_not_cleared_as_an_earlier_runs_error(
+        starting, factory, state_path):
+    """The process before the restart left a `last_error` retained - a command refused behind
+    its closed doors. The one that starts clears an earlier run's error at its first connect,
+    but not when it has the update's end to say there: that is this run's, and it replaces
+    the other."""
+    from MQTTBridge.discovery import StateStore
+
+    earlier = StateStore(path=state_path)
+    earlier.remember(LAST_ERROR)
+    earlier.save()
+    starting(prepare=lambda root: marker(
+        root, phase="finished", result="rolled_back", reason="not_started",
+        error="the new plugin did not start; the previous version 0.2.0 is back",
+        finished=NOW))
+
+    factory.client.fire_connect()
+
+    entries = factory.client.all_for(LAST_ERROR)
+    assert [entry.text != "" for entry in entries] == [True]
+    assert refusal(factory.client) == (
+        "not_started", "the new plugin did not start; the previous version 0.2.0 is back")
+
+
+def test_an_update_that_installed_leaves_no_earlier_runs_error_behind(starting, factory,
+                                                                      state_path):
+    """`installed` has nothing to say on `last_error`, so what the process before the restart
+    left there - "an update is being applied on the receiver", to a command it refused - goes."""
+    from MQTTBridge.discovery import StateStore
+
+    earlier = StateStore(path=state_path)
+    earlier.remember(LAST_ERROR)
+    earlier.save()
+    starting(prepare=lambda root: marker(
+        root, phase="finished", result="installed", finished=NOW))
+
+    factory.client.fire_connect()
+
+    assert transaction(factory.client)["result"] == "installed"
+    assert [entry.text for entry in factory.client.all_for(LAST_ERROR)] == [""]
 
 
 # `update.transaction.reason` (review S1): `last_error` is cleared by the next command that

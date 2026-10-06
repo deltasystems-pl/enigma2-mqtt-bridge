@@ -478,6 +478,9 @@ def test_commands_are_not_dispatched_once_the_doors_are_closed(box, factory, rec
 
     client.fire_message(ROOT + "/cmd/restart_gui", b"PRESS")
     client.fire_message(ROOT + "/cmd/reset", b"PRESS")
+    # Not even the one that only retracts: the removal's own set is what is acknowledged.
+    client.fire_message(ROOT + "/cmd/clear_error", b"PRESS")
+    assert bridge.run_command("clear_error", "", PAGE) == "an uninstall is already running"
     refusal = bridge.run_command("screenshot", "", PAGE)
     # A settings save is kept and not applied, like the setup screen's Save.
     clients = len(factory.clients)

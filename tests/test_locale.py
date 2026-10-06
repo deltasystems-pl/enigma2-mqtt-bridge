@@ -86,6 +86,17 @@ def test_the_polish_catalogue_reads_as_polish():
     assert any("ł" in value or "ą" in value or "ż" in value for value in entries.values())
 
 
+def test_clearing_the_last_error_is_said_in_each_language():
+    """The page's button, in the catalogues' own words for "last error"."""
+    assert "Clear last error" in translated_literals()
+    polish = catalogue(LOCALE / "pl" / "LC_MESSAGES" / "MQTTBridge.po")
+    german = catalogue(LOCALE / "de" / "LC_MESSAGES" / "MQTTBridge.po")
+    assert polish["Clear last error"] == "Wyczyść ostatni błąd"
+    assert german["Clear last error"] == "Letzten Fehler löschen"
+    assert polish["Last error"].lower() in polish["Clear last error"]
+    assert german["Last error"] == "Letzter Fehler"
+
+
 def test_the_german_catalogue_is_flagged_for_review():
     """Drafted, not confirmed. CONTRIBUTING.md asks for a native speaker."""
     text = (LOCALE / "de" / "LC_MESSAGES" / "MQTTBridge.po").read_text(encoding="utf-8")

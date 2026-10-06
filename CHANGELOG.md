@@ -27,6 +27,15 @@ version that has no section here.
   ([TOPICS.md](docs/TOPICS.md)).
 - `epg_grid/<bouquet_slug>` gains `events_per_channel`: how many events a channel may carry in
   that payload. It is `epg_grid_events` unless the grid was cut to fit one packet (Changed, below).
+- `cmd/clear_error` clears the retained `last_error` on request. Until now the only way to empty
+  it was to send some other command that succeeds. The payload is ignored, the command succeeds
+  whether or not an error is retained, and it publishes the empty retained payload either way -
+  so it also clears an error the running plugin does not know of. It needs no permission and no
+  capability, and is refused only as every command is: discarded when it arrives retained or
+  oversized, and answered with the doors' sentence while an update is being applied. In
+  discovery mode the device gains a "Clear last error" button, a configuration entity that is
+  always announced, and the OpenWebif page gains the same action, in English, Polish and German
+  ([TOPICS.md](docs/TOPICS.md#2-commands)).
 
 ### Changed
 
@@ -47,6 +56,21 @@ version that has no section here.
   entity and later creates a new one, so a customisation of it is lost. The log says once that it
   was left out. A payload too big even without the select is withheld as before
   ([TOPICS.md](docs/TOPICS.md#4-home-assistant-discovery)).
+- A `last_error` left by an earlier run of the plugin is cleared when the plugin starts again.
+  The topic is retained, so after an interface restart, a reboot, a reinstall or an update the
+  broker went on showing the last refusal of the run before - until some command succeeded, which
+  on a receiver nobody commands is never. The first connect of a new plugin process now empties
+  it. A reconnect after a broker outage does not, and neither does the new session a settings
+  save opens: the refusal of the run that is still going stays. When the starting plugin has a
+  refusal of its own to report - how an update ended - that one is published instead and nothing
+  is emptied first. Nothing is published when there was nothing to clear. The plugin knows of the
+  earlier error from its state file, which is not written at every refusal - a connect and a
+  clean stop write it - so an error published shortly before the interface was killed can still
+  be left behind; `cmd/clear_error` (Added, above) clears that one.
+  **Behaviour change, named in-major exception `last-error-cleared-at-start`**
+  ([TOPICS.md, Contract version](docs/TOPICS.md#contract-version)): a consumer that wants the
+  last refusal across a restart of the receiver keeps it itself when it arrives, as it already
+  had to across the next command that succeeds. The companion integration does.
 - `cmd/config`'s refusal of a key outside its list names the key. The sentence on `last_error`
   was "the config object contains unknown settings" and left the reader to compare the payload
   with the list; it now goes on with the keys it refused, each in single quotes -

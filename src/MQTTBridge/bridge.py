@@ -226,6 +226,10 @@ class Bridge:
         # reason a removal failed, reported once the fresh session is up.
         self._pending_error = None
         self._last_error_published = False
+        # Until this process has connected once: a `last_error` the state file
+        # knows of then is an earlier run's (`_clear_earlier_runs_error`). Not
+        # reset by a reload - a new session is not a new run.
+        self._first_connect = True
         # topic -> the bytes last sent to it, so a repeat can be dropped.
         self._published = {}
         # topic -> the JSON last published to it, for the OpenWebif page. Not
@@ -1019,6 +1023,8 @@ class Bridge:
         integration = self._self_update.integration_topic()
         if integration:
             self.client.subscribe(integration, qos=COMMAND_QOS)
+        # Before the state file is written, so that it is written without the topic.
+        self._clear_earlier_runs_error()
         self.state.save()
         if self._pending_error is not None:
             command, message = self._pending_error
@@ -1677,6 +1683,50 @@ class Bridge:
         self.retract(self.topic("last_error"))
         self._last_error_published = False
         return True
+
+    def _clear_earlier_runs_error(self):
+        """Take back the `last_error` an earlier run left retained. Whether it did.
+
+        A retained refusal outlives the process that published it: after an
+        interface restart, a reinstall or an update the broker still holds it,
+        and it then describes a command of a run that is over - until some
+        command succeeds, which on a receiver nobody commands is never. So the
+        first connect of a process clears it. The state file is how this
+        process knows there is one (`_start`).
+
+        Only the first connect. A reconnect is the same run, whose refusal has
+        to survive a broker outage, and so is the session a settings save or a
+        failed removal opens (`reload`). And not when this run has an error of
+        its own to say at that connect - how an update ended, read at the start
+        (`selfupdate.py`): that one is published a few lines on and replaces the
+        earlier run's, so emptying the topic first would only be a second
+        message about nothing.
+
+        A refusal this process made before it had a session - a command from
+        the page, with the broker away - was not sent, and goes the same way:
+        `last_error()` is what stands on the broker.
+        """
+        if not self._first_connect:
+            return False
+        self._first_connect = False
+        if self._pending_error is not None:
+            return False
+        if not self.clear_last_error():
+            return False
+        LOG.info("clearing the last_error an earlier run left retained")
+        return True
+
+    def retract_last_error(self):
+        """`cmd/clear_error`: the retraction, whether or not this process knows of an error.
+
+        `clear_last_error` sends nothing when no error is known here. That is
+        right after every other command and wrong for this one: the state file
+        is not written at every refusal, so an interface that was killed before
+        the next write leaves a retained refusal nothing here knows of, and this
+        command is how somebody takes it back.
+        """
+        self.retract(self.topic("last_error"))
+        self._last_error_published = False
 
     def set_ha_mode(self, mode):
         """The republished `info` is the acknowledgement; there is no ack topic."""

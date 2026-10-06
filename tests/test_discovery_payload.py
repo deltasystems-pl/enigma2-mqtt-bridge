@@ -141,7 +141,8 @@ def test_the_expected_entities_are_all_there(live_bridge, factory):
     assert set(components(factory)) == {
         "power", "channel", "program", "next_program", "recording", "active_recordings",
         "next_timer", "volume", "mute", "channel_select", "screen", "screenshot",
-        "restart_gui", "refresh_discovery", "snr", "agc", "ber", "recording_disk", "uptime",
+        "restart_gui", "refresh_discovery", "clear_error", "snr", "agc", "ber",
+        "recording_disk", "uptime",
         "process_memory", "process_memory_peak", "process_threads", "process_open_files",
         "process_started",
     }
@@ -407,6 +408,50 @@ def test_switching_back_republishes_them(live_bridge, factory):
     factory.client.clear()
     live_bridge.set_ha_mode("discovery")
     assert factory.client.last(DEVICE_TOPIC).text != ""
+
+
+def test_the_clear_error_button_publishes_cmd_clear_error(live_bridge, factory):
+    """`cmd/clear_error` as a button: a config entity beside the other plugin controls."""
+    button = components(factory)["clear_error"]
+    assert button == {
+        "p": "button",
+        "uniq_id": NODE + "_clear_error",
+        "def_ent_id": "button.living_room_receiver_clear_error",
+        "name": "Clear last error",
+        "cmd_t": ROOT + "/cmd/clear_error",
+        "ent_cat": "config",
+        "ic": "mdi:notification-clear-all",
+    }
+
+
+def test_the_clear_error_button_needs_no_capability_and_no_permission(connected_bridge,
+                                                                      factory):
+    """No session, so no capability at all, and every permission at its default."""
+    assert payload(factory)["cmps"]["clear_error"]["cmd_t"] == ROOT + "/cmd/clear_error"
+
+
+def test_the_clear_error_button_goes_and_comes_back_with_the_mode(live_bridge, factory):
+    """Like its neighbours: retracted with the device payload, announced again with it, and
+    never named as a removal in between."""
+    live_bridge.set_ha_mode("integration")
+    assert factory.client.last(DEVICE_TOPIC).text == ""
+    assert "clear_error" not in live_bridge.state.component_keys
+
+    live_bridge.set_ha_mode("discovery")
+    assert components(factory)["clear_error"]["p"] == "button"
+    assert len(components(factory)["clear_error"]) > 1
+    assert live_bridge.state.component_keys["clear_error"] == "button"
+
+    live_bridge.set_ha_mode("off")
+    assert factory.client.last(DEVICE_TOPIC).text == ""
+
+
+def test_pressing_the_clear_error_button_clears_the_error(live_bridge, factory):
+    """The payload Home Assistant's button sends, on the topic the payload names."""
+    live_bridge.on_message(ROOT + "/cmd/nonsense", b"", False)
+    button = components(factory)["clear_error"]
+    factory.client.fire_message(button["cmd_t"], b"PRESS")
+    assert factory.client.last(ROOT + "/last_error").text == ""
 
 
 def test_the_payload_is_valid_json_with_polish_in_it(live_bridge, factory, receiver):

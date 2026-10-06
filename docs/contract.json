@@ -152,6 +152,7 @@
     "discovery": {},
     "ha_mode": {},
     "reset": {},
+    "clear_error": {},
     "uninstall": {
       "since": "0.3.0"
     },
@@ -312,6 +313,10 @@
     },
     {
       "name": "oversize-payload-withheld",
+      "release": "unreleased"
+    },
+    {
+      "name": "last-error-cleared-at-start",
       "release": "unreleased"
     }
   ],

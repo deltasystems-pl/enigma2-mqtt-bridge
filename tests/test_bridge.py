@@ -18,6 +18,7 @@ AVAILABILITY = "enigma2/" + NODE + "/availability"
 INFO = "enigma2/" + NODE + "/info"
 ANNOUNCEMENT = "enigma2mqtt/discovery/" + NODE + "/config"
 COMMAND_WILDCARD = "enigma2/" + NODE + "/cmd/#"
+LAST_ERROR = "enigma2/" + NODE + "/last_error"
 
 
 def test_availability_is_online_retained_on_connect(connected_bridge, factory):
@@ -916,3 +917,150 @@ def test_the_first_change_after_another_start_is_logged_again(
     bridge.announce_capabilities()
 
     assert plugin_log().count("capabilities=2 now") == 2
+
+
+# ------------------------------------------- last_error and the start of a process --
+# A retained `last_error` outlives the process that published it. The first connect
+# of a new process takes it back; no later connect of that process does.
+
+
+def _left_by_an_earlier_run(state_path):
+    earlier = discovery.StateStore(path=state_path)
+    earlier.remember(LAST_ERROR)
+    earlier.remember(INFO)
+    earlier.save()
+
+
+def _a_new_process(make_bridge, settings):
+    settings.host.value = "192.0.2.2"
+    settings.node_id.value = NODE
+    bridge = make_bridge()
+    bridge.start()
+    return bridge
+
+
+def _cleared(client):
+    return [entry for entry in client.all_for(LAST_ERROR) if entry.text == ""]
+
+
+def test_the_first_connect_of_a_new_process_clears_an_earlier_runs_last_error(
+        make_bridge, factory, settings, state_path, plugin_log):
+    _left_by_an_earlier_run(state_path)
+    bridge = _a_new_process(make_bridge, settings)
+    assert factory.client.published == []
+
+    factory.client.fire_connect()
+
+    entries = factory.client.all_for(LAST_ERROR)
+    assert [(entry.text, entry.retain, entry.qos) for entry in entries] == [("", True, 0)]
+    assert bridge.last_error() is None
+    assert "clearing the last_error an earlier run left retained" in plugin_log()
+    # The state file was written by this connect, without the topic and with the rest.
+    reopened = discovery.StateStore(path=state_path)
+    assert not reopened.knows(LAST_ERROR)
+    assert reopened.knows(INFO)
+
+
+def test_a_new_process_with_nothing_left_behind_publishes_nothing_on_last_error(
+        make_bridge, factory, settings, state_path, plugin_log):
+    earlier = discovery.StateStore(path=state_path)
+    earlier.remember(INFO)
+    earlier.save()
+    _a_new_process(make_bridge, settings)
+
+    factory.client.fire_connect()
+
+    assert LAST_ERROR not in factory.client.topics()
+    assert "an earlier run left" not in plugin_log()
+
+
+def test_a_reconnect_in_the_same_run_keeps_this_runs_last_error(connected_bridge, factory):
+    """A broker outage is not a new run: the refusal is still the last one."""
+    connected_bridge.on_message("enigma2/" + NODE + "/cmd/nonsense", b"", False)
+    assert connected_bridge.state.knows(LAST_ERROR)
+    factory.client.fire_disconnect(reason_code=7)
+    factory.client.clear()
+
+    factory.client.fire_connect()
+
+    assert LAST_ERROR not in factory.client.topics()
+    assert connected_bridge.last_error() is not None
+    assert connected_bridge.state.knows(LAST_ERROR)
+    # And it is still cleared the way it always was.
+    connected_bridge.on_message("enigma2/" + NODE + "/cmd/discovery", b"", False)
+    assert factory.client.last(LAST_ERROR).text == ""
+
+
+def test_only_the_first_connect_of_a_process_clears(make_bridge, factory, settings, state_path):
+    """An earlier run's error that the first connect could not take back - nothing here
+    tells whether it left - is not taken for one on the second."""
+    _left_by_an_earlier_run(state_path)
+    bridge = _a_new_process(make_bridge, settings)
+    factory.client.fire_connect()
+    bridge.on_message("enigma2/" + NODE + "/cmd/nonsense", b"", False)
+    factory.client.fire_disconnect(reason_code=7)
+    factory.client.clear()
+
+    factory.client.fire_connect()
+
+    assert LAST_ERROR not in factory.client.topics()
+    assert bridge.last_error() is not None
+
+
+def test_a_settings_reload_in_the_same_process_keeps_this_runs_last_error(
+        connected_bridge, factory):
+    """`reload()` opens a new session, not a new run: the state file still knows the error
+    and nothing takes it back."""
+    connected_bridge.on_message("enigma2/" + NODE + "/cmd/nonsense", b"", False)
+    old = factory.client
+
+    connected_bridge.reload()
+    assert factory.client is not old
+    factory.client.fire_connect()
+
+    assert LAST_ERROR not in factory.client.topics()
+    assert connected_bridge.state.knows(LAST_ERROR)
+    connected_bridge.on_message("enigma2/" + NODE + "/cmd/discovery", b"", False)
+    assert factory.client.last(LAST_ERROR).text == ""
+
+
+def test_an_error_this_run_brings_to_its_first_connect_is_what_stays_retained(
+        make_bridge, factory, settings, state_path):
+    """The outcome of an update or of a removal, carried to the first session, is this
+    run's message - not the earlier run's leftover."""
+    _left_by_an_earlier_run(state_path)
+    bridge = _a_new_process(make_bridge, settings)
+    bridge._pending_error = ("update", "the previous version 0.4.0 is back")
+
+    factory.client.fire_connect()
+
+    entries = factory.client.all_for(LAST_ERROR)
+    assert len(entries) == 1
+    assert entries[0].json()["cmd"] == "update"
+    assert entries[0].json()["error"] == "the previous version 0.4.0 is back"
+    assert entries[0].retain is True
+    assert bridge.last_error() is not None
+    assert discovery.StateStore(path=state_path).knows(LAST_ERROR)
+    # Nor is it taken for an earlier run's on the next connect.
+    factory.client.fire_disconnect(reason_code=7)
+    factory.client.clear()
+    factory.client.fire_connect()
+    assert LAST_ERROR not in factory.client.topics()
+    assert bridge.last_error() is not None
+
+
+def test_a_process_that_starts_idle_clears_at_the_first_connect_it_ever_makes(
+        make_bridge, factory, settings, state_path):
+    """No broker configured at the start: the first session comes with a settings save."""
+    _left_by_an_earlier_run(state_path)
+    settings.node_id.value = NODE
+    bridge = make_bridge()
+    bridge.start()
+    assert factory.clients == []
+
+    settings.host.value = "192.0.2.2"
+    bridge.reload()
+    factory.client.fire_connect()
+
+    assert len(_cleared(factory.client)) == 1
+    assert bridge.last_error() is None

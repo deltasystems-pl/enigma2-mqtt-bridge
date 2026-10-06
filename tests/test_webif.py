@@ -1216,6 +1216,23 @@ def test_every_command_the_dispatcher_knows_has_a_page_action():
     assert handlers == covered | {"config", "relay"}
 
 
+def test_the_page_offers_clearing_the_last_error_without_a_question(connected_bridge, factory,
+                                                                    page):
+    """One button, no field and no second page: taking a message back loses nothing."""
+    action = {one.key: one for one in webif.actions()}["clear_error"]
+    assert (action.command, action.label, action.fields) == (
+        "clear_error", "Clear last error", ())
+    assert action.confirm is None
+    connected_bridge.on_message(connected_bridge.topic("cmd/nonsense"), b"", False)
+    assert connected_bridge.last_error() is not None
+
+    request, body = post(page(connected_bridge), new_session(), action_fields("clear_error"))
+
+    assert request.response_code == 200
+    assert connected_bridge.last_error() is None
+    assert factory.client.last(connected_bridge.topic("last_error")).text == ""
+
+
 def test_the_origin_answers_the_permission_and_nothing_else():
     assert granted(lambda _name: False, "deep_standby_allowed", PAGE) is True
     assert granted(lambda _name: False, "deep_standby_allowed", MQTT) is False
