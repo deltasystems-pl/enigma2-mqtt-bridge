@@ -282,6 +282,45 @@ def test_process_scan_reads_comm_only_and_normalizes_the_name(tmp_path):
     assert oscam.process_running(str(tmp_path)) is True
 
 
+def _process(root, pid, comm, exe=None):
+    process = root / str(pid)
+    process.mkdir()
+    (process / "comm").write_text(comm + "\n", encoding="ascii")
+    if exe is not None:
+        (process / "exe").symlink_to(exe)
+
+
+def test_a_binary_named_with_an_underscore_and_a_version_is_found(tmp_path):
+    """`oscam_<version>`: the kernel keeps 15 characters of the name in `comm`."""
+    name = "oscam_11.704-emu-r802-arm"
+    _process(tmp_path, 123, name[:15], "/usr/softcams/" + name)
+    assert oscam.process_running(str(tmp_path)) is True
+
+
+def test_a_replaced_binary_named_with_an_underscore_is_still_found(tmp_path):
+    _process(tmp_path, 123, "oscam_11.704-em", "/usr/softcams/oscam_11.704-emu (deleted)")
+    assert oscam.process_running(str(tmp_path)) is True
+
+
+def test_a_script_named_like_the_cam_is_not_the_cam(tmp_path):
+    """A shell script's `comm` is the script's name; its executable is the shell."""
+    _process(tmp_path, 123, "oscam_watchdog.", "/bin/busybox")
+    _process(tmp_path, 124, "oscam_check.sh")
+    _process(tmp_path, 125, "oscamx", "/usr/bin/oscamx")
+    assert oscam.process_running(str(tmp_path)) is False
+
+
+def test_the_process_is_reported_when_the_web_port_is_down(tmp_path):
+    _process(tmp_path, 123, "oscam_11.704-em", "/usr/softcams/oscam_11.704-emu-r802-arm")
+    payload = oscam.probe(
+        8888, salt=SALT, opener=Opener([OSError("connection refused")]),
+        proc_root=str(tmp_path),
+    )
+    assert payload["software_running"] is True
+    assert payload["software"] == "OSCam"
+    assert payload["api_reachable"] is False
+
+
 def test_identity_salt_is_hidden_persisted_and_reused(live_bridge, settings):
     settings.oscam_identity_salt.value = ""
     settings.oscam_identity_salt.saved_value = ""

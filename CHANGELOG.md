@@ -84,6 +84,12 @@ version that has no section here.
   [TOPICS.md](docs/TOPICS.md)). A grid and the discovery payload now give something up before they
   are withheld - events, the channel select (Changed, above) - and the lists of a withheld
   `channels` are on `channels/<bouquet_slug>` (Added, above).
+- An OSCam whose binary is named `oscam_<version>` is reported as running. `oscam.software_running`
+  and `oscam.software` come from the process list, and the list was asked for `oscam` and
+  `oscam-...` only, so a cam named with an underscore - `oscam_11.704-emu-...`, of which the
+  kernel keeps fifteen characters - was `software_running: false` whenever its web interface did
+  not answer, which is the moment the member is for. It is now found too, when the process runs
+  a binary of that name; a shell script that is merely called `oscam_...` is not taken for it.
   **Behaviour change, named in-major exception `oversize-payload-withheld`**
   ([TOPICS.md, Contract version](docs/TOPICS.md#contract-version)): `channels` and
   `epg_grid/<bouquet_slug>` used to be published whatever their size; over the bound they are
