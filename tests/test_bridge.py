@@ -101,9 +101,12 @@ def test_info_is_retained(connected_bridge, factory):
     assert factory.client.last(INFO).retain is True
 
 
-def test_capabilities_are_empty_until_a_feature_area_is_bound(connected_bridge, factory):
-    """The contract's vocabulary is the feature areas; this build binds none."""
-    assert factory.client.last(INFO).json()["capabilities"] == []
+def test_capabilities_name_no_feature_area_until_one_is_bound(connected_bridge, factory):
+    """The contract's vocabulary is the feature areas, and this build binds none.
+
+    `command_id` is the plugin's own and is claimed always.
+    """
+    assert factory.client.last(INFO).json()["capabilities"] == ["command_id"]
 
 
 def test_a_publisher_adds_its_name_and_its_snapshot(make_bridge, factory, settings):
@@ -122,7 +125,7 @@ def test_a_publisher_adds_its_name_and_its_snapshot(make_bridge, factory, settin
     bridge.start()
     factory.client.fire_connect()
 
-    assert factory.client.last(INFO).json()["capabilities"] == ["power"]
+    assert factory.client.last(INFO).json()["capabilities"] == ["power", "command_id"]
     assert factory.client.last("enigma2/" + NODE + "/power").text == "on"
     assert factory.client.last("enigma2/" + NODE + "/volume").json() == {
         "level": 35, "muted": False
@@ -135,7 +138,7 @@ def test_the_announcement_is_where_the_integration_looks(connected_bridge, facto
     assert payload["name"] == "Living room receiver"
     assert payload["base_topic"] == "enigma2"
     assert payload["ha_mode"] == "discovery"
-    assert payload["capabilities"] == []
+    assert payload["capabilities"] == ["command_id"]
     assert set(payload) == {
         "node_id", "name", "base_topic", "image", "enigma", "plugin", "boxtype", "mac", "ip",
         "capabilities", "ha_mode",
@@ -406,7 +409,7 @@ def test_a_publisher_that_cannot_bind_is_dropped(make_bridge, factory, settings,
     bridge.start()
     factory.client.fire_connect()
 
-    assert factory.client.last(INFO).json()["capabilities"] == []
+    assert factory.client.last(INFO).json()["capabilities"] == ["command_id"]
     assert "does not provide the tuner hooks" in plugin_log()
 
 
@@ -838,15 +841,16 @@ def test_the_log_counts_the_capabilities_again_after_a_late_bind(
     bridge.start()
     factory.client.fire_connect()
 
-    assert factory.client.last(INFO).json()["capabilities"] == []
-    assert " capabilities=0 build=" in plugin_log()
-    assert "capabilities=2 " not in plugin_log()
+    assert factory.client.last(INFO).json()["capabilities"] == ["command_id"]
+    assert " capabilities=1 build=" in plugin_log()
+    assert "capabilities=3 " not in plugin_log()
 
     late.bound = True
     bridge.announce_capabilities()
 
-    assert factory.client.last(INFO).json()["capabilities"] == ["zap_history", "history_clear"]
-    assert "capabilities=2 now" in plugin_log()
+    assert factory.client.last(INFO).json()["capabilities"] == [
+        "zap_history", "history_clear", "command_id"]
+    assert "capabilities=3 now" in plugin_log()
 
 
 def test_a_late_bind_before_the_connect_is_counted_in_the_log_too(
@@ -862,9 +866,10 @@ def test_a_late_bind_before_the_connect_is_counted_in_the_log_too(
     late.bound = True
     assert bridge.announce_capabilities() is False
 
-    assert "capabilities=2 now" in plugin_log()
+    assert "capabilities=3 now" in plugin_log()
     factory.client.fire_connect()
-    assert factory.client.last(INFO).json()["capabilities"] == ["zap_history", "history_clear"]
+    assert factory.client.last(INFO).json()["capabilities"] == [
+        "zap_history", "history_clear", "command_id"]
 
 
 def test_the_count_is_logged_once_for_each_change_and_not_for_each_call(
@@ -881,16 +886,16 @@ def test_the_count_is_logged_once_for_each_change_and_not_for_each_call(
     late.bound = True
     for _ in range(3):
         assert bridge.announce_capabilities() is True
-    assert plugin_log().count("capabilities=2 now") == 1
+    assert plugin_log().count("capabilities=3 now") == 1
 
     late.bound = False
     bridge.announce_capabilities()
     bridge.announce_capabilities()
-    assert plugin_log().count("capabilities=0 now") == 1
+    assert plugin_log().count("capabilities=1 now") == 1
 
     late.bound = True
     bridge.announce_capabilities()
-    assert plugin_log().count("capabilities=2 now") == 2
+    assert plugin_log().count("capabilities=3 now") == 2
 
 
 def test_the_first_change_after_another_start_is_logged_again(
@@ -905,18 +910,18 @@ def test_the_first_change_after_another_start_is_logged_again(
     bridge.start()
     late.bound = True
     bridge.announce_capabilities()
-    assert plugin_log().count("capabilities=2 now") == 1
+    assert plugin_log().count("capabilities=3 now") == 1
 
     bridge.stop()
     late.bound = False
     bridge.register_publisher(late)
     bridge.start()
-    assert plugin_log().count(" capabilities=0 build=") == 2
+    assert plugin_log().count(" capabilities=1 build=") == 2
     late.bound = True
     bridge.announce_capabilities()
     bridge.announce_capabilities()
 
-    assert plugin_log().count("capabilities=2 now") == 2
+    assert plugin_log().count("capabilities=3 now") == 2
 
 
 # ------------------------------------------- last_error and the start of a process --

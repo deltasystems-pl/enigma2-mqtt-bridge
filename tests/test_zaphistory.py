@@ -651,3 +651,55 @@ def test_the_history_is_named_the_way_the_service_topic_names_it(box):
     del box.list.history[1]
     tick(box)
     assert payload(box.factory)["entries"][0]["name"] == "TVN HD (renamed)"
+
+
+# ------------------------------------------------------------ the command's id --
+
+
+def enveloped(command_id, sref):
+    return json.dumps({"id": command_id, "payload": {"sref": sref}}).encode("utf-8")
+
+
+OTHER_COMMAND = json.dumps({"id": "other-2", "payload": ""}).encode("utf-8")
+
+
+def test_a_history_zap_that_never_lands_says_the_id_of_its_own_command(box):
+    send(box.factory, "zap_history", enveloped("hist-1", TVN))
+    send(box.factory, "discovery", OTHER_COMMAND)
+    box.receiver.nav.sref = POLSAT
+
+    box.bridge.publisher("service")._verify.timer.fire()
+
+    refusal = last_error(box.factory)
+    assert "did not tune to" in refusal["error"]
+    assert refusal["id"] == "hist-1"
+
+
+def test_a_history_zap_whose_wake_never_ends_says_the_id_of_its_own_command(box):
+    from MQTTBridge import service
+
+    box.receiver.enter_standby(restoring=True)
+    send(box.factory, "zap_history", enveloped("hist-1", TVN))
+    send(box.factory, "discovery", OTHER_COMMAND)
+
+    MainLoop.advance(service.WAKE_WAIT_MILLISECONDS)
+
+    refusal = last_error(box.factory)
+    assert refusal["error"] == service.WAKE_TIMEOUT
+    assert (refusal["cmd"], refusal["id"]) == ("zap_history", "hist-1")
+
+
+def test_a_history_zap_made_after_the_wake_is_watched_under_its_own_id(box):
+    screen = box.receiver.enter_standby(restoring=True)
+    send(box.factory, "zap_history", enveloped("hist-1", TVN))
+    screen.finish_close()
+    send(box.factory, "discovery", OTHER_COMMAND)
+    MainLoop.advance(0)
+    assert box.receiver.nav.played == [POLSAT, TVN]
+    box.receiver.nav.sref = POLSAT
+
+    box.bridge.publisher("service")._verify.timer.fire()
+
+    refusal = last_error(box.factory)
+    assert "did not tune to" in refusal["error"]
+    assert refusal["id"] == "hist-1"

@@ -960,6 +960,8 @@ class ServicePublisher(NavPublisher):
         NavPublisher.__init__(self, bridge)
         self._current = None
         self._waiting_for = None
+        # The id of the command whose zap is being verified, or None.
+        self._waiting_id = None
         self._verify = Ticker(self._zap_timed_out, "zap verify")
 
     # The resolution arrives after the first frame is decoded, so `evStart`
@@ -994,9 +996,15 @@ class ServicePublisher(NavPublisher):
 
     # ------------------------------------------------------- zap verification --
 
-    def expect(self, sref):
-        """Watch for a zap to land, and say so on `last_error` when it does not."""
+    def expect(self, sref, command_id=None):
+        """Watch for a zap to land, and say so on `last_error` when it does not.
+
+        `command_id` is the id of the command that zapped. A newer zap
+        replaces the one being watched and its id with it, so the refusal is
+        always about the zap it names.
+        """
         self._waiting_for = str(sref)
+        self._waiting_id = command_id
         self._verify.start(ZAP_VERIFY_MILLISECONDS, True)
 
     def _check_zap(self, sref):
@@ -1004,10 +1012,12 @@ class ServicePublisher(NavPublisher):
             return
         if same_service(self._waiting_for, sref):
             self._waiting_for = None
+            self._waiting_id = None
             self._verify.stop()
 
     def _zap_timed_out(self):
         wanted, self._waiting_for = self._waiting_for, None
+        command_id, self._waiting_id = self._waiting_id, None
         if wanted is None:
             return
         current = self.sref
@@ -1017,6 +1027,7 @@ class ServicePublisher(NavPublisher):
             "zap",
             "the box did not tune to " + str(wanted) + " within "
             + str(ZAP_VERIFY_MILLISECONDS // 1000) + " s (it is on " + str(current) + ")",
+            command_id,
         )
 
     def snapshot(self):

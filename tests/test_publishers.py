@@ -37,11 +37,11 @@ def test_capabilities_name_the_areas_that_bound(live_bridge, factory):
     # registered on this receiver and absent from the list, because nothing has
     # built the channel list yet and a list that cannot be read is not a
     # capability. `channel_topics` is the channel list's second name, claimed
-    # with it.
+    # with it. `command_id` is no area: the dispatcher opens a command's envelope.
     assert capabilities == [
         "power", "service", "epg", "tuner", "recording", "timers", "volume", "hdd",
         "process", "channels", "channel_topics", "epg_grid", "keys", "screenshot", "toast",
-        "message",
+        "message", "command_id",
     ]
     assert live_bridge.publisher("bouquet_context") is not None
     assert live_bridge.publisher("zap_history") is not None
@@ -196,7 +196,7 @@ def test_the_default_registry_is_the_documented_order():
 
 def test_a_bridge_without_a_session_registers_nothing(connected_bridge):
     assert connected_bridge._publishers == []
-    assert connected_bridge.capabilities() == []
+    assert connected_bridge.capabilities() == ["command_id"]
 
 
 def test_a_hand_registered_publisher_suppresses_the_defaults(make_bridge, settings, receiver,

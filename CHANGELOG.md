@@ -36,6 +36,27 @@ version that has no section here.
   discovery mode the device gains a "Clear last error" button, a configuration entity that is
   always announced, and the OpenWebif page gains the same action, in English, Polish and German
   ([TOPICS.md](docs/TOPICS.md#2-commands)).
+- A command may carry an id, and its refusal says it back. A broker client that puts a command's
+  payload in the envelope `{"id": "...", "payload": ...}` - the payload as a string, or as the
+  JSON object the command takes - gets that id as `last_error.id` when
+  the command is refused or fails - and only then: a command that worked is answered by its state
+  topic, as before, and there is still no acknowledgement. One mechanism in the dispatcher serves
+  every command; a bare payload is handled exactly as it was, and a refusal without an id is the
+  payload it always was. The id is 1 to 64 characters of letters, digits, `.`, `_`, `:` and `-`; one
+  of another shape, or one that holds a registered secret - the broker password or the OSCam web
+  interface's password - is dropped and the command runs without it; the log says why once for
+  each reason, and a sender uses random ids without a fixed prefix. A refusal published after its command returned - a zap that never showed up on `service`, a
+  wake that did not finish, a failed `grab`, a softcam that could not be started, a removal that
+  stopped, an update that did not end `installed`, also when the plugin that starts after the
+  restart says it - carries the id of its own command, never that of whichever command is being
+  handled then. The capability `command_id` says the plugin opens the envelope: an older plugin
+  takes it for the command's payload, so a consumer reads `info.capabilities` first
+  ([TOPICS.md](docs/TOPICS.md#2-commands), ADR-0016).
+- A refusal whose sentence echoes text UTF-8 cannot carry is published instead of lost. A JSON
+  payload can spell half a surrogate pair (`{"key": "\ud83d"}`); the handler's refusal echoed
+  it, the publish raised, and nothing reached `last_error`. The sentence now carries the escape
+  as text, and the log file writes such a character as its escape instead of printing a logging
+  error to the console.
 
 ### Changed
 

@@ -149,7 +149,7 @@ def test_everything_else_is_still_published(make_bridge, factory, settings):
 
     assert factory.client.all_for(CHANNELS) == []
     assert factory.client.last(AVAILABILITY).text == "online"
-    assert factory.client.last(INFO).json()["capabilities"] == ["channels"]
+    assert factory.client.last(INFO).json()["capabilities"] == ["channels", "command_id"]
     assert factory.client.last(VOLUME).json() == {"level": 35, "muted": False}
     assert factory.client.last(ANNOUNCEMENT).json()["node_id"] == NODE
 

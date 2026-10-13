@@ -1263,3 +1263,136 @@ def test_the_restart_button_follows_the_permission(softcam_bridge, factory, sett
     button = components(factory)["softcam_restart"]
     assert button["p"] == "button"
     assert button["cmd_t"] == ROOT + "/cmd/softcam_restart"
+
+
+# ------------------------------------------------------------ the command's id --
+
+
+def enveloped(command_id, payload="PRESS"):
+    return json.dumps({"id": command_id, "payload": payload}).encode("utf-8")
+
+
+def test_a_restart_that_fails_later_says_the_id_of_its_own_command(
+    softcam_bridge, factory, settings, lab, monkeypatch
+):
+    settings.softcam_restart_allowed.value = True
+    bridge = softcam_bridge()
+    monkeypatch.setattr(ConsoleAppContainer, "execute", lambda self, command, *rest: 1)
+    send(factory, enveloped("cam-1"))
+    # The sequence runs over several turns; another command is handled meanwhile.
+    factory.client.fire_message(ROOT + "/cmd/discovery", enveloped("other-2"))
+
+    run_the_sequence(bridge.publisher("softcam"))
+
+    payload = factory.client.last(LAST_ERROR).json()
+    assert payload["error"] == CAM + " could not be started"
+    assert (payload["cmd"], payload["id"]) == ("softcam_restart", "cam-1")
+
+
+def test_a_restart_without_an_id_that_fails_later_takes_nobody_elses(
+    softcam_bridge, factory, settings, lab, monkeypatch
+):
+    settings.softcam_restart_allowed.value = True
+    bridge = softcam_bridge()
+    monkeypatch.setattr(ConsoleAppContainer, "execute", lambda self, command, *rest: 1)
+    send(factory)
+    factory.client.fire_message(ROOT + "/cmd/discovery", enveloped("other-2"))
+
+    run_the_sequence(bridge.publisher("softcam"))
+
+    assert sorted(factory.client.last(LAST_ERROR).json()) == ["cmd", "error", "ts"]
+
+
+def test_an_automatic_restart_is_nobodys_whatever_command_is_being_handled(
+    softcam_bridge, factory, settings, lab, monkeypatch
+):
+    """The automatic restart runs off a timer. Were it ever started while a command is
+    handled, that command's id is still not its own."""
+    settings.softcam_restart_allowed.value = True
+    bridge = softcam_bridge()
+    publisher = bridge.publisher("softcam")
+    monkeypatch.setattr(ConsoleAppContainer, "execute", lambda self, command, *rest: 1)
+    began = []
+    bridge._commands.handlers["discovery"] = lambda text, origin=None: began.append(
+        (bridge.command_id, publisher.restart(softcam.AUTOHEAL)))
+    factory.client.fire_message(ROOT + "/cmd/discovery", enveloped("other-2"))
+    assert began == [("other-2", None)]
+
+    run_the_sequence(publisher)
+
+    payload = factory.client.last(LAST_ERROR).json()
+    assert payload["error"] == CAM + " could not be started"
+    assert "id" not in payload
+
+
+def test_a_sequence_that_gets_no_timer_while_it_waits_says_the_id_of_its_command(
+    softcam_bridge, factory, settings, lab, monkeypatch
+):
+    settings.softcam_restart_allowed.value = True
+    bridge = softcam_bridge()
+    publisher = bridge.publisher("softcam")
+    send(factory, enveloped("cam-1"))
+    lab.proc.set(healthy(lab.binary))          # still running at the next look
+    factory.client.fire_message(ROOT + "/cmd/discovery", enveloped("other-2"))
+    monkeypatch.setattr(publisher, "_arm", lambda milliseconds: False)
+
+    publisher._advance()
+
+    payload = factory.client.last(LAST_ERROR).json()
+    assert (payload["error"], payload["id"]) == (softcam.NO_TIMER, "cam-1")
+
+
+def test_a_sequence_that_gets_no_timer_after_the_kill_says_the_id_of_its_command(
+    softcam_bridge, factory, settings, lab, monkeypatch
+):
+    settings.softcam_restart_allowed.value = True
+    bridge = softcam_bridge()
+    publisher = bridge.publisher("softcam")
+    send(factory, enveloped("cam-1"))
+    lab.proc.set(healthy(lab.binary))
+    factory.client.fire_message(ROOT + "/cmd/discovery", enveloped("other-2"))
+    publisher._deadline = 0                    # the wait for a clean stop is over
+    monkeypatch.setattr(publisher, "_arm", lambda milliseconds: False)
+
+    publisher._advance()
+
+    assert publisher._phase == "killing"
+    payload = factory.client.last(LAST_ERROR).json()
+    assert (payload["error"], payload["id"]) == (softcam.NO_TIMER, "cam-1")
+
+
+def test_a_start_without_a_container_says_the_id_of_its_command(
+    softcam_bridge, factory, settings, lab, monkeypatch
+):
+    settings.softcam_restart_allowed.value = True
+    bridge = softcam_bridge()
+    publisher = bridge.publisher("softcam")
+    send(factory, enveloped("cam-1"))
+    factory.client.fire_message(ROOT + "/cmd/discovery", enveloped("other-2"))
+    monkeypatch.setattr(publisher, "_new_container", lambda: None)
+
+    run_the_sequence(publisher)
+
+    payload = factory.client.last(LAST_ERROR).json()
+    assert payload["error"] == "this image has no eConsoleAppContainer"
+    assert payload["id"] == "cam-1"
+
+
+def test_a_start_that_raises_says_the_id_of_its_command(
+    softcam_bridge, factory, settings, lab, monkeypatch
+):
+    settings.softcam_restart_allowed.value = True
+    bridge = softcam_bridge()
+
+    def raises(self, command, *rest):
+        raise RuntimeError("the container said no")
+
+    monkeypatch.setattr(ConsoleAppContainer, "execute", raises)
+    send(factory, enveloped("cam-1"))
+    factory.client.fire_message(ROOT + "/cmd/discovery", enveloped("other-2"))
+
+    run_the_sequence(bridge.publisher("softcam"))
+
+    payload = factory.client.last(LAST_ERROR).json()
+    assert payload["error"] == "RuntimeError: the container said no"
+    assert payload["id"] == "cam-1"

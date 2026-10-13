@@ -42,7 +42,7 @@ from . import boxinfo, buildid, discovery, wol
 from . import config as settings_module
 from .cec import TOPIC as CEC_TOPIC
 from .cec import CecPublisher
-from .commands import CommandDispatcher
+from .commands import CommandDispatcher, clean_id
 from .diagnostics import LoopMonitor
 from .enigma2 import Ticker
 from .log import configure as configure_logging
@@ -73,6 +73,20 @@ def _capped(text, limit):
     if len(text) <= limit:
         return text
     return text[: limit - 1] + "\u2026"
+
+
+def _sendable(text):
+    """`text` as UTF-8 can carry it: what it has no bytes for is written as its escape.
+
+    A JSON payload can spell half a surrogate pair, and a handler that echoes
+    it hands over a sentence the client cannot encode. Any other text comes
+    back as the object it was.
+    """
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return text.encode("utf-8", "backslashreplace").decode("utf-8")
+    return text
 
 
 def _encoded(payload):
@@ -125,6 +139,12 @@ MESSAGE_CAPABILITY = "message"
 # Claimed where the package manager installed this very copy of the plugin
 # (`uninstall.py`), and by nothing else - there is no publisher behind it.
 UNINSTALL_CAPABILITY = "uninstall"
+
+# Claimed by every plugin that opens the envelope a command's id comes in
+# (`commands.unwrap`), so by this one always. It is not a feature area: it tells
+# a consumer that the envelope is safe to send, which an older plugin would take
+# for the command's own payload.
+COMMAND_ID_CAPABILITY = "command_id"
 
 SHUTDOWN_FLUSH_SECONDS = 1.0
 
@@ -396,6 +416,15 @@ class Bridge:
         if self._uninstaller.closed:
             return UNINSTALL_RUNNING
         return self._commands.run(name, text, origin, **consents)
+
+    @property
+    def command_id(self):
+        """The id of the command a handler is running for right now, or None.
+
+        What a handler's later work takes when it is accepted, to say back
+        with a refusal it publishes turns afterwards (`commands.py`).
+        """
+        return self._commands.command_id
 
     @property
     def updates(self):
@@ -934,6 +963,7 @@ class Bridge:
             names.append(UNINSTALL_CAPABILITY)
         if self._self_update.claimed:
             names.append(SELF_UPDATE_CAPABILITY)
+        names.append(COMMAND_ID_CAPABILITY)
         return names
 
     def announce_capabilities(self):
@@ -1036,8 +1066,10 @@ class Bridge:
             # Said once, so only a publish the client took counts as said: a
             # connect whose socket was gone again leaves it for the next one.
             # Nothing else would say it - the marker it was read from is gone.
-            command, message = self._pending_error
-            if accepted(self.publish_last_error(command, message)):
+            # With the id of the command it is about, when that carried one.
+            command, message, *asked_by = self._pending_error
+            command_id = asked_by[0] if asked_by else None
+            if accepted(self.publish_last_error(command, message, command_id=command_id)):
                 self._pending_error = None
 
     def on_message(self, topic, payload, retain):
@@ -1667,22 +1699,39 @@ class Bridge:
 
     # ------------------------------------------------------------------ commands --
 
-    def publish_last_error(self, command, message, reason=None):
+    def publish_last_error(self, command, message, reason=None, command_id=None):
         """`last_error`; `reason` is the optional stable code of a handler that defines one.
 
         Absent, not null, when there is none: the payload of every other
         refusal stays exactly what it was before the field existed.
+
+        `command_id` is the id the refused command carried, said back as `id`
+        and absent in the same way. It is never taken from the command being
+        handled now: the caller passes the id of the command the refusal
+        belongs to, which for a refusal published later is another one. Held
+        to the id's rule here once more, because this is where it reaches the
+        broker - and an id carried across a restart was read from a file.
+
+        The sentence is made sendable first (`_sendable`): a refusal that
+        cannot be encoded would be an exception here and no refusal at all.
         """
+        if reason is None:
+            reason = getattr(message, "reason", None)
+        if isinstance(message, str):
+            message = _sendable(message)
         payload = {
             "cmd": _capped(command, LAST_ERROR_CMD_LIMIT),
             "error": message,
             "ts": int(time.time()),
         }
-        if reason is None:
-            reason = getattr(message, "reason", None)
         if reason:
             payload["reason"] = str(reason)
-        LOG.warning("cmd/%s refused: %s", payload["cmd"], message)
+        command_id = clean_id(command_id)
+        if command_id is not None:
+            payload["id"] = command_id
+            LOG.warning("cmd/%s (id %s) refused: %s", payload["cmd"], command_id, message)
+        else:
+            LOG.warning("cmd/%s refused: %s", payload["cmd"], message)
         info = self.publish_json(self.topic("last_error"), payload)
         self._last_error_published = True
         return info
@@ -1877,13 +1926,21 @@ class Bridge:
             self.client.stop()
             self.client = None
 
-    def restart_after_failed_uninstall(self, command, message):
+    def say_at_connect(self, command, message, command_id=None):
+        """A refusal for the next connect to publish, once (`on_connect`).
+
+        `command_id` is the id of the command it belongs to, kept with it:
+        by the time a session is up, other commands have come and gone.
+        """
+        self._pending_error = (command, message, command_id)
+
+    def restart_after_failed_uninstall(self, command, message, command_id=None):
         """A removal that stopped ends where a reset ends: everything back, and why.
 
         `reload()` opens a fresh session, whose connect republishes availability,
         the snapshot, the announcement and discovery. The reason goes on
         `last_error` after that, on the new session - before it there is nobody
-        to publish it to.
+        to publish it to. `command_id` is the id the removal's command carried.
         """
-        self._pending_error = (command, message)
+        self.say_at_connect(command, message, command_id)
         self.reload()

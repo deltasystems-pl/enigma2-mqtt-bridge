@@ -69,15 +69,17 @@ def every_capability():
     """Every capability a bridge can ever claim.
 
     The core ones, one per publisher, the extra ones a publisher claims on top
-    (`history_clear`, `channel_topics`), and the two with no publisher behind
-    them (`message`, `uninstall`). `test_every_capability_is_in_every_capability`
-    fails when a new one is not added here.
+    (`history_clear`, `channel_topics`), and the ones with no publisher behind
+    them (`message`, `uninstall`, `self_update`, `command_id`).
+    `test_every_capability_is_in_every_capability` fails when a new one is not
+    added here.
     """
     names = set(bridge_module.CORE_CAPABILITIES)
     names.update(publisher.name for publisher in PUBLISHER_CLASSES if publisher.name)
     names.add(bridge_module.MESSAGE_CAPABILITY)
     names.add(bridge_module.UNINSTALL_CAPABILITY)
     names.add(bridge_module.SELF_UPDATE_CAPABILITY)
+    names.add(bridge_module.COMMAND_ID_CAPABILITY)
     names.add(zaphistory.CLEAR_CAPABILITY)
     names.add(channels.LISTS_CAPABILITY)
     return sorted(names)

@@ -131,7 +131,21 @@ class Publisher:
             suffix, payload, raw=suffix in self.raw, volatile=self.volatile, **options
         )
 
-    def report(self, command, message):
-        """Say why something a publisher was asked to do could not be done."""
+    def current_command_id(self):
+        """The id of the command being handled right now, or None.
+
+        For a publisher that accepts work a command asked for and finishes it
+        on a later turn: it takes the id here, when it accepts, and gives it
+        to `report` when the work fails. Asked later it would be another
+        command's, or nobody's.
+        """
+        return getattr(self.bridge, "command_id", None)
+
+    def report(self, command, message, command_id=None):
+        """Say why something a publisher was asked to do could not be done.
+
+        `command_id` is the id of the command that asked, when one did and it
+        carried one - never read at the time of the report.
+        """
         if self.bridge is not None:
-            self.bridge.publish_last_error(command, message)
+            self.bridge.publish_last_error(command, message, command_id=command_id)

@@ -265,6 +265,7 @@
     "cec_workaround",
     "channel_topics",
     "channels",
+    "command_id",
     "epg",
     "epg_grid",
     "epg_import",
