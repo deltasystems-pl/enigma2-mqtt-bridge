@@ -150,8 +150,12 @@ def configure(level="info", path=None):
     rejected = []
     for candidate in candidates:
         try:
+            # `backslashreplace`: a sender's text can hold half a surrogate pair,
+            # which UTF-8 cannot write. Without it logging prints its own
+            # traceback to stderr - enigma2's console - and the line is lost.
             handler = RotatingFileHandler(
-                candidate, maxBytes=MAX_BYTES, backupCount=BACKUP_COUNT, encoding="utf-8"
+                candidate, maxBytes=MAX_BYTES, backupCount=BACKUP_COUNT, encoding="utf-8",
+                errors="backslashreplace",
             )
         except OSError as error:
             rejected.append((candidate, error))

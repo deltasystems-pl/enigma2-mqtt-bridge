@@ -75,6 +75,20 @@ def _capped(text, limit):
     return text[: limit - 1] + "\u2026"
 
 
+def _sendable(text):
+    """`text` as UTF-8 can carry it: what it has no bytes for is written as its escape.
+
+    A JSON payload can spell half a surrogate pair, and a handler that echoes
+    it hands over a sentence the client cannot encode. Any other text comes
+    back as the object it was.
+    """
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return text.encode("utf-8", "backslashreplace").decode("utf-8")
+    return text
+
+
 def _encoded(payload):
     """The canonical JSON for a payload: one dictionary, always the same bytes."""
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -1697,14 +1711,19 @@ class Bridge:
         belongs to, which for a refusal published later is another one. Held
         to the id's rule here once more, because this is where it reaches the
         broker - and an id carried across a restart was read from a file.
+
+        The sentence is made sendable first (`_sendable`): a refusal that
+        cannot be encoded would be an exception here and no refusal at all.
         """
+        if reason is None:
+            reason = getattr(message, "reason", None)
+        if isinstance(message, str):
+            message = _sendable(message)
         payload = {
             "cmd": _capped(command, LAST_ERROR_CMD_LIMIT),
             "error": message,
             "ts": int(time.time()),
         }
-        if reason is None:
-            reason = getattr(message, "reason", None)
         if reason:
             payload["reason"] = str(reason)
         command_id = clean_id(command_id)

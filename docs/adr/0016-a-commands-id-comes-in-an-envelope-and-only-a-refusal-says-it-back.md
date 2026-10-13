@@ -26,9 +26,14 @@ reference, the node id), some a JSON object, several either, and a dozen ignore 
 handler decides what its payload is; nothing in front of the handlers parsed anything.
 
 **The contract is in its first major**, and what may change inside one is written down
-([TOPICS.md](../TOPICS.md), Contract version): a payload member, a capability name and a newly
-accepted form of a command are additions. A command that used to mean one thing and now means
-another is not.
+([TOPICS.md](../TOPICS.md), Contract version). The list names a payload member and a capability
+name as additions, which covers `last_error.id` and `command_id`. It does not name a new form of
+an existing command's payload. For that this record rests on what the history table of the same
+section already classified as additions inside contract 1: `cmd/message`'s `style` in 0.3.0 and
+`cmd/timer` `delete` accepting a finished timer in 0.4.0 - both a payload an older plugin
+refused or read differently, taken by a newer one. A command that used to mean one thing and
+now means another is not an addition, and nothing here is one: every payload a command took
+before, it takes unchanged.
 
 ## Decision
 
@@ -47,8 +52,9 @@ another is not.
   any of them. It is not trimmed, cut or cleaned: a changed id is no longer the one its sender
   waits for.
 - **An id the plugin cannot use is dropped and the command runs.** That covers a wrong type, a
-  wrong shape, and an id that holds a registered secret - the broker password. The log says why,
-  without the id.
+  wrong shape, and an id that holds a registered secret - the broker password or the OSCam web
+  interface's password. The log says why, without the id, once for each reason in a run of the
+  plugin and at debug level after that.
 - **The capability `command_id` is claimed by every plugin that opens the envelope.** It is the
   one name in `info.capabilities` that says nothing about the receiver: it says the envelope is
   safe to send.
@@ -82,8 +88,8 @@ another is not.
 - **Refusing a command whose id cannot be used.** The id is an aid to the sender, not part of the
   request. A random id that happens to contain a short broker password would turn into a command
   that fails for no reason its sender could find, on that one household's receiver.
-- **Looking for a piece of a secret in the id.** A plugin that drops every id found inside its
-  password answers "is this text part of the password" for anyone who can publish a command and
+- **Looking for a piece of a secret in the id.** A plugin that drops every id found inside a
+  password it holds answers "is this text part of the password" for anyone who can publish a command and
   read `last_error`, one character at a time. Only an id that holds a whole registered secret is
   dropped, which tells a sender nothing it did not already hold.
 - **An acknowledgement of success.** It would be a second answer next to the state topic, and the
@@ -107,9 +113,16 @@ another is not.
   those two members, and a later extension of the envelope needs a capability of its own - a
   plugin that knows only this one hands an envelope with a third member to the handler.
 - **An object in `payload` reaches its handler as JSON text written again**, not as the bytes the
-  sender wrote: key order is kept, spacing and number formatting are the encoder's. A handler that
-  echoes a rejected payload on `last_error` echoes that text. A sender that needs its exact bytes
-  sends them as a string.
+  sender wrote: key order is kept, there are no spaces, a number is spelled the encoder's way and
+  of two members with one name the last is kept. A handler that echoes a rejected payload on
+  `last_error` echoes that text. A sender that needs its exact bytes sends them as a string.
+- **A payload UTF-8 cannot carry makes the message no envelope.** JSON can spell half a surrogate
+  pair; opened, it would reach a handler as text no refusal could be published with. Unopened it
+  is the raw payload, refused or not as it always was, without an id. The same hole existed for
+  the commands that read JSON themselves, and is closed where `last_error` is built: the sentence
+  carries the escape as text.
+- **A short secret can cost a household its ids.** An id that holds a two-letter password is
+  dropped every time, so a consumer uses random ids without a fixed alphabetic prefix.
 - **The 4096-byte limit includes the envelope**, so the largest command that fits is a little
   smaller with an id than without.
 - **`info.capabilities` is no longer `[]` on a plugin that has bound nothing.** The name is an

@@ -3576,6 +3576,18 @@ def test_the_end_of_another_transaction_does_not_take_the_id_this_process_rememb
     assert "id" not in payload
 
 
+@pytest.mark.parametrize("ident", ["../elsewhere", "A1B2C3D4E5F6", "a1b2c3", 17, None])
+def test_no_request_file_is_read_for_what_is_not_a_transaction_id(ident, box, monkeypatch):
+    """The id names a directory. Only the shape the plugin itself gives one is ever a path."""
+    bridge = box()
+    read = []
+    monkeypatch.setattr(updatehelper, "read_json", lambda path: read.append(path) or {
+        "id": ident, "command_id": "up-1"})
+
+    assert bridge.self_update._command_id_of(ident) is None
+    assert read == []
+
+
 def _rolled_back(root, request):
     directory = marker(root, phase="finished", result="rolled_back", reason="not_started",
                        error="the new plugin did not start; the previous version 0.2.0 is back",

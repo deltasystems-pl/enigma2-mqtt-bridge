@@ -73,12 +73,19 @@ def test_an_envelopes_string_is_the_commands_text_as_it_was_written():
     (None, ""),
     (40, "40"),
     (True, "true"),
-    ({"name": "TVN", "long": False}, '{"name": "TVN", "long": false}'),
-    ({"text": "za\u017c\u00f3\u0142\u0107"}, '{"text": "za\u017c\u00f3\u0142\u0107"}'),
+    ({"name": "TVN", "long": False}, '{"name":"TVN","long":false}'),
+    ({"text": "za\u017c\u00f3\u0142\u0107"}, '{"text":"za\u017c\u00f3\u0142\u0107"}'),
 ])
 def test_an_envelopes_json_value_is_handed_on_as_its_json_text(payload, text):
     inner, command_id, problem = commands.unwrap(json.dumps({"id": "a1", "payload": payload}))
     assert (inner, command_id, problem) == (text, "a1", None)
+
+
+def test_a_json_value_is_written_again_without_the_senders_spacing():
+    text = '{"id": "a1", "payload": {"a": 1,   "b": [1, 2, {"c": null}]}}'
+    inner = commands.unwrap(text)[0]
+    assert inner == '{"a":1,"b":[1,2,{"c":null}]}'
+    assert len(inner) < len(text)
 
 
 def test_whitespace_around_an_envelope_does_not_hide_it():
@@ -597,3 +604,128 @@ def test_the_next_grab_does_not_inherit_the_id_of_the_one_before(live_bridge, fa
     ConsoleAppContainer.instances[-1].finish(1)
 
     assert "id" not in refusal(factory)
+
+
+# ------------------------------------------- text that UTF-8 has no bytes for --
+
+# Half a surrogate pair, which JSON can spell as an escape and no UTF-8 can carry.
+HALF = chr(0xD83D)
+SPELLED = chr(92) + "ud83d"
+
+
+def spelled(value):
+    """`value` as JSON in ASCII: the half pair goes out as its six-character escape."""
+    return json.dumps(value).encode("ascii")
+
+
+def test_a_string_no_utf8_holds_makes_the_message_no_envelope():
+    for payload in (HALF, {"key": HALF}, [HALF], {HALF: 1}):
+        text = json.dumps({"id": "a1", "payload": payload})
+        assert commands.unwrap(text) == (text, None, None)
+
+
+@pytest.mark.parametrize("name, payload, said", [
+    ("power", {"id": "a1", "payload": HALF}, "unknown power state"),
+    ("power", {"id": "a1", "payload": "on" + HALF}, "unknown power state"),
+    ("mute", {"id": "a1", "payload": HALF}, "unknown mute state"),
+    ("key", {"key": HALF}, SPELLED),
+    ("key", {"id": "a1", "payload": {"key": HALF}}, "no key given"),
+    ("key", {"id": "a1", "payload": HALF}, "no key given"),
+    ("zap", {"name": HALF}, SPELLED),
+    ("zap", {"id": "a1", "payload": {"name": HALF}}, "no service reference or name given"),
+    ("zap", {"id": "a1", "payload": HALF}, "no service reference or name given"),
+    ("message", {"id": "a1", "payload": HALF}, "message text is empty"),
+    ("message", {"text": "hello", "style": HALF}, SPELLED),
+    ("volume", {"level": HALF}, "is not a volume"),
+    ("timer", {"action": HALF, "sref": "1:0:1:1:1:1:1:0:0:0:"}, SPELLED),
+])
+def test_no_payload_makes_a_refusal_disappear(name, payload, said, live_bridge, factory,
+                                              plugin_log, capsys):
+    send(factory, name, spelled(payload))
+
+    assert "a message handler raised" not in plugin_log()
+    assert "Logging error" not in capsys.readouterr().err
+    refused = refusal(factory)
+    assert refused is not None
+    assert refused["cmd"] == name
+    assert said in refused["error"]
+    assert "id" not in refused
+    factory.client.last(LAST_ERROR).text.encode("utf-8")
+
+
+def test_a_message_whose_text_no_utf8_holds_does_not_raise(live_bridge, factory, plugin_log,
+                                                          capsys):
+    send(factory, "message", spelled({"text": "hello " + HALF}))
+
+    assert "a message handler raised" not in plugin_log()
+    assert "Logging error" not in capsys.readouterr().err
+
+
+def test_a_zap_to_a_reference_no_utf8_holds_is_refused_when_it_does_not_land(
+        live_bridge, factory, receiver, plugin_log, capsys):
+    send(factory, "zap", spelled({"sref": HALF}))
+    receiver.nav.sref = TVP1
+
+    live_bridge.publisher("service")._verify.timer.fire()
+
+    assert "did not tune to " + SPELLED in refusal(factory)["error"]
+    assert "raised" not in plugin_log()
+    assert "Logging error" not in capsys.readouterr().err
+
+
+def test_last_error_writes_what_utf8_cannot_carry_as_its_escape(connected_bridge, factory):
+    from MQTTBridge.publisher import Refusal
+
+    connected_bridge.publish_last_error("key", Refusal("unknown key '" + HALF + "'", "bad_key"),
+                                        command_id="a1")
+
+    payload = refusal(factory)
+    assert payload["error"] == "unknown key '" + SPELLED + "'"
+    assert (payload["reason"], payload["id"]) == ("bad_key", "a1")
+
+
+def test_a_sentence_utf8_can_carry_is_published_as_the_object_it_was():
+    from MQTTBridge import bridge as bridge_module
+
+    sentence = "no channel called 'Tr" + chr(0xF3) + "jka'"
+    assert bridge_module._sendable(sentence) is sentence
+
+
+def test_the_log_writes_what_utf8_cannot_carry_as_its_escape(connected_bridge, plugin_log,
+                                                             capsys):
+    log.get_logger("commands").warning("a sender wrote %s", HALF)
+
+    assert "a sender wrote " + SPELLED in plugin_log()
+    assert "Logging error" not in capsys.readouterr().err
+
+
+# ------------------------------------------------------- the line about a drop --
+
+
+def warnings_about_a_drop(text):
+    return [line for line in text.splitlines()
+            if "WARNING" in line and "the command's id is dropped" in line]
+
+
+def test_a_dropped_id_is_a_warning_once_for_each_reason(connected_bridge, factory, plugin_log):
+    for _ in range(3):
+        send(factory, "ha_mode", wrapped("not an id", "integration"))
+    assert len(warnings_about_a_drop(plugin_log())) == 1
+
+    send(factory, "ha_mode", wrapped("x" * 65, "integration"))
+    send(factory, "ha_mode", wrapped("x" * 65, "integration"))
+    lines = warnings_about_a_drop(plugin_log())
+    assert len(lines) == 2
+    assert "it is longer than 64 characters" in lines[1]
+
+
+def test_a_dropped_id_is_still_in_the_log_at_debug_after_the_first(connected_bridge, factory,
+                                                                  settings, plugin_log):
+    send(factory, "ha_mode", wrapped("not an id", "integration"))
+    log.configure("debug")
+    send(factory, "discovery", wrapped("not an id", "PRESS"))
+
+    lines = [line for line in plugin_log().splitlines() if "the command's id is dropped" in line]
+    assert [("WARNING" in line, "DEBUG" in line) for line in lines] == [
+        (True, False), (False, True)]
+    assert "cmd/discovery" in lines[1]

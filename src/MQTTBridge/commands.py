@@ -135,13 +135,14 @@ def _inner(value):
     What the sender would have published without the envelope: a string is
     that text, `null` is the empty payload, and anything else - an object, a
     number, `true` - is its JSON text, which the handler reads as it reads a
-    payload that arrived that way.
+    payload that arrived that way. Written without spaces: the handler is
+    not given more text than the sender wrote spacing for.
     """
     if value is None:
         return ""
     if isinstance(value, str):
         return value
-    return json.dumps(value, ensure_ascii=False)
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
 def unwrap(text):
@@ -155,6 +156,13 @@ def unwrap(text):
 
     Opened once. An envelope inside an envelope is the inner command's
     payload, and the handler's to refuse.
+
+    A payload that cannot be sent on is not an envelope either. JSON can
+    spell half a surrogate pair, which is a string no UTF-8 holds: a
+    handler that echoed it would raise where `last_error` is published,
+    and the refusal would be lost with it. Unopened, such a message is the
+    text it arrived as - which was valid UTF-8, or it was replaced when it
+    was decoded.
     """
     stripped = text.strip()
     if not stripped.startswith("{"):
@@ -164,9 +172,12 @@ def unwrap(text):
         if not isinstance(envelope, dict) or set(envelope) != {ENVELOPE_ID, ENVELOPE_PAYLOAD}:
             return text, None, None
         inner = _inner(envelope[ENVELOPE_PAYLOAD])
+        inner.encode("utf-8")
     except (ValueError, RecursionError):
-        # Not JSON, or nested past what the parser or the encoder follows: the
-        # handler's to judge, exactly as before there was an envelope.
+        # Not JSON, nested past what the parser or the encoder follows, or a
+        # payload UTF-8 has no bytes for (a `UnicodeEncodeError` is a
+        # `ValueError`): the handler's to judge, exactly as before there was
+        # an envelope.
         return text, None, None
     problem = id_problem(envelope[ENVELOPE_ID])
     command_id = None if problem else envelope[ENVELOPE_ID]
@@ -231,6 +242,10 @@ class CommandDispatcher:
         # between commands, for a command without one, and for every command
         # from the page or the receiver's own screen.
         self.command_id = None
+        # Why an id was dropped, each reason once for this run of the plugin
+        # at warning. A consumer whose ids keep failing one rule - they all
+        # hold a two-letter password - would otherwise write a line a command.
+        self._id_problems_said = set()
 
     def handle(self, topic, payload, retain=False):
         name = self.bridge.command_name(topic)
@@ -262,8 +277,10 @@ class CommandDispatcher:
 
         text, command_id, problem = unwrap(decode(payload))
         if problem:
-            # Once a message, and never the id itself: it is the sender's text.
-            LOG.warning("cmd/%s: the command's id is dropped, %s", name, problem)
+            # Never the id itself: it is the sender's text.
+            said = LOG.debug if problem in self._id_problems_said else LOG.warning
+            self._id_problems_said.add(problem)
+            said("cmd/%s: the command's id is dropped, %s", name, problem)
 
         handler = self.handlers.get(name)
         if handler is None:

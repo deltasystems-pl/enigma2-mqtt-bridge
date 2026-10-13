@@ -273,7 +273,7 @@ nothing else is ever in the list: `power`, `cec_workaround`, `service`, `epg`, `
 `zap_history`, `history_clear`, `epg_import`, `uninstall`, `self_update`, `command_id`. A build that
 has bound no feature area publishes that last name alone - `[]` before it existed - because the
 connection, `info` and the commands are the plugin itself and are not capabilities. `uninstall`
-(since 0.3.0) is the one name with no feature area behind it: it
+(since 0.3.0) was the first name with no feature area behind it: it
 says the package manager installed this very copy of the plugin, so `cmd/uninstall` can work - opkg
 is executable, its configured info directory knows the package, and the package's file list names
 the running `plugin.py`. A copy unpacked by hand or carried in a firmware image does not claim it.
@@ -1467,18 +1467,26 @@ The id travels in an **envelope** around the command's own payload, the same for
   that shape, and none will be given it.
 - **`payload` is what the sender would have published without the envelope.** A string is that
   text, character for character: `"PRESS"`, `"standby"`, a service reference, a node id. An
-  object, a number or a boolean stands for its JSON text - `{"level": 42}`, `40`, `true` - and
-  reaches the command as if that text had been published; a command that takes a JSON object may
-  also be given a string that holds it. `null` is the empty payload. For a command that ignores
+  object, a number or a boolean stands for its JSON text - `{"level": 42}`, `40`, `true`: the
+  plugin reads the value and writes it again without spaces, so the command gets the same value
+  and not the same bytes - a number may be spelled differently (`1e2` arrives as `100.0`), and
+  of two members with one name the last is kept. A sender that needs its exact text sends it as
+  a string, and a command that takes a JSON object may be given a string that holds it. `null`
+  is the empty payload. A string that UTF-8 cannot carry - JSON can spell half a surrogate pair -
+  makes the message no envelope: it is the command's own payload, without an id. For a command that ignores
   its payload any value does, and `""` is the convention. An envelope is opened once: one inside
   another is the command's payload.
 - **`id` is a string of 1 to 64 characters** out of `A`-`Z`, `a`-`z`, `0`-`9`, `.`, `_`, `:` and
-  `-` - a UUID, a ULID, a counter behind a prefix. It is the sender's to choose and to keep apart
-  from its other ids for as long as it waits. The plugin compares it with nothing and remembers
+  `-` - a UUID, a ULID, random hex. It is the sender's to choose and to keep apart
+  from its other ids for as long as it waits. Use random ids without a fixed alphabetic prefix:
+  an id that holds a registered secret is dropped (below), and a prefix that happens to hold a
+  short password would lose every id of that household. The plugin compares it with nothing and remembers
   none: two commands with one id are two commands.
 - **An id the plugin cannot use is dropped, and the command runs** as if it had carried none: an
-  id of another type or shape, and one that holds a value the plugin keeps secret - the broker
-  password. The log says that it was dropped and why, without the id. A refusal of that command
+  id of another type or shape, and one that holds a registered secret - a value the plugin keeps
+  out of its log: the broker password and the OSCam web interface's password. The log says why
+  it was dropped, without the id - once for each reason in a run of the plugin, and at debug
+  level after that. A refusal of that command
   has no `id`, so a sender reads a refusal without `id` whose `cmd` is its command's the way it
   did before there were ids.
 - **The 4096-byte limit counts the whole message**, envelope included, and a retained command is

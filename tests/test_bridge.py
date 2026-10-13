@@ -102,8 +102,10 @@ def test_info_is_retained(connected_bridge, factory):
 
 
 def test_capabilities_name_no_feature_area_until_one_is_bound(connected_bridge, factory):
-    """`command_id` is the plugin's own, claimed always; every other name is a feature area."""
-    """The contract's vocabulary is the feature areas; this build binds none."""
+    """The contract's vocabulary is the feature areas, and this build binds none.
+
+    `command_id` is the plugin's own and is claimed always.
+    """
     assert factory.client.last(INFO).json()["capabilities"] == ["command_id"]
 
 
