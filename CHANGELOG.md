@@ -37,7 +37,8 @@ version that has no section here.
   always announced, and the OpenWebif page gains the same action, in English, Polish and German
   ([TOPICS.md](docs/TOPICS.md#2-commands)).
 - A command may carry an id, and its refusal says it back. A broker client that puts a command's
-  payload in the envelope `{"id": "...", "payload": ...}` gets that id as `last_error.id` when
+  payload in the envelope `{"id": "...", "payload": ...}` - the payload as a string, or as the
+  JSON object the command takes - gets that id as `last_error.id` when
   the command is refused or fails - and only then: a command that worked is answered by its state
   topic, as before, and there is still no acknowledgement. One mechanism in the dispatcher serves
   every command; a bare payload is handled exactly as it was, and a refusal without an id is the

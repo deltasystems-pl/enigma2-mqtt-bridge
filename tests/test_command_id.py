@@ -52,6 +52,14 @@ def refusal(factory):
     '{"id": "a1"}',
     '{"payload": "on"}',
     '{"id": "a1", "payload": "on", "more": 1}',
+    '{"id": "a1", "payload": null}',
+    '{"id": "a1", "payload": 40}',
+    '{"id": "a1", "payload": 1.5}',
+    '{"id": "a1", "payload": true}',
+    '{"id": "a1", "payload": false}',
+    '{"id": "a1", "payload": []}',
+    '{"id": "a1", "payload": ["on"]}',
+    '{"id": "a1", "payload": [{"sref": "1:0:1:1:1:1:1:0:0:0:"}]}',
     '{"ID": "a1", "payload": "on"}',
     '["a1", "on"]',
     '{"id": "a1", "payload": "on"',
@@ -70,15 +78,18 @@ def test_an_envelopes_string_is_the_commands_text_as_it_was_written():
 
 
 @pytest.mark.parametrize("payload, text", [
-    (None, ""),
-    (40, "40"),
-    (True, "true"),
+    ({}, "{}"),
+    ({"level": 40}, '{"level":40}'),
     ({"name": "TVN", "long": False}, '{"name":"TVN","long":false}'),
     ({"text": "za\u017c\u00f3\u0142\u0107"}, '{"text":"za\u017c\u00f3\u0142\u0107"}'),
 ])
-def test_an_envelopes_json_value_is_handed_on_as_its_json_text(payload, text):
+def test_an_envelopes_object_is_handed_on_as_its_json_text(payload, text):
     inner, command_id, problem = commands.unwrap(json.dumps({"id": "a1", "payload": payload}))
     assert (inner, command_id, problem) == (text, "a1", None)
+
+
+def test_an_empty_command_is_sent_with_an_id_as_the_empty_string():
+    assert commands.unwrap('{"id": "a1", "payload": ""}') == ("", "a1", None)
 
 
 def test_a_json_value_is_written_again_without_the_senders_spacing():
@@ -276,10 +287,36 @@ def test_an_envelopes_object_reaches_a_handler_that_reads_json(live_bridge, fact
     assert payload["id"] == "a1b2c3"
 
 
-def test_an_envelopes_number_reaches_a_handler_that_reads_text(live_bridge, factory, receiver):
-    send(factory, "volume", wrapped("a1b2c3", 40))
+def test_a_number_goes_in_an_envelope_as_a_string_or_inside_an_object(live_bridge, factory,
+                                                                     receiver):
+    send(factory, "volume", wrapped("a1b2c3", "40"))
     assert refusal(factory) is None
     assert receiver.volume.getVolume() == 40
+
+    send(factory, "volume", wrapped("a1b2c3", {"level": 55}))
+    assert refusal(factory) is None
+    assert receiver.volume.getVolume() == 55
+
+
+@pytest.mark.parametrize("payload", [40, True, None, ["on"]])
+def test_a_payload_that_is_no_string_and_no_object_makes_the_message_no_envelope(
+        payload, live_bridge, factory, receiver):
+    """It is the command's own payload, as it was before there were envelopes, with no id."""
+    before = receiver.volume.getVolume()
+    send(factory, "volume", wrapped("a1b2c3", payload))
+
+    refused = refusal(factory)
+    assert "is not a volume" in refused["error"]
+    assert "id" not in refused
+    assert receiver.volume.getVolume() == before
+
+
+def test_an_empty_command_with_an_id_is_refused_under_that_id(live_bridge, factory):
+    send(factory, "zap", wrapped("a1b2c3", ""))
+
+    refused = refusal(factory)
+    assert refused["error"] == "no service reference or name given"
+    assert refused["id"] == "a1b2c3"
 
 
 def test_a_command_with_an_id_that_cannot_be_used_runs_and_its_refusal_has_none(

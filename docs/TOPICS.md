@@ -1461,21 +1461,24 @@ The id travels in an **envelope** around the command's own payload, the same for
 {"id": "zap-17", "payload": {"sref": "1:0:19:283D:3FB:1:C00000:0:0:0:"}}
 ```
 
-- **An envelope is a JSON object with exactly the members `id` and `payload`.** Anything else - a
-  bare string, a JSON object with other members, one of the two alone, the two with a third - is
-  the command's own payload and is handled exactly as it always was. No command's own payload has
+- **An envelope is a JSON object with exactly the members `id` and `payload`, and its `payload`
+  is a string or an object.** Anything else - a bare string, a JSON object with other members,
+  one of the two alone, the two with a third, a `payload` that is a number, a boolean, an array
+  or `null` - is the command's own payload, without an id, and is handled exactly as it always
+  was. No command's own payload has
   that shape, and none will be given it.
 - **`payload` is what the sender would have published without the envelope.** A string is that
-  text, character for character: `"PRESS"`, `"standby"`, a service reference, a node id. An
-  object, a number or a boolean stands for its JSON text - `{"level": 42}`, `40`, `true`: the
-  plugin reads the value and writes it again without spaces, so the command gets the same value
-  and not the same bytes - a number may be spelled differently (`1e2` arrives as `100.0`), and
-  of two members with one name the last is kept. A sender that needs its exact text sends it as
-  a string, and a command that takes a JSON object may be given a string that holds it. `null`
-  is the empty payload. A string that UTF-8 cannot carry - JSON can spell half a surrogate pair -
-  makes the message no envelope: it is the command's own payload, without an id. For a command that ignores
-  its payload any value does, and `""` is the convention. An envelope is opened once: one inside
-  another is the command's payload.
+  text, character for character: `"PRESS"`, `"standby"`, `"40"`, a service reference, a node
+  id. The empty string is the empty payload, and it is the convention for a command that ignores
+  its payload. An object stands for its JSON text - `{"level": 42}`: the plugin reads it and
+  writes it again without spaces, so the command gets the same value and not the same bytes - a
+  number inside it may be spelled differently (`1e2` arrives as `100.0`), and of two members
+  with one name the last is kept. A sender that needs its exact text sends it as a string, and
+  a command that takes a JSON object may be given a string that holds it. A command that takes
+  a number or a keyword takes it as a string here, as it does bare: `"payload": "40"`, not
+  `"payload": 40`. A string that UTF-8 cannot carry - JSON can spell half a surrogate pair -
+  makes the message no envelope: it is the command's own payload, without an id. An envelope is
+  opened once: one inside another is the command's payload.
 - **`id` is a string of 1 to 64 characters** out of `A`-`Z`, `a`-`z`, `0`-`9`, `.`, `_`, `:` and
   `-` - a UUID, a ULID, random hex. It is the sender's to choose and to keep apart
   from its other ids for as long as it waits. Use random ids without a fixed alphabetic prefix:

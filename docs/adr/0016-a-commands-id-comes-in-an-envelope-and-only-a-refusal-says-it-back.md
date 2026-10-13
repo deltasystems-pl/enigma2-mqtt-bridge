@@ -1,6 +1,6 @@
 # ADR-0016: A command's id comes in an envelope around its payload, and only a refusal says it back
 
-**Status:** proposed
+**Status:** accepted 2026-10-13
 **Date:** 2026-10-13
 **Supersedes:** - . It replaces one sentence of [TOPICS.md](../TOPICS.md) section 2, "no
 correlation id in v1", with an optional id inside contract 1.
@@ -39,9 +39,14 @@ before, it takes unchanged.
 
 - **The id travels in an envelope around the command's own payload**: a JSON object with exactly
   the members `id` and `payload`. The dispatcher opens it before any handler runs and hands the
-  handler what `payload` stands for - a string as that text, any other JSON value as its JSON text,
-  `null` as the empty payload. No handler knows there was an envelope, so there is one mechanism for
-  every command, the present ones and the next.
+  handler what `payload` stands for - a string as that text, an object as its JSON text. No
+  handler knows there was an envelope, so there is one mechanism for every command, the present
+  ones and the next.
+- **`payload` is a string or an object, and nothing else.** Those are the two shapes a command's
+  payload has on the broker. A number, a boolean, an array or `null` there makes the message no
+  envelope: a bare `40` and a bare `true` are text, so `"payload": "40"` already says them, and
+  a second spelling would be one more thing whose reading - `1e2`, `-0`, `null` for "nothing" -
+  has to be promised. The empty string is the empty payload.
 - **Anything that is not exactly that object is the command's own payload**, passed on as the same
   text it arrived as. A command without an id is not parsed differently, and its refusal is the
   same bytes as before, because the member is absent and not `null`.
@@ -85,6 +90,9 @@ before, it takes unchanged.
   refusal would have to carry the id on a retained topic all the same.
 - **A prefix on a string payload** (`id=...;PRESS`). It changes what an existing payload means for
   any sender whose text happens to start that way, and `cmd/message` shows free text.
+- **Any JSON value as `payload`.** Built first, and withdrawn before release: a number was
+  written again the encoder's way and `null` stood for the empty payload, which is two rules a
+  sender has to know for nothing a string does not already carry.
 - **Refusing a command whose id cannot be used.** The id is an aid to the sender, not part of the
   request. A random id that happens to contain a short broker password would turn into a command
   that fails for no reason its sender could find, on that one household's receiver.

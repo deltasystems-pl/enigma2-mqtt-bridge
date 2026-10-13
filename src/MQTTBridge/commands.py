@@ -133,13 +133,11 @@ def _inner(value):
     """The text a handler is given for an envelope's `payload` member.
 
     What the sender would have published without the envelope: a string is
-    that text, `null` is the empty payload, and anything else - an object, a
-    number, `true` - is its JSON text, which the handler reads as it reads a
-    payload that arrived that way. Written without spaces: the handler is
-    not given more text than the sender wrote spacing for.
+    that text - the empty string the empty payload - and an object is its
+    JSON text, which the handler reads as it reads a payload that arrived
+    that way. Written without spaces: the handler is not given more text
+    than the sender wrote spacing for. `unwrap` hands over nothing else.
     """
-    if value is None:
-        return ""
     if isinstance(value, str):
         return value
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
@@ -148,11 +146,13 @@ def _inner(value):
 def unwrap(text):
     """`(text, id, problem)`: a command's own payload, out of its envelope when it has one.
 
-    An envelope is a JSON object with exactly the members `id` and `payload`.
-    Anything else is the command's own payload and comes back as it arrived,
-    the same object, with no id. An envelope is opened whatever its id is
-    worth: the sender said which part is the command, and an id that cannot
-    be used (`problem` says why) is dropped without touching that.
+    An envelope is a JSON object with exactly the members `id` and `payload`,
+    whose `payload` is a string or an object. Anything else - a `payload`
+    that is a number, `true`, a list or `null` included - is the command's
+    own payload and comes back as it arrived, the same object, with no id.
+    An envelope is opened whatever its id is worth: the sender said which
+    part is the command, and an id that cannot be used (`problem` says why)
+    is dropped without touching that.
 
     Opened once. An envelope inside an envelope is the inner command's
     payload, and the handler's to refuse.
@@ -170,6 +170,10 @@ def unwrap(text):
     try:
         envelope = json.loads(stripped)
         if not isinstance(envelope, dict) or set(envelope) != {ENVELOPE_ID, ENVELOPE_PAYLOAD}:
+            return text, None, None
+        if not isinstance(envelope[ENVELOPE_PAYLOAD], (str, dict)):
+            # The two shapes a command's payload has. A number or `null`
+            # there is nobody's command, so it is not this plugin's envelope.
             return text, None, None
         inner = _inner(envelope[ENVELOPE_PAYLOAD])
         inner.encode("utf-8")
