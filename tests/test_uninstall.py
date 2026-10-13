@@ -1293,3 +1293,55 @@ def test_the_whole_teardown_runs_with_the_package_directory_gone(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "COMPLETE" in result.stdout
+
+
+# ------------------------------------------------------------ the command's id --
+
+
+def enveloped(command_id, payload=NODE):
+    import json
+
+    return json.dumps({"id": command_id, "payload": payload}).encode("utf-8")
+
+
+def _stopped_removal(factory, payload):
+    """A removal accepted from `payload` whose opkg cannot start; the session that says so."""
+    old = factory.client
+    send(factory, payload)
+    MainLoop.advance(0)
+    old.acknowledge()
+    MainLoop.advance(uninstall.POLL_MILLISECONDS)
+    return _fresh_session(factory, old)
+
+
+def test_a_removal_that_stops_says_the_id_of_its_own_command(box, factory, monkeypatch):
+    bridge = box()
+    monkeypatch.setattr(ConsoleAppContainer, "execute", lambda self, command: 1)
+
+    client = _stopped_removal(factory, enveloped("rm-1"))
+
+    _put_back(client, bridge)
+    payload = client.last(LAST_ERROR).json()
+    assert "opkg could not be started" in payload["error"]
+    assert (payload["cmd"], payload["id"]) == ("uninstall", "rm-1")
+
+
+def test_a_refused_removal_says_its_id_at_once(box, factory):
+    box()
+    send(factory, enveloped("rm-1", "another_node"))
+
+    payload = factory.client.last(LAST_ERROR).json()
+    assert payload["error"] == uninstall.WRONG_NODE
+    assert payload["id"] == "rm-1"
+
+
+def test_a_removal_without_an_id_does_not_inherit_the_one_before(box, factory, monkeypatch):
+    box()
+    monkeypatch.setattr(ConsoleAppContainer, "execute", lambda self, command: 1)
+    first = _stopped_removal(factory, enveloped("rm-1"))
+    assert first.last(LAST_ERROR).json()["id"] == "rm-1"
+
+    second = _stopped_removal(factory, NODE)
+
+    assert "opkg could not be started" in error(second)
+    assert sorted(second.last(LAST_ERROR).json()) == ["cmd", "error", "ts"]

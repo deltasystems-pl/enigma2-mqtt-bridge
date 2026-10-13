@@ -420,6 +420,9 @@ class SelfUpdater:
         self.integration = None
         self._current = None
         self._transaction = None
+        # `(transaction id, command id)` of the update this process launched from a
+        # `cmd/update` that carried an id; None otherwise (`_command_id_of`).
+        self._asked_by = None
         self._marker_read = False
         self._container = None
         self._finished_container = None
@@ -705,9 +708,14 @@ class SelfUpdater:
         self.relay_refusal = None
         self.relay_version = None
         self.relay_ended = None
-        return self._request(text, origin, downgrade)
+        # The id of the command being handled, taken here and handed down: this call is the
+        # broker's command only while its handler runs. An install from the television or the
+        # page has none, and it alone can wait and be asked again turns later (`_probed`,
+        # `_on_relay`), during whichever command is handled then.
+        command_id = getattr(self.bridge, "command_id", None) if origin == MQTT else None
+        return self._request(text, origin, downgrade, command_id=command_id)
 
-    def _request(self, text, origin, downgrade, probed=False):
+    def _request(self, text, origin, downgrade, probed=False, command_id=None):
         bridge = self.bridge
         if not granted(bridge.value, PERMISSION, origin):
             return Refusal(NOT_PERMITTED, "not_permitted")
@@ -766,7 +774,7 @@ class SelfUpdater:
             started_by = origin
         else:
             started_by = "home_assistant" if relay is not None else "mqtt"
-        return self._launch(entry, sha, relay, started_by, allowed_downgrade)
+        return self._launch(entry, sha, relay, started_by, allowed_downgrade, command_id)
 
     def busy(self):
         """`busy`, or None: a transaction runs, or the shared lock is held and not stale.
@@ -1193,7 +1201,7 @@ class SelfUpdater:
 
     # ----------------------------------------------------------------- launch --
 
-    def _launch(self, entry, sha, relay, started_by, downgrade):
+    def _launch(self, entry, sha, relay, started_by, downgrade, command_id=None):
         ident = secrets.token_hex(6)
         directory = os.path.join(self.backups, "update-" + ident)
         updates = self.bridge.updates
@@ -1214,6 +1222,12 @@ class SelfUpdater:
             "integration": self.integration,
             "integration_mode": self._integration_mode(),
         }
+        if command_id is not None:
+            # The id the `cmd/update` that asked for this carried (`request`). In the request
+            # file, which outlives this process: the end may be said by the one that starts
+            # after the restart. The helper reads the members it knows, and without an id the
+            # file is what it always was.
+            request["command_id"] = command_id
         try:
             os.makedirs(self.backups, mode=0o700, exist_ok=True)
             os.mkdir(directory, 0o700)
@@ -1244,6 +1258,7 @@ class SelfUpdater:
         self._current = {"id": ident, "directory": directory, "ours": True,
                          "downgrade": bool(downgrade), "launched": self.monotonic(),
                          "finished_seen": None, "asked": False, "deadline": None}
+        self._asked_by = (ident, command_id)
         self._transaction = {"id": ident, "started_by": started_by, "target": entry["version"],
                              "from": __version__, "phase": "downloading", "started": now,
                              "finished": None, "result": None, "error": None}
@@ -1302,6 +1317,25 @@ class SelfUpdater:
         self._end(public(record), "internal_error", followed=False, stuck=stuck)
 
     # ------------------------------------------------------------ following --
+
+    def _command_id_of(self, ident):
+        """The id the `cmd/update` that started transaction `ident` carried, or None.
+
+        From this process when it launched the transaction, else from the transaction's
+        request file - after the restart, or for a transaction another process started.
+        Whatever the file says is held to the id's rule where `last_error` is built
+        (`Bridge.publish_last_error`); a file that is gone or names another transaction
+        gives none.
+        """
+        asked = self._asked_by
+        if asked is not None and asked[0] == ident:
+            return asked[1]
+        if not isinstance(ident, str) or not updatehelper.TRANSACTION_ID.fullmatch(ident):
+            return None
+        request = updatehelper.read_json(os.path.join(self.backups, "update-" + ident, REQUEST))
+        if not isinstance(request, dict) or request.get("id") != ident:
+            return None
+        return request.get("command_id")
 
     def _record(self, current):
         """What the helper last wrote about this transaction: its status, the marker, the last."""
@@ -1583,6 +1617,8 @@ class SelfUpdater:
         result = (payload or {}).get("result")
         error = (payload or {}).get("error")
         ident = (payload or {}).get("id")
+        # Asked before the marker goes: whose command this end answers.
+        command_id = self._command_id_of(ident)
         LOG.warning("update %s ended: %s%s", ident, result, " (" + error + ")" if error else "")
         if not keep_marker:
             self._remove_marker(ident)
@@ -1614,10 +1650,10 @@ class SelfUpdater:
                 text += "; " + stuck
             said = Refusal(text, reason or result or "failed")
             if self.bridge.connected:
-                self.bridge.publish_last_error(COMMAND, said)
+                self.bridge.publish_last_error(COMMAND, said, command_id=command_id)
             else:
                 # The session's own connect says it: no reload comes to carry it.
-                self.bridge._pending_error = (COMMAND, said)
+                self.bridge.say_at_connect(COMMAND, said, command_id)
             return
         if self.closed:
             self.closed = False
@@ -1626,7 +1662,7 @@ class SelfUpdater:
             self._queue = []
             self._outstanding = []
             if refusal is not None:
-                self.bridge._pending_error = (COMMAND, refusal)
+                self.bridge.say_at_connect(COMMAND, refusal, command_id)
             # A fresh session republishes availability, the snapshot - `update` with this
             # transaction's end - the announcement and discovery, and whatever a downgrade's
             # retraction took.
@@ -1635,10 +1671,10 @@ class SelfUpdater:
         self._publish()
         if refusal is not None:
             if self.bridge.connected:
-                self.bridge.publish_last_error(COMMAND, refusal)
+                self.bridge.publish_last_error(COMMAND, refusal, command_id=command_id)
             else:
                 # Read at start, before any session: said once the first one is up.
-                self.bridge._pending_error = (COMMAND, refusal)
+                self.bridge.say_at_connect(COMMAND, refusal, command_id)
         if followed and result == "installed":
             self._schedule_collapse()
 

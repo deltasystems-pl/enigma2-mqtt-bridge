@@ -164,7 +164,7 @@ not by the checker; their types are the tables below.
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
 | 0.3.0 -> 0.4.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3); the read-only setting `update_allowed`, the capability `self_update`, the command `update`, `update.transaction` and the subscription to `enigma2mqtt/integration/<node>` (§3); the event topic `relay_request` and the command `relay`, and `cmd/update`'s refusal `no_relay`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
-| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4). **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
+| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4); a command's id - the envelope every command takes on the broker, the `last_error` member `id` and the capability `command_id` (sections 1 and 2). **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
 
 ---
 
@@ -212,7 +212,7 @@ announcement retained.
                "update_check": false, "update_allowed": false},
   "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
                    "volume", "hdd", "process", "channels", "channel_topics", "bouquet_context",
-                   "epg_grid", "keys", "screenshot", "toast", "message"],
+                   "epg_grid", "keys", "screenshot", "toast", "message", "command_id"],
   "not_published": []
 }
 ```
@@ -270,9 +270,10 @@ hides what is missing instead of showing a dead entity. The names are the featur
 nothing else is ever in the list: `power`, `cec_workaround`, `service`, `epg`, `epg_grid`,
 `tuner`, `recording`, `timers`, `volume`, `cam`, `oscam`, `softcam`, `keys`, `screenshot`,
 `toast`, `message`, `hdd`, `process`, `channels`, `channel_topics`, `bouquet_context`,
-`zap_history`, `history_clear`, `epg_import`, `uninstall`, `self_update`. A build that has bound no
-feature area publishes `[]` - the connection, `info` and the commands are the plugin itself and
-are not capabilities. `uninstall` (since 0.3.0) is the one name with no feature area behind it: it
+`zap_history`, `history_clear`, `epg_import`, `uninstall`, `self_update`, `command_id`. A build that
+has bound no feature area publishes that last name alone - `[]` before it existed - because the
+connection, `info` and the commands are the plugin itself and are not capabilities. `uninstall`
+(since 0.3.0) is the one name with no feature area behind it: it
 says the package manager installed this very copy of the plugin, so `cmd/uninstall` can work - opkg
 is executable, its configured info directory knows the package, and the package's file list names
 the running `plugin.py`. A copy unpacked by hand or carried in a firmware image does not claim it.
@@ -282,7 +283,10 @@ the receiver can run the update helper outside enigma2 - `/sbin/start-stop-daemo
 directory - so `cmd/update` can work. `channel_topics` (added after 0.4.0, unreleased) is not a
 feature area of its own either: it is claimed with `channels`, and says that the index `bouquets`
 and each bouquet's list on `channels/<bouquet_slug>` are published - which is where a consumer
-finds the lists when `channels` is too big to be.
+finds the lists when `channels` is too big to be. `command_id` (added after 0.4.0, unreleased) is
+not a feature area at all, and no hook is behind it: every plugin that opens the envelope a
+command's id comes in (section 2) claims it, always. It is how a consumer knows the envelope is
+safe to send - a plugin without the name takes an envelope for the command's own payload.
 
 A name is in the list because it **worked on this box**, not because this version of the plugin
 has the code for it. Three things can take one out: the image did not provide the hooks
@@ -1336,7 +1340,9 @@ Published when a command fails or is refused by a guard, and **cleared** - an em
 payload - when any command later succeeds, not only the same one: a successful zap clears a
 refusal `history_clear` left there. A check that runs after a command has returned, such as the
 5 s verification of a zap on `service`, can publish a new refusal. A consumer that raises an error
-to the user reads this topic, not the absence of a state change.
+to the user reads this topic, not the absence of a state change. A refusal names its command in
+`cmd`, and - added after 0.4.0 (unreleased) - says back the id that command carried, in `id`, when
+it carried one (section 2).
 
 **It is the last refusal of this run of the plugin.** Added after 0.4.0 (unreleased), the named
 exception `last-error-cleared-at-start` (Contract version, above). The topic is retained, so it
@@ -1372,9 +1378,14 @@ command that succeeds.
 | `error` | string | Why, in English, for the person reading the topic. This is the contract's human text |
 | `ts` | int | When, in epoch seconds |
 | `reason` | string, optional | Since 0.3.0. A stable code for the refusal, **only** from a command that defines codes - today `history_clear`, `update_check`'s `not_permitted`, `update`, `uninstall`'s `busy` (and `zap_history`'s `playback`); see §2. Absent, not `null`, otherwise, so every other refusal is exactly what it was. A consumer that knows the code can say the refusal in the household's language, and one that does not ignores the field |
+| `id` | string, optional | Added after 0.4.0 (unreleased), capability `command_id`. The id the refused command carried in its envelope (section 2), exactly as it was sent. It is the id of the command this refusal is about - also when the refusal is published after that command returned, or by the plugin process that starts after an update - and never the id of another command. Absent, not `null`, when the command carried none or one the plugin could not use, so a refusal without an id is exactly what it was |
 
 ```json
 {"cmd": "history_clear", "error": "the receiver's zap history holds at most one channel, and 0 does nothing then", "reason": "too_short", "ts": 1789459213}
+```
+
+```json
+{"cmd": "zap", "error": "the box did not tune to 1:0:19:283D:3FB:1:C00000:0:0:0: within 5 s (it is on 1:0:19:283E:3FB:1:C00000:0:0:0:)", "id": "7f9c2e4a-3b1d-4c8e-9f60-2d5a1b7c8e90", "ts": 1789459213}
 ```
 
 ---
@@ -1387,8 +1398,10 @@ for the keyword payloads (`on`, `ON`, `On` all work).
 
 Every command is **verified by effect**: the plugin does the thing, observes the resulting
 enigma2 event, and publishes the new state on the matching state topic. A failure or a refusal
-goes to `last_error`. There is no acknowledgement topic and no correlation id in v1 - the state
-topic is the answer.
+goes to `last_error`. There is no acknowledgement topic - the state topic is the answer. A sender
+that has to tell which of its commands a refusal belongs to gives the command an id - added after
+0.4.0, [below](#a-commands-id---added-after-040-unreleased-capability-command_id); a command that
+worked is still answered by its state topic and by nothing else.
 
 🔴 **A command that arrives with the retain flag set is logged and discarded, never executed.**
 This is a guard on every command in the table below, not a property of any one of them. A retained
@@ -1429,6 +1442,78 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `relay` - since 0.4.0 | `{"id": "a1b2c3d4e5f6", "version": "0.4.1", "url": "http://192.0.2.5:8123/api/enigma2_mqtt/relay/<token>", "expires": <epoch>}` | Home Assistant's answer to this receiver's `relay_request` (§1): where to download the package. Taken only as the answer the receiver is waiting for, and it then starts the install that asked (below) | **Never refused on `last_error`, and never clears it**: an answer that is not the awaited one is logged and dropped, and the wait goes on. What comes of an answer that is taken is `cmd/update`'s |
 
 Every one of them is refused when it arrives retained, as above.
+
+### A command's id - added after 0.4.0 (unreleased), capability `command_id`
+
+A sender may give a command an id, and a refusal of that command says it back as `last_error.id`
+(section 1, [ADR-0016](adr/0016-a-commands-id-comes-in-an-envelope-and-only-a-refusal-says-it-back.md)).
+It is there to tell refusals apart: two commands of one name sent close together, or a refusal
+that arrives after the next command has been sent, have the same `last_error.cmd`. **Refusals
+only.** A command that worked says its id nowhere, and its answer is its state topic, as before.
+
+The id travels in an **envelope** around the command's own payload, the same for every command:
+
+```json
+{"id": "7f9c2e4a-3b1d-4c8e-9f60-2d5a1b7c8e90", "payload": "PRESS"}
+```
+
+```json
+{"id": "zap-17", "payload": {"sref": "1:0:19:283D:3FB:1:C00000:0:0:0:"}}
+```
+
+- **An envelope is a JSON object with exactly the members `id` and `payload`.** Anything else - a
+  bare string, a JSON object with other members, one of the two alone, the two with a third - is
+  the command's own payload and is handled exactly as it always was. No command's own payload has
+  that shape, and none will be given it.
+- **`payload` is what the sender would have published without the envelope.** A string is that
+  text, character for character: `"PRESS"`, `"standby"`, a service reference, a node id. An
+  object, a number or a boolean stands for its JSON text - `{"level": 42}`, `40`, `true` - and
+  reaches the command as if that text had been published; a command that takes a JSON object may
+  also be given a string that holds it. `null` is the empty payload. For a command that ignores
+  its payload any value does, and `""` is the convention. An envelope is opened once: one inside
+  another is the command's payload.
+- **`id` is a string of 1 to 64 characters** out of `A`-`Z`, `a`-`z`, `0`-`9`, `.`, `_`, `:` and
+  `-` - a UUID, a ULID, a counter behind a prefix. It is the sender's to choose and to keep apart
+  from its other ids for as long as it waits. The plugin compares it with nothing and remembers
+  none: two commands with one id are two commands.
+- **An id the plugin cannot use is dropped, and the command runs** as if it had carried none: an
+  id of another type or shape, and one that holds a value the plugin keeps secret - the broker
+  password. The log says that it was dropped and why, without the id. A refusal of that command
+  has no `id`, so a sender reads a refusal without `id` whose `cmd` is its command's the way it
+  did before there were ids.
+- **The 4096-byte limit counts the whole message**, envelope included, and a retained command is
+  discarded with or without one.
+- **Only on the broker.** A command run from the OpenWebif page or from the receiver's own screen
+  has no envelope and no id, and a payload typed there that looks like one is the command's
+  payload. `cmd/relay` takes no envelope either: it is an answer, not a command, it never reaches
+  `last_error`, and the `id` in it is the relay request's.
+
+**Which refusal says it.** Every `last_error` payload is about one command, and carries that
+command's id when it had one. That holds for a refusal made while the command is handled - an
+unknown command, a guard, a failure, the doors' sentence while an update is applied - and for one
+published later:
+
+| Command | The later refusal |
+|---|---|
+| `zap`, `zap_history` | The zap did not show up on `service` within 5 s; the receiver did not leave standby; the zap was refused once the receiver was awake |
+| `screenshot` | `grab` failed, wrote nothing, or wrote a picture over the size limit |
+| `softcam_restart` | The sequence failed on a later turn - the cam could not be started |
+| `uninstall` | The removal stopped, and the fresh session says why |
+| `update` | However the update ended without `installed` - also when the plugin process that starts after the restart, or after the rollback, is the one that says it: the id is kept on the receiver with the update's own request |
+
+A later refusal keeps the id of its own command whatever has been sent since: one published while
+another command is handled, or after it, never takes that command's id. A newer zap replaces the
+zap being verified, and the refusal is then about the newer one, with its id or without. What no
+broker command asked for has no id: an install started at the television or on the page - also
+when it ends in `no_relay` or `clock_skew` after waiting for Home Assistant - and the automatic
+softcam restart. The empty payload that clears `last_error` carries nothing, as before.
+
+🔴 **Read `info.capabilities` before sending an envelope.** A plugin without `command_id` - 0.4.0
+and older - does not know the envelope and takes it for the command's payload: a command that reads
+its payload refuses it, in its own words, and a command that ignores its payload runs. A consumer
+sends the envelope to a plugin that claims `command_id` and the bare payload to every other. A
+consumer that sends no id sees one difference, the new name in `info.capabilities`: no payload it
+receives has a new member.
 
 ### `cmd/update` semantics - since 0.4.0
 
@@ -2042,7 +2127,7 @@ configuration; `docs/SETUP.md` lists what stays and why.
   "ip": "192.0.2.12",
   "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
                    "volume", "hdd", "process", "channels", "channel_topics", "bouquet_context",
-                   "epg_grid", "keys", "screenshot", "toast", "message"],
+                   "epg_grid", "keys", "screenshot", "toast", "message", "command_id"],
   "ha_mode": "discovery"
 }
 ```
@@ -2245,4 +2330,6 @@ moment.
   When the topics are missing and the log shows no error, subscribe as a privileged user and
   publish as the box's user to find out which it is.
 - **Nothing here is a request/response protocol.** If a command seems not to have worked, read
-  its state topic and then `last_error`; there is no per-command reply to wait for.
+  its state topic and then `last_error`; there is no per-command reply to wait for. An id on a
+  command (section 2) changes one thing: a refusal says which command it refuses. A command that
+  worked is still answered by its state topic alone.

@@ -494,6 +494,8 @@ class SoftcamPublisher(NavPublisher):
         self._phase = None
         self._deadline = 0.0
         self._reason = None
+        # The id of the command the restart under way was asked by, or None.
+        self._asked_by = None
         self._container = None
         self._finished_container = None
 
@@ -715,6 +717,9 @@ class SoftcamPublisher(NavPublisher):
             return NO_TIMER
         self._busy = True
         self._reason = reason
+        # Whose restart this is, for a refusal a later turn of the sequence
+        # publishes. The automatic one is nobody's, whatever is being handled.
+        self._asked_by = self.current_command_id() if reason == MANUAL else None
         self._last_started = time.monotonic()
         for pid in signal_order(found):
             _send(pid, TERMINATE)
@@ -755,7 +760,7 @@ class SoftcamPublisher(NavPublisher):
             if found:
                 if time.monotonic() < self._deadline:
                     if not self._arm(TERM_POLL_MILLISECONDS):
-                        self.report("softcam_restart", NO_TIMER)
+                        self.report("softcam_restart", NO_TIMER, self._asked_by)
                     return
                 LOG.warning("%d %s process(es) did not stop; killing them",
                             len(found), self.selected)
@@ -763,7 +768,7 @@ class SoftcamPublisher(NavPublisher):
                     _send(pid, KILL)
                 self._phase = "killing"
                 if not self._arm(TERM_POLL_MILLISECONDS):
-                    self.report("softcam_restart", NO_TIMER)
+                    self.report("softcam_restart", NO_TIMER, self._asked_by)
                 return
             self._start_one()
             return
@@ -794,20 +799,26 @@ class SoftcamPublisher(NavPublisher):
         container = self._new_container()
         if container is None:
             self._phase = None
-            self.report("softcam_restart", "this image has no eConsoleAppContainer")
+            self.report(
+                "softcam_restart", "this image has no eConsoleAppContainer", self._asked_by
+            )
             return
         try:
             rejected = container.execute(self._start_line)
         except Exception as error:
             LOG.exception("could not start %s", self.selected)
             self._phase = None
-            self.report("softcam_restart", type(error).__name__ + ": " + str(error))
+            self.report(
+                "softcam_restart", type(error).__name__ + ": " + str(error), self._asked_by
+            )
             return
         if rejected:
             # A non-zero answer here is „the program never started", which is a
             # different failure from one that ran and did nothing.
             self._phase = None
-            self.report("softcam_restart", self.selected + " could not be started")
+            self.report(
+                "softcam_restart", self.selected + " could not be started", self._asked_by
+            )
             return
         self._last_restart = int(time.time())
         self._last_reason = self._reason

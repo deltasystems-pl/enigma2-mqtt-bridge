@@ -96,6 +96,8 @@ class ScreenPublisher(Publisher):
         self._finished_container = None
         self._busy = False
         self._commanded = False
+        # The id of the command the capture in flight was asked by, or None.
+        self._asked_by = None
         self._last_capture = 0.0
         self._last_image = None
         # When the last published picture was taken - `grab` finishing, not
@@ -257,6 +259,8 @@ class ScreenPublisher(Publisher):
             return "grab could not be started"
         self._busy = True
         self._commanded = bool(commanded)
+        # Whose capture this is, for a refusal `grab` causes when it ends.
+        self._asked_by = self.current_command_id() if commanded else None
         self._capture_generation = generation
         self._last_capture = time.time()
         return None
@@ -318,6 +322,7 @@ class ScreenPublisher(Publisher):
         self._busy = False
         self._finished_container, self._container = self._container, None
         commanded, self._commanded = self._commanded, False
+        asked_by, self._asked_by = self._asked_by, None
         generation, self._capture_generation = self._capture_generation, None
         try:
             if not self._active:
@@ -335,12 +340,14 @@ class ScreenPublisher(Publisher):
                 LOG.warning("grab exited with %s", retval)
                 self._remove_output()
                 if commanded:
-                    self.report("screenshot", "grab exited with code " + str(retval))
+                    self.report(
+                        "screenshot", "grab exited with code " + str(retval), asked_by
+                    )
                 return
             data = self._read_and_remove()
             if data is None:
                 if commanded:
-                    self.report("screenshot", "grab produced no image")
+                    self.report("screenshot", "grab produced no image", asked_by)
                 return
             if len(data) > MAX_BYTES:
                 message = (
@@ -348,7 +355,7 @@ class ScreenPublisher(Publisher):
                     + str(MAX_BYTES) + " byte limit"
                 )
                 if commanded:
-                    self.report("screenshot", message)
+                    self.report("screenshot", message, asked_by)
                 else:
                     LOG.warning(message)
                 return

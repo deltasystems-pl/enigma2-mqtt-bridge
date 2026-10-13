@@ -3451,3 +3451,267 @@ def test_a_closed_follower_that_loses_every_record_is_not_left_saying_wait(how, 
     assert updater._current is None and updater.closed and updater.stuck
     assert updater.doors_refusal() == selfupdate.STUCK_STOPPED
     assert updater.doors_refusal() != DOORS
+
+
+# ------------------------------------------------------------ the command's id --
+
+
+def enveloped(command_id, payload=None):
+    return {"id": command_id, "payload": payload or {"version": "0.4.0"}}
+
+
+def said(client):
+    """The last refusal on `last_error`, whole."""
+    entry = client.last(LAST_ERROR)
+    return None if entry is None or entry.text == "" else entry.json()
+
+
+def other_command(factory, command_id="other-2"):
+    factory.client.fire_message(ROOT + "/cmd/teleport",
+                                json.dumps({"id": command_id, "payload": ""}).encode())
+
+
+def test_a_refused_update_says_its_id_next_to_its_reason(box, factory):
+    bridge = box()
+    send(factory, enveloped("up-1", {"version": "0.9.0"}))
+
+    payload = said(factory.client)
+    assert (payload["reason"], payload["id"]) == ("unknown_version", "up-1")
+    assert directories(bridge.root) == []
+
+
+def test_the_rate_limits_refusal_says_the_id_of_the_command_it_refused(box, factory):
+    bridge = box()
+    updatehelper.write_json(str(bridge.root / updatehelper.LAST),
+                            {"id": "0123456789ab", "finished": NOW - 60, "result": "failed"})
+    send(factory, enveloped("up-1"))
+
+    payload = said(factory.client)
+    assert (payload["reason"], payload["id"]) == ("rate_limited", "up-1")
+
+
+def test_the_request_file_carries_the_id_and_the_helper_still_reads_it(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory, enveloped("up-1"))
+
+    assert json.loads((directory / "request.json").read_text())["command_id"] == "up-1"
+    helper = updatehelper.Transaction(str(directory))
+    helper.load_request()
+    assert helper.request["target"] == "0.4.0"
+
+
+def test_the_request_file_of_an_update_without_an_id_has_no_such_member(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    assert "command_id" not in json.loads((directory / "request.json").read_text())
+
+
+def test_an_update_that_fails_before_the_restart_says_the_id_of_its_own_command(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory, enveloped("up-1"))
+    helper_says(directory, phase="finished", result="failed", reason="download",
+                error="version 0.4.0 could not be downloaded: timed out", finished=NOW + 5)
+    other_command(factory)
+
+    tick()
+
+    payload = said(factory.client)
+    assert (payload["cmd"], payload["reason"], payload["id"]) == ("update", "download", "up-1")
+
+
+def test_an_update_without_an_id_that_fails_takes_nobody_elses(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory)
+    helper_says(directory, phase="finished", result="failed", reason="download",
+                error="version 0.4.0 could not be downloaded: timed out", finished=NOW + 5)
+    other_command(factory)
+
+    tick()
+
+    payload = said(factory.client)
+    assert payload["reason"] == "download"
+    assert "id" not in payload
+
+
+def test_a_launch_that_fails_says_the_id_although_its_directory_is_gone(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory, enveloped("up-1"))
+    other_command(factory)
+
+    ConsoleAppContainer.instances[-1].finish(1)
+
+    assert not directory.exists()
+    payload = said(factory.client)
+    assert (payload["reason"], payload["id"]) == ("internal_error", "up-1")
+
+
+def test_the_next_update_does_not_inherit_the_id_of_the_one_before(box, factory):
+    bridge = box()
+    accepted(bridge, factory, enveloped("up-1"))
+    ConsoleAppContainer.instances[-1].finish(1)
+    assert said(factory.client)["id"] == "up-1"
+
+    send(factory, {"version": "0.4.0"})
+    ConsoleAppContainer.instances[-1].finish(1)
+
+    payload = said(factory.client)
+    assert payload["reason"] == "internal_error"
+    assert "id" not in payload
+
+
+def test_the_end_of_another_transaction_does_not_take_the_id_this_process_remembers(
+        box, factory):
+    """A transaction another process started, followed here after this one launched its own."""
+    bridge = box()
+    accepted(bridge, factory, enveloped("up-1"))
+    ConsoleAppContainer.instances[-1].finish(1)
+    assert said(factory.client)["id"] == "up-1"
+
+    bridge.self_update._end(
+        {"id": "ffffffffffff", "phase": "finished", "result": "failed", "reason": "download",
+         "error": "version 0.4.0 could not be downloaded: timed out"}, "download", followed=True)
+
+    payload = said(factory.client)
+    assert payload["reason"] == "download"
+    assert "id" not in payload
+
+
+def _rolled_back(root, request):
+    directory = marker(root, phase="finished", result="rolled_back", reason="not_started",
+                       error="the new plugin did not start; the previous version 0.2.0 is back",
+                       finished=NOW)
+    updatehelper.write_json(str(directory / "request.json"), request)
+
+
+def test_an_updates_end_read_at_the_start_says_the_id_its_command_carried(starting, factory):
+    """The process that took `cmd/update` is gone; the id is in the transaction's request."""
+    starting(prepare=lambda root: _rolled_back(
+        root, {"id": "a1b2c3d4e5f6", "enigma2_pid": 1, "command_id": "up-1"}))
+
+    factory.client.fire_connect()
+
+    payload = said(factory.client)
+    assert (payload["cmd"], payload["reason"], payload["id"]) == ("update", "not_started", "up-1")
+
+
+@pytest.mark.parametrize("request_file", [
+    {"id": "a1b2c3d4e5f6", "enigma2_pid": 1},
+    {"id": "ffffffffffff", "enigma2_pid": 1, "command_id": "up-1"},
+    {"id": "a1b2c3d4e5f6", "enigma2_pid": 1, "command_id": "not an id"},
+    {"id": "a1b2c3d4e5f6", "enigma2_pid": 1, "command_id": "x" * 65},
+    {"id": "a1b2c3d4e5f6", "enigma2_pid": 1, "command_id": 17},
+    ["a1b2c3d4e5f6", "up-1"],
+])
+def test_an_updates_end_read_at_the_start_takes_no_id_the_request_does_not_vouch_for(
+        request_file, starting, factory):
+    starting(prepare=lambda root: _rolled_back(root, request_file))
+
+    factory.client.fire_connect()
+
+    payload = said(factory.client)
+    assert payload["reason"] == "not_started"
+    assert "id" not in payload
+
+
+def test_an_update_rolled_back_behind_closed_doors_says_the_id_on_the_fresh_session(
+        box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory, enveloped("up-1"))
+    helper_process(bridge, directory)
+    helper_says(directory, phase="installing")
+    tick()
+    assert bridge.self_update.closed
+    clients = len(factory.clients)
+    helper_says(directory, phase="finished", result="rolled_back", reason="drill",
+                error=updatehelper.SENTENCES["drill"], finished=NOW + 90,
+                record={"restore": "done"})
+
+    tick()
+
+    assert len(factory.clients) == clients + 1
+    factory.client.fire_connect()
+    payload = said(factory.client)
+    assert (payload["cmd"], payload["reason"], payload["id"]) == ("update", "drill", "up-1")
+
+
+def test_an_update_that_leaves_the_doors_closed_for_good_says_the_id_of_its_command(
+        box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory, enveloped("up-1"))
+    helper_process(bridge, directory)
+    tick()
+    other_command(factory)
+    helper_says(directory, phase="finished", result="failed", reason="opkg_failed",
+                error="the package manager could not install version 0.4.0: exit 255",
+                finished=NOW + 5, record={"restore": "failed: [Errno 5] Input/output error"})
+
+    tick()
+
+    assert bridge.self_update.stuck
+    payload = said(factory.client)
+    assert "install the plugin again" in payload["error"]
+    assert (payload["reason"], payload["id"]) == ("opkg_failed", "up-1")
+
+
+def test_a_stuck_end_while_disconnected_keeps_the_id_for_the_next_connect(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory, enveloped("up-1"))
+    helper_process(bridge, directory)
+    tick()
+    factory.client.fire_disconnect()
+    helper_says(directory, phase="finished", result="failed", reason="opkg_failed",
+                error="the package manager could not install version 0.4.0: exit 255",
+                finished=NOW + 5, record={"restore": "failed: [Errno 5] Input/output error"})
+    tick()
+    assert bridge.self_update.stuck
+
+    factory.client.fire_connect()
+
+    payload = said(factory.client)
+    assert (payload["reason"], payload["id"]) == ("opkg_failed", "up-1")
+
+
+def test_an_update_that_ends_while_disconnected_keeps_the_id_for_the_next_connect(box, factory):
+    bridge = box()
+    directory = accepted(bridge, factory, enveloped("up-1"))
+    factory.client.fire_disconnect()
+    helper_says(directory, phase="finished", result="failed", reason="download",
+                error="version 0.4.0 could not be downloaded: timed out", finished=NOW + 5)
+    tick()
+
+    factory.client.fire_connect()
+
+    payload = said(factory.client)
+    assert (payload["reason"], payload["id"]) == ("download", "up-1")
+
+
+def test_an_install_from_the_television_is_nobodys_whatever_command_is_being_handled(
+        box, factory):
+    """An install at the television is asked again turns later, after a probe or a relay's
+    answer - during whichever command is handled then. It never takes that command's id."""
+    bridge = box()
+    asked = []
+    bridge._commands.handlers["discovery"] = lambda text, origin=None: asked.append(
+        (bridge.command_id,
+         bridge.self_update.request(json.dumps({"version": "0.4.0"}), origin=SCREEN)))
+    factory.client.fire_message(ROOT + "/cmd/discovery",
+                                json.dumps({"id": "other-2", "payload": ""}).encode())
+    assert asked == [("other-2", None)]
+    directory = directories(bridge.root)[0]
+    assert "command_id" not in json.loads((directory / "request.json").read_text())
+
+    ConsoleAppContainer.instances[-1].finish(1)
+
+    payload = said(factory.client)
+    assert payload["reason"] == "internal_error"
+    assert "id" not in payload
+
+
+def test_behind_closed_doors_a_refused_command_says_its_id(box, factory):
+    bridge = box()
+    restarting(bridge, factory)
+    factory.client.fire_message(ROOT + "/cmd/power",
+                                json.dumps({"id": "pw-1", "payload": "standby"}).encode())
+
+    payload = said(factory.client)
+    assert (payload["cmd"], payload["error"], payload["id"]) == ("power", DOORS, "pw-1")

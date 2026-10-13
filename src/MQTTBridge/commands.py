@@ -16,6 +16,17 @@ There is no acknowledgement topic. A command's answer is its state topic
 changing; a refusal is `last_error`, which is cleared when a command next
 succeeds.
 
+**A command may carry an id, and its refusal says it back** (ADR-0016). The id
+comes in an envelope around the command's own payload, opened here and nowhere
+else (`unwrap`): no handler knows about it, and a payload that is not an
+envelope reaches its handler untouched. A refusal the dispatcher publishes
+itself gets the id from the dispatcher. While a handler runs, the dispatcher's
+`command_id` is that command's id; work a handler leaves for a later turn
+takes it then and keeps it, and gives it to `publish_last_error` when it
+fails. Nothing that publishes a refusal reads `command_id` at that moment, so
+a late refusal carries the id of its own command or none - never the id of
+whichever command is being handled when it is published.
+
 Every handler returns `None` when it worked and a sentence when it did not, and
 that sentence is written for the person who will read it on `last_error` at
 eleven at night - it says what was refused and why, not which function returned
@@ -41,6 +52,17 @@ MAX_PAYLOAD_BYTES = 4096
 
 # How much of a rejected payload is echoed back on last_error.
 ERROR_ECHO_LIMIT = 64
+
+# The envelope a broker client may put around a command's payload, and the bound
+# on the id it carries (`docs/TOPICS.md`, section 2).
+ENVELOPE_ID = "id"
+ENVELOPE_PAYLOAD = "payload"
+COMMAND_ID_LIMIT = 64
+# What an id may be made of. Nothing that needs escaping anywhere it is shown:
+# a JSON string, a line of the log, the OpenWebif page.
+COMMAND_ID_CHARACTERS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-"
+)
 
 # The words a keyword payload may be spelled with. Case never matters.
 TRUE_WORDS = ("on", "true", "yes", "1", "press")
@@ -72,6 +94,83 @@ def parse(text):
         return json.loads(stripped)
     except ValueError:
         return None
+
+
+def id_problem(value):
+    """Why `value` cannot be a command's id, or None when it can.
+
+    An id is the sender's text, and it ends up on a retained topic and in the
+    log. So it is held to a length, to the characters it may be made of, and
+    against the registered secrets. One that fails is not cleaned or cut: a
+    changed id is no longer the one its sender is waiting for, a cut one could
+    be somebody else's, and a secret cut in the middle would no longer be the
+    registered text and would pass as its own remainder.
+
+    The sentence is for the log and never holds the id. An id that holds a
+    registered secret is refused whole, and one that is only a piece of a
+    secret is not looked for: answering "this is part of the password" one
+    character at a time would give the password to whoever asked.
+    """
+    if not isinstance(value, str):
+        return "it is not a string"
+    if not value:
+        return "it is empty"
+    if len(value) > COMMAND_ID_LIMIT:
+        return "it is longer than " + str(COMMAND_ID_LIMIT) + " characters"
+    if not COMMAND_ID_CHARACTERS.issuperset(value):
+        return "it holds a character other than a letter, a digit, '.', '_', ':' or '-'"
+    if redact(value) != value:
+        return "it holds a value this plugin keeps secret"
+    return None
+
+
+def clean_id(value):
+    """`value` when it may be said back as a command's id, else None."""
+    return value if id_problem(value) is None else None
+
+
+def _inner(value):
+    """The text a handler is given for an envelope's `payload` member.
+
+    What the sender would have published without the envelope: a string is
+    that text, `null` is the empty payload, and anything else - an object, a
+    number, `true` - is its JSON text, which the handler reads as it reads a
+    payload that arrived that way.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
+def unwrap(text):
+    """`(text, id, problem)`: a command's own payload, out of its envelope when it has one.
+
+    An envelope is a JSON object with exactly the members `id` and `payload`.
+    Anything else is the command's own payload and comes back as it arrived,
+    the same object, with no id. An envelope is opened whatever its id is
+    worth: the sender said which part is the command, and an id that cannot
+    be used (`problem` says why) is dropped without touching that.
+
+    Opened once. An envelope inside an envelope is the inner command's
+    payload, and the handler's to refuse.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("{"):
+        return text, None, None
+    try:
+        envelope = json.loads(stripped)
+        if not isinstance(envelope, dict) or set(envelope) != {ENVELOPE_ID, ENVELOPE_PAYLOAD}:
+            return text, None, None
+        inner = _inner(envelope[ENVELOPE_PAYLOAD])
+    except (ValueError, RecursionError):
+        # Not JSON, or nested past what the parser or the encoder follows: the
+        # handler's to judge, exactly as before there was an envelope.
+        return text, None, None
+    problem = id_problem(envelope[ENVELOPE_ID])
+    command_id = None if problem else envelope[ENVELOPE_ID]
+    return inner, command_id, problem
 
 
 def _echo(text):
@@ -128,6 +227,10 @@ class CommandDispatcher:
         # out again on every subscribe. `cmd/uninstall` retracts them with
         # everything else the node owns, so nothing of this node is left behind.
         self.discarded_retained = set()
+        # The id of the command a handler is running for right now, or None:
+        # between commands, for a command without one, and for every command
+        # from the page or the receiver's own screen.
+        self.command_id = None
 
     def handle(self, topic, payload, retain=False):
         name = self.bridge.command_name(topic)
@@ -157,12 +260,17 @@ class CommandDispatcher:
             self.relay(decode(payload))
             return True
 
+        text, command_id, problem = unwrap(decode(payload))
+        if problem:
+            # Once a message, and never the id itself: it is the sender's text.
+            LOG.warning("cmd/%s: the command's id is dropped, %s", name, problem)
+
         handler = self.handlers.get(name)
         if handler is None:
-            self.bridge.publish_last_error(name, "unknown command")
+            self.bridge.publish_last_error(name, "unknown command", command_id=command_id)
             return False
 
-        return self._execute(name, handler, decode(payload), MQTT) is None
+        return self._execute(name, handler, text, MQTT, command_id=command_id) is None
 
     def run(self, name, text, origin, **consents):
         """One command from somewhere other than the broker; the refusal, or None.
@@ -177,6 +285,9 @@ class CommandDispatcher:
         names what an older release takes away. They travel down the call, as
         the origin does, and are never part of the payload: nothing a broker
         client writes can carry one, and `handle()` never passes any.
+
+        No id either, and no envelope: the payload is the handler's as it
+        stands, so a message typed on the page is never read as one.
         """
         text = str(text or "")
         if len(text.encode("utf-8")) > MAX_PAYLOAD_BYTES:
@@ -193,12 +304,25 @@ class CommandDispatcher:
             return "unknown command"
         return self._execute(name, handler, text, origin, consents)
 
-    def _execute(self, name, handler, text, origin, consents=None):
-        """Run one handler, and say how it went on `last_error`. The refusal, or None."""
+    def _execute(self, name, handler, text, origin, consents=None, command_id=None):
+        """Run one handler, and say how it went on `last_error`. The refusal, or None.
+
+        `command_id` is this command's for as long as its handler runs, and
+        the dispatcher's again afterwards - also when the handler raises.
+        """
+        previous, self.command_id = self.command_id, command_id
+        try:
+            return self._handled(name, handler, text, origin, consents, command_id)
+        finally:
+            self.command_id = previous
+
+    def _handled(self, name, handler, text, origin, consents, command_id):
         if origin == PAGE:
             LOG.info("cmd/%s from the OpenWebif page", name)
         elif origin == SCREEN:
             LOG.info("cmd/%s from the receiver's own screen", name)
+        elif command_id is not None:
+            LOG.info("cmd/%s (id %s)", name, command_id)
         else:
             LOG.info("cmd/%s", name)
         doors = self._doors(name)
@@ -208,18 +332,18 @@ class CommandDispatcher:
             if self.bridge.self_update.silent:
                 LOG.info("cmd/%s refused, not published: %s", name, doors)
             else:
-                self.bridge.publish_last_error(name, doors)
+                self.bridge.publish_last_error(name, doors, command_id=command_id)
             return doors
         try:
             error = handler(text, origin=origin, **(consents or {}))
         except Exception as exception:
             LOG.exception("cmd/%s raised", name)
             error = type(exception).__name__ + ": " + redact(str(exception))
-            self.bridge.publish_last_error(name, error)
+            self.bridge.publish_last_error(name, error, command_id=command_id)
             return error
 
         if error:
-            self.bridge.publish_last_error(name, error)
+            self.bridge.publish_last_error(name, error, command_id=command_id)
             return error
 
         self.bridge.clear_last_error()
@@ -237,6 +361,28 @@ class CommandDispatcher:
 
     def publisher(self, name):
         return self.bridge.publisher(name)
+
+    def _reporter(self):
+        """`report(command, sentence)` for a refusal that comes after this command returned.
+
+        Made while the handler runs, so it carries this command's id whichever
+        command is being handled when it is called.
+        """
+        command_id = self.command_id
+
+        def report(command, message):
+            return self.bridge.publish_last_error(command, message, command_id=command_id)
+
+        return report
+
+    def _expecting(self):
+        """`on_zap(sref)` that starts this command's verification, under this command's id."""
+        command_id = self.command_id
+
+        def on_zap(sref):
+            self._expect(sref, command_id)
+
+        return on_zap
 
     def _refresh(self, *names):
         """Read the state back after changing it - the „verified by effect" half."""
@@ -345,21 +491,22 @@ class CommandDispatcher:
             return "no service reference or name given"
 
         return zap_to(
-            self.session, sref, channels=self.publisher("channels"), on_zap=self._expect,
-            report=self.bridge.publish_last_error, allowed=self._still_open,
+            self.session, sref, channels=self.publisher("channels"), on_zap=self._expecting(),
+            report=self._reporter(), allowed=self._still_open,
         )
 
-    def _expect(self, sref):
+    def _expect(self, sref, command_id=None):
         """Start verifying a zap, when it has actually been made.
 
         The zap is verified when `service` echoes the reference. Nothing is
         published here: `evStart` will, and a refusal arrives on `last_error` if
         it does not. From standby the zap is made a turn after the wake, and the
-        five seconds start then, not when the command arrived.
+        five seconds start then, not when the command arrived. `command_id` is
+        the zap's own, kept since its command was handled.
         """
         service = self.publisher("service")
         if service is not None:
-            service.expect(sref)
+            service.expect(sref, command_id)
 
     def _still_open(self):
         """Whether work a command left for a later turn may still run.
@@ -421,14 +568,17 @@ class CommandDispatcher:
         if publisher.find(sref) is None:
             return zaphistory.GONE
 
+        # Taken now: `awake` may run turns later, during another command.
+        on_zap = self._expecting()
+
         def awake():
-            return publisher.zap_to(sref, on_zap=self._expect)
+            return publisher.zap_to(sref, on_zap=on_zap)
 
         # A zap still waiting for the wake is older than this one.
         cancel_waiting_zap()
         if in_standby():
             return run_after_wake(
-                "zap_history", awake, report=self.bridge.publish_last_error,
+                "zap_history", awake, report=self._reporter(),
                 allowed=self._still_open,
             )
         return awake()

@@ -281,6 +281,8 @@ class Uninstaller:
         self._finished_container = None
         self._output = ""
         self._last_line = ""
+        # The id of the command the removal under way was accepted from, or None.
+        self._asked_by = None
 
     @property
     def underway(self):
@@ -350,6 +352,10 @@ class Uninstaller:
         if not self._begin_ticker.start(0, single=True):
             return NO_TIMER
         self.phase = "scheduled"
+        # Kept for the removal's whole life: when it stops, the reason is said
+        # on a later session, turns and commands after this one. Set at every
+        # acceptance, to None as well, so no removal has the id of one before.
+        self._asked_by = getattr(bridge, "command_id", None)
         LOG.warning("uninstall accepted from %s; the teardown starts now", origin)
         return None
 
@@ -591,7 +597,7 @@ class Uninstaller:
         self._outstanding = []
         self.phase = None
         self.closed = False
-        self.bridge.restart_after_failed_uninstall(COMMAND, sentence)
+        self.bridge.restart_after_failed_uninstall(COMMAND, sentence, self._asked_by)
 
 
 def _attach(container, name, function):
