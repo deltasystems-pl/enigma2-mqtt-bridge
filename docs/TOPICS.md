@@ -164,7 +164,7 @@ not by the checker; their types are the tables below.
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
 | 0.3.0 -> 0.4.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3); the read-only setting `update_allowed`, the capability `self_update`, the command `update`, `update.transaction` and the subscription to `enigma2mqtt/integration/<node>` (§3); the event topic `relay_request` and the command `relay`, and `cmd/update`'s refusal `no_relay`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
-| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4); a command's id - the envelope every command takes on the broker, the `last_error` member `id` and the capability `command_id` (sections 1 and 2); the `service` members `video_codec`, `interlaced`, `frame_rate` and `audio_tracks` and the capability `service_codecs`; the topics `stream` and `stream_clients`, the event topic `stream_playable`, the commands `stream_stop` and `stream_playable` and the capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable`. **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
+| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4); a command's id - the envelope every command takes on the broker, the `last_error` member `id` and the capability `command_id` (sections 1 and 2); the `service` members `video_codec`, `interlaced`, `frame_rate` and `audio_tracks` and the capability `service_codecs`; the topics `stream` and `stream_clients`, the event topic `stream_playable`, the commands `stream_stop` and `stream_playable` and the capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable`; the `volume` member `passthrough` and the capability `volume_passthrough`. **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
 
 ---
 
@@ -271,7 +271,8 @@ nothing else is ever in the list: `power`, `cec_workaround`, `service`, `epg`, `
 `tuner`, `recording`, `timers`, `volume`, `cam`, `oscam`, `softcam`, `keys`, `screenshot`,
 `toast`, `message`, `hdd`, `process`, `channels`, `channel_topics`, `bouquet_context`,
 `zap_history`, `history_clear`, `epg_import`, `uninstall`, `self_update`, `command_id`,
-`service_codecs`, `stream`, `stream_clients`, `stream_stop`, `stream_playable`. A build that
+`service_codecs`, `stream`, `stream_clients`, `stream_stop`, `stream_playable`,
+`volume_passthrough`. A build that
 has bound no feature area publishes that last name alone - `[]` before it existed - because the
 connection, `info` and the commands are the plugin itself and are not capabilities. `uninstall`
 (since 0.3.0) was the first name with no feature area behind it: it
@@ -289,8 +290,8 @@ not a feature area at all, and no hook is behind it: every plugin that opens the
 command's id comes in (section 2) claims it, always. It is how a consumer knows the envelope is
 safe to send - a plugin without the name takes an envelope for the command's own payload.
 
-Five names were added after 0.4.0 (unreleased) for what the receiver knows about streaming.
-`service_codecs` is claimed with `service` on an image that can name
+Six names were added after 0.4.0 (unreleased) for what the receiver knows about streaming
+and about its audio. `service_codecs` is claimed with `service` on an image that can name
 the video type (`iServiceInformation.sVideoType`): the codec members of `service` are then
 filled in, where an older plugin has no such members and an image without the name has
 them `null`. `stream` says the image has a stream server and the `stream` topic describes
@@ -299,6 +300,9 @@ it; `stream_clients` that the server lists who it is serving, on `stream_clients
 `stream_playable` that the image can be asked whether a service could be played now, so
 `cmd/stream_playable` can work. Each of the last three is claimed by itself: an image whose
 server lists clients and cannot stop one claims the first and not the second.
+`volume_passthrough` is claimed with `volume` on an image that has at least one of the
+settings `volume.passthrough` is read from; without it the member is still published, and
+is `null` for every track the receiver might hand on undecoded.
 
 A name is in the list because it **worked on this box**, not because this version of the plugin
 has the code for it. Three things can take one out: the image did not provide the hooks
@@ -1196,12 +1200,45 @@ Until then the topic shows the timer's previous state.
 ### `<base>/<node>/volume`
 
 ```json
-{"level": 35, "muted": false}
+{"level": 35, "muted": false, "passthrough": false}
 ```
 
 `level` is an integer 0-100, `muted` a boolean. Published on every volume change from any source
 - the remote, OpenWebif, the plugin itself - and reconciled on a short timer, because enigma2 has
 no single choke point every volume change passes through.
+
+**`passthrough` says whether the volume changes anything.** Added after 0.4.0 (unreleased),
+[ADR-0019](adr/0019-passthrough-is-true-false-or-unknown.md). A receiver can hand AC-3, AAC and
+other encoded audio to the television undecoded - "passthrough" in its audio settings - and then
+its own volume moves a bar on the screen and nothing anybody can hear. The member is about the
+audio track **being played now**:
+
+| `passthrough` | Meaning |
+|---|---|
+| `true` | The image is set to pass that track's codec to the television undecoded: the receiver's volume and mute do nothing audible, and the television's or the amplifier's are the ones to use |
+| `false` | The receiver decodes the track, so its volume acts on it: the image is set to "downmix" for that codec, or the codec is one the receiver always decodes (`mp2`, `lpcm`) |
+| `null` | It cannot be told: nothing is playing, the track's codec is unknown (`service.audio_tracks[].codec` is `null`), the image has no setting for that codec, or the setting is a choice other than those two |
+
+It is the image's setting for the active track's codec, read from memory - `config.av.downmix_ac3`
+for `ac3`; `downmix_ac3plus` (OpenViX) or `transcodeac3plus` (OpenATV, OpenPLi) for `eac3`;
+`downmix_aac` for `aac`; `downmix_aacplus` for `aac_he`; `downmix_dts` for `dts`; `dtshd` for
+`dts_hd`. The value is a word on some images and a boolean on others, and only the two certain
+answers are taken: `passthrough`, and `downmix` or the boolean that stands for it. Every other
+choice an image offers - "use the best the television supports", "convert to multi-channel PCM",
+a transcode to another codec - is `null`, because what reaches the television then depends on the
+television. So is `ac4` and `dra`, for which no image has such a setting, and `aac_he` on a
+receiver without a setting of its own for it.
+
+**It says what the receiver is set to do, not what the television does with it.** A television
+that cannot take the bitstream is the television's business; the receiver still sends it.
+
+A consumer greys out or relabels its volume control on a stated `true`, and treats `null` as an
+older plugin that publishes no such member: unknown, not "no". The capability
+`volume_passthrough` says the image has at least one of those settings.
+
+It follows the track: read again at once on `evStart`, `evUpdatedInfo` and `evEnd`, and - because
+neither a track picked on the remote nor a setting changed in the image's menu announces itself -
+with every reconciliation of the volume, so within five seconds of either.
 
 ### `<base>/<node>/cam`
 
@@ -2469,8 +2506,9 @@ from the topic; discovery mode offers the clear button only.
 `stream`, `stream_clients` and `stream_playable` (added after 0.4.0, unreleased) have **no
 discovery components**: a list of clients that changes shape, a command that needs the row it is
 about, and a question whose answer is an event are the companion integration's to build from the
-topics. The new members of `service` are in no discovery payload either - the channel sensor's
-attributes are the five listed below. A plugin-only install reads them from the broker.
+topics. The new members of `service` and `volume.passthrough` are in no discovery payload either
+- the channel sensor's attributes are the five listed below, and the volume number and the mute
+switch read `level` and `muted`. A plugin-only install reads them from the broker.
 
 ### The attributes the sensors carry
 

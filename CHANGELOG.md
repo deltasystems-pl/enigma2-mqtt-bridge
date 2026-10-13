@@ -39,6 +39,13 @@ version that has no section here.
   another audio track is picked on the remote - which no event announces, so the active track is
   asked for every five seconds. The capability `service_codecs` says the image can fill the
   members in ([TOPICS.md](docs/TOPICS.md)).
+- `volume` gains `passthrough`: whether the audio track being played is handed to the television
+  undecoded, in which case the receiver's volume changes nothing anybody can hear. `true`,
+  `false`, or `null` when it cannot be told - an unknown codec, an image without the setting, or
+  a setting that is neither "downmix" nor "passthrough". It follows the track and the image's
+  audio settings within five seconds. The capability `volume_passthrough` says the image has the
+  settings it is read from
+  ([ADR-0019](docs/adr/0019-passthrough-is-true-false-or-unknown.md)).
 - Each bouquet's channel list is on a retained topic of its own, `channels/<bouquet_slug>`, with
   the bouquet's name, its reference, when the list last changed and the services; and a new small
   topic, `bouquets`, is their index: every bouquet in the receiver's order with the slug of its

@@ -1,4 +1,4 @@
-"""The audio tracks of the playing service and their codecs.
+"""The audio tracks of the playing service, their codecs, and whether the volume acts on them.
 
 The track stubs in `conftest.py` are `iAudioTrackInfo` as OpenViX 6.6 has it: a
 description, a language and a PID, and nothing that names the codec. The words
@@ -7,14 +7,29 @@ and OpenPLi.
 """
 
 import pytest
+from Components.config import ConfigSelection, ConfigSubsection, ConfigYesNo, config
 from conftest import AudioTrackInfo, AudioTracks, Navigation, Service, Session
 
 from MQTTBridge import audio
+
+WORDS = ("downmix", "passthrough")
 
 
 def session_with(tracks, current=0):
     service = Service(audio=AudioTracks(tracks, current))
     return Session(Navigation(service, "1:0:19:283D:3FB:1:C00000:0:0:0:"))
+
+
+@pytest.fixture
+def av(monkeypatch):
+    """`config.av`, empty: a test adds the elements its image would have."""
+    section = ConfigSubsection()
+    monkeypatch.setattr(config, "av", section, raising=False)
+    return section
+
+
+def word(value, choices=WORDS):
+    return ConfigSelection(choices=list(choices), default=value)
 
 
 # --------------------------------------------------------------------- codecs --
@@ -162,3 +177,170 @@ def test_a_negative_current_track_is_none():
     session = session_with([AudioTrackInfo()], current=-1)
     assert audio.active_index(session) is None
     assert audio.read_tracks(session)[0]["active"] is False
+
+
+# ---------------------------------------------------------------- passthrough --
+
+
+def active(description):
+    return audio.read_tracks(session_with([AudioTrackInfo("MPEG"), AudioTrackInfo(description)],
+                                          current=1))
+
+
+@pytest.mark.parametrize(("description", "element", "value", "expected"), [
+    # OpenViX and OpenPLi keep a word.
+    ("Dolby Digital", "downmix_ac3", "passthrough", True),
+    ("Dolby Digital", "downmix_ac3", "downmix", False),
+    ("AC3", "downmix_ac3", "passthrough", True),
+    ("AAC-LC", "downmix_aac", "passthrough", True),
+    ("AAC", "downmix_aac", "downmix", False),
+    ("DTS", "downmix_dts", "passthrough", True),
+    ("DTS", "downmix_dts", "downmix", False),
+    ("Dolby Digital +", "downmix_ac3plus", "passthrough", True),
+    ("Dolby Digital +", "downmix_ac3plus", "downmix", False),
+    ("AC3+", "transcodeac3plus", "passthrough", True),
+    ("AC3+", "transcodeac3plus", "downmix", False),
+    ("HE-AAC", "downmix_aacplus", "passthrough", True),
+    ("AAC-HE", "downmix_aacplus", "downmix", False),
+    ("DTS-HD", "dtshd", "passthrough", True),
+    ("DTS-HD", "dtshd", "downmix", False),
+])
+def test_the_active_tracks_codec_and_its_setting_decide(av, description, element, value,
+                                                        expected):
+    setattr(av, element, word(value))
+    assert audio.passthrough_of(active(description)) is expected
+
+
+@pytest.mark.parametrize(("description", "element"), [
+    ("AC3", "downmix_ac3"), ("DTS", "downmix_dts"), ("AAC", "downmix_aac"),
+])
+def test_a_boolean_setting_means_downmix_when_it_is_true(av, description, element):
+    """OpenATV keeps a yes/no on most receivers, and yes is "downmix"."""
+    setattr(av, element, ConfigYesNo(default=True))
+    assert audio.passthrough_of(active(description)) is False
+    getattr(av, element).value = False
+    assert audio.passthrough_of(active(description)) is True
+
+
+@pytest.mark.parametrize("value", ["multichannel", "hdmi_best", "use_hdmi_caps", "force_ac3",
+                                   "force_dts", "0", "1", "2"])
+def test_a_choice_that_is_neither_of_the_two_is_unknown(av, value):
+    """What the television is offered then depends on things this plugin cannot see."""
+    av.downmix_ac3 = word(value, choices=(value,))
+    av.transcodeac3plus = word(value, choices=(value,))
+    assert audio.passthrough_of(active("AC3")) is None
+    assert audio.passthrough_of(active("AC3+")) is None
+
+
+def test_a_setting_spelled_with_capitals_and_spaces_is_read(av):
+    av.downmix_ac3 = type("Element", (), {"value": " Passthrough "})()
+    assert audio.passthrough_of(active("AC3")) is True
+
+
+@pytest.mark.parametrize("description", ["MPEG", "LPCM"])
+def test_a_codec_the_receiver_always_decodes_is_never_passed_through(description):
+    """With no `config.av` at all: nothing has to be read to know it."""
+    assert audio.passthrough_of(active(description)) is False
+
+
+@pytest.mark.parametrize("description", ["AC3", "AC3+", "AAC", "HE-AAC", "DTS", "DTS-HD"])
+def test_an_image_without_the_setting_cannot_tell(description):
+    assert audio.passthrough_of(active(description)) is None
+
+
+def test_an_image_whose_av_section_lacks_the_element_cannot_tell(av):
+    av.downmix_dts = word("passthrough")
+    assert audio.passthrough_of(active("AC3")) is None
+
+
+@pytest.mark.parametrize("description", ["???", "DRA", "AC4", "Dolby AC-4", "Dolby TrueHD", ""])
+def test_a_codec_without_a_known_setting_cannot_be_told(av, description):
+    av.downmix_ac3 = word("passthrough")
+    av.downmix_aac = word("passthrough")
+    assert audio.passthrough_of(active(description)) is None
+
+
+def test_he_aac_is_not_judged_by_the_setting_for_plain_aac(av):
+    """A receiver has a setting of its own for it or none; which one governs it is not known."""
+    av.downmix_aac = word("passthrough")
+    assert audio.passthrough_of(active("HE-AAC")) is None
+
+
+def test_the_placeholder_an_image_puts_where_it_cannot_is_no_setting(av):
+    """`ConfigNothing` holds the empty string: skipped, and the next name is asked."""
+    av.downmix_ac3plus = type("Element", (), {"value": ""})()
+    av.transcodeac3plus = word("passthrough")
+    assert audio.passthrough_of(active("AC3+")) is True
+    av.downmix_ac3 = type("Element", (), {"value": ""})()
+    assert audio.passthrough_of(active("AC3")) is None
+
+
+def test_a_setting_of_nothing_but_spaces_is_no_setting(av):
+    av.downmix_ac3plus = type("Element", (), {"value": "   "})()
+    av.transcodeac3plus = word("passthrough")
+    assert audio.passthrough_of(active("AC3+")) is True
+
+
+def test_the_first_setting_an_image_has_decides(av):
+    av.downmix_ac3plus = word("downmix")
+    av.transcodeac3plus = word("passthrough")
+    assert audio.passthrough_of(active("AC3+")) is False
+
+
+@pytest.mark.parametrize("value", [None, 5, 1.0, ["passthrough"]])
+def test_a_setting_of_another_type_is_no_setting(av, value):
+    av.downmix_ac3 = type("Element", (), {"value": value})()
+    assert audio.passthrough_of(active("AC3")) is None
+
+
+def test_a_setting_that_raises_is_no_setting(av):
+    class Broken:
+        @property
+        def value(self):
+            raise RuntimeError("not loaded")
+
+    av.downmix_ac3 = Broken()
+    assert audio.passthrough_of(active("AC3")) is None
+
+
+def test_only_the_active_track_counts(av):
+    av.downmix_ac3 = word("passthrough")
+    tracks = audio.read_tracks(session_with(
+        [AudioTrackInfo("MPEG"), AudioTrackInfo("AC3")], current=0))
+    assert audio.passthrough_of(tracks) is False
+    tracks = audio.read_tracks(session_with(
+        [AudioTrackInfo("AC3"), AudioTrackInfo("MPEG")], current=0))
+    assert audio.passthrough_of(tracks) is True
+
+
+@pytest.mark.parametrize("tracks", [None, [], [{"index": 0, "codec": "ac3", "active": False}]])
+def test_without_an_active_track_it_cannot_be_told(av, tracks):
+    av.downmix_ac3 = word("passthrough")
+    assert audio.passthrough_of(tracks) is None
+
+
+def test_passthrough_reads_what_is_playing_now(av):
+    av.downmix_ac3 = word("passthrough")
+    session = session_with([AudioTrackInfo("MPEG"), AudioTrackInfo("AC3")], current=0)
+    assert audio.passthrough(session) is False
+    session.nav.service._audio.selectTrack(1)
+    assert audio.passthrough(session) is True
+    assert audio.passthrough(None) is None
+
+
+def test_whether_the_image_has_any_of_the_settings(av):
+    assert audio.settings_known() is False
+    av.unrelated = word("passthrough")
+    assert audio.settings_known() is False
+    av.dtshd = word("downmix")
+    assert audio.settings_known() is True
+
+
+def test_an_image_without_an_av_section_has_none_of_the_settings():
+    assert audio.settings_known() is False
+
+
+def test_every_setting_named_is_for_a_codec_the_table_can_produce():
+    assert set(audio.SETTINGS) <= set(audio.CODECS.values())
+    assert set(audio.ALWAYS_DECODED) <= set(audio.CODECS.values())
+    assert not set(audio.ALWAYS_DECODED) & set(audio.SETTINGS)

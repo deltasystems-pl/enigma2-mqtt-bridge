@@ -350,6 +350,16 @@ There is no acknowledgement topic. A command's answer is the state topic changin
    nothing. The log line names it. Clear it by publishing an empty retained payload to that
    topic, then send it again without `-r`.
 
+## The volume moves on the screen and nothing gets quieter
+
+The receiver is handing the audio to the television or an amplifier undecoded - "passthrough" in
+its audio settings - and its own volume does not act on a bitstream. It depends on the channel:
+a track in MPEG audio is decoded and the volume works, a Dolby Digital one on the same receiver
+is passed on and it does not. `volume.passthrough` says which it is for the track being played:
+`true`, `false`, or `null` when the plugin cannot tell
+([TOPICS.md](TOPICS.md), `volume`). Use the television's or the amplifier's volume, or set the
+receiver to "downmix" for that codec in its own audio settings.
+
 ## A channel is missing from the zap history
 
 The zap history is the receiver's own list, and the receiver records only zaps that pass through

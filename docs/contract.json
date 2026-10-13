@@ -305,6 +305,7 @@
     "tuner",
     "uninstall",
     "volume",
+    "volume_passthrough",
     "zap_history"
   ],
   "other_topics": [

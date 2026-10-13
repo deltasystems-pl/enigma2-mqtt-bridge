@@ -13,9 +13,18 @@ one comparison per tick and nothing on the broker.
 Setting the volume goes through `VolumeControl` too, and deliberately: it is what
 draws the volume bar on the television. A household that cannot see the volume it
 is changing will report the plugin as broken, and they will be right.
+
+**The volume does not always change anything.** A receiver set to hand AC-3 or
+AAC to the television undecoded has a volume that moves a bar and nothing else.
+`passthrough` says so for the track being played (`audio.py`, ADR-0019). It is
+read with the volume, so the reconciliation that catches a volume change from
+elsewhere also catches a track chosen on the remote and a setting changed in the
+image's menu - neither of which announces itself - and it is read again at once
+when the service changes, which does.
 """
 
-from .enigma2 import Ticker, missing
+from . import audio
+from .enigma2 import Ticker, append_listener, constant, missing, navigation, remove_listener
 from .log import get_logger
 from .publisher import Publisher
 
@@ -34,6 +43,13 @@ WRAPPED = ("setVolume", "volUp", "volDown", "volMute")
 
 # Set on a wrapper so a second start cannot wrap the wrappers.
 MARKER = "_mqttbridge_wrapped"
+
+# Claimed with `volume` on an image that has at least one of the settings
+# `passthrough` is read from.
+PASSTHROUGH_CAPABILITY = "volume_passthrough"
+
+# The service events after which the track being played may be another one.
+SERVICE_EVENTS = ("evStart", "evUpdatedInfo", "evEnd")
 
 
 def _control():
@@ -163,7 +179,7 @@ def set_muted(muted):
 
 
 class VolumePublisher(Publisher):
-    """`volume` - {level, muted}, from whoever changed it."""
+    """`volume` - {level, muted, passthrough}, from whoever changed it."""
 
     name = "volume"
 
@@ -176,6 +192,12 @@ class VolumePublisher(Publisher):
         self._bind_attempts = 0
         self._stopped = False
         self._fallback_logged = False
+        self._nav = None
+        self._service_events = ()
+
+    def extra_capabilities(self):
+        """`volume_passthrough`, where the image has a setting to read it from."""
+        return [PASSTHROUGH_CAPABILITY] if audio.settings_known() else []
 
     def start(self):
         if read() is None:
@@ -183,6 +205,7 @@ class VolumePublisher(Publisher):
         self._stopped = False
         self._bind_attempts = 0
         self._fallback_logged = False
+        self._listen()
         if not self._wrap():
             # WHERE_SESSIONSTART runs from Session.__init__, before OpenViX
             # constructs VolumeControl. Its exact delay is image-dependent, so
@@ -196,6 +219,38 @@ class VolumePublisher(Publisher):
         self._deferred_wrap.stop()
         self._ticker.stop()
         self._unwrap()
+        nav, self._nav = self._nav, None
+        remove_listener(nav, "event", self._on_service_event)
+
+    # ---------------------------------------------------------- service events --
+
+    def _listen(self):
+        """Hear the service change, so `passthrough` follows it at once.
+
+        Not needed for the topic to be right: without it the reconciliation
+        says the same within five seconds, which is why failing to bind costs
+        nothing but that delay.
+        """
+        nav = navigation(self.session)
+        if nav is None:
+            return
+        wanted = []
+        for name in SERVICE_EVENTS:
+            value = constant("iPlayableService", name)
+            if value is not None:
+                wanted.append(value)
+        if wanted and append_listener(nav, "event", self._on_service_event):
+            self._nav = nav
+            self._service_events = tuple(wanted)
+
+    def _on_service_event(self, event):
+        # Called by enigma2 on the main thread for every service event there is.
+        if event not in self._service_events:
+            return
+        try:
+            self._publish_now()
+        except Exception:
+            LOG.exception("publishing the volume on a service event raised")
 
     # -------------------------------------------------------------- wrapping --
 
@@ -268,8 +323,26 @@ class VolumePublisher(Publisher):
 
     # ------------------------------------------------------------- publishing --
 
-    def _publish_now(self):
+    def _passthrough(self):
+        """Whether the track being played is handed on undecoded; None when unknown.
+
+        Never worth a volume: a service that cannot be asked leaves the level
+        and the mute flag as they are, with `passthrough` null.
+        """
+        try:
+            return audio.passthrough(self.session)
+        except Exception:
+            LOG.debug("could not tell whether the audio is passed through")
+            return None
+
+    def _payload(self):
         payload = read()
+        if payload is not None:
+            payload["passthrough"] = self._passthrough()
+        return payload
+
+    def _publish_now(self):
+        payload = self._payload()
         if payload is not None:
             self.publish("volume", payload)
 
@@ -279,5 +352,5 @@ class VolumePublisher(Publisher):
         self._publish_now()
 
     def snapshot(self):
-        payload = read()
+        payload = self._payload()
         return {} if payload is None else {"volume": payload}

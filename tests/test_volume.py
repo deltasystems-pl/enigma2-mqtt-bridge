@@ -7,7 +7,10 @@ VOLUME = "enigma2/" + NODE + "/volume"
 
 
 def test_the_volume_payload_is_a_level_and_a_flag(live_bridge, factory):
-    assert factory.client.last(VOLUME).json() == {"level": 35, "muted": False}
+    # And whether the volume acts on the track being played: the fake image plays an MPEG
+    # track, which a receiver always decodes (`test_volume_passthrough.py`).
+    assert factory.client.last(VOLUME).json() == {"level": 35, "muted": False,
+                                                  "passthrough": False}
 
 
 def test_the_remote_turning_it_up_publishes(live_bridge, factory, receiver):

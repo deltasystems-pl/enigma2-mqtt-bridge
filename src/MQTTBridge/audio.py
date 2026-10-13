@@ -1,4 +1,8 @@
-"""The audio tracks of the playing service, as the `service` topic lists them.
+"""The audio tracks of the playing service, and whether the receiver's volume acts on them.
+
+Two publishers read this: `service` lists the tracks, and `volume` says whether
+the active one is handed to the television undecoded - in which case the
+receiver's own volume changes nothing anybody can hear.
 
 **A track's codec is read off its description**, because that is all the image
 offers: `iAudioTrackInfo` has a description, a language and a PID, and on the
@@ -9,7 +13,16 @@ A description that is not in it is an unknown codec, `None`, never a guess: a
 stream played through the media player describes its audio in other words, and
 those are not mapped.
 
-Nothing here reads a file: the tracks are calls into the playing service.
+**Passthrough is the image's setting for the active track's codec**
+(ADR-0019). The settings live in `config.av`, are named differently per codec
+and per image, and are a word on some images and a boolean on others. Only the
+two answers that are certain are taken - "downmix" and "passthrough", or the
+boolean that stands for them. Every other choice ("use the best the television
+offers", "convert to multi-channel PCM", a transcode) depends on something this
+plugin cannot see, and is `None`.
+
+Nothing here reads a file. The settings are attributes of objects the image
+already holds in memory, and the tracks are calls into the playing service.
 """
 
 from .enigma2 import current_service
@@ -46,6 +59,22 @@ CODECS = {
     "dra": "dra",
     "ac4": "ac4",
     "dolby ac-4": "ac4",
+}
+
+# Decoded by the receiver whatever is set: no image offers to pass these on.
+ALWAYS_DECODED = ("mp2", "lpcm")
+
+# codec -> the `config.av` elements that decide it, the first one the image has.
+# E-AC-3 is `downmix_ac3plus` on OpenViX and `transcodeac3plus` on OpenATV and
+# OpenPLi. HE-AAC has a setting of its own only on some receivers, and where it
+# has none nothing here says which one governs it.
+SETTINGS = {
+    "ac3": ("downmix_ac3",),
+    "eac3": ("downmix_ac3plus", "transcodeac3plus"),
+    "aac": ("downmix_aac",),
+    "aac_he": ("downmix_aacplus",),
+    "dts": ("downmix_dts",),
+    "dts_hd": ("dtshd",),
 }
 
 
@@ -159,3 +188,80 @@ def active_of(tracks):
         if track.get("active"):
             return track.get("index")
     return None
+
+
+# ---------------------------------------------------------------- passthrough --
+
+
+def _setting(name):
+    """`config.av.<name>` as the image holds it: a word, a boolean, or None.
+
+    None where the image has no such element, and where the element is the
+    placeholder an image puts there when the receiver cannot do it - whose
+    value is the empty string.
+    """
+    try:
+        from Components.config import config
+    except Exception:
+        return None
+    section = getattr(config, "av", None)
+    element = getattr(section, name, None) if section is not None else None
+    if element is None:
+        return None
+    try:
+        value = element.value
+    except Exception:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip():
+        return value.strip().lower()
+    return None
+
+
+def _decides(value):
+    """Whether a setting's value means passthrough: True, False, or None for neither.
+
+    A word on OpenViX and OpenPLi and on some OpenATV receivers; a boolean on
+    the others, where true is "downmix".
+    """
+    if value is True:
+        return False
+    if value is False:
+        return True
+    if value == "passthrough":
+        return True
+    if value == "downmix":
+        return False
+    return None
+
+
+def passthrough_of(tracks):
+    """Whether the active track of `tracks` is passed to the television undecoded.
+
+    True, False, or None when it cannot be told: no active track, a codec this
+    plugin does not know, an image without the setting for it, or a setting
+    whose value is neither of the two this plugin is sure of.
+    """
+    for track in tracks or ():
+        if not track.get("active"):
+            continue
+        codec = track.get("codec")
+        if codec in ALWAYS_DECODED:
+            return False
+        for name in SETTINGS.get(codec, ()):
+            value = _setting(name)
+            if value is not None:
+                return _decides(value)
+        return None
+    return None
+
+
+def passthrough(session):
+    """`passthrough_of` for what is playing now."""
+    return passthrough_of(read_tracks(session))
+
+
+def settings_known():
+    """Whether this image has at least one of the settings passthrough is read from."""
+    return any(_setting(name) is not None for names in SETTINGS.values() for name in names)
