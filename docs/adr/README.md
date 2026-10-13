@@ -74,7 +74,9 @@ What this costs, what it rules out, and what has to change if it is ever reverse
 | [0013](0013-the-uninstall-closes-the-doors-and-waits-for-the-broker.md) | The remote uninstall closes the doors first, retracts at QoS 1 and waits for the broker, and puts everything back when a step fails | accepted 2026-09-23 |
 | [0014](0014-the-zap-history-is-the-receivers.md) | The zap history is the receiver's, and the plugin's zaps are in it | accepted 2026-09-24, amended 2026-09-25 and 2026-09-26 |
 | [0015](0015-signed-self-update.md) | The plugin updates itself only to releases from a signed index, in a detached transaction that proves the new plugin started or puts the old one back | accepted 2026-09-26, with its first code - the build id; the rest is built by later changes. Supersedes in part [ADR-0000](0000-prd.md) §7, the "no outbound connection" sentence of [SECURITY.md](../../SECURITY.md), the README's "no update check of its own" and the same promise in `CONTROL/control` |
-| [0016](0016-a-commands-id-comes-in-an-envelope-and-only-a-refusal-says-it-back.md) | A command's id comes in an envelope around its payload, and only a refusal says it back | accepted 2026-10-13 |
+| [0016](0016-a-commands-id-comes-in-an-envelope-and-only-a-refusal-says-it-back.md) | A command's id comes in an envelope around its payload, and only a refusal says it back | accepted 2026-10-13; "only a refusal says it back" is amended by the proposed [ADR-0017](0017-whether-a-service-can-be-played-is-asked-with-an-empty-second-reference.md), whose answer to a question says it too |
+| [0017](0017-whether-a-service-can-be-played-is-asked-with-an-empty-second-reference.md) | Whether a service can be played is asked with an empty second reference, and answered once on a topic that is not retained | proposed |
+| [0018](0018-stopping-a-stream-client-needs-no-permission.md) | Stopping a stream client needs no permission, and names exactly one client | accepted 2026-10-13 |
 
 "Superseded in part by a proposed record" means: the earlier text still describes every released
 plugin exactly, and the proposed record says where it will stop doing so. It becomes a supersession

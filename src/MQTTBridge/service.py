@@ -18,10 +18,16 @@ when the programme it published was due to end.
 
 The signal is a measurement, not a state. It drifts with the weather and is
 worth having on a slow tick rather than on an event that will not come.
+
+A third thing has no event either: the audio track. The image changes it when
+somebody picks another one on the remote and tells nobody, so `service` asks
+which track is playing every few seconds - one call - and reads the tracks
+again only when the answer moved.
 """
 
 import time
 
+from . import audio
 from .enigma2 import (
     Ticker,
     constant,
@@ -54,12 +60,42 @@ SIGNAL_SCALE = 65535
 EPG_MAX_SLEEP_MILLISECONDS = 15 * 60 * 1000
 EPG_MIN_SLEEP_MILLISECONDS = 5000
 
+# How often the active audio track is asked for. Nothing announces a change of
+# track, and five seconds is what the volume's own reconciliation takes.
+AUDIO_POLL_MILLISECONDS = 5000
+
+# Claimed with `service` on an image that names the video type: the codec
+# members of the payload are filled in, and not just present.
+CODECS_CAPABILITY = "service_codecs"
+
+# `iServiceInformation.sVideoType` is the stream type the PMT parser gave the
+# video stream - `videoStream::vt*` in `lib/dvb/pmtparse.h`, the same numbers in
+# OpenViX, OpenATV and OpenPLi. Only those are named. The images' own tables
+# for the info bar list more (VP9, XviD, ...), which a stream played through
+# the media player can report; they are not a DVB service's, and a number that
+# is not below is published as null rather than guessed.
+VIDEO_CODECS = {
+    0: "mpeg2",
+    1: "h264",
+    3: "vc1",
+    4: "mpeg4",
+    5: "vc1_sm",
+    6: "mpeg1",
+    7: "hevc",
+    16: "avs",
+    40: "avs2",
+}
+
+# The image reports the frame rate in thousandths of a frame a second.
+FRAME_RATE_SCALE = 1000.0
+
 # What „nothing is playing" and „nothing is tuned" look like. The keys are all
 # there with null values rather than the topic being absent, because the
 # contract promises that a field which has no value right now is `null` and that
 # a key is never silently dropped.
 EMPTY_SERVICE = {"sref": None, "name": None, "bouquet": None, "provider": None,
-                 "width": None, "height": None}
+                 "width": None, "height": None, "video_codec": None, "interlaced": None,
+                 "frame_rate": None, "audio_tracks": None}
 EMPTY_TUNER = {"snr": None, "agc": None, "ber": None, "tuner": None}
 
 
@@ -122,6 +158,44 @@ def _number(info, name):
     return value if value > 0 else None
 
 
+def _raw_number(info, name):
+    """An integer field exactly as the image answers it, or None when it cannot."""
+    key = info_constant(name)
+    if info is None or key is None:
+        return None
+    try:
+        return int(info.getInfo(key))
+    except Exception:
+        return None
+
+
+def video_codec(info):
+    """A stable name for the video codec on the decoder, or None when unknown."""
+    return VIDEO_CODECS.get(_raw_number(info, "sVideoType"))
+
+
+def interlaced(info):
+    """True for an interlaced picture, False for a progressive one, else None.
+
+    The image's flag is the other way round - `sProgressive`, 0 for interlaced -
+    and is `-1` until the decoder has seen a frame.
+    """
+    progressive = _raw_number(info, "sProgressive")
+    if progressive == 0:
+        return True
+    if progressive == 1:
+        return False
+    return None
+
+
+def frame_rate(info):
+    """Frames a second, or None before the decoder knows: 25000 is 25.0."""
+    value = _raw_number(info, "sFrameRate")
+    if value is None or value <= 0:
+        return None
+    return value / FRAME_RATE_SCALE
+
+
 def read_service(session, bouquet_lookup=None):
     """The `service` payload, or None when nothing is playing."""
     sref = current_service_reference(session)
@@ -147,6 +221,10 @@ def read_service(session, bouquet_lookup=None):
         "provider": _text(info, "sProvider"),
         "width": _number(info, "sVideoWidth"),
         "height": _number(info, "sVideoHeight"),
+        "video_codec": video_codec(info),
+        "interlaced": interlaced(info),
+        "frame_rate": frame_rate(info),
+        "audio_tracks": audio.read_tracks(session),
     }
 
 
@@ -954,7 +1032,11 @@ class ServicePublisher(NavPublisher):
     """`service` - what is tuned, and what it looks like."""
 
     name = "service"
-    events = ("evStart", "evUpdatedInfo", "evNewProgramInfo", "evTunedIn", "evEnd")
+    # The last three are the decoder's: the size, the frame rate and the scan
+    # become known with the first frames, each with an event of its own. An
+    # image that lacks one of the names simply does not send it.
+    events = ("evStart", "evUpdatedInfo", "evNewProgramInfo", "evTunedIn", "evEnd",
+              "evVideoSizeChanged", "evVideoFramerateChanged", "evVideoProgressiveChanged")
 
     def __init__(self, bridge=None):
         NavPublisher.__init__(self, bridge)
@@ -963,6 +1045,35 @@ class ServicePublisher(NavPublisher):
         # The id of the command whose zap is being verified, or None.
         self._waiting_id = None
         self._verify = Ticker(self._zap_timed_out, "zap verify")
+        self._audio = Ticker(self._check_audio, "audio track")
+
+    def start(self):
+        if not NavPublisher.start(self):
+            return False
+        self._audio.start(AUDIO_POLL_MILLISECONDS)
+        return True
+
+    def stop(self):
+        self._audio.stop()
+        NavPublisher.stop(self)
+
+    def extra_capabilities(self):
+        """`service_codecs`, where the image can name the video type at all."""
+        return [CODECS_CAPABILITY] if info_constant("sVideoType") is not None else []
+
+    def _check_audio(self):
+        """Publish again when the track being played is not the one last published.
+
+        One call into the service. The tracks themselves are read only when
+        the answer differs - by `refresh`, which publishes only what changed.
+        """
+        if self._current is None:
+            return
+        playing = audio.active_index(self.session)
+        if playing is None:
+            return
+        if playing != audio.active_of(self._current.get("audio_tracks")):
+            self.refresh()
 
     # The resolution arrives after the first frame is decoded, so `evStart`
     # publishes a service with `width: null` and `evUpdatedInfo` publishes it

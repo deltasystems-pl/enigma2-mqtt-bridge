@@ -26,6 +26,7 @@ from .remote import KeyPublisher
 from .screen import ScreenPublisher
 from .service import EpgPublisher, ServicePublisher, TunerPublisher
 from .softcam import SoftcamPublisher
+from .stream import StreamPublisher
 from .toast import ToastPublisher
 from .volume import VolumePublisher
 from .zaphistory import ZapHistoryPublisher
@@ -36,6 +37,7 @@ PUBLISHER_CLASSES = (
     ServicePublisher,
     EpgPublisher,
     TunerPublisher,
+    StreamPublisher,
     CamPublisher,
     OscamPublisher,
     SoftcamPublisher,

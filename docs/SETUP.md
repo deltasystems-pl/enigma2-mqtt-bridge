@@ -668,6 +668,12 @@ What else to know, and the settings that control it:
   read so far), from every bouquet, retained on the broker - just as `channels` names every
   channel there is. A consumer that hides a bouquet hides it from its own list, not from the
   broker.
+- **`stream_clients`** (added after 0.4.0) names every device that is being sent a stream by the
+  receiver - its address on your network and the channel it is watching, from every bouquet -
+  retained on the broker while it watches. There is no setting for it: it is published wherever
+  the image has a stream server. Any broker client that can publish this receiver's commands can
+  also end one of those streams (`cmd/stream_stop`), as it can change the channel on the
+  television.
 - **`screenshot`** is a picture of your screen on the broker, retained. Set it to `off` if you do
   not use it. `screenshot_delay` (four seconds by default) is how long the image settles after a
   channel change; rapid zaps reset the delay and stale in-flight captures are discarded.

@@ -34,7 +34,18 @@ import test_softcam
 from conftest import POLSAT, TVP1, RecordTimerEntry, install_epg_importer
 
 from MQTTBridge import bridge as bridge_module
-from MQTTBridge import channels, discovery, hdd, keys, process, recording, volume, zaphistory
+from MQTTBridge import (
+    channels,
+    discovery,
+    hdd,
+    keys,
+    process,
+    recording,
+    stream,
+    volume,
+    zaphistory,
+)
+from MQTTBridge import service as service_module
 from MQTTBridge.publishers import PUBLISHER_CLASSES
 
 NODE = "vuuno4kse_005301"
@@ -69,7 +80,8 @@ def every_capability():
     """Every capability a bridge can ever claim.
 
     The core ones, one per publisher, the extra ones a publisher claims on top
-    (`history_clear`, `channel_topics`), and the ones with no publisher behind
+    (`history_clear`, `channel_topics`, `service_codecs`, the three of the
+    stream area), and the ones with no publisher behind
     them (`message`, `uninstall`, `self_update`, `command_id`).
     `test_every_capability_is_in_every_capability` fails when a new one is not
     added here.
@@ -82,6 +94,10 @@ def every_capability():
     names.add(bridge_module.COMMAND_ID_CAPABILITY)
     names.add(zaphistory.CLEAR_CAPABILITY)
     names.add(channels.LISTS_CAPABILITY)
+    names.add(service_module.CODECS_CAPABILITY)
+    names.add(stream.CLIENTS_CAPABILITY)
+    names.add(stream.STOP_CAPABILITY)
+    names.add(stream.PLAYABLE_CAPABILITY)
     return sorted(names)
 
 

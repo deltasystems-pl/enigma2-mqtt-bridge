@@ -11,6 +11,34 @@ version that has no section here.
 
 ### Added
 
+- What only the receiver knows about streaming its channels, without the plugin carrying any
+  video. A new retained topic, `stream`, says where the image's stream server is and what it
+  wants: the port, the form of the request path (`/{sref}` - the receiver's address is
+  `info.ip`), whether it asks for a login, whether the receiver has a hardware encoder and, where
+  the image says, the transcoding port. No credential is published: whether a login is asked for
+  is a boolean. A second retained topic, `stream_clients`, is the image's own list of who is being
+  served: each client's address, service, name, bouquet and whether it is transcoded, at most 32
+  rows with the full count beside them, read every five seconds and published when it changed.
+  `cmd/stream_stop` ends one client's stream, the one named by the `host` and `sref` the list
+  shows; it needs no permission, as a zap needs none, never stops "all", and refuses a client
+  that is not connected with the reason `not_connected`
+  ([ADR-0018](docs/adr/0018-stopping-a-stream-client-needs-no-permission.md)).
+  `cmd/stream_playable` asks the image whether one service could be played now beside everything
+  the receiver is doing - the television, a recording, another stream - and is the one command
+  answered on a topic of its own: one message on `stream_playable`, not retained, with the
+  command's id when it carried one
+  ([ADR-0017](docs/adr/0017-whether-a-service-can-be-played-is-asked-with-an-empty-second-reference.md)).
+  The capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable` say which of
+  these the image offers. The OpenWebif page gains both commands, in English, Polish and German.
+  Discovery mode announces nothing for them ([TOPICS.md](docs/TOPICS.md)).
+- `service` says what is on the decoder: `video_codec` (`h264`, `hevc`, `mpeg2`, ...),
+  `interlaced`, `frame_rate`, and `audio_tracks` - each track's description, language, PID, a
+  codec name that is the same on every image (`mp2`, `ac3`, `eac3`, `aac`, ...) and which one is
+  playing. A value the image does not give, or gives as something this plugin does not know, is
+  `null`, never a guess. The topic is also published on the decoder's own events, and when
+  another audio track is picked on the remote - which no event announces, so the active track is
+  asked for every five seconds. The capability `service_codecs` says the image can fill the
+  members in ([TOPICS.md](docs/TOPICS.md)).
 - Each bouquet's channel list is on a retained topic of its own, `channels/<bouquet_slug>`, with
   the bouquet's name, its reference, when the list last changed and the services; and a new small
   topic, `bouquets`, is their index: every bouquet in the receiver's order with the slug of its

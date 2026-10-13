@@ -38,8 +38,11 @@ def test_capabilities_name_the_areas_that_bound(live_bridge, factory):
     # built the channel list yet and a list that cannot be read is not a
     # capability. `channel_topics` is the channel list's second name, claimed
     # with it. `command_id` is no area: the dispatcher opens a command's envelope.
+    # `service_codecs` is `service`'s second name, on an image that names the video
+    # type. No `stream`: the fake image has no stream server unless a test adds one.
     assert capabilities == [
-        "power", "service", "epg", "tuner", "recording", "timers", "volume", "hdd",
+        "power", "service", "service_codecs", "epg", "tuner", "recording", "timers", "volume",
+        "hdd",
         "process", "channels", "channel_topics", "epg_grid", "keys", "screenshot", "toast",
         "message", "command_id",
     ]
@@ -188,7 +191,8 @@ def test_snapshot_timings_name_only_publishers_and_warn_when_slow(
 
 def test_the_default_registry_is_the_documented_order():
     assert [cls.name for cls in publishers.PUBLISHER_CLASSES] == [
-        "power", "cec_workaround", "service", "epg", "tuner", "cam", "oscam", "softcam",
+        "power", "cec_workaround", "service", "epg", "tuner", "stream", "cam", "oscam",
+        "softcam",
         "recording", "timers", "volume", "hdd", "process", "channels", "bouquet_context",
         "zap_history", "epg_grid", "epg_import", "keys", "screenshot", "toast",
     ]

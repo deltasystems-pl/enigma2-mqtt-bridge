@@ -435,6 +435,9 @@ class iServiceInformation:
     sVideoHeight = 903
     sServiceref = 904
     sIsCrypted = 905
+    sVideoType = 906
+    sFrameRate = 907
+    sProgressive = 908
 
 
 class iPlayableService:
@@ -445,6 +448,9 @@ class iPlayableService:
     evUpdatedInfo = 5
     evUpdatedEventInfo = 6
     evNewProgramInfo = 7
+    evVideoSizeChanged = 8
+    evVideoFramerateChanged = 9
+    evVideoProgressiveChanged = 10
 
 
 class iRecordableService:
@@ -500,14 +506,25 @@ class Event:
 
 
 class ServiceInfo:
+    """`iServiceInformation`, and for `eServiceCenter.info()` the static one beside it.
+
+    The video numbers are what OpenViX 6.6 answered for an H.264 service sent
+    interlaced at 25 frames a second: `sVideoType` 1, `sProgressive` 0 and
+    `sFrameRate` 25000 - thousandths. `sVideoType` is the PMT's stream type as
+    `lib/dvb/pmtparse.h` numbers it, the same in OpenViX, OpenATV and OpenPLi.
+    """
+
     def __init__(self, name="TVP 1 HD", provider="Cyfrowy Polsat", width=1920, height=1080,
-                 events=None, encrypted=False):
+                 events=None, encrypted=False, video_type=1, frame_rate=25000, progressive=0):
         self.name = name
         self.provider = provider
         self.width = width
         self.height = height
         self.events = list(events or [])
         self.encrypted = encrypted
+        self.video_type = video_type
+        self.frame_rate = frame_rate
+        self.progressive = progressive
         self.raises_on_event = False
 
     def getName(self):
@@ -525,7 +542,28 @@ class ServiceInfo:
             return self.height
         if key == iServiceInformation.sIsCrypted:
             return int(self.encrypted)
+        # By name, so that a test can take one of the three away from the image.
+        for name, value in (("sVideoType", self.video_type), ("sFrameRate", self.frame_rate),
+                            ("sProgressive", self.progressive)):
+            if key == getattr(iServiceInformation, name, None):
+                return value
         return -1
+
+    def isPlayable(self, reference, ignore, simulate=False):
+        """`iStaticServiceInformation.isPlayable`, as measured on OpenViX 6.6.
+
+        With a service to ignore the image assumes that service gives its
+        tuner up, and says yes to everything. With an empty one it answers for
+        the tuners as they are: `ServiceCenter.playable` says which services
+        those cannot take, and every other one can be played.
+        """
+        center = ServiceCenter.getInstance()
+        center.asked.append((reference.toString(), ignore.toString(), simulate))
+        if center.playable_raises:
+            raise RuntimeError("no resource manager")
+        if ignore.toString():
+            return 1
+        return center.playable.get(reference.toString(), 1)
 
     def getEvent(self, index):
         if self.raises_on_event:
@@ -568,16 +606,66 @@ class Frontend:
         }.get(key)
 
 
+class AudioTrackInfo:
+    """`iAudioTrackInfo` as OpenViX 6.6 has it: a description, a language and a PID.
+
+    No `getType`, `isSaved` or `isDefault` - measured on the receiver - so what
+    a track is can only be read off the word the image describes it with.
+    """
+
+    def __init__(self, description="MPEG", language="pol", pid=5001):
+        self.description = description
+        self.language = language
+        self.pid = pid
+
+    def getDescription(self):
+        return self.description
+
+    def getLanguage(self):
+        return self.language
+
+    def getPID(self):
+        return self.pid
+
+
+class AudioTracks:
+    """`iAudioTrackSelection`: the tracks of a service and the one being played."""
+
+    def __init__(self, tracks=None, current=0):
+        self.tracks = list(tracks) if tracks is not None else [AudioTrackInfo()]
+        self.current = current
+        self.raises = False
+
+    def getNumberOfTracks(self):
+        if self.raises:
+            raise RuntimeError("no program information")
+        return len(self.tracks)
+
+    def getCurrentTrack(self):
+        return self.current
+
+    def getTrackInfo(self, index):
+        return self.tracks[index]
+
+    def selectTrack(self, index):
+        # The image raises no event for this: nothing tells a plugin.
+        self.current = index
+
+
 class Service:
-    def __init__(self, info=None, frontend=None):
+    def __init__(self, info=None, frontend=None, audio=None):
         self._info = info if info is not None else ServiceInfo()
         self._frontend = frontend
+        self._audio = audio if audio is not None else AudioTracks()
 
     def info(self):
         return self._info
 
     def frontendInfo(self):
         return self._frontend
+
+    def audioTracks(self):
+        return self._audio
 
 
 class ServiceList:
@@ -607,6 +695,11 @@ class ServiceCenter:
     def __init__(self):
         self.contents = {}
         self.listed = []
+        # For `isPlayable` with nothing to ignore: the services the tuners
+        # cannot take right now, as `{reference: 0}`, and every question asked.
+        self.playable = {}
+        self.asked = []
+        self.playable_raises = False
 
     @classmethod
     def getInstance(cls):
@@ -625,6 +718,59 @@ class ServiceCenter:
 
 
 enigma.eServiceCenter = ServiceCenter
+
+
+class StreamServer:
+    """`eStreamServer`: the image's own list of who is being sent a stream.
+
+    From `lib/dvb/streamserver.cpp`, the same in OpenViX, OpenATV and OpenPLi:
+    `getConnectedClients()` is a list of `(host, service reference, encoder)`
+    tuples, and `stopStreamClient(host, reference)` compares both as text with
+    what the client holds - an IPv4 client as `::ffff:192.0.2.20` - and is true
+    when it found one. Measured on OpenViX 6.6: it returns True and the
+    connection ends about 1.4 s later, so the client is still listed for a
+    moment; `linger` models that.
+
+    Deliberately not in `enigma` by default, as the EPG importer is not: a test
+    that wants a stream server says so with `install_stream_server()`, which
+    keeps it out of every capability list the other tests assert.
+    """
+
+    _instance = None
+
+    def __init__(self):
+        self.clients = []
+        self.stopped = []
+        self.linger = False
+        self.raises = False
+
+    @classmethod
+    def getInstance(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def getConnectedClients(self):
+        if self.raises:
+            raise RuntimeError("the stream server is busy")
+        return [tuple(client) for client in self.clients]
+
+    def stopStreamClient(self, remotehost, serviceref):
+        for client in self.clients:
+            if client[0] == remotehost and client[1] == serviceref:
+                self.stopped.append((remotehost, serviceref))
+                if not self.linger:
+                    self.clients.remove(client)
+                return True
+        return False
+
+
+def install_stream_server(monkeypatch, server_class=StreamServer):
+    """Give the fake image a stream server, and hand back its one instance."""
+    StreamServer._instance = None
+    server_class._instance = None
+    monkeypatch.setattr(enigma, "eStreamServer", server_class, raising=False)
+    return server_class.getInstance()
 
 
 class EPGCache:
@@ -3102,7 +3248,8 @@ class Receiver:
             ]
         )
         self.frontend = Frontend()
-        self.service = Service(self.info, self.frontend)
+        self.audio = AudioTracks()
+        self.service = Service(self.info, self.frontend, self.audio)
         self.nav = Navigation(self.service, TVP1)
         self.session = ModalSession(self.nav) if modal else Session(self.nav)
         self.session_start_screen = None
@@ -3225,6 +3372,7 @@ def fresh_receiver():
             service_module._pending_wake.cancel()
         service_module._pending_wake = None
         ServiceCenter._instance = None
+        StreamServer._instance = None
         EPGCache._instance = None
         KeyActionMap._instance = None
         DVBVolumeControl._instance = None
