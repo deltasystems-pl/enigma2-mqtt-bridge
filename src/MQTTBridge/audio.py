@@ -25,7 +25,10 @@ its downmix setting (`transcodeaac`); with that on, the answer is `None` too.
 **Passthrough needs one track, not all of them.** `ActiveTrack` asks which
 track is playing and reads that one's description, once, until the track or
 the service is another: the volume is read on every key press, and on one
-image describing a track starts work in the decoder.
+image describing a track starts work in the decoder. Once is not for ever: a
+track can change under the same index with nothing said, so the description
+is read again after a number of periodic looks, and a read that failed is
+tried again the next time it is asked for.
 
 Nothing here reads a file. The settings are attributes of objects the image
 already holds in memory, and the tracks are calls into the playing service.
@@ -205,14 +208,32 @@ class ActiveTrack:
     the track's description is read only when one of the two is not what it
     was at the last look. `forget()` is for a service event, after which the
     same index of the same reference may be another track.
+
+    Two things keep an answer from outliving the track it was read from.
+    `looked()` is called once for each periodic look, and after
+    `reread_looks` of them the description is read again - so the bound is
+    that many looks, and asking in between (a volume key press) neither
+    reads nor brings the next read nearer. And a read that failed is not
+    kept: the next ask reads again.
     """
 
-    def __init__(self):
+    def __init__(self, reread_looks=None):
+        # How many periodic looks an answer is good for; None for no bound.
+        self.reread_looks = reread_looks
+        self._looks = 0
         self._key = None
         self._codec = None
 
     def forget(self):
         self._key = None
+
+    def looked(self):
+        """One periodic look has gone by."""
+        if not self.reread_looks:
+            return
+        self._looks += 1
+        if self._looks >= self.reread_looks:
+            self.forget()
 
     def codec(self, session):
         index = active_index(session)
@@ -221,18 +242,16 @@ class ActiveTrack:
             return None
         key = (current_service_reference(session), index)
         if key != self._key:
-            self._codec = codec_name(self._description(session, index))
+            self._looks = 0
+            try:
+                info = _selection(session).getTrackInfo(index)
+            except Exception:
+                # Not an answer: asked again the next time.
+                self._key = None
+                return None
+            self._codec = codec_name(_text(info, "getDescription", DESCRIPTION_LIMIT))
             self._key = key
         return self._codec
-
-    @staticmethod
-    def _description(session, index):
-        selection = _selection(session)
-        try:
-            info = selection.getTrackInfo(index)
-        except Exception:
-            return None
-        return _text(info, "getDescription", DESCRIPTION_LIMIT)
 
 
 # ---------------------------------------------------------------- passthrough --

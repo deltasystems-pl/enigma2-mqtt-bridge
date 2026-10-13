@@ -147,6 +147,74 @@ def test_the_volume_look_reads_one_track_and_only_when_it_has_to(av, live_bridge
     assert asked == [5]
 
 
+def test_a_track_that_changes_under_the_same_index_is_noticed_within_thirty_seconds(
+    av, live_bridge, factory, receiver, monkeypatch
+):
+    """No event and the same index: six looks of five seconds, one track read."""
+    receiver.audio.tracks = [AudioTrackInfo("Dolby Digital", "pol", 5002)]
+    receiver.nav.fire(EV_START)
+    assert passthrough(factory) is True
+    receiver.audio.tracks[0] = AudioTrackInfo("MPEG", "pol", 5002)
+    asked = []
+    real = receiver.audio.getTrackInfo
+    monkeypatch.setattr(receiver.audio, "getTrackInfo",
+                        lambda index: asked.append(index) or real(index))
+    for _ in range(5):
+        reconcile(live_bridge)
+        receiver.volume_control.volUp()
+    assert passthrough(factory) is True
+    assert asked == []
+    reconcile(live_bridge)
+    assert passthrough(factory) is False
+    assert asked == [0]
+    for _ in range(12):
+        reconcile(live_bridge)
+    assert asked == [0, 0, 0]
+
+
+def test_a_track_that_could_not_be_read_once_is_read_at_the_next_look(av, live_bridge, factory,
+                                                                    receiver, monkeypatch):
+    receiver.audio.tracks = [AudioTrackInfo("MPEG", "pol", 5001),
+                             AudioTrackInfo("Dolby Digital", "pol", 5002)]
+    receiver.nav.fire(EV_START)
+    real = receiver.audio.getTrackInfo
+    calls = []
+
+    def flaky(index):
+        calls.append(index)
+        if len(calls) == 1:
+            raise RuntimeError("no program information yet")
+        return real(index)
+
+    monkeypatch.setattr(receiver.audio, "getTrackInfo", flaky)
+    receiver.audio.selectTrack(1)
+    reconcile(live_bridge)
+    assert passthrough(factory) is None
+    reconcile(live_bridge)
+    assert passthrough(factory) is True
+    assert calls == [1, 1]
+
+
+def test_without_service_events_the_track_is_read_at_every_look(av, make_bridge, factory,
+                                                               settings, receiver):
+    """Nothing will say the service changed, so the short bound is the only one."""
+    settings.host.value = "192.0.2.2"
+    settings.node_id.value = NODE
+    del receiver.nav.event
+    receiver.audio.tracks = [AudioTrackInfo("Dolby Digital", "pol", 5002)]
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+    factory.client.fire_connect()
+    assert passthrough(factory) is True
+    receiver.audio.tracks[0] = AudioTrackInfo("MPEG", "pol", 5002)
+    reconcile(bridge)
+    assert passthrough(factory) is False
+
+
+def test_the_bound_is_six_looks_with_service_events(av, live_bridge):
+    assert live_bridge.publisher("volume")._track.reread_looks == 6
+
+
 def test_with_nothing_playing_it_cannot_be_told(av, live_bridge, factory, receiver):
     receiver.nav.sref = ""
     receiver.nav.service = None

@@ -32,7 +32,7 @@ version that has no section here.
   `cmd/stream_playable` asks the image whether one service could be played now beside everything
   the receiver is doing - the television, a recording, another stream - and is the one command
   answered on a topic of its own: one message on `stream_playable`, not retained, with the
-  command's id when it carried one; the reference of a bouquet or a marker is refused
+  command's id when it carried one; a reference that is not one playable service is refused
   ([ADR-0017](docs/adr/0017-whether-a-service-can-be-played-is-asked-with-an-empty-second-reference.md)).
   The capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable` say which of
   these the image offers. The OpenWebif page gains both commands, in English, Polish and German.

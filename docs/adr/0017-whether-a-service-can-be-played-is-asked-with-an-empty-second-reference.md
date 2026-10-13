@@ -117,3 +117,9 @@ Also recorded here, though the Decision did not say otherwise: an exception from
 named on `last_error` by its type and not by its text, as for `cmd/stream_stop`
 ([ADR-0018](0018-stopping-a-stream-client-needs-no-permission.md)), and the `sref` in the answer
 is the one that was sent without the spaces around it.
+
+The second point names "a bouquet or a marker", which is not every reference that test refuses.
+It refuses a bouquet and any other directory - the list of bouquets and a service with
+alternatives among them - a marker, a numbered marker, an entry hidden in its bouquet, and text
+that has fewer fields than a reference or flags that are no number. The refusal says what holds
+for all of them: "cmd/stream_playable takes the reference of one playable service".

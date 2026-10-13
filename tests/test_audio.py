@@ -385,6 +385,95 @@ def test_a_forgotten_track_is_read_again():
     assert asked == [0, 0]
 
 
+def test_a_track_is_read_again_after_so_many_looks_and_not_before():
+    """A bound on how long a track that changed under the same index can go unnoticed."""
+    session = session_with([AudioTrackInfo("AC3")])
+    asked = counted(session)
+    track = audio.ActiveTrack(reread_looks=6)
+    assert track.codec(session) == "ac3"
+    session.nav.service._audio.tracks[0] = AudioTrackInfo("MPEG")
+    for _ in range(5):
+        track.looked()
+        assert track.codec(session) == "ac3"
+    assert asked == [0]
+    track.looked()
+    assert track.codec(session) == "mp2"
+    assert asked == [0, 0]
+    for _ in range(5):
+        track.looked()
+        track.codec(session)
+    assert asked == [0, 0]
+    track.looked()
+    track.codec(session)
+    assert asked == [0, 0, 0]
+
+
+def test_asking_between_looks_does_not_bring_the_next_read_nearer():
+    """A volume key press asks; only the periodic look counts towards the bound."""
+    session = session_with([AudioTrackInfo("AC3")])
+    asked = counted(session)
+    track = audio.ActiveTrack(reread_looks=2)
+    for _ in range(50):
+        track.codec(session)
+    assert asked == [0]
+    track.looked()
+    track.codec(session)
+    assert asked == [0]
+    track.looked()
+    track.codec(session)
+    assert asked == [0, 0]
+
+
+def test_a_bound_of_one_look_reads_at_every_look():
+    session = session_with([AudioTrackInfo("AC3")])
+    asked = counted(session)
+    track = audio.ActiveTrack(reread_looks=1)
+    for _ in range(3):
+        track.looked()
+        track.codec(session)
+    assert asked == [0, 0, 0]
+
+
+def test_without_a_bound_a_look_changes_nothing():
+    session = session_with([AudioTrackInfo("AC3")])
+    asked = counted(session)
+    track = audio.ActiveTrack()
+    for _ in range(20):
+        track.looked()
+        track.codec(session)
+    assert asked == [0]
+
+
+def test_a_read_that_failed_is_tried_again_at_the_next_ask():
+    """Not kept as "no codec" until something else happens."""
+    session = session_with([AudioTrackInfo("MPEG"), AudioTrackInfo("AC3")])
+    tracks = session.nav.service._audio
+    real = tracks.getTrackInfo
+    calls = []
+
+    def flaky(index):
+        calls.append(index)
+        if len(calls) == 1:
+            raise RuntimeError("no program information yet")
+        return real(index)
+
+    tracks.getTrackInfo = flaky
+    tracks.current = 1
+    track = audio.ActiveTrack()
+    assert track.codec(session) is None
+    assert track.codec(session) == "ac3"
+    assert track.codec(session) == "ac3"
+    assert calls == [1, 1]
+
+
+def test_a_track_that_describes_itself_with_nothing_is_not_a_failed_read():
+    session = session_with([AudioTrackInfo("")])
+    asked = counted(session)
+    track = audio.ActiveTrack()
+    assert [track.codec(session) for _ in range(4)] == [None] * 4
+    assert asked == [0]
+
+
 def test_an_active_track_that_cannot_be_named_or_described_has_no_codec():
     track = audio.ActiveTrack()
     assert track.codec(None) is None

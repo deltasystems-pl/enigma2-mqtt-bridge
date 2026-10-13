@@ -1,6 +1,6 @@
 # ADR-0018: Stopping a stream client needs no permission, and names exactly one client
 
-**Status:** accepted 2026-10-13, amended 2026-10-13 (two notes: the image's spelling of a host, and what an exception puts on `last_error`)
+**Status:** accepted 2026-10-13, amended 2026-10-13 (see [the amendment](#amendment-2026-10-13---which-row-a-stop-ends-and-what-it-says-when-the-image-raises))
 **Date:** 2026-10-13
 **Supersedes:** -
 
@@ -32,17 +32,10 @@ television, and nobody is asked.
   sends one command for each row it read.
 - **A client that is not connected is a refusal**, with the reason code `not_connected`; an image
   that answers "no" for a client it listed is `not_stopped`. Both say the command's id back.
-  (Amended 2026-10-13: a stop the image raises on is `not_stopped` too, and the sentence names
-  the kind of error and never its text - that text can hold a client's address, `last_error` is
-  retained, and the log keeps it at debug level only. A row whose reference is `null` cannot be
-  named and so cannot be stopped.)
 - **The host is matched as the topic shows it, and the image is handed its own spelling.** The
   image compares the host as text and holds an IPv4 client as `::ffff:192.0.2.20`; the topic
   shows `192.0.2.20`. The plugin finds the row in the image's list and passes on what the image
-  holds, for the host and for the reference. (Amended 2026-10-13, a note for the reader,
-  nothing reversed: "holds an IPv4 client as" is "may hold it as". The measured receiver listed
-  a plain IPv4 address; the other spelling is what the server's source can produce. The rule
-  covers both, and a host sent either way finds a client held either way.)
+  holds, for the host and for the reference.
 - **The list is read again two seconds after a stop**, so `stream_clients` answers the command
   without waiting for the next five-second look. Nothing is verified beyond that: a row still
   there may be the same client or the one that reconnected, and the topic cannot tell them apart.
@@ -78,3 +71,25 @@ television, and nobody is asked.
   setting; the OpenWebif page's action is translated as every action is.
 - **If a permission is ever wanted**, it is a new read-only setting and a new refusal, both of
   which the contract allows inside a major.
+
+## Amendment 2026-10-13 - which row a stop ends, and what it says when the image raises
+
+Notes from two reviews. Nothing in the Decision is reversed; its bullets stand as accepted.
+
+- **"Holds an IPv4 client as `::ffff:192.0.2.20`" is "may hold it as".** The measured receiver
+  listed a plain IPv4 address; the other spelling is what the server's source can produce. The
+  rule covers both: a host sent either way finds a client held either way, and only a
+  well-formed dotted quad is taken out of the wrapping.
+- **A row listed without its reference is never the row a stop ends.** `stream_clients` leaves
+  a reference longer than 512 characters out of its row, and a row without a reference cannot be
+  named. The match is made on the rows as the topic shows them: such a row is passed over, also
+  when the reference sent is the same service by its first eleven fields. That matters when it
+  shares a host and a service with a listed row - the listed row is the one found, and the image
+  is handed that row's own reference. The image compares host and reference as whole texts and
+  ends the first client that has both; a reference that fits the limit cannot be the text of one
+  that does not, so the row passed over is not ended in its place.
+- **Two rows with one host and one reference are one row to everybody.** The image ends the
+  first it finds, and the list is read again two seconds later.
+- **A stop the image raises on is `not_stopped` too**, and the sentence names the kind of error
+  and never its text: that text can hold a client's address, `last_error` is retained, and the
+  log keeps it at debug level only.

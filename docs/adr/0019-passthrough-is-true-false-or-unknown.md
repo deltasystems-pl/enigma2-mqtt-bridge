@@ -122,3 +122,13 @@ Found in review; the Decision's own rule applied where the first reading missed 
   at; a service event makes it read again. `volume` and `service` each read what they need and
   share nothing: `service` may not have bound on a receiver where `volume` has, and the other
   way round.
+
+- **Read once is not read for ever.** With one read for each track of each service, three things
+  could leave an answer standing with nothing to end it: a track that became another codec under
+  the same index with no service event, a description that could not be read the one time it
+  was asked for, and a receiver whose session announces no service events. So the active
+  track's description is read again every sixth reconciliation of the volume - thirty seconds,
+  for one read in that time, because the read is the call that must stay rare; a read that
+  failed is tried again at the next reconciliation; and where the service listener did not bind
+  the track is read at every reconciliation, five seconds, as it was before this amendment but
+  for one track. A volume key press never reads the track and does not count towards the six.

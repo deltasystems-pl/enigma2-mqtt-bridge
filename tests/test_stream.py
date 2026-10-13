@@ -500,6 +500,9 @@ def test_a_reference_is_kept_up_to_512_characters(box, server, factory, length, 
     ("::ffff:192.0.2.256", "::ffff:192.0.2.256"),
     ("::ffff:192.0.2.0255", "::ffff:192.0.2.0255"),
     ("::ffff:255.255.255.255", "255.255.255.255"),
+    # Digits that are not ASCII: one kind `int` reads, one kind it raises on.
+    ("::ffff:\uff11\uff19\uff12.0.2.20", "::ffff:\uff11\uff19\uff12.0.2.20"),
+    ("::ffff:192.0.2.\u00b2", "::ffff:192.0.2.\u00b2"),
     ("::ffff:0.0.0.0", "0.0.0.0"),
     ("  192.0.2.20 ", "192.0.2.20"),
     ("", ""),
@@ -834,6 +837,62 @@ def test_spaces_around_the_host_and_the_reference_do_not_hide_the_client(box, se
     assert server.stopped == [(PHONE, TVP1)]
 
 
+# A valid reference with a name behind it, longer than the 512 a row may carry: the same
+# service as TVP1 by its first eleven fields, and listed without its reference.
+LONG = TVP1 + ":" + "N" * 600
+
+
+@pytest.mark.parametrize("clients", [
+    [(PHONE, LONG, 0), (PHONE, TVP1, 1)],
+    [(PHONE, TVP1, 1), (PHONE, LONG, 0)],
+], ids=["the long row first", "the long row second"])
+def test_a_stop_ends_the_row_it_names_and_never_the_unlisted_one_beside_it(
+    box, server, factory, clients
+):
+    """One host, one channel twice: the row shown without a reference is not the one named."""
+    server.clients = list(clients)
+    tick(box)
+    rows = factory.client.last(CLIENTS).json()["clients"]
+    assert sorted(str(row["sref"]) for row in rows) == sorted(["None", TVP1])
+    send(factory, "stream_stop", {"host": "192.0.2.20", "sref": TVP1})
+    assert server.stopped == [(PHONE, TVP1)]
+    assert server.clients == [(PHONE, LONG, 0)]
+    assert factory.client.last(LAST_ERROR) is None
+
+
+@pytest.mark.parametrize("named", [TVP1, LONG, TVP1 + ":TVP 1 HD"])
+def test_a_row_listed_without_its_reference_cannot_be_stopped_by_any_spelling(
+    box, server, factory, named
+):
+    """What the topic does not show cannot be named - also not by a reference that fits it."""
+    assert len(LONG) == 632
+    server.clients = [(PHONE, LONG, 0)]
+    tick(box)
+    assert factory.client.last(CLIENTS).json()["clients"][0]["sref"] is None
+    send(factory, "stream_stop", {"host": "192.0.2.20", "sref": named})
+    assert server.stopped == []
+    assert server.clients == [(PHONE, LONG, 0)]
+    assert factory.client.last(LAST_ERROR).json()["reason"] == "not_connected"
+
+
+def test_a_reference_of_exactly_the_limit_is_listed_and_can_be_stopped(box, server, factory):
+    held = TVP1 + ":" + "N" * (512 - len(TVP1) - 1)
+    assert len(held) == 512
+    server.clients = [(PHONE, held, 0)]
+    send(factory, "stream_stop", {"host": "192.0.2.20", "sref": TVP1})
+    assert server.stopped == [(PHONE, held)]
+
+
+def test_of_two_rows_that_are_the_same_the_image_ends_the_first(box, server, factory):
+    """Same host, same reference: one command ends one, and the list is read again."""
+    server.clients = [(PHONE, TVP1, 0), (PHONE, TVP1, 0)]
+    send(factory, "stream_stop", {"host": "192.0.2.20", "sref": TVP1})
+    assert server.stopped == [(PHONE, TVP1)]
+    assert server.clients == [(PHONE, TVP1, 0)]
+    box.publisher("stream")._after_stop.timer.fire()
+    assert factory.client.last(CLIENTS).json()["count"] == 1
+
+
 def test_a_row_without_a_reference_cannot_be_stopped(box, server, factory):
     server.clients = [(PHONE, "", 0)]
     send(factory, "stream_stop", {"host": "192.0.2.20", "sref": TVP1})
@@ -1036,6 +1095,25 @@ def test_a_refused_question_says_its_id_back_on_last_error(box, factory):
     assert factory.client.last(LAST_ERROR).json()["id"] == "q-3"
 
 
+def test_what_a_raising_question_said_stays_out_of_last_error_and_out_of_the_warnings(
+    box, factory, monkeypatch, plugin_log
+):
+    from conftest import ServiceInfo
+
+    def broken(self, reference, ignore):
+        raise RuntimeError("tuner B is held by 198.51.100.7")
+
+    monkeypatch.setattr(ServiceInfo, "isPlayable", broken)
+    send(factory, "stream_playable", TVN)
+    assert "198.51.100.7" not in factory.client.last(LAST_ERROR).text
+    lines = [line for line in plugin_log().splitlines() if "198.51.100.7" in line]
+    assert lines, "the detail is kept, at debug level"
+    assert not [line for line in lines if "WARNING" in line or "ERROR" in line]
+    assert [line for line in plugin_log().splitlines()
+            if "WARNING" in line and "isPlayable raised RuntimeError" in line]
+    assert "Traceback" not in plugin_log()
+
+
 def test_a_question_the_image_cannot_answer_is_a_refusal(box, factory):
     ServiceCenter.getInstance().playable_raises = True
     send(factory, "stream_playable", TVN)
@@ -1122,12 +1200,21 @@ def test_a_service_centre_that_raises_is_a_refusal(box, factory, monkeypatch):
     assert factory.client.last(LAST_ERROR).json()["error"] == stream.NO_INFORMATION
 
 
-@pytest.mark.parametrize("sref", [FIRST_BOUQUET, BOUQUET_ROOT, MARKER])
-def test_a_reference_that_is_not_one_service_is_refused(box, factory, sref):
+@pytest.mark.parametrize("sref", [
+    FIRST_BOUQUET,                                   # a bouquet
+    BOUQUET_ROOT,                                    # the list of bouquets
+    MARKER,                                          # a marker
+    "1:134:1:0:0:0:0:0:0:0:FROM BOUQUET \"alternatives.x.tv\" ORDER BY bouquet",  # alternatives
+    "1:512:19:283D:3FB:1:C00000:0:0:0:",             # a hidden entry
+    "1:320:0:0:0:0:0:0:0:0::A numbered heading",     # a numbered marker
+    "not:a:reference",                               # fewer fields than any reference has
+    "1:x:19:283D:3FB:1:C00000:0:0:0:",               # flags that are no number
+])
+def test_a_reference_that_is_not_one_playable_service_is_refused(box, factory, sref):
     """A bouquet would be answered for any one of its members, by walking it."""
     send(factory, "stream_playable", {"sref": sref})
     assert factory.client.last(LAST_ERROR).json()["error"] == (
-        "cmd/stream_playable takes the reference of one service, not of a bouquet or a marker")
+        "cmd/stream_playable takes the reference of one playable service")
     assert ServiceCenter.getInstance().asked == []
     assert factory.client.last(PLAYABLE) is None
 

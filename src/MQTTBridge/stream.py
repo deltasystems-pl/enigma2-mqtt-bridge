@@ -119,9 +119,7 @@ NOT_CONNECTED = ("that stream client is not connected", "not_connected")
 NOT_STOPPED = ("the receiver did not stop that stream client", "not_stopped")
 STOP_RAISED = "the receiver could not stop that stream client: "
 NO_INFORMATION = "the receiver has no information for that service"
-NOT_ONE_SERVICE = (
-    "cmd/stream_playable takes the reference of one service, not of a bouquet or a marker"
-)
+NOT_ONE_SERVICE = "cmd/stream_playable takes the reference of one playable service"
 NO_ANSWER = "the receiver did not say whether that service can be played"
 ANSWER_RAISED = "the receiver could not say whether that service can be played: "
 
@@ -418,10 +416,18 @@ class StreamPublisher(Publisher):
             return UNREADABLE
         wanted = normalise_host(host).lower()
         for held_host, held_sref, _encoder in clients:
+            if len(held_sref) > SREF_LIMIT:
+                # Listed without its reference (`build`), so it is not a row
+                # anybody can have named - and by its first eleven fields it
+                # may be the same service as the row that was.
+                continue
             if normalise_host(held_host).lower() != wanted or not same_service(held_sref, sref):
                 continue
             try:
-                # The image's own spelling of both: it compares them as text.
+                # The image's own spelling of both, of this very row: the
+                # image compares them as whole texts and ends the first
+                # client that has both. A row left out above is longer than
+                # this reference can be, so it is never that client.
                 stopped = stopper(held_host, held_sref)
             except Exception as error:
                 # Its text can name a client's address: not on a retained topic.
@@ -454,8 +460,11 @@ class StreamPublisher(Publisher):
         except Exception:
             return "'" + str(sref) + "' is not a service reference"
         if not is_one_service(sref):
-            # For a bouquet the image answers for any one of its members, by
-            # walking it; a marker is nothing to play.
+            # The channel list's own test: a bouquet and any other directory
+            # (alternatives among them), a marker, a numbered marker and a
+            # hidden entry are not one playable service, nor is text with
+            # fewer fields than a reference has. For a bouquet the image
+            # would answer for any one of its members, by walking it.
             return NOT_ONE_SERVICE
         try:
             info = _service_center().info(reference)

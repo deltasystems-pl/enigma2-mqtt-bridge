@@ -51,6 +51,14 @@ PASSTHROUGH_CAPABILITY = "volume_passthrough"
 # The service events after which the track being played may be another one.
 SERVICE_EVENTS = ("evStart", "evUpdatedInfo", "evEnd")
 
+# How many reconciliations the codec read for the playing track is good for:
+# six of five seconds, so a track that changed under the same index with no
+# event is noticed within thirty seconds, for one read in that time. Without
+# service events nothing else would ever say the service changed, and the
+# track is read at every reconciliation - one track, as before.
+PASSTHROUGH_REREAD_LOOKS = 6
+PASSTHROUGH_REREAD_LOOKS_WITHOUT_EVENTS = 1
+
 
 def _control():
     """enigma2's own volume control, the one the remote uses."""
@@ -209,6 +217,10 @@ class VolumePublisher(Publisher):
         self._bind_attempts = 0
         self._fallback_logged = False
         self._listen()
+        self._track.reread_looks = (
+            PASSTHROUGH_REREAD_LOOKS if self._nav is not None
+            else PASSTHROUGH_REREAD_LOOKS_WITHOUT_EVENTS
+        )
         if not self._wrap():
             # WHERE_SESSIONSTART runs from Session.__init__, before OpenViX
             # constructs VolumeControl. Its exact delay is image-dependent, so
@@ -354,6 +366,9 @@ class VolumePublisher(Publisher):
     def _reconcile(self):
         if self._control is None:
             self._wrap()
+        # Counted here and nowhere else: a key press publishes too, and must
+        # not bring the next read of the track nearer.
+        self._track.looked()
         self._publish_now()
 
     def snapshot(self):
