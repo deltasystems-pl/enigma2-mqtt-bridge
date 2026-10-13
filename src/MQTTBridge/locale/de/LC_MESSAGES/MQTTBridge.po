@@ -734,7 +734,7 @@ msgstr "Adresse des Clients"
 
 #: src/MQTTBridge/webif.py
 msgid "The stream to that client stops. A player that reconnects by itself gets a new one."
-msgstr "Der Stream zu diesem Client wird beendet. Ein Player, der sich selbst neu verbindet, bekommt einen neuen."
+msgstr "Der Stream zu diesem Client wird beendet. Ein Player, der sich von selbst neu verbindet, bekommt einen neuen."
 
 #: src/MQTTBridge/webif.py
 msgid "Ask whether a channel can be played now"

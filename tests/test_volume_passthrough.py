@@ -91,7 +91,7 @@ def test_a_service_event_that_changes_nothing_publishes_nothing(av, dolby, live_
 def test_an_event_the_volume_does_not_care_about_reads_nothing(av, dolby, live_bridge, factory,
                                                                receiver, monkeypatch):
     read = []
-    monkeypatch.setattr(audio, "passthrough", lambda session: read.append(1))
+    monkeypatch.setattr(audio, "passthrough_for", lambda codec: read.append(1))
     receiver.nav.fire(iPlayableService.evUpdatedEventInfo)
     receiver.nav.fire(iPlayableService.evTunedIn)
     assert read == []
@@ -114,6 +114,37 @@ def test_a_changed_setting_is_caught_by_the_reconciliation(av, dolby, live_bridg
     factory.client.clear()
     reconcile(live_bridge)
     assert passthrough(factory) is False
+
+
+def test_the_volume_look_reads_one_track_and_only_when_it_has_to(av, live_bridge, factory,
+                                                                receiver, monkeypatch):
+    """Not all of them on every tick and every key press: one, when the track or service moved."""
+    receiver.audio.tracks = [AudioTrackInfo("MPEG", "pol", 5000 + n) for n in range(31)] + [
+        AudioTrackInfo("Dolby Digital", "pol", 5031)]
+    receiver.audio.current = 31
+    receiver.nav.fire(EV_START)
+    assert passthrough(factory) is True
+    asked = []
+    real = receiver.audio.getTrackInfo
+    monkeypatch.setattr(receiver.audio, "getTrackInfo",
+                        lambda index: asked.append(index) or real(index))
+    publisher = live_bridge.publisher("volume")
+    for _ in range(3):
+        reconcile(live_bridge)
+    receiver.volume_control.volUp()
+    receiver.volume_control.volDown()
+    publisher.snapshot()
+    assert asked == []
+    receiver.audio.selectTrack(5)
+    reconcile(live_bridge)
+    reconcile(live_bridge)
+    assert asked == [5]
+    assert passthrough(factory) is False
+    del asked[:]
+    monkeypatch.setattr(live_bridge.publisher("service"), "refresh", lambda: None)
+    receiver.nav.fire(EV_UPDATED_INFO)
+    reconcile(live_bridge)
+    assert asked == [5]
 
 
 def test_with_nothing_playing_it_cannot_be_told(av, live_bridge, factory, receiver):
@@ -139,10 +170,10 @@ def test_a_reconnect_publishes_it(av, dolby, live_bridge, factory):
 
 def test_tracks_that_cannot_be_read_do_not_cost_the_volume(av, live_bridge, factory, receiver,
                                                           monkeypatch, plugin_log):
-    def broken(session):
+    def broken(codec):
         raise RuntimeError("the service went away")
 
-    monkeypatch.setattr(audio, "passthrough", broken)
+    monkeypatch.setattr(audio, "passthrough_for", broken)
     receiver.volume.setVolume(70, 70)
     reconcile(live_bridge)
     assert factory.client.last(VOLUME).json() == {"level": 70, "muted": False,
@@ -153,7 +184,7 @@ def test_reading_the_volume_for_a_command_reads_no_track(av, live_bridge, monkey
     """`read()` is what mute compares with; the track is the publisher's business."""
     from MQTTBridge import volume
 
-    monkeypatch.setattr(audio, "passthrough", lambda session: 1 / 0)
+    monkeypatch.setattr(audio, "passthrough_for", lambda codec: 1 / 0)
     assert volume.read() == {"level": 35, "muted": False}
 
 

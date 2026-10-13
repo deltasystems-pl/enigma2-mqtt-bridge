@@ -15,6 +15,14 @@ from MQTTBridge import audio
 WORDS = ("downmix", "passthrough")
 
 
+def active_of(tracks):
+    """The index of the row marked active, or None."""
+    for track in tracks or ():
+        if track["active"]:
+            return track["index"]
+    return None
+
+
 def session_with(tracks, current=0):
     service = Service(audio=AudioTracks(tracks, current))
     return Session(Navigation(service, "1:0:19:283D:3FB:1:C00000:0:0:0:"))
@@ -76,21 +84,21 @@ def test_the_tracks_are_listed_in_the_images_order_with_the_active_one_marked():
          "active": False},
     ]
     assert audio.active_index(session) == 1
-    assert audio.active_of(audio.read_tracks(session)) == 1
+    assert active_of(audio.read_tracks(session)) == 1
 
 
 def test_the_first_track_is_an_index_like_any_other():
     session = session_with([AudioTrackInfo("MPEG"), AudioTrackInfo("AC3")], current=0)
     assert audio.active_index(session) == 0
-    assert audio.active_of(audio.read_tracks(session)) == 0
+    assert active_of(audio.read_tracks(session)) == 0
 
 
 def test_a_service_without_audio_has_an_empty_list():
     session = session_with([])
     assert audio.read_tracks(session) == []
     assert audio.active_index(session) is None
-    assert audio.active_of([]) is None
-    assert audio.active_of(None) is None
+    assert active_of([]) is None
+    assert active_of(None) is None
 
 
 def test_nothing_playing_has_no_tracks():
@@ -159,7 +167,7 @@ def test_at_most_thirty_two_tracks_are_listed():
     tracks = [AudioTrackInfo("MPEG", "pol", 5000 + number) for number in range(40)]
     listed = audio.read_tracks(session_with(tracks, current=35))
     assert [track["index"] for track in listed] == list(range(32))
-    assert audio.active_of(listed) is None
+    assert active_of(listed) is None
 
 
 def test_a_current_track_the_image_cannot_name_marks_none():
@@ -322,10 +330,128 @@ def test_without_an_active_track_it_cannot_be_told(av, tracks):
 def test_passthrough_reads_what_is_playing_now(av):
     av.downmix_ac3 = word("passthrough")
     session = session_with([AudioTrackInfo("MPEG"), AudioTrackInfo("AC3")], current=0)
-    assert audio.passthrough(session) is False
+    track = audio.ActiveTrack()
+    assert audio.passthrough_for(track.codec(session)) is False
     session.nav.service._audio.selectTrack(1)
-    assert audio.passthrough(session) is True
-    assert audio.passthrough(None) is None
+    assert audio.passthrough_for(track.codec(session)) is True
+    assert audio.passthrough_for(track.codec(None)) is None
+
+
+def counted(session):
+    """Every `getTrackInfo` the session's service is asked for from here on."""
+    asked = []
+    tracks = session.nav.service._audio
+    real = tracks.getTrackInfo
+    tracks.getTrackInfo = lambda index: asked.append(index) or real(index)
+    return asked
+
+
+def test_the_active_tracks_codec_costs_one_track_and_then_none():
+    """Not every track: on one image describing a track starts work in the decoder."""
+    session = session_with([AudioTrackInfo("MPEG")] * 31 + [AudioTrackInfo("AC3")], current=31)
+    asked = counted(session)
+    track = audio.ActiveTrack()
+    assert track.codec(session) == "ac3"
+    assert asked == [31]
+    assert [track.codec(session) for _ in range(5)] == ["ac3"] * 5
+    assert asked == [31]
+
+
+def test_another_track_or_another_service_is_read_once(av):
+    session = session_with([AudioTrackInfo("MPEG"), AudioTrackInfo("AC3")], current=0)
+    asked = counted(session)
+    track = audio.ActiveTrack()
+    assert track.codec(session) == "mp2"
+    session.nav.service._audio.selectTrack(1)
+    assert track.codec(session) == "ac3"
+    assert track.codec(session) == "ac3"
+    assert asked == [0, 1]
+    session.nav.sref = "1:0:19:283E:3FB:1:C00000:0:0:0:"
+    session.nav.service._audio.tracks[1] = AudioTrackInfo("DTS")
+    assert track.codec(session) == "dts"
+    assert asked == [0, 1, 1]
+
+
+def test_a_forgotten_track_is_read_again():
+    """After a service event the same index may be another track."""
+    session = session_with([AudioTrackInfo("AC3")])
+    asked = counted(session)
+    track = audio.ActiveTrack()
+    assert track.codec(session) == "ac3"
+    session.nav.service._audio.tracks[0] = AudioTrackInfo("AAC")
+    assert track.codec(session) == "ac3"
+    track.forget()
+    assert track.codec(session) == "aac"
+    assert asked == [0, 0]
+
+
+def test_an_active_track_that_cannot_be_named_or_described_has_no_codec():
+    track = audio.ActiveTrack()
+    assert track.codec(None) is None
+    assert track.codec(session_with([])) is None
+    session = session_with([AudioTrackInfo("AC3")])
+    assert track.codec(session) == "ac3"
+    session.nav.service._audio.raises = True
+    assert track.codec(session) is None
+    session.nav.service._audio.raises = False
+    session.nav.service._audio.current = 9
+    assert track.codec(session) is None
+    session.nav.service._audio.current = 0
+    assert track.codec(session) == "ac3"
+
+
+# ---- AAC and the separate transcode switch (`config.av.transcodeaac`)
+
+
+def transcode(value):
+    return ConfigSelection(choices=["off", "ac3", "dts", "force_ac3"], default=value)
+
+
+@pytest.mark.parametrize("value", ["ac3", "dts", "force_ac3"])
+@pytest.mark.parametrize("setting", ["downmix", "passthrough"])
+def test_aac_that_is_being_transcoded_cannot_be_told(av, value, setting):
+    """A transcode is neither of the two certain answers, whatever the downmix setting says."""
+    av.downmix_aac = word(setting)
+    av.transcodeaac = transcode(value)
+    assert audio.passthrough_of(active("AAC")) is None
+    assert audio.passthrough_of(active("AAC-LC")) is None
+
+
+def test_he_aac_that_is_being_transcoded_cannot_be_told(av):
+    av.downmix_aacplus = word("downmix")
+    av.transcodeaac = transcode("ac3")
+    assert audio.passthrough_of(active("HE-AAC")) is None
+
+
+@pytest.mark.parametrize("value", ["off", " Off "])
+def test_a_transcode_that_is_off_leaves_the_downmix_setting_to_decide(av, value):
+    av.downmix_aac = word("downmix")
+    av.downmix_aacplus = word("passthrough")
+    av.transcodeaac = type("Element", (), {"value": value})()
+    assert audio.passthrough_of(active("AAC")) is False
+    assert audio.passthrough_of(active("HE-AAC")) is True
+
+
+def test_the_placeholder_where_a_receiver_cannot_transcode_is_no_transcode(av):
+    av.downmix_aac = word("passthrough")
+    av.transcodeaac = type("Element", (), {"value": ""})()
+    assert audio.passthrough_of(active("AAC")) is True
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_a_transcode_switch_that_is_a_yes_or_no_is_not_the_one_the_images_have(av, value):
+    av.downmix_aac = word("passthrough")
+    av.transcodeaac = type("Element", (), {"value": value})()
+    assert audio.passthrough_of(active("AAC")) is True
+
+
+def test_the_aac_transcode_is_no_business_of_another_codec(av):
+    av.downmix_ac3 = word("passthrough")
+    av.downmix_dts = word("downmix")
+    av.transcodeaac = transcode("ac3")
+    assert audio.passthrough_of(active("AC3")) is True
+    assert audio.passthrough_of(active("DTS")) is False
+    assert audio.passthrough_of(active("MPEG")) is False
 
 
 def test_whether_the_image_has_any_of_the_settings(av):

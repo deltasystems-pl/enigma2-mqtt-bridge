@@ -1,6 +1,6 @@
 # ADR-0017: Whether a service can be played is asked with an empty second reference, and answered once on a topic that is not retained
 
-**Status:** accepted 2026-10-13
+**Status:** accepted 2026-10-13, amended 2026-10-13 (see [the amendment](#amendment-2026-10-13---what-counts-as-an-answer-and-one-service-only))
 **Date:** 2026-10-13
 **Supersedes:** - . It amends [ADR-0016](0016-a-commands-id-comes-in-an-envelope-and-only-a-refusal-says-it-back.md)
 in one place: "only a refusal says the id back" gains one exception, the answer to a question.
@@ -98,3 +98,22 @@ A question changes nothing, so there is no state topic for the answer to appear 
   caught; a change in the image is not.
 - **If this is ever reversed** - the topic or the command withdrawn - that is a removal, and
   needs a new contract major.
+
+## Amendment 2026-10-13 - what counts as an answer, and one service only
+
+Two points of the Decision are narrowed after review; nothing else in it changes.
+
+- **"Any number but 0 is yes" is "a positive number is yes".** Zero is no. A negative number is
+  the image saying something this record does not know the meaning of, and it is refused on
+  `last_error` with the sentence a missing answer gets - "the receiver did not say whether that
+  service can be played" - rather than published as `true`.
+- **The reference has to be one service.** The reference of a bouquet or a marker is refused
+  before the image is asked: for a bouquet the image answers "yes" when any one of its members
+  can be played, and finds that out by walking the bouquet, which is neither the question a
+  stream asks nor a walk a command should start. The test is the channel list's own - the flags
+  in the reference's second field.
+
+Also recorded here, though the Decision did not say otherwise: an exception from the image is
+named on `last_error` by its type and not by its text, as for `cmd/stream_stop`
+([ADR-0018](0018-stopping-a-stream-client-needs-no-permission.md)), and the `sref` in the answer
+is the one that was sent without the spaces around it.

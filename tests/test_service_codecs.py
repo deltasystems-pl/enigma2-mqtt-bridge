@@ -153,6 +153,12 @@ def test_the_tracks_of_the_playing_service_are_listed(live_bridge, factory, rece
         ("mp2", "pol", 5001, False), ("ac3", "pol", 5002, True), (None, "qaa", 5003, False)]
 
 
+def test_a_service_without_audio_has_an_empty_list_and_not_null(live_bridge, factory, receiver):
+    """`[]` says "no tracks"; `null` says "the image will not say"."""
+    receiver.audio.tracks = []
+    assert after_start(factory, receiver)["audio_tracks"] == []
+
+
 def test_a_service_whose_tracks_cannot_be_read_has_a_null_list(live_bridge, factory, receiver):
     receiver.audio.raises = True
     payload = after_start(factory, receiver)
@@ -294,6 +300,27 @@ def test_a_track_the_image_stops_naming_does_not_republish(live_bridge, factory,
     factory.client.clear()
     audio_tick(live_bridge)
     assert factory.client.all_for(SERVICE) == []
+
+
+@pytest.mark.parametrize(("count", "current"), [(40, 35), (2, 7)])
+def test_an_active_track_that_is_not_listed_does_not_make_every_look_read_again(
+    live_bridge, factory, receiver, monkeypatch, count, current
+):
+    """Past the 32 listed, or past the count: no row is active, and that is not news."""
+    receiver.audio.tracks = [AudioTrackInfo("MPEG", "pol", 5000 + n) for n in range(count)]
+    receiver.audio.current = current
+    receiver.nav.fire(EV_START)
+    reads = []
+    real = receiver.audio.getNumberOfTracks
+    monkeypatch.setattr(service_module.audio, "read_tracks",
+                        lambda session: reads.append(1) or [])
+    for _ in range(3):
+        audio_tick(live_bridge)
+    assert reads == []
+    assert real() == count
+    receiver.audio.current = 1
+    audio_tick(live_bridge)
+    assert reads == [1]
 
 
 def test_the_look_stops_with_the_publisher(live_bridge):

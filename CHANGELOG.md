@@ -21,7 +21,10 @@ version that has no section here.
   served: each client's address, service, name, bouquet and whether it is transcoded, at most 32
   rows with the full count beside them, read every five seconds and published when it changed.
   The first publish after every connect is a fresh read, and a list that cannot be read is taken
-  off the broker rather than left as it was.
+  off the broker rather than left as it was - as is the list an earlier run left when this run's
+  image has no stream server or one that lists no clients. A row's name and bouquet follow the
+  channel list when that is walked again. A reference longer than 512 characters is left out of
+  its row.
   `cmd/stream_stop` ends one client's stream, the one named by the `host` and `sref` the list
   shows; it needs no permission, as a zap needs none, never stops "all", and refuses a client
   that is not connected with the reason `not_connected`
@@ -29,7 +32,7 @@ version that has no section here.
   `cmd/stream_playable` asks the image whether one service could be played now beside everything
   the receiver is doing - the television, a recording, another stream - and is the one command
   answered on a topic of its own: one message on `stream_playable`, not retained, with the
-  command's id when it carried one
+  command's id when it carried one; the reference of a bouquet or a marker is refused
   ([ADR-0017](docs/adr/0017-whether-a-service-can-be-played-is-asked-with-an-empty-second-reference.md)).
   The capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable` say which of
   these the image offers. The OpenWebif page gains both commands, in English, Polish and German.
@@ -45,7 +48,8 @@ version that has no section here.
 - `volume` gains `passthrough`: whether the audio track being played is handed to the television
   undecoded, in which case the receiver's volume changes nothing anybody can hear. `true`,
   `false`, or `null` when it cannot be told - an unknown codec, an image without the setting, or
-  a setting that is neither "downmix" nor "passthrough". It follows the track and the image's
+  a setting that is neither "downmix" nor "passthrough", or AAC with the image's separate
+  transcode switch on. It follows the track and the image's
   audio settings within five seconds. The capability `volume_passthrough` says the image has the
   settings it is read from
   ([ADR-0019](docs/adr/0019-passthrough-is-true-false-or-unknown.md)).

@@ -531,7 +531,7 @@ standby the household asks for during those seconds is still told apart from the
 | `width`, `height` | int \| null | Video resolution; `null` before the first frame is decoded |
 | `video_codec` | string \| null | Added after 0.4.0 (unreleased). The video codec on the decoder, as a stable lower-case name: `mpeg2`, `h264`, `hevc`, `mpeg1`, `mpeg4` (MPEG-4 Part 2), `vc1`, `vc1_sm`, `avs`, `avs2`. `null` when the image gives a value that is none of these, or none at all. An open enumeration |
 | `interlaced` | bool \| null | Added after 0.4.0 (unreleased). `true` for an interlaced picture, `false` for a progressive one; `null` before the decoder knows |
-| `frame_rate` | number \| null | Added after 0.4.0 (unreleased). Frames a second - `25.0`, `50.0`, `23.976` - to three decimal places; `null` before the decoder knows. For an interlaced picture it is the frame rate, not the field rate |
+| `frame_rate` | number \| null | Added after 0.4.0 (unreleased). Frames a second - `25.0`, `50.0`, `23.976` - to three decimal places; `null` before the decoder knows. For an interlaced picture it is the frame rate, not the field rate. It is the image's number divided by a thousand and is held to no upper bound: a value no broadcast has is published as the image gave it |
 | `audio_tracks` | list \| null | Added after 0.4.0 (unreleased). The audio tracks of the service, in the image's order, at most 32. `[]` for a service without audio; `null` when nothing is playing or the image will not say. See below |
 
 Published on `evStart`, `evTunedIn`, `evUpdatedInfo`, `evNewProgramInfo` and `evEnd`, so it
@@ -1064,16 +1064,17 @@ when `stream_clients` is a capability - the image's stream server lists its clie
 |---|---|---|
 | `count` | int | How many clients the image lists |
 | `clients` | list | One row for each, in the image's order, **at most 32**. With more, the list is cut there and `count` still says how many there are. `[]` with none |
-| `clients[].host` | string | The client's address. An IPv4 client, which the image holds as `::ffff:192.0.2.20`, is shown as `192.0.2.20`; any other address is shown as the image holds it. At most 64 characters |
-| `clients[].sref` | string or `null` | The service reference being streamed, as the image holds it; `null` when it holds none |
+| `clients[].host` | string | The client's address. An IPv4 client, which the image may hold as `::ffff:192.0.2.20`, is shown as `192.0.2.20` - only a well-formed dotted quad is unwrapped; any other address is shown as the image holds it. At most 64 characters |
+| `clients[].sref` | string or `null` | The service reference being streamed, as the image holds it. `null` when it holds none, and when what it holds is longer than 512 characters, which no reference of a receiver is. A row without a reference is still listed and counted, has no `name` and no `bouquet`, and **cannot be stopped**: `cmd/stream_stop` names a client by its reference |
 | `clients[].name` | string or `null` | The name the `service` topic uses for the same channel |
-| `clients[].bouquet` | string or `null` | As `service.bouquet`: the first of the configured bouquets (`bouquets_for_select`) that holds the service, `null` when none does |
+| `clients[].bouquet` | string or `null` | As `service.bouquet`: the first of the configured bouquets (`bouquets_for_select`) that holds the service, `null` when none does. It and `name` follow the channel list: when the bouquets are walked again - at a start, after a save of the settings, after an edit - the rows are resolved again at the next look, so within five seconds |
 | `clients[].transcoded` | bool | Whether the client is served through the receiver's encoder |
 
 **Polled, not hooked.** A client that connects or leaves raises no event the three images share,
 so the image's list is read every five seconds - one call that returns a short list - and the
-topic is published only when the list changed; names are resolved only then. A client that came
-and went between two looks was never on the topic. After a `cmd/stream_stop` the list is read
+topic is published only when the list changed; names and bouquets are resolved only then, and
+when the channel list was walked. A client that came and went between two looks was never on
+the topic. After a `cmd/stream_stop` the list is read
 again two seconds later, without waiting for the next look.
 
 **Everything is published.** Every client of every bouquet is on the broker, retained, as every
@@ -1089,6 +1090,16 @@ publish after every connect - a new session after a broker outage, and the first
 that has just started - is a fresh read of the image's list, never the one the plugin held
 before. When the list cannot be read, the topic is emptied - an empty retained payload - rather
 than left saying what it last said, and it is published again with the next read that works.
+"Cannot be read" is a call that raises and an answer that is not a list of rows - nothing, a
+string, a row that is no host, reference and flag; only an empty list is "no clients". And a
+plugin that starts on an image where this area does not bind - no stream server, or one that
+does not list its clients - empties what an earlier run left here when it connects, and
+`stream` with it when there is no stream server at all.
+
+**It holds only while `availability` is `online`.** Like every state topic here, it stays
+retained when the plugin stops or the receiver is switched off - nothing is retracted at a stop,
+`offline` says it - so a consumer offers nothing from this list for a receiver that is not
+`online`.
 
 On OpenATV the list also holds the clients of its RTSP server (read from its source, not
 measured), which `cmd/stream_stop` cannot end: the image does not look for them there, and the
@@ -1108,8 +1119,8 @@ asked about could be played now, beside everything the receiver is already doing
 
 | Field | Type | Meaning |
 |---|---|---|
-| `sref` | string | The service reference that was asked about, as it was sent |
-| `playable` | bool | Whether the image says the service could be played now without taking a tuner from anything that is running - the television, a recording, another stream. The image gives no reason with a `false` |
+| `sref` | string | The service reference that was asked about, as it was sent without the spaces around it |
+| `playable` | bool | Whether the image says the service could be played now without taking a tuner from anything that is running - the television, a recording, another stream: `true` for a positive number from the image, `false` for zero. The image gives no reason with a `false` |
 | `ts` | int | When it was asked, in epoch seconds |
 | `id` | string, optional | The id the command carried in its envelope (section 2), exactly as it was sent. Absent, not `null`, when it carried none. **A question without an id is answered all the same**, and its sender tells the answer by `sref` |
 
@@ -1120,8 +1131,9 @@ reconnect, or delivered late from a queue, would be an answer about tuners that 
 consumer asks just before it opens a stream, and treats no answer within a few seconds as
 "unknown", not as "no".
 
-A question that could not be asked - no reference, text that is none, an image that will not
-say - is a refusal on `last_error`, with the command's id, and no message here.
+A question that could not be asked - no reference, text that is none, the reference of a bouquet
+or a marker, an image that will not say or answers with something that is no number or a negative
+one - is a refusal on `last_error`, with the command's id, and no message here.
 
 ### `<base>/<node>/recording`
 
@@ -1239,7 +1251,11 @@ answers are taken: `passthrough`, and `downmix` or the boolean that stands for i
 choice an image offers - "use the best the television supports", "convert to multi-channel PCM",
 a transcode to another codec - is `null`, because what reaches the television then depends on the
 television. So is `ac4` and `dra`, for which no image has such a setting, and `aac_he` on a
-receiver without a setting of its own for it.
+receiver without a setting of its own for it. AAC has a second switch beside its downmix setting,
+`config.av.transcodeaac` (`off`, `ac3` or `dts` on all three images): with it on anything but
+`off`, `aac` and `aac_he` are `null` whatever the downmix setting says, because a transcode is
+neither of the two answers. And on the two OpenATV models whose `downmix_ac3` is `0`, `1` or `2`
+(dreamone, dreamtwo) `ac3` is `null`: those are not the two words.
 
 **It says what the receiver is set to do, not what the television does with it.** A television
 that cannot take the bitstream is the television's business; the receiver still sends it.
@@ -1247,6 +1263,10 @@ that cannot take the bitstream is the television's business; the receiver still 
 A consumer greys out or relabels its volume control on a stated `true`, and treats `null` as an
 older plugin that publishes no such member: unknown, not "no". The capability
 `volume_passthrough` says the image has at least one of those settings.
+
+The look is cheap: it asks which track is playing, and reads that one track's description only
+when the track or the service is not the one it last looked at - never every track, and nothing
+of a track on a volume key press.
 
 It follows the track: read again at once on `evStart`, `evUpdatedInfo` and `evEnd`, and - because
 neither a track picked on the remote nor a setting changed in the image's menu announces itself -
@@ -1635,8 +1655,8 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `bouquet` | `{"sref": "..."}` | Makes one published TV bouquet the active channel-list context | Exact allowlist match only. The current channel is preserved when it belongs to the bouquet; otherwise the first playable channel is tuned. Empty/marker-only bouquets and unavailable service-list APIs are refused without changing context. Since 0.3.0 refused during timeshift, before anything changes: "timeshift is active; the receiver would ask on screen whether to leave it" |
 | `zap_history` - since 0.3.0, capability `zap_history` | `{"sref": "..."}`, exactly | Zaps to one channel of the receiver's zap history the way its own "History Zap" screen does: the entry moves to the front and plays. From standby the receiver is woken first, as for `zap`. Verified on `service` within 5 s | By reference only - the list reorders on every zap and names repeat - matched by service identity among the entries `zap_history` shows: "that channel is no longer in the receiver's zap history" otherwise - checked first, so a refused channel never wakes the receiver. Refused while a recording is played back ("a recording is being played back", `reason` `playback`). With another screen open over the info bar the channel is played directly and the history is left as it is - refused, as `zap` refuses it and with `zap`'s sentences, where there is nothing to play it with: "there is no session to zap with" without a navigation, "this image's navigation has no playService" without a player. **No permission, no recording guard and no timeshift guard**: the receiver's own screen has none, and leaves timeshift without asking |
 | `history_clear` - since 0.3.0, capability `history_clear` | any (`PRESS` by convention) | Clears the receiver's zap history **exactly as its 0 key does**: the image's own `keyNumberGlobal(0)`, which empties the list and **switches to channel 1** - the first channel of the first bouquet - closing picture-in-picture if it is open. Afterwards `zap_history.entries` holds that one channel and `service` names it | Refused, before anything happens, in this order, each with a `reason` on `last_error`: in standby - "the receiver is in standby, where 0 does not clear the history" (`standby`); with the image's panic-button setting off - "the receiver's panic-button setting is off, so 0 goes back one channel instead of clearing the history" (`panic_off`); with fewer than two entries - "the receiver's zap history holds at most one channel, and 0 does nothing then" (`too_short`); in timeshift, or with one waiting to be saved, or when the image's timeshift state cannot be read - "timeshift is active; 0 would ask on screen whether to leave it" (`timeshift`), whatever the image's "check timeshift" setting says; while the image holds zaps after timeshift - "the receiver is holding zaps for a moment after timeshift; try again" (`zap_blocked`); with picture-in-picture shown and the image's "0 key in PiP" setting not "standard" - "picture-in-picture is showing and 0 is set to act on it" (`pip`); while a recording is played back - "a recording is being played back" (`playback`); while any other screen is open over the info bar (the channel list, the EPG, a menu) - "a screen is open on the receiver, and 0 does not reach the zap history there" (`screen_open`). More than one entry left afterwards - "the receiver did not clear its zap history" (`not_cleared`). 🔴 **The payload is ignored**. No permission: `key KEY_0` does the same, unguarded |
-| `stream_stop` - added after 0.4.0 (unreleased), capability `stream_stop` | `{"host": "192.0.2.20", "sref": "1:0:19:283D:3FB:1:C00000:0:0:0:"}`, exactly | Ends one stream client's stream: the one `stream_clients` lists with that `host` and that service. The answer is `stream_clients` without it, read again two seconds later. See below | **No permission**, as `zap` and `power` have none. Both members and nothing else, each a non-empty string - an empty payload, one member alone or a third one is refused before anything happens, so nothing here ever stops "all of them". Refused when no such client is connected - "that stream client is not connected" (`reason` `not_connected`) - and when the image did not stop it - "the receiver did not stop that stream client" (`not_stopped`); without the capability, "stopping a stream client is not available on this image" |
-| `stream_playable` - added after 0.4.0 (unreleased), capability `stream_playable` | `<sref>` \| `{"sref": "..."}` | Asks the image whether that service could be played now, beside everything the receiver is doing, and publishes the answer on `stream_playable` (section 1) - **the one command answered on a topic of its own**. See below | Refused, with nothing published on `stream_playable`: without a reference - "no service reference given"; for text that is none; when the receiver has no information for the service; when the image raises or gives no number; without the capability, "this image cannot say whether a service can be played". **No permission**: it changes nothing on the receiver |
+| `stream_stop` - added after 0.4.0 (unreleased), capability `stream_stop` | `{"host": "192.0.2.20", "sref": "1:0:19:283D:3FB:1:C00000:0:0:0:"}`, exactly | Ends one stream client's stream: the one `stream_clients` lists with that `host` and that service. The answer is `stream_clients` without it, read again two seconds later. See below | **No permission**, as `zap` and `power` have none. Both members and nothing else, each a non-empty string - an empty payload, one member alone or a third one is refused before anything happens, so nothing here ever stops "all of them". Refused when no such client is connected - "that stream client is not connected" (`reason` `not_connected`) - and when the image did not stop it - "the receiver did not stop that stream client" (`not_stopped`), or raised while trying - "the receiver could not stop that stream client: " and the kind of error, never its text, which can hold an address (`not_stopped`); without the capability, "stopping a stream client is not available on this image" |
+| `stream_playable` - added after 0.4.0 (unreleased), capability `stream_playable` | `<sref>` \| `{"sref": "..."}` | Asks the image whether that service could be played now, beside everything the receiver is doing, and publishes the answer on `stream_playable` (section 1) - **the one command answered on a topic of its own**. See below | Refused, with nothing published on `stream_playable`: without a reference - "no service reference given"; for text that is none; for the reference of a bouquet or a marker - "cmd/stream_playable takes the reference of one service, not of a bouquet or a marker"; when the receiver has no information for the service; when the image raises, or gives no number or a negative one; without the capability, "this image cannot say whether a service can be played". **No permission**: it changes nothing on the receiver |
 | `volume` | `0`-`100`, or `{"level": 42}` | Sets the volume, with the on-screen bar | Out-of-range values are clamped and noted in the log |
 | `mute` | `ON` \| `OFF` | Sets mute | Never a blind toggle: the state is read first, and read back afterwards. A receiver refuses to mute at volume 0, and that refusal is reported |
 | `key` | `KEY_OK` \| `{"key": "KEY_OK", "long": true}` | Injects a remote key | Unknown key names are refused with the name in `last_error`; at most 20 a second |
@@ -1763,8 +1783,9 @@ television, and less than standby. The payload names the client by the two thing
   reference that differs in any of those fields is another service, and is refused as not
   connected.
 
-When the same host is sent the same service twice - once transcoded, once not - the two rows are
-one client to this command, and the image ends the first it finds; sending the command again ends
+A row whose `sref` is `null` cannot be named, so it cannot be stopped. When the same host is
+sent the same service twice - once transcoded, once not - the two rows are one client to this
+command, and the image ends the first it finds; sending the command again ends
 the other. The image answers at once and the connection ends a moment later (measured: about
 1.4 s), so the row is still on `stream_clients` until the list is read again, two seconds after
 the command. **A player that reconnects by itself is back by then**, as a new connection the
@@ -1783,8 +1804,10 @@ up**. The image's channel list asks the same function with the playing service n
 that would make room, and then nearly everything is playable - the television can always be
 switched over. A stream is opened beside the television, so the plugin names nothing: the answer
 is `false` when the service needs a tuner that the television, a recording or another stream is
-holding. It is asked for one service a command. The plugin does not publish it for the channel
-list: it would be a second copy of the list that is out of date with every zap.
+holding. It is asked for one service a command, and for a service only: the reference of a
+bouquet or a marker is refused, because the image would answer a bouquet for any one of its
+members. The plugin does not publish it for the channel list: it would be a second copy of the
+list that is out of date with every zap.
 
 ### `cmd/update` semantics - since 0.4.0
 

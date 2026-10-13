@@ -1,6 +1,6 @@
 # ADR-0019: Whether the volume acts on the audio is true, false or unknown, read from the image's setting for the active track's codec
 
-**Status:** accepted 2026-10-13
+**Status:** accepted 2026-10-13, amended 2026-10-13 (see [the amendment](#amendment-2026-10-13---aac-that-is-being-transcoded-and-how-much-is-read))
 **Date:** 2026-10-13
 **Supersedes:** -
 
@@ -100,3 +100,25 @@ by receiver.
 - **If this is ever reversed** - the member withdrawn - that is a removal, and needs a new
   contract major. Giving a `null` case a `true` or `false` later is a fix, not a change of
   meaning: the member already says what it means.
+
+## Amendment 2026-10-13 - AAC that is being transcoded, and how much is read
+
+Found in review; the Decision's own rule applied where the first reading missed it.
+
+- **AAC has a second switch.** Beside `downmix_aac` all three images have
+  `config.av.transcodeaac` - `off`, `ac3` or `dts`, and `off` or `force_ac3` on two OpenATV
+  models. With it on anything but `off` the receiver sends the television a transcode, which by
+  this record's rule is neither of the two certain answers: `aac` and `aac_he` are then `null`,
+  whatever the downmix setting says. The placeholder an image puts there when the receiver
+  cannot transcode is no switch. No other codec has such an element in the three images.
+- **Two `null` cases the list did not name.** OpenATV's `downmix_ac3` on dreamone and dreamtwo
+  is `0`, `1` or `2`, which are not the two words, so `ac3` is `null` there. And
+  `service.frame_rate`, which this record does not otherwise concern, is published without an
+  upper bound, as the image gave it.
+- **One track is read, not all of them.** "Read with the volume" meant every track of the
+  service on every reconciliation and every volume key press, and on OpenViX describing the
+  active track starts a detector in the decoder. The volume now asks which track is playing and
+  reads that one's description only when the track or the service is not the one it last looked
+  at; a service event makes it read again. `volume` and `service` each read what they need and
+  share nothing: `service` may not have bound on a receiver where `volume` has, and the other
+  way round.

@@ -51,6 +51,9 @@ from .mqttclient import BrokerSettings, MqttClient, accepted
 from .publisher import Publisher
 from .selfupdate import CAPABILITY as SELF_UPDATE_CAPABILITY
 from .selfupdate import SelfUpdater
+from .stream import CLIENTS_TOPIC as STREAM_CLIENTS_TOPIC
+from .stream import TOPIC as STREAM_TOPIC
+from .stream import StreamPublisher
 from .uninstall import DEFERRED as UNINSTALL_DEFERRED
 from .uninstall import RUNNING as UNINSTALL_RUNNING
 from .uninstall import Uninstaller
@@ -1019,6 +1022,15 @@ class Bridge:
         # also goes when HDMI-CEC does.
         if self.publisher(CecPublisher.name) is None:
             self.retract(self.topic(CEC_TOPIC))
+        # The stream area's topics outlive it the same way, and its list of
+        # clients is one a consumer acts on: a client an earlier run listed
+        # must not stay offered for stopping by a run that lists none. Keyed
+        # on what bound - an image can have the server and not the listing.
+        stream = self.publisher(StreamPublisher.name)
+        if stream is None:
+            self.retract(self.topic(STREAM_TOPIC))
+        if stream is None or not stream.lists_clients():
+            self.retract(self.topic(STREAM_CLIENTS_TOPIC))
         # And the refusal an earlier run left retained, here with the other
         # leftovers of an earlier process: before `online`, so that a consumer
         # which takes `online` for the start of this run never reads that

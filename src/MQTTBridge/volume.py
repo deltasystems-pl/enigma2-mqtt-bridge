@@ -194,6 +194,9 @@ class VolumePublisher(Publisher):
         self._fallback_logged = False
         self._nav = None
         self._service_events = ()
+        # Which track is playing and what it is, read once for each track
+        # (`audio.ActiveTrack`): this runs on every tick and every key press.
+        self._track = audio.ActiveTrack()
 
     def extra_capabilities(self):
         """`volume_passthrough`, where the image has a setting to read it from."""
@@ -248,6 +251,8 @@ class VolumePublisher(Publisher):
         if event not in self._service_events:
             return
         try:
+            # The same index may be another track now.
+            self._track.forget()
             self._publish_now()
         except Exception:
             LOG.exception("publishing the volume on a service event raised")
@@ -330,7 +335,7 @@ class VolumePublisher(Publisher):
         and the mute flag as they are, with `passthrough` null.
         """
         try:
-            return audio.passthrough(self.session)
+            return audio.passthrough_for(self._track.codec(self.session))
         except Exception:
             LOG.debug("could not tell whether the audio is passed through")
             return None

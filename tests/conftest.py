@@ -726,7 +726,7 @@ class StreamServer:
     From `lib/dvb/streamserver.cpp`, the same in OpenViX, OpenATV and OpenPLi:
     `getConnectedClients()` is a list of `(host, service reference, encoder)`
     tuples, and `stopStreamClient(host, reference)` compares both as text with
-    what the client holds - an IPv4 client as `::ffff:192.0.2.20` - and is true
+    what the client holds - an IPv4 client as `::ffff:192.0.2.20` or as it is - and is true
     when it found one. Measured on OpenViX 6.6: it returns True and the
     connection ends about 1.4 s later, so the client is still listed for a
     moment; `linger` models that.

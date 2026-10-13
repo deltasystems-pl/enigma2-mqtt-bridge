@@ -1047,6 +1047,10 @@ class ServicePublisher(NavPublisher):
         self._waiting_id = None
         self._verify = Ticker(self._zap_timed_out, "zap verify")
         self._audio = Ticker(self._check_audio, "audio track")
+        # The index of the track that was playing when `service` was last
+        # read. Not the row marked active: a track past the ones listed marks
+        # none, and comparing with that would read the tracks at every look.
+        self._audio_seen = None
 
     def start(self):
         if not NavPublisher.start(self):
@@ -1074,7 +1078,7 @@ class ServicePublisher(NavPublisher):
         playing = audio.active_index(self.session)
         if playing is None:
             return
-        if playing != audio.active_of(self._current.get("audio_tracks")):
+        if playing != self._audio_seen:
             self.refresh()
 
     # The resolution arrives after the first frame is decoded, so `evStart`
@@ -1090,7 +1094,9 @@ class ServicePublisher(NavPublisher):
         return None if channels is None else channels.bouquet_for
 
     def read(self):
-        return read_service(self.session, self._bouquet_lookup())
+        payload = read_service(self.session, self._bouquet_lookup())
+        self._audio_seen = None if payload is None else audio.active_index(self.session)
+        return payload
 
     def refresh(self):
         payload = self.read()

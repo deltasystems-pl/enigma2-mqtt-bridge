@@ -10,11 +10,16 @@ import json
 import pytest
 from Components.config import ConfigInteger, ConfigSubsection, ConfigYesNo, config
 from conftest import (
+    BOUQUET_ROOT,
+    FIRST_BOUQUET,
+    MARKER,
     POLSAT,
+    SECOND_BOUQUET,
     TVN,
     TVP1,
     ServiceCenter,
     StreamServer,
+    enigma,
     install_stream_server,
 )
 
@@ -244,8 +249,9 @@ def test_the_stream_areas_are_capabilities(box, factory):
 def test_an_image_without_a_stream_server_claims_nothing(live_bridge, factory):
     assert live_bridge.publisher("stream") is None
     assert not [name for name in capabilities(factory) if name.startswith("stream")]
-    assert factory.client.last(STREAM) is None
-    assert factory.client.last(CLIENTS) is None
+    # Nothing but the empty payload that takes back what an earlier run may have left.
+    assert {one.text for one in factory.client.all_for(STREAM)} == {""}
+    assert {one.text for one in factory.client.all_for(CLIENTS)} == {""}
 
 
 def test_an_image_whose_server_lists_no_clients_claims_only_the_descriptor(
@@ -263,9 +269,9 @@ def test_an_image_whose_server_lists_no_clients_claims_only_the_descriptor(
     names = capabilities(factory)
     assert "stream" in names and "stream_playable" in names
     assert "stream_clients" not in names and "stream_stop" not in names
-    assert factory.client.last(STREAM) is not None
+    assert factory.client.last(STREAM).json()["port"] == 8001
     tick(bridge)
-    assert factory.client.last(CLIENTS) is None
+    assert {one.text for one in factory.client.all_for(CLIENTS)} == {""}
     send(factory, "stream_stop", {"host": "192.0.2.20", "sref": TVP1})
     assert factory.client.last(LAST_ERROR).json()["error"] == stream.STOP_NOT_AVAILABLE
 
@@ -341,6 +347,147 @@ def test_a_client_is_listed_with_its_host_its_service_and_how_it_is_served(box, 
     }
 
 
+def bouquet_of(factory):
+    return factory.client.last(CLIENTS).json()["clients"][0]["bouquet"]
+
+
+def test_a_client_already_streaming_when_the_plugin_starts_has_its_bouquet(
+    server, make_bridge, factory, settings, receiver
+):
+    """The stream area starts before the channel list has been walked."""
+    server.clients = [(PHONE, TVP1, 0)]
+    bridge = start(make_bridge, factory, settings, receiver)
+    assert bouquet_of(factory) == "Ulubione TV"
+    tick(bridge)
+    factory.client.fire_connect()
+    assert bouquet_of(factory) == "Ulubione TV"
+
+
+def test_a_clients_bouquet_survives_a_save_of_the_settings(box, server, factory):
+    """The same client tuple before and after: what was resolved for it must not be kept."""
+    server.clients = [(PHONE, TVP1, 0)]
+    tick(box)
+    assert bouquet_of(factory) == "Ulubione TV"
+    box.reload()
+    factory.client.fire_connect()
+    assert bouquet_of(factory) == "Ulubione TV"
+    for _ in range(5):
+        tick(box)
+    factory.client.fire_connect()
+    assert bouquet_of(factory) == "Ulubione TV"
+
+
+def test_a_row_follows_the_channel_list_when_that_changes(box, server, factory, monkeypatch):
+    """As `service.bouquet`: a bouquet renamed on the receiver renames it on the row too."""
+    from ServiceReference import ServiceReference
+
+    resolved = []
+    real = stream.service_name
+    monkeypatch.setattr(stream, "service_name", lambda sref: resolved.append(sref) or real(sref))
+    server.clients = [(PHONE, TVP1, 0)]
+    tick(box)
+    tick(box)
+    assert resolved == [TVP1]
+    ServiceCenter.getInstance().contents[BOUQUET_ROOT] = [
+        (FIRST_BOUQUET, "Moje kanaly"), (SECOND_BOUQUET, "Sport (HD)")]
+    ServiceReference.names[TVP1] = "TVP 1"
+    box.publisher("channels").refresh()
+    tick(box)
+    row = factory.client.last(CLIENTS).json()["clients"][0]
+    assert (row["bouquet"], row["name"]) == ("Moje kanaly", "TVP 1")
+    tick(box)
+    tick(box)
+    assert resolved == [TVP1, TVP1]
+
+
+def test_a_receiver_without_a_channel_list_lists_its_clients_without_a_bouquet(
+    server, make_bridge, factory, settings, receiver, monkeypatch
+):
+    from MQTTBridge import channels
+
+    monkeypatch.setattr(channels, "_service_center", lambda: None)
+    server.clients = [(PHONE, TVP1, 0)]
+    bridge = start(make_bridge, factory, settings, receiver)
+    assert bridge.publisher("channels") is None
+    row = factory.client.last(CLIENTS).json()["clients"][0]
+    assert (row["sref"], row["bouquet"]) == (TVP1, None)
+
+
+# ---- 2: a later start without the listing takes the earlier list back
+
+
+def test_a_later_start_without_a_stream_server_takes_both_topics_back(
+    server, make_bridge, factory, settings, receiver, monkeypatch
+):
+    """What an earlier run left retained must not outlive the area that published it."""
+    server.clients = [(PHONE, TVP1, 0)]
+    first = start(make_bridge, factory, settings, receiver)
+    assert factory.client.last(CLIENTS).json()["count"] == 1
+    first.stop()
+    monkeypatch.delattr(enigma, "eStreamServer")
+    second = start(make_bridge, factory, settings, receiver)
+    assert second.publisher("stream") is None
+    for topic in (STREAM, CLIENTS):
+        published = factory.client.last(topic)
+        assert (published.text, published.retain) == ("", True)
+    assert factory.client.last(ROOT + "/availability").text == "online"
+
+
+def test_a_later_start_whose_server_lists_no_clients_takes_the_list_back(
+    server, make_bridge, factory, settings, receiver, monkeypatch
+):
+    class Bare:
+        _instance = None
+
+        @classmethod
+        def getInstance(cls):
+            return cls()
+
+    server.clients = [(PHONE, TVP1, 0)]
+    first = start(make_bridge, factory, settings, receiver)
+    assert factory.client.last(CLIENTS).json()["count"] == 1
+    first.stop()
+    install_stream_server(monkeypatch, Bare)
+    start(make_bridge, factory, settings, receiver)
+    published = factory.client.last(CLIENTS)
+    assert (published.text, published.retain) == ("", True)
+    assert factory.client.last(STREAM).json()["port"] == 8001
+
+
+def test_an_area_that_bound_is_not_taken_back_at_a_connect(box, server, factory):
+    server.clients = [(PHONE, TVP1, 0)]
+    factory.client.clear()
+    factory.client.fire_connect()
+    assert [one.text for one in factory.client.all_for(CLIENTS) if one.text == ""] == []
+    assert [one.text for one in factory.client.all_for(STREAM) if one.text == ""] == []
+
+
+# ---- 4: a reference too long to be one
+
+
+def test_a_reference_longer_than_any_reference_is_left_out_of_its_row(box, server, factory):
+    """The row is still counted and listed, without the reference, and cannot be stopped."""
+    huge = "1:0:1:" + "A" * 200000
+    server.clients = [(PHONE, huge, 0), (TABLET, TVN, 0)]
+    tick(box)
+    published = factory.client.last(CLIENTS)
+    assert len(published.text) < 1000
+    payload = published.json()
+    assert payload["count"] == 2
+    assert payload["clients"][0] == {"host": "192.0.2.20", "sref": None, "name": None,
+                                     "bouquet": None, "transcoded": False}
+    assert payload["clients"][1]["sref"] == TVN
+
+
+@pytest.mark.parametrize(("length", "kept"), [(512, True), (513, False)])
+def test_a_reference_is_kept_up_to_512_characters(box, server, factory, length, kept):
+    sref = "4097:0:1:0:0:0:0:0:0:0:" + "u" * (length - 23)
+    assert len(sref) == length
+    server.clients = [(PHONE, sref, 0)]
+    tick(box)
+    assert factory.client.last(CLIENTS).json()["clients"][0]["sref"] == (sref if kept else None)
+
+
 @pytest.mark.parametrize(("held", "shown"), [
     ("::ffff:192.0.2.20", "192.0.2.20"),
     ("::FFFF:192.0.2.20", "192.0.2.20"),
@@ -349,6 +496,11 @@ def test_a_client_is_listed_with_its_host_its_service_and_how_it_is_served(box, 
     ("::ffff:c000:214", "::ffff:c000:214"),
     ("::ffff:192.0.2", "::ffff:192.0.2"),
     ("::ffff:192.0.2.x", "::ffff:192.0.2.x"),
+    ("::ffff:192.0.2.20.5", "::ffff:192.0.2.20.5"),
+    ("::ffff:192.0.2.256", "::ffff:192.0.2.256"),
+    ("::ffff:192.0.2.0255", "::ffff:192.0.2.0255"),
+    ("::ffff:255.255.255.255", "255.255.255.255"),
+    ("::ffff:0.0.0.0", "0.0.0.0"),
     ("  192.0.2.20 ", "192.0.2.20"),
     ("", ""),
 ])
@@ -439,18 +591,42 @@ def test_a_list_that_cannot_be_read_names_no_client_and_raises_nothing(box, serv
 
 
 @pytest.mark.parametrize(("rows", "read"), [
-    ([("only-a-host",)], []),
-    ([None], []),
-    ([(PHONE, TVP1)], []),
-    ([("only-a-host",), (PHONE, TVP1, 0)], [(PHONE, TVP1, False)]),
-    ([(None, None, 1)], [("", "", True)]),
-    (None, []),
+    ([], []),
+    ((), []),
+    ([(PHONE, TVP1, 0)], [(PHONE, TVP1, False)]),
+    (((PHONE, TVP1, 1),), [(PHONE, TVP1, True)]),
+    ([[PHONE, TVP1, 0, "more"]], [(PHONE, TVP1, False)]),
+    # Not a list of rows: unreadable, never "no clients".
+    (None, None),
     (7, None),
+    ("192.0.2.20", None),
+    ({}, None),
+    ({PHONE: TVP1}, None),
+    ([("only-a-host",)], None),
+    ([None], None),
+    ([(PHONE, TVP1)], None),
+    (["abc"], None),
+    ([("only-a-host",), (PHONE, TVP1, 0)], None),
+    ([(None, TVP1, 1)], None),
+    ([(PHONE, None, 1)], None),
+    ([(b"192.0.2.20", TVP1, 0)], None),
 ])
-def test_a_row_the_image_shaped_differently_is_skipped(monkeypatch, rows, read):
+def test_only_a_list_of_rows_is_a_list_of_clients(monkeypatch, rows, read):
     server = install_stream_server(monkeypatch)
     monkeypatch.setattr(server, "getConnectedClients", lambda: rows)
     assert stream.read_clients() == read
+
+
+@pytest.mark.parametrize("answer", [None, "192.0.2.20", {}, [("only-a-host",)]])
+def test_an_answer_that_is_no_list_of_rows_is_not_published_as_no_clients(
+    box, server, factory, monkeypatch, answer
+):
+    server.clients = [(PHONE, TVP1, 0)]
+    tick(box)
+    monkeypatch.setattr(server, "getConnectedClients", lambda: answer)
+    factory.client.clear()
+    tick(box)
+    assert [one.text for one in factory.client.all_for(CLIENTS)] == [""]
 
 
 def test_a_reconnect_publishes_both_topics_again(box, server, factory):
@@ -658,6 +834,13 @@ def test_spaces_around_the_host_and_the_reference_do_not_hide_the_client(box, se
     assert server.stopped == [(PHONE, TVP1)]
 
 
+def test_a_row_without_a_reference_cannot_be_stopped(box, server, factory):
+    server.clients = [(PHONE, "", 0)]
+    send(factory, "stream_stop", {"host": "192.0.2.20", "sref": TVP1})
+    assert server.stopped == []
+    assert factory.client.last(LAST_ERROR).json()["reason"] == "not_connected"
+
+
 def test_only_the_named_service_of_a_host_is_stopped(box, server, factory):
     server.clients = [(PHONE, TVP1, 0), (PHONE, TVN, 0)]
     send(factory, "stream_stop", {"host": "192.0.2.20", "sref": TVN})
@@ -739,7 +922,26 @@ def test_a_stop_that_raises_is_a_refusal_and_not_a_traceback_on_screen(box, serv
     server.clients = [(PHONE, TVP1, 0)]
     monkeypatch.setattr(server, "stopStreamClient", broken)
     send(factory, "stream_stop", {"host": "192.0.2.20", "sref": TVP1})
-    assert factory.client.last(LAST_ERROR).json()["error"] == "RuntimeError: the client went away"
+    error = factory.client.last(LAST_ERROR).json()
+    assert (error["error"], error["reason"]) == (
+        "the receiver could not stop that stream client: RuntimeError", "not_stopped")
+
+
+def test_what_a_raising_stop_said_stays_out_of_last_error_and_out_of_the_warnings(
+    box, server, factory, monkeypatch, plugin_log
+):
+    """The image's text can name a client's address: debug level only."""
+    def broken(host, sref):
+        raise RuntimeError("no client at 198.51.100.7")
+
+    server.clients = [(PHONE, TVP1, 0)]
+    monkeypatch.setattr(server, "stopStreamClient", broken)
+    send(factory, "stream_stop", {"host": "192.0.2.20", "sref": TVP1})
+    assert "198.51.100.7" not in factory.client.last(LAST_ERROR).text
+    lines = [line for line in plugin_log().splitlines() if "198.51.100.7" in line]
+    assert lines, "the detail is kept, at debug level"
+    assert not [line for line in lines if "WARNING" in line or "ERROR" in line]
+    assert "Traceback" not in plugin_log()
 
 
 def test_a_list_that_cannot_be_read_refuses_the_stop(box, server, factory):
@@ -837,11 +1039,12 @@ def test_a_refused_question_says_its_id_back_on_last_error(box, factory):
 def test_a_question_the_image_cannot_answer_is_a_refusal(box, factory):
     ServiceCenter.getInstance().playable_raises = True
     send(factory, "stream_playable", TVN)
-    assert factory.client.last(LAST_ERROR).json()["error"] == "RuntimeError: no resource manager"
+    assert factory.client.last(LAST_ERROR).json()["error"] == (
+        "the receiver could not say whether that service can be played: RuntimeError")
     assert factory.client.last(PLAYABLE) is None
 
 
-@pytest.mark.parametrize("answer", [None, "yes", 1.0])
+@pytest.mark.parametrize("answer", [None, "yes", 1.0, -1, -7])
 def test_an_answer_that_is_no_number_is_a_refusal(box, factory, monkeypatch, answer):
     from conftest import ServiceInfo
 
@@ -917,6 +1120,16 @@ def test_a_service_centre_that_raises_is_a_refusal(box, factory, monkeypatch):
     monkeypatch.setattr(ServiceCenter, "info", broken)
     send(factory, "stream_playable", TVN)
     assert factory.client.last(LAST_ERROR).json()["error"] == stream.NO_INFORMATION
+
+
+@pytest.mark.parametrize("sref", [FIRST_BOUQUET, BOUQUET_ROOT, MARKER])
+def test_a_reference_that_is_not_one_service_is_refused(box, factory, sref):
+    """A bouquet would be answered for any one of its members, by walking it."""
+    send(factory, "stream_playable", {"sref": sref})
+    assert factory.client.last(LAST_ERROR).json()["error"] == (
+        "cmd/stream_playable takes the reference of one service, not of a bouquet or a marker")
+    assert ServiceCenter.getInstance().asked == []
+    assert factory.client.last(PLAYABLE) is None
 
 
 def test_a_question_without_a_stream_server_is_refused(live_bridge, factory):

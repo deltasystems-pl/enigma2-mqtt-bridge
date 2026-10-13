@@ -19,13 +19,19 @@ and per image, and are a word on some images and a boolean on others. Only the
 two answers that are certain are taken - "downmix" and "passthrough", or the
 boolean that stands for them. Every other choice ("use the best the television
 offers", "convert to multi-channel PCM", a transcode) depends on something this
-plugin cannot see, and is `None`.
+plugin cannot see, and is `None`. AAC has a transcode switch of its own beside
+its downmix setting (`transcodeaac`); with that on, the answer is `None` too.
+
+**Passthrough needs one track, not all of them.** `ActiveTrack` asks which
+track is playing and reads that one's description, once, until the track or
+the service is another: the volume is read on every key press, and on one
+image describing a track starts work in the decoder.
 
 Nothing here reads a file. The settings are attributes of objects the image
 already holds in memory, and the tracks are calls into the playing service.
 """
 
-from .enigma2 import current_service
+from .enigma2 import current_service, current_service_reference
 from .log import get_logger
 
 LOG = get_logger("audio")
@@ -76,6 +82,16 @@ SETTINGS = {
     "dts": ("downmix_dts",),
     "dts_hd": ("dtshd",),
 }
+
+# codec -> the `config.av` element that turns a transcode of it on, beside its
+# downmix setting: "off", "ac3" or "dts" on all three images ("force_ac3" on
+# two OpenATV models). Anything but "off" is a transcode, and what reaches the
+# television then is not what the downmix setting says.
+TRANSCODES = {
+    "aac": "transcodeaac",
+    "aac_he": "transcodeaac",
+}
+TRANSCODE_OFF = "off"
 
 
 def codec_name(description):
@@ -182,12 +198,41 @@ def read_tracks(session):
     return tracks
 
 
-def active_of(tracks):
-    """The index of the active track in a list `read_tracks` built, or None."""
-    for track in tracks or ():
-        if track.get("active"):
-            return track.get("index")
-    return None
+class ActiveTrack:
+    """The codec of the track being played, read once for each track of each service.
+
+    The look costs the index of the playing track and the playing reference;
+    the track's description is read only when one of the two is not what it
+    was at the last look. `forget()` is for a service event, after which the
+    same index of the same reference may be another track.
+    """
+
+    def __init__(self):
+        self._key = None
+        self._codec = None
+
+    def forget(self):
+        self._key = None
+
+    def codec(self, session):
+        index = active_index(session)
+        if index is None:
+            self._key = None
+            return None
+        key = (current_service_reference(session), index)
+        if key != self._key:
+            self._codec = codec_name(self._description(session, index))
+            self._key = key
+        return self._codec
+
+    @staticmethod
+    def _description(session, index):
+        selection = _selection(session)
+        try:
+            info = selection.getTrackInfo(index)
+        except Exception:
+            return None
+        return _text(info, "getDescription", DESCRIPTION_LIMIT)
 
 
 # ---------------------------------------------------------------- passthrough --
@@ -236,30 +281,34 @@ def _decides(value):
     return None
 
 
-def passthrough_of(tracks):
-    """Whether the active track of `tracks` is passed to the television undecoded.
+def passthrough_for(codec):
+    """Whether a track of `codec` is passed to the television undecoded.
 
-    True, False, or None when it cannot be told: no active track, a codec this
-    plugin does not know, an image without the setting for it, or a setting
-    whose value is neither of the two this plugin is sure of.
+    True, False, or None when it cannot be told: a codec this plugin does not
+    know, an image without the setting for it, a setting whose value is
+    neither of the two this plugin is sure of, or a transcode of it switched
+    on.
     """
-    for track in tracks or ():
-        if not track.get("active"):
-            continue
-        codec = track.get("codec")
-        if codec in ALWAYS_DECODED:
-            return False
-        for name in SETTINGS.get(codec, ()):
-            value = _setting(name)
-            if value is not None:
-                return _decides(value)
+    if codec in ALWAYS_DECODED:
+        return False
+    transcode = _setting(TRANSCODES.get(codec, ""))
+    if isinstance(transcode, str) and transcode != TRANSCODE_OFF:
+        # A word on every image that has the switch; a yes/no there is no
+        # switch this plugin knows, and is left to the downmix setting.
         return None
+    for name in SETTINGS.get(codec, ()):
+        value = _setting(name)
+        if value is not None:
+            return _decides(value)
     return None
 
 
-def passthrough(session):
-    """`passthrough_of` for what is playing now."""
-    return passthrough_of(read_tracks(session))
+def passthrough_of(tracks):
+    """`passthrough_for` the active track of a list `read_tracks` built; None without one."""
+    for track in tracks or ():
+        if track.get("active"):
+            return passthrough_for(track.get("codec"))
+    return None
 
 
 def settings_known():

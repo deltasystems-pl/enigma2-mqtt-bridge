@@ -32,15 +32,27 @@ read, and when the read fails the topic is emptied rather than left saying
 what it said before.
 
 **The image's host, not ours, is what stops a client.** The server compares the
-host it was given with the one it holds, character for character, and it holds
-an IPv4 client as `::ffff:192.0.2.20`. The topic shows the address without that
-prefix; the command takes it as the topic shows it, finds the client in the
-image's list and hands the image its own spelling back.
+host it was given with the one it holds, character for character, and it may
+hold an IPv4 client as `::ffff:192.0.2.20`. The topic shows the address without
+that prefix; the command takes it either way, finds the client in the image's
+list and hands the image its own spelling back.
+
+**A row's name and bouquet are the channel list's.** They are resolved when the
+image's list changes, not on every look - and again when the channel list says
+it was walked (`ChannelsPublisher.when_changed`), because that is when they can
+differ for the same client: the stream area starts before the first walk, and
+a bouquet can be renamed while somebody is watching.
+
+**What the image raises is named by its type.** The text of an exception from
+the stream server can hold a client's address, and `last_error` is retained:
+the sentence carries the kind of error, the log has it at warning level, and
+the text is written at debug level only.
 """
 
 import os
 import time
 
+from .channels import is_playable as is_one_service
 from .enigma2 import (
     Ticker,
     enigma_attribute,
@@ -92,6 +104,12 @@ MAX_CLIENTS = 32
 # this is not an address.
 HOST_LIMIT = 64
 
+# A DVB reference is about thirty characters and one that carries a name or a
+# stream's address a few hundred. Anything longer is not a reference this
+# plugin could do anything with, and the topic is retained: such a row is
+# listed without it.
+SREF_LIMIT = 512
+
 MAPPED_PREFIX = "::ffff:"
 
 STOP_NOT_AVAILABLE = "stopping a stream client is not available on this image"
@@ -99,7 +117,13 @@ PLAYABLE_NOT_AVAILABLE = "this image cannot say whether a service can be played"
 UNREADABLE = "the receiver's list of stream clients cannot be read"
 NOT_CONNECTED = ("that stream client is not connected", "not_connected")
 NOT_STOPPED = ("the receiver did not stop that stream client", "not_stopped")
+STOP_RAISED = "the receiver could not stop that stream client: "
 NO_INFORMATION = "the receiver has no information for that service"
+NOT_ONE_SERVICE = (
+    "cmd/stream_playable takes the reference of one service, not of a bouquet or a marker"
+)
+NO_ANSWER = "the receiver did not say whether that service can be played"
+ANSWER_RAISED = "the receiver could not say whether that service can be played: "
 
 
 def refusal(pair):
@@ -177,19 +201,32 @@ def encoder_port():
     return _port(_config("plugins.transcodingsetup", "port"))
 
 
+def _dotted_quad(text):
+    """Whether `text` is an IPv4 address as it is written: four numbers up to 255."""
+    parts = text.split(".")
+    return len(parts) == 4 and all(
+        part.isascii() and part.isdigit() and len(part) <= 3 and int(part) <= 255
+        for part in parts
+    )
+
+
 def normalise_host(host):
     """A client's address as the topic shows it: an IPv4 address without its IPv6 wrapping."""
     text = str(host or "").strip()
-    if text.lower().startswith(MAPPED_PREFIX):
-        rest = text[len(MAPPED_PREFIX):]
-        parts = rest.split(".")
-        if len(parts) == 4 and all(part.isdigit() for part in parts):
-            return rest
+    if text.lower().startswith(MAPPED_PREFIX) and _dotted_quad(text[len(MAPPED_PREFIX):]):
+        return text[len(MAPPED_PREFIX):]
     return text[:HOST_LIMIT]
 
 
 def read_clients():
-    """`[(host, sref, encoder)]` exactly as the image holds them, or None."""
+    """`[(host, sref, encoder)]` exactly as the image holds them, or None.
+
+    None is "cannot be read", and it is the answer to everything but a list
+    of rows: a call that raises, and an answer of another shape - nothing, a
+    string, a dictionary, a row that is no `(host, reference, flag)`. Only an
+    empty list is "no clients"; reading a surprise as that would publish "no
+    clients" for a receiver that is serving some.
+    """
     server = _server()
     getter = getattr(server, "getConnectedClients", None) if server is not None else None
     if not callable(getter):
@@ -199,15 +236,15 @@ def read_clients():
     except Exception:
         LOG.debug("eStreamServer.getConnectedClients() raised")
         return None
-    clients = []
-    try:
-        for row in rows or ():
-            try:
-                clients.append((str(row[0] or ""), str(row[1] or ""), bool(row[2])))
-            except Exception:
-                continue
-    except TypeError:
+    if not isinstance(rows, (list, tuple)):
         return None
+    clients = []
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) < 3:
+            return None
+        if not isinstance(row[0], str) or not isinstance(row[1], str):
+            return None
+        clients.append((row[0], row[1], bool(row[2])))
     return clients
 
 
@@ -250,6 +287,10 @@ class StreamPublisher(Publisher):
     def playable_available(self):
         return self._playable
 
+    def lists_clients(self):
+        """Whether `stream_clients` is this run's to publish."""
+        return self._clients
+
     def start(self):
         server = _server()
         if server is None:
@@ -264,9 +305,22 @@ class StreamPublisher(Publisher):
             callable(getattr(center, "info", None))
             and enigma_attribute("eServiceReference") is not None
         )
-        self.refresh()
+        # Nothing is read here: the channel list has not been walked yet - it
+        # starts after this area - and a row built now would have no bouquet.
+        # The connect's snapshot is the first read.
+        channels = self.bridge.publisher("channels") if self.bridge is not None else None
+        listen = getattr(channels, "when_changed", None)
+        if listen is not None:
+            listen(self._channels_changed)
         self._ticker.start(POLL_MILLISECONDS)
         return True
+
+    def _channels_changed(self):
+        """The channel list was walked: what the rows say of it is resolved again.
+
+        At the next look or connect, not here - this runs inside the walk.
+        """
+        self._key = None
 
     def stop(self):
         self._ticker.stop()
@@ -298,6 +352,9 @@ class StreamPublisher(Publisher):
         """The `stream_clients` payload for the image's list."""
         rows = []
         for host, sref, encoder in clients[:MAX_CLIENTS]:
+            if len(sref) > SREF_LIMIT:
+                # Not a reference: the row is listed and counted without it.
+                sref = ""
             rows.append({
                 "host": normalise_host(host),
                 "sref": sref or None,
@@ -367,8 +424,10 @@ class StreamPublisher(Publisher):
                 # The image's own spelling of both: it compares them as text.
                 stopped = stopper(held_host, held_sref)
             except Exception as error:
-                LOG.exception("eStreamServer.stopStreamClient() raised")
-                return type(error).__name__ + ": " + str(error)
+                # Its text can name a client's address: not on a retained topic.
+                LOG.warning("eStreamServer.stopStreamClient() raised %s", type(error).__name__)
+                LOG.debug("stopStreamClient said: %s", error)
+                return Refusal(STOP_RAISED + type(error).__name__, NOT_STOPPED[1])
             if not stopped:
                 return refusal(NOT_STOPPED)
             self._after_stop.start(STOP_REFRESH_MILLISECONDS, True)
@@ -394,6 +453,10 @@ class StreamPublisher(Publisher):
                 return "'" + str(sref) + "' is not a service reference"
         except Exception:
             return "'" + str(sref) + "' is not a service reference"
+        if not is_one_service(sref):
+            # For a bouquet the image answers for any one of its members, by
+            # walking it; a marker is nothing to play.
+            return NOT_ONE_SERVICE
         try:
             info = _service_center().info(reference)
         except Exception:
@@ -404,12 +467,15 @@ class StreamPublisher(Publisher):
         try:
             answer = ask(reference, enigma_attribute("eServiceReference")())
         except Exception as error:
-            LOG.exception("isPlayable raised")
-            return type(error).__name__ + ": " + str(error)
-        if not isinstance(answer, int):
-            # A boolean is an integer here, and either is an answer.
-            return "the receiver did not say whether that service can be played"
-        payload = {"sref": str(sref), "playable": bool(answer), "ts": int(time.time())}
+            LOG.warning("isPlayable raised %s", type(error).__name__)
+            LOG.debug("isPlayable said: %s", error)
+            return ANSWER_RAISED + type(error).__name__
+        if not isinstance(answer, int) or answer < 0:
+            # A boolean is an integer here, and either is an answer: zero is
+            # no and a positive number is yes. A negative one is the image
+            # saying something else, and is not read as yes.
+            return NO_ANSWER
+        payload = {"sref": str(sref), "playable": answer > 0, "ts": int(time.time())}
         if command_id is not None:
             payload["id"] = command_id
         self.last_answer = payload
