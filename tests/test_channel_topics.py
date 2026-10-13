@@ -363,6 +363,41 @@ def test_a_bouquet_keeps_its_stamp_until_its_list_differs(live_bridge, factory, 
     assert factory.client.last(SPORT).json()["generated"] == first + 2000
 
 
+def test_a_bouquet_whose_reference_changed_is_published_with_the_new_one(live_bridge, factory,
+                                                                         receiver, monkeypatch):
+    """A list is compared by all of it: the same name over the same services, in another file.
+
+    Compared without the reference, the parts the walk before made would be
+    kept - and the old reference with them, in the JSON a walk publishes and a
+    connect sends, while the payload a caller gets carries the new one.
+    """
+    first = factory.client.last(SPORT).json()["generated"]
+    pinned_clock(monkeypatch, first + 1000)
+    publisher = live_bridge.publisher("channels")
+    receiver.service_center.contents[conftest.BOUQUET_ROOT][1] = (THIRD_BOUQUET, "Sport (HD)")
+    receiver.service_center.contents[THIRD_BOUQUET] = [(POLSAT, "Polsat Sport")]
+    factory.client.clear()
+
+    publisher.refresh()
+
+    sent = factory.client.all_for(SPORT)
+    assert len(sent) == 1
+    assert sent[0].json() == {
+        "bouquet": "Sport (HD)",
+        "sref": THIRD_BOUQUET,
+        "generated": first + 1000,
+        "channels": [{"sref": POLSAT, "name": "Polsat Sport"}],
+    }
+    assert factory.client.all_for(ULUBIONE) == []
+
+    # And a connect sends what the walk did, which is what a caller is handed.
+    factory.client.clear()
+    factory.client.fire_connect()
+    payload = publisher.snapshot()["channels/sport_hd"]
+    assert payload["sref"] == THIRD_BOUQUET
+    assert factory.client.last(SPORT).text == bridge_module._encoded(payload)
+
+
 def test_a_restart_of_the_plugin_stamps_every_bouquet_anew(make_bridge, factory, settings,
                                                            receiver, state_path, monkeypatch):
     """The stamps are kept in memory; a new process has only its own first walk to go by."""
@@ -416,6 +451,16 @@ def test_a_walk_encodes_each_list_once_and_a_connect_none(live_bridge, factory, 
     factory.client.fire_connect()
     assert kinds(built) == ["channels"]
     assert factory.client.last(SPORT).json()["channels"][-1] == {"sref": TVN, "name": "TVN HD"}
+
+
+def test_a_bouquet_without_a_topic_is_not_encoded_for_one(live_bridge, receiver, monkeypatch):
+    """A name that leaves no slug has no topic, and its list is not encoded for one."""
+    name_bouquets(receiver, "***", "Sport (HD)")
+    built = watch_encoding(monkeypatch)
+
+    live_bridge.publisher("channels").refresh()
+
+    assert kinds(built) == ["channels", "index", "list"]
 
 
 # ------------------------------------------------------------------ over the bound --
@@ -762,6 +807,29 @@ def test_a_deselected_bouquet_has_its_list_retracted(live_bridge, factory, setti
     assert live_bridge.state.channel_slugs == ["ulubione_tv"]
     assert factory.client.all_for(ULUBIONE) == []
     assert [entry["slug"] for entry in index(factory)] == ["ulubione_tv"]
+
+
+def test_a_bouquet_that_went_and_came_back_is_stamped_anew(live_bridge, factory, settings,
+                                                           monkeypatch):
+    """Its topic was retracted in between, so the list on it now is not the one from before.
+
+    Only the walk before is compared with. What an earlier one made of a
+    bouquet goes with the bouquet, and is not kept to be found again.
+    """
+    first = factory.client.last(SPORT).json()["generated"]
+    clock = pinned_clock(monkeypatch, first + 1000)
+    publisher = live_bridge.publisher("channels")
+    settings.bouquets_for_select.value = "Ulubione TV"
+    publisher.refresh()
+    assert factory.client.last(SPORT).text == ""
+    assert publisher.prepared("channels/sport_hd", None) == (None, None)
+
+    clock[0] += 500
+    settings.bouquets_for_select.value = ""
+    publisher.refresh()
+
+    assert factory.client.last(SPORT).json()["generated"] == first + 1500
+    assert factory.client.last(ULUBIONE).json()["generated"] == first
 
 
 def test_a_renamed_bouquet_has_its_old_topic_retracted(live_bridge, factory, receiver):

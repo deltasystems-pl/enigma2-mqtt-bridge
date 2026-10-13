@@ -198,6 +198,19 @@ def test_another_size_while_it_stays_too_big_says_nothing_new(make_bridge, facto
     assert not_published(factory) == [entry("channels", CHANNELS, BIG)]
 
 
+def test_the_size_kept_is_the_first_one_measured(make_bridge, factory, settings):
+    """Another size is no change to the list, so no `info` follows it."""
+    bridge, publisher = connect(make_bridge, factory, settings, BIG)
+    conftest.say_withheld()
+    factory.client.clear()
+
+    publisher.publish("channels", channel_list(LIMIT + 2000))
+    conftest.say_withheld()
+
+    assert bridge.not_published() == [entry("channels", CHANNELS, BIG)]
+    assert factory.client.published == []
+
+
 def test_too_big_again_after_it_fitted_is_a_new_withholding(make_bridge, factory, settings,
                                                             plugin_log):
     _bridge, publisher = connect(make_bridge, factory, settings, BIG)
@@ -616,6 +629,22 @@ def test_a_publisher_withholds_nothing_behind_closed_doors(make_bridge, factory,
     assert factory.client.published == []
     assert bridge.not_published() == []
     assert bridge.state.knows(CHANNELS)
+
+
+def test_a_publisher_withholds_nothing_without_a_client(make_bridge, settings, plugin_log):
+    """The first of `publish_raw`'s conditions, which `withhold_state` repeats.
+
+    A defensive guard: `publish_snapshot` is the only caller, from a connect
+    and from a reset, and nothing in the plugin was found to reach it without
+    a client - a bridge that is stopped has no publisher left to ask.
+    """
+    settings.node_id.value = NODE
+    bridge = make_bridge()
+
+    assert bridge.withhold_state("channels", LIMIT + 1) is None
+
+    assert bridge.not_published() == []
+    assert "not publishing" not in plugin_log()
 
 
 def test_the_same_small_payload_is_published_again_after_a_big_one(make_bridge, factory,
