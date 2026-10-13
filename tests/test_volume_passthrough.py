@@ -195,6 +195,38 @@ def test_a_track_that_could_not_be_read_once_is_read_at_the_next_look(av, live_b
     assert calls == [1, 1]
 
 
+def test_a_key_press_reads_no_track_while_the_read_keeps_failing(av, live_bridge, factory,
+                                                                receiver, monkeypatch):
+    """The retry is the periodic look's: five presses, no read; the next look, one."""
+    receiver.audio.tracks = [AudioTrackInfo("MPEG", "pol", 5001),
+                             AudioTrackInfo("Dolby Digital", "pol", 5002)]
+    receiver.nav.fire(EV_START)
+    real = receiver.audio.getTrackInfo
+    calls = []
+    failing = [True]
+
+    def flaky(index):
+        calls.append(index)
+        if failing[0]:
+            raise RuntimeError("no program information yet")
+        return real(index)
+
+    monkeypatch.setattr(receiver.audio, "getTrackInfo", flaky)
+    receiver.audio.selectTrack(1)
+    reconcile(live_bridge)
+    assert calls == [1]
+    for _ in range(5):
+        receiver.volume_control.volUp()
+    assert calls == [1]
+    assert passthrough(factory) is None
+    failing[0] = False
+    receiver.volume_control.volUp()
+    assert calls == [1]
+    reconcile(live_bridge)
+    assert calls == [1, 1]
+    assert passthrough(factory) is True
+
+
 def test_without_service_events_the_track_is_read_at_every_look(av, make_bridge, factory,
                                                                settings, receiver):
     """Nothing will say the service changed, so the short bound is the only one."""

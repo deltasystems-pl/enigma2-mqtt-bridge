@@ -28,7 +28,8 @@ the service is another: the volume is read on every key press, and on one
 image describing a track starts work in the decoder. Once is not for ever: a
 track can change under the same index with nothing said, so the description
 is read again after a number of periodic looks, and a read that failed is
-tried again the next time it is asked for.
+tried again at the next periodic look - not at the next ask, which may be a
+key press.
 
 Nothing here reads a file. The settings are attributes of objects the image
 already holds in memory, and the tracks are calls into the playing service.
@@ -213,8 +214,9 @@ class ActiveTrack:
     `looked()` is called once for each periodic look, and after
     `reread_looks` of them the description is read again - so the bound is
     that many looks, and asking in between (a volume key press) neither
-    reads nor brings the next read nearer. And a read that failed is not
-    kept: the next ask reads again.
+    reads nor brings the next read nearer. And a read that failed is kept
+    only until the next look: that look forgets it, so the ask after it
+    reads again, while every ask before it is answered "unknown" unread.
     """
 
     def __init__(self, reread_looks=None):
@@ -223,12 +225,16 @@ class ActiveTrack:
         self._looks = 0
         self._key = None
         self._codec = None
+        self._failed = False
 
     def forget(self):
         self._key = None
+        self._failed = False
 
     def looked(self):
         """One periodic look has gone by."""
+        if self._failed:
+            self.forget()
         if not self.reread_looks:
             return
         self._looks += 1
@@ -246,10 +252,13 @@ class ActiveTrack:
             try:
                 info = _selection(session).getTrackInfo(index)
             except Exception:
-                # Not an answer: asked again the next time.
-                self._key = None
-                return None
-            self._codec = codec_name(_text(info, "getDescription", DESCRIPTION_LIMIT))
+                # Not an answer, and kept as "unknown" for this track until
+                # the next periodic look, which is when it is tried again.
+                self._codec = None
+                self._failed = True
+            else:
+                self._codec = codec_name(_text(info, "getDescription", DESCRIPTION_LIMIT))
+                self._failed = False
             self._key = key
         return self._codec
 

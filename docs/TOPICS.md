@@ -1799,8 +1799,11 @@ whole text.
 a client of the RTSP server beside one of the stream server, can be two rows with one host and
 one reference. Nothing tells them apart, here or in the image: one command ends the first the
 image finds, the list is read again two seconds later, and the row that is still there is the
-other one. When the same host is sent the same service twice in two spellings - once
-transcoded, once not, say - the two rows are one client to this command, and the image ends the first it finds; sending the command again ends
+other one. When the same host is sent the same service twice in two spellings - with a name
+behind the reference and without, say - the command ends the row whose `sref` it spells exactly
+as the topic shows it. Only a reference that is spelled as none of the rows is - another case, a
+missing trailing colon, another name behind it - falls back to the eleven-field rule, and then
+the two rows are one client to this command, and the image ends the first it finds; sending the command again ends
 the other. The image answers at once and the connection ends a moment later (measured: about
 1.4 s), so the row is still on `stream_clients` until the list is read again, two seconds after
 the command. **A player that reconnects by itself is back by then**, as a new connection the

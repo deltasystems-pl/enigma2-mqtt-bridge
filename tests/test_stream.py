@@ -875,6 +875,56 @@ def test_a_row_listed_without_its_reference_cannot_be_stopped_by_any_spelling(
     assert factory.client.last(LAST_ERROR).json()["reason"] == "not_connected"
 
 
+SPELLINGS = [TVP1, TVP1 + ":TVP 1 HD", TVP1.lower().rstrip(":")]
+
+
+@pytest.mark.parametrize("order", [SPELLINGS, SPELLINGS[::-1]], ids=["as listed", "reversed"])
+@pytest.mark.parametrize("named", SPELLINGS, ids=["plain", "with a name", "lower, no colon"])
+def test_a_stop_lands_on_the_row_whose_reference_it_spells(box, server, factory, order, named):
+    """One host, one service, three spellings: the row named is the row ended."""
+    server.clients = [(PHONE, sref, 0) for sref in order]
+    tick(box)
+    assert [row["sref"] for row in factory.client.last(CLIENTS).json()["clients"]] == order
+    send(factory, "stream_stop", {"host": "192.0.2.20", "sref": " " + named + " "})
+    assert server.stopped == [(PHONE, named)]
+    assert [client[1] for client in server.clients] == [s for s in order if s != named]
+
+
+@pytest.mark.parametrize("order", [SPELLINGS[1:], SPELLINGS[:0:-1]],
+                         ids=["as listed", "reversed"])
+def test_a_spelling_no_row_has_still_ends_the_first_row_of_that_service(box, server, factory,
+                                                                        order):
+    """The eleven-field rule is the fallback: the first such row in the image's order."""
+    server.clients = [(PHONE, sref, 0) for sref in order]
+    send(factory, "stream_stop", {"host": "192.0.2.20", "sref": TVP1})
+    assert server.stopped == [(PHONE, order[0])]
+
+
+def test_the_fallback_passes_over_another_service_of_the_same_host(box, server, factory):
+    server.clients = [(PHONE, TVN, 0), (PHONE, TVP1 + ":TVP 1 HD", 0)]
+    send(factory, "stream_stop", {"host": "192.0.2.20", "sref": TVP1})
+    assert server.stopped == [(PHONE, TVP1 + ":TVP 1 HD")]
+
+
+def test_an_exact_spelling_on_another_host_is_not_a_match(box, server, factory):
+    server.clients = [(TABLET, TVP1, 0), (PHONE, TVP1 + ":TVP 1 HD", 0)]
+    send(factory, "stream_stop", {"host": "192.0.2.20", "sref": TVP1})
+    assert server.stopped == [(PHONE, TVP1 + ":TVP 1 HD")]
+
+
+def test_a_reference_one_character_over_the_limit_cannot_be_stopped(box, server, factory):
+    """The stop's side of the boundary `stream_clients` draws at 512."""
+    held = TVP1 + ":" + "N" * (513 - len(TVP1) - 1)
+    assert len(held) == 513
+    server.clients = [(PHONE, held, 0)]
+    tick(box)
+    assert factory.client.last(CLIENTS).json()["clients"][0]["sref"] is None
+    for named in (TVP1, held):
+        send(factory, "stream_stop", {"host": "192.0.2.20", "sref": named})
+        assert factory.client.last(LAST_ERROR).json()["reason"] == "not_connected"
+    assert server.stopped == []
+
+
 def test_a_reference_of_exactly_the_limit_is_listed_and_can_be_stopped(box, server, factory):
     held = TVP1 + ":" + "N" * (512 - len(TVP1) - 1)
     assert len(held) == 512

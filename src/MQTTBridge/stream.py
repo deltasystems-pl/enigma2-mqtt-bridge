@@ -415,13 +415,21 @@ class StreamPublisher(Publisher):
         if clients is None:
             return UNREADABLE
         wanted = normalise_host(host).lower()
-        for held_host, held_sref, _encoder in clients:
-            if len(held_sref) > SREF_LIMIT:
-                # Listed without its reference (`build`), so it is not a row
-                # anybody can have named - and by its first eleven fields it
-                # may be the same service as the row that was.
-                continue
-            if normalise_host(held_host).lower() != wanted or not same_service(held_sref, sref):
+        named = str(sref).strip()
+        # The rows of that host that can be named at all. One listed without
+        # its reference (`build`) is not a row anybody can have named - and
+        # by its first eleven fields it may be the same service as one that
+        # was.
+        rows = [
+            (held_host, held_sref) for held_host, held_sref, _encoder in clients
+            if len(held_sref) <= SREF_LIMIT and normalise_host(held_host).lower() == wanted
+        ]
+        # The reference as the topic shows it first, so that of several rows
+        # of one service in different spellings the one named is the one
+        # ended; then the first row that is the same service.
+        exact = [row for row in rows if row[1] == named]
+        for held_host, held_sref in exact or rows:
+            if not same_service(held_sref, sref):
                 continue
             try:
                 # The image's own spelling of both, of this very row: the

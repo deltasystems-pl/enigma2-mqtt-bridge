@@ -444,8 +444,8 @@ def test_without_a_bound_a_look_changes_nothing():
     assert asked == [0]
 
 
-def test_a_read_that_failed_is_tried_again_at_the_next_ask():
-    """Not kept as "no codec" until something else happens."""
+def test_a_read_that_failed_is_tried_again_at_the_next_look_and_not_at_an_ask():
+    """Not kept as "no codec" until something else happens - and not read on a key press."""
     session = session_with([AudioTrackInfo("MPEG"), AudioTrackInfo("AC3")])
     tracks = session.nav.service._audio
     real = tracks.getTrackInfo
@@ -459,11 +459,36 @@ def test_a_read_that_failed_is_tried_again_at_the_next_ask():
 
     tracks.getTrackInfo = flaky
     tracks.current = 1
-    track = audio.ActiveTrack()
+    track = audio.ActiveTrack(reread_looks=6)
     assert track.codec(session) is None
+    assert [track.codec(session) for _ in range(5)] == [None] * 5
+    assert calls == [1]
+    track.looked()
     assert track.codec(session) == "ac3"
     assert track.codec(session) == "ac3"
     assert calls == [1, 1]
+    # And the retry did not use up the bound: five more looks read nothing.
+    for _ in range(5):
+        track.looked()
+        track.codec(session)
+    assert calls == [1, 1]
+
+
+def test_a_read_that_keeps_failing_is_tried_once_a_look():
+    session = session_with([AudioTrackInfo("AC3")])
+    tracks = session.nav.service._audio
+    calls = []
+
+    def broken(index):
+        calls.append(index)
+        raise RuntimeError("no program information")
+
+    tracks.getTrackInfo = broken
+    track = audio.ActiveTrack()
+    for _ in range(3):
+        track.looked()
+        assert [track.codec(session) for _ in range(4)] == [None] * 4
+    assert calls == [0, 0, 0]
 
 
 def test_a_track_that_describes_itself_with_nothing_is_not_a_failed_read():
@@ -487,6 +512,11 @@ def test_an_active_track_that_cannot_be_named_or_described_has_no_codec():
     assert track.codec(session) is None
     session.nav.service._audio.current = 0
     assert track.codec(session) == "ac3"
+    session.nav.service._audio.current = 9
+    assert track.codec(session) is None
+    track.forget()
+    session.nav.service._audio.tracks.extend([AudioTrackInfo("DTS")] * 9)
+    assert track.codec(session) == "dts"
 
 
 # ---- AAC and the separate transcode switch (`config.av.transcodeaac`)
