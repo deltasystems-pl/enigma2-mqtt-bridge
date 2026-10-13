@@ -51,8 +51,10 @@ def image(monkeypatch):
     """The image's own settings a stream is described from; absent from the shared stub."""
     streaming = ConfigSubsection()
     streaming.authentication = ConfigYesNo(default=False)
+    # What OpenWebif writes into its own links, which may be a forwarded port.
+    # Deliberately not 8001: nothing the plugin publishes may follow it.
     openwebif = ConfigSubsection()
-    openwebif.streamport = ConfigInteger(default=8001, limits=(1, 65535))
+    openwebif.streamport = ConfigInteger(default=9001, limits=(1, 65535))
     transcoding = ConfigSubsection()
     transcoding.port = ConfigInteger(default=8002, limits=(8002, 9999))
     monkeypatch.setattr(config, "streaming", streaming, raising=False)
@@ -96,26 +98,45 @@ def test_the_stream_topic_says_where_the_stream_server_is(box, factory):
     }
 
 
-def test_the_port_is_the_one_openwebif_is_set_to(image, server, make_bridge, factory, settings,
-                                                 receiver):
+def test_the_port_is_the_one_the_server_listens_on_whatever_openwebif_says(image, box, factory):
+    """OpenWebif's `streamport` is what it writes into its links - here 9001. Not published."""
+    assert image.OpenWebif.streamport.value == 9001
+    assert factory.client.last(STREAM).json()["port"] == 8001
     image.OpenWebif.streamport.value = 18001
-    start(make_bridge, factory, settings, receiver)
-    assert factory.client.last(STREAM).json()["port"] == 18001
+    factory.client.clear()
+    tick(box)
+    assert factory.client.all_for(STREAM) == []
+    factory.client.fire_connect()
+    assert factory.client.last(STREAM).json()["port"] == 8001
+
+
+def test_openwebifs_setting_is_never_read(server, make_bridge, factory, settings, receiver,
+                                          monkeypatch):
+    class Trap:
+        def __getattr__(self, name):
+            raise AssertionError("the plugin read config.OpenWebif." + name)
+
+    monkeypatch.setattr(config, "OpenWebif", Trap(), raising=False)
+    bridge = start(make_bridge, factory, settings, receiver)
+    tick(bridge)
+    assert factory.client.last(STREAM).json()["port"] == 8001
+    assert stream.LISTEN_PORT == 8001
+
+
+def transcoding_port(monkeypatch, value):
+    section = ConfigSubsection()
+    section.port = type("Element", (), {"value": value})()
+    monkeypatch.setattr(config.plugins, "transcodingsetup", section, raising=False)
+    return stream.encoder_port()
 
 
 @pytest.mark.parametrize("value", [0, 65536, "eight thousand", None, True])
-def test_a_port_that_is_not_one_is_the_default(monkeypatch, value):
-    section = ConfigSubsection()
-    section.streamport = type("Element", (), {"value": value})()
-    monkeypatch.setattr(config, "OpenWebif", section, raising=False)
-    assert stream.stream_port() == 8001
+def test_an_encoder_port_that_is_not_a_port_is_none(monkeypatch, value):
+    assert transcoding_port(monkeypatch, value) is None
 
 
-def test_a_port_kept_as_text_is_read_as_a_number(monkeypatch):
-    section = ConfigSubsection()
-    section.streamport = type("Element", (), {"value": " 8003 "})()
-    monkeypatch.setattr(config, "OpenWebif", section, raising=False)
-    assert stream.stream_port() == 8003
+def test_an_encoder_port_kept_as_text_is_read_as_a_number(monkeypatch):
+    assert transcoding_port(monkeypatch, " 8003 ") == 8003
 
 
 @pytest.mark.parametrize("port", [1, 65535])
@@ -139,8 +160,8 @@ def test_a_setting_that_cannot_be_read_is_no_setting(monkeypatch):
         def __getattr__(self, name):
             raise RuntimeError("this image's settings object is not what it was")
 
-    monkeypatch.setattr(config, "OpenWebif", Trap(), raising=False)
-    assert stream.stream_port() == 8001
+    monkeypatch.setattr(config, "streaming", Trap(), raising=False)
+    assert stream.authentication() is None
 
 
 def test_whether_the_stream_wants_a_login_is_the_images_setting(image, box, factory):
@@ -171,9 +192,9 @@ def test_the_descriptor_is_published_only_when_it_changed(image, box, factory):
     tick(box)
     tick(box)
     assert factory.client.all_for(STREAM) == []
-    image.OpenWebif.streamport.value = 8003
+    image.streaming.authentication.value = True
     tick(box)
-    assert [one.json()["port"] for one in factory.client.all_for(STREAM)] == [8003]
+    assert [one.json()["authentication"] for one in factory.client.all_for(STREAM)] == [True]
 
 
 @pytest.mark.parametrize("which", [0, 1, 2])
@@ -402,14 +423,14 @@ def test_the_list_is_cut_at_thirty_two_rows_and_the_count_is_not(box, server, fa
         "192.0.2." + str(number) for number in range(1, 33)]
 
 
-def test_a_list_that_cannot_be_read_publishes_nothing_and_raises_nothing(box, server, factory,
+def test_a_list_that_cannot_be_read_names_no_client_and_raises_nothing(box, server, factory,
                                                                         plugin_log):
     server.clients = [(PHONE, TVP1, 0)]
     tick(box)
     factory.client.clear()
     server.raises = True
     tick(box)
-    assert factory.client.all_for(CLIENTS) == []
+    assert [one.text for one in factory.client.all_for(CLIENTS)] == [""]
     assert "Traceback" not in plugin_log()
     server.raises = False
     server.clients = []
@@ -438,6 +459,93 @@ def test_a_reconnect_publishes_both_topics_again(box, server, factory):
     factory.client.fire_connect()
     assert factory.client.last(STREAM).json()["port"] == 8001
     assert factory.client.last(CLIENTS).json()["count"] == 1
+
+
+def test_the_first_list_after_a_connect_is_the_one_the_image_holds_now(box, server, factory):
+    """A client that left while the session was down must not be offered for stopping."""
+    server.clients = [(PHONE, TVP1, 0)]
+    tick(box)
+    assert factory.client.last(CLIENTS).json()["count"] == 1
+    server.clients = []
+    factory.client.clear()
+    factory.client.fire_connect()
+    assert factory.client.last(CLIENTS).json() == {"count": 0, "clients": []}
+
+
+def test_a_new_run_of_the_plugin_publishes_the_list_it_reads(server, make_bridge, factory,
+                                                             settings, receiver):
+    """Whatever an earlier run left retained is replaced at the first connect."""
+    server.clients = [(TABLET, TVN, 1)]
+    start(make_bridge, factory, settings, receiver)
+    published = factory.client.all_for(CLIENTS)
+    assert [one.retain for one in published] == [True] * len(published)
+    assert published[-1].json()["clients"][0]["host"] == TABLET
+
+
+def test_a_list_that_cannot_be_read_is_taken_off_the_broker(box, server, factory):
+    """Unknown is an empty retained topic, never the last list the plugin managed to read."""
+    server.clients = [(PHONE, TVP1, 0)]
+    tick(box)
+    server.raises = True
+    factory.client.clear()
+    tick(box)
+    tick(box)
+    assert [one.text for one in factory.client.all_for(CLIENTS)] == [""]
+    factory.client.clear()
+    factory.client.fire_connect()
+    assert [one.text for one in factory.client.all_for(CLIENTS)] == [""]
+    server.raises = False
+    tick(box)
+    assert factory.client.last(CLIENTS).json()["count"] == 1
+
+
+def test_a_list_that_could_never_be_read_retracts_what_an_earlier_run_left(
+    server, make_bridge, factory, settings, receiver
+):
+    server.raises = True
+    start(make_bridge, factory, settings, receiver)
+    published = factory.client.all_for(CLIENTS)
+    assert published and {one.text for one in published} == {""}
+    assert {one.retain for one in published} == {True}
+
+
+def running(publisher):
+    return [ticker.timer for ticker in (publisher._ticker, publisher._after_stop)
+            if ticker.timer is not None]
+
+
+def test_the_look_is_stopped_when_the_bridge_stops(box, server, factory):
+    publisher = box.publisher("stream")
+    publisher._after_stop.start(2000, True)
+    box.stop()
+    assert running(publisher) == []
+    assert box.publisher("stream") is None
+
+
+def test_the_look_is_stopped_when_the_settings_are_saved(box):
+    old = box.publisher("stream")
+    box.reload()
+    assert running(old) == []
+    assert box.publisher("stream") is not old
+
+
+def test_the_look_is_stopped_on_the_path_an_uninstall_and_an_update_take(box):
+    """Both close the doors with `_stop_publishers`, the same call a stop makes."""
+    publisher = box.publisher("stream")
+    box._stop_publishers()
+    assert running(publisher) == []
+
+
+def test_nothing_is_published_once_the_plugin_is_removing_itself(box, server, factory,
+                                                                 monkeypatch):
+    """A look already queued when the doors closed must not re-create a retained topic."""
+    publisher = box.publisher("stream")
+    monkeypatch.setattr(box.uninstaller, "closed", True)
+    server.clients = [(PHONE, TVP1, 0)]
+    factory.client.clear()
+    publisher.refresh()
+    publisher.playable(TVN)
+    assert factory.client.topics() == []
 
 
 def test_both_topics_are_the_nodes_to_take_back(box):
@@ -503,6 +611,36 @@ def test_the_host_may_be_sent_as_the_image_holds_it(box, server, factory):
     server.clients = [(PHONE, TVP1, 0)]
     send(factory, "stream_stop", {"host": "::FFFF:192.0.2.20", "sref": TVP1})
     assert server.stopped == [(PHONE, TVP1)]
+
+
+@pytest.mark.parametrize("held", ["::ffff:192.0.2.20", "192.0.2.20"])
+@pytest.mark.parametrize("sent", ["::ffff:192.0.2.20", "192.0.2.20", "::FFFF:192.0.2.20"])
+def test_a_host_with_the_ipv6_wrapping_and_one_without_are_the_same_client(box, server, factory,
+                                                                           held, sent):
+    """Whichever way the image holds it and whichever way it is sent."""
+    server.clients = [(held, TVP1, 0)]
+    send(factory, "stream_stop", {"host": sent, "sref": TVP1})
+    assert server.stopped == [(held, TVP1)]
+
+
+@pytest.mark.parametrize("sent", [
+    TVP1.rstrip(":"),          # without the trailing colon
+    TVP1.lower(),              # in another case
+    TVP1 + ":TVP 1 HD",        # with a name behind it
+])
+def test_a_reference_spelled_another_way_is_the_same_service(box, server, factory, sent):
+    """The rule of `service`: the first eleven fields, whatever their case."""
+    assert sent != TVP1
+    server.clients = [(PHONE, TVP1, 0)]
+    send(factory, "stream_stop", {"host": "192.0.2.20", "sref": sent})
+    assert server.stopped == [(PHONE, TVP1)]
+
+
+def test_a_reference_that_differs_in_a_field_is_another_service(box, server, factory):
+    server.clients = [(PHONE, TVP1, 0)]
+    send(factory, "stream_stop", {"host": "192.0.2.20", "sref": TVP1.replace("283D", "283C")})
+    assert server.stopped == []
+    assert factory.client.last(LAST_ERROR).json()["reason"] == "not_connected"
 
 
 def test_an_ipv6_host_is_matched_whatever_its_case(box, server, factory):
@@ -646,6 +784,15 @@ def test_the_answer_says_the_commands_id_back(box, factory):
     send(factory, "stream_playable", {"id": "q-2", "payload": TVP1})
     answer = factory.client.last(PLAYABLE).json()
     assert (answer["id"], answer["sref"]) == ("q-2", TVP1)
+
+
+def test_a_question_without_an_id_is_answered_and_told_by_its_reference(box, factory):
+    send(factory, "stream_playable", TVN)
+    send(factory, "stream_playable", {"sref": TVP1})
+    answers = [one.json() for one in factory.client.all_for(PLAYABLE)]
+    assert [answer["sref"] for answer in answers] == [TVN, TVP1]
+    assert not [answer for answer in answers if "id" in answer]
+    assert factory.client.last(LAST_ERROR) is None
 
 
 def test_two_questions_get_two_answers_even_when_they_are_the_same(box, factory):

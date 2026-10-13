@@ -541,9 +541,10 @@ codec members were added it is also published on the decoder's own events - `evV
 `evVideoFramerateChanged`, `evVideoProgressiveChanged` - where the image has them, which is when
 the frame rate and the scan become known; and when the audio track being played is not the one
 last published. Nothing announces a change of track - the image raises no event when somebody
-picks another one on the remote - so the plugin asks which track is playing every five seconds,
-one call, and publishes only when the answer moved. As always, a payload equal to the last one is
-not sent again.
+picks another one on the remote - so the plugin asks which track is playing every five seconds -
+two cheap calls that read no track, and none at all with nothing playing, which is what standby
+is - and publishes only when the answer moved. As always, a payload equal to the last one is not
+sent again.
 
 With nothing playing every field is `null`; the keys are still all there.
 
@@ -1024,7 +1025,7 @@ needs to ask. The plugin starts no stream and carries no video. Retained, and pr
 
 | Field | Type | Meaning |
 |---|---|---|
-| `port` | int | The port a stream is asked for on: the image's OpenWebif setting (`config.OpenWebif.streamport`) where it has one, otherwise 8001, the port the stream server of all three images listens on |
+| `port` | int | The port the stream server listens on: `8001`. It is not a setting - OpenViX, OpenATV and OpenPLi each hard-code it where the server is built - so it is the same on every receiver, and is published so that a consumer does not have to know that. OpenWebif's own "streaming port" setting is not this and is not published: it is what OpenWebif writes into the links it hands out |
 | `path` | string | The form of the request path, with `{sref}` where the service reference goes: `/{sref}`. The reference goes in as it is published - colons and the trailing colon included |
 | `authentication` | bool or `null` | Whether the stream server asks for a login (`config.streaming.authentication`). `null` where the image has no such setting. **Never the login itself** - see below |
 | `encoder` | bool | Whether the receiver has a hardware encoder: one of `/dev/bcm_enc0`, `/proc/stb/encoder/0`, `/dev/encoder0` exists. Looked for once, when the plugin starts |
@@ -1032,17 +1033,18 @@ needs to ask. The plugin starts no stream and carries no video. Retained, and pr
 
 **There is no host and no URL in it.** The receiver's address is `info.ip`; a stream's address is
 `http://` + `info.ip` + `:` + `port` + `path` with the reference filled in -
-`http://192.0.2.12:8001/1:0:19:283D:3FB:1:C00000:0:0:0:`. A consumer that reaches the receiver by
-another name or through a forwarded port uses its own.
+`http://192.0.2.12:8001/1:0:19:283D:3FB:1:C00000:0:0:0:`. A receiver reached by another name
+or through a forwarded port is the consumer's business - the Home Assistant side knows how it
+reaches the receiver, and the receiver does not.
 
 **No credential is ever published.** `authentication` is a boolean. With it on, the stream server
 wants HTTP basic authentication with an account of the receiver; which account, and its password,
 stay on the receiver, and whoever configures the consumer types them there.
 
-Published on every connect, and again when a value changed: the settings are read from memory
-every five seconds, with the look `stream_clients` takes, and the topic is sent only when it
-differs. The plugin reads what the image is set to; it does not test that anything answers on the
-port.
+Published on every connect, and again when a value changed: the two settings behind
+`authentication` and `encoder_port` are read from memory every five seconds, with the look
+`stream_clients` takes, and the topic is sent only when it differs. The plugin does not test
+that anything answers on the port.
 
 ### `<base>/<node>/stream_clients` - added after 0.4.0 (unreleased)
 
@@ -1074,9 +1076,19 @@ topic is published only when the list changed; names are resolved only then. A c
 and went between two looks was never on the topic. After a `cmd/stream_stop` the list is read
 again two seconds later, without waiting for the next look.
 
-**Everything is published**, as on `service` and `zap_history`: a client watching a channel of a
-bouquet that `bouquets_for_select` leaves out is listed with its reference and its name, and a
-`null` `bouquet`. A consumer that hides a bouquet hides the row itself.
+**Everything is published.** Every client of every bouquet is on the broker, retained, as every
+entry is on `zap_history` and every channel is on `channels`. Hiding a bouquet from a list in a
+consumer hides nothing here: a client watching a channel of a bouquet that `bouquets_for_select`
+leaves out is listed with its reference and its name, and a `null` `bouquet`. The plugin's
+OpenWebif page shows this payload as it is, to whoever OpenWebif admits. There is no setting for
+this topic: it is published wherever the image's stream server lists its clients.
+
+**What is retained is the list the image holds now, or nothing.** A consumer offers to stop what
+this topic lists, so a list that names a client that has left is worse than none. The first
+publish after every connect - a new session after a broker outage, and the first one of a plugin
+that has just started - is a fresh read of the image's list, never the one the plugin held
+before. When the list cannot be read, the topic is emptied - an empty retained payload - rather
+than left saying what it last said, and it is published again with the next read that works.
 
 On OpenATV the list also holds the clients of its RTSP server (read from its source, not
 measured), which `cmd/stream_stop` cannot end: the image does not look for them there, and the
@@ -1099,7 +1111,7 @@ asked about could be played now, beside everything the receiver is already doing
 | `sref` | string | The service reference that was asked about, as it was sent |
 | `playable` | bool | Whether the image says the service could be played now without taking a tuner from anything that is running - the television, a recording, another stream. The image gives no reason with a `false` |
 | `ts` | int | When it was asked, in epoch seconds |
-| `id` | string, optional | The id the command carried in its envelope (section 2), exactly as it was sent. Absent, not `null`, when it carried none - a consumer then tells its answer by `sref` |
+| `id` | string, optional | The id the command carried in its envelope (section 2), exactly as it was sent. Absent, not `null`, when it carried none. **A question without an id is answered all the same**, and its sender tells the answer by `sref` |
 
 One message for each question, including the same question asked twice. **It is true for the
 moment it was asked**: a recording that starts a second later takes the tuner the answer counted
@@ -1741,10 +1753,15 @@ television, and less than standby. The payload names the client by the two thing
 `stream_clients` shows for it:
 
 - `host` as the topic shows it - `192.0.2.20`. The image's own spelling of an IPv4 client,
-  `::ffff:192.0.2.20`, is taken too. The plugin finds the client in the image's list and hands the
-  image its own spelling back, because the image compares it as text.
-- `sref` as the topic shows it. Two references are the same service by the rule of `service`
-  (the first eleven fields), so a name behind the reference does not matter.
+  `::ffff:192.0.2.20`, is taken too, and the two name the same client whichever of them the image
+  holds; letters in an address are compared without regard to case. The plugin finds the client
+  in the image's list and hands the image its own spelling back, because the image compares it
+  as text.
+- `sref` as the topic shows it. Two references are the same service by the rule of `service` -
+  the first eleven colon-separated fields - compared without regard to case. So a name behind
+  the reference does not matter, nor does a missing trailing colon, nor `283d` for `283D`; a
+  reference that differs in any of those fields is another service, and is refused as not
+  connected.
 
 When the same host is sent the same service twice - once transcoded, once not - the two rows are
 one client to this command, and the image ends the first it finds; sending the command again ends

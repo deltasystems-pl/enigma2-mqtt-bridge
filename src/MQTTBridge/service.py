@@ -21,8 +21,9 @@ worth having on a slow tick rather than on an event that will not come.
 
 A third thing has no event either: the audio track. The image changes it when
 somebody picks another one on the remote and tells nobody, so `service` asks
-which track is playing every few seconds - one call - and reads the tracks
-again only when the answer moved.
+which track is playing every few seconds - two cheap calls, no track read -
+and reads the tracks again only when the answer moved. With nothing playing,
+which is what standby is, it asks nothing.
 """
 
 import time
@@ -1064,8 +1065,9 @@ class ServicePublisher(NavPublisher):
     def _check_audio(self):
         """Publish again when the track being played is not the one last published.
 
-        One call into the service. The tracks themselves are read only when
-        the answer differs - by `refresh`, which publishes only what changed.
+        Two calls into the service, and none with nothing playing. The tracks
+        themselves are read only when the answer differs - by `refresh`, which
+        publishes only what changed.
         """
         if self._current is None:
             return

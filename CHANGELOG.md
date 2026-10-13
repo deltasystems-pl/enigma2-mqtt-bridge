@@ -13,12 +13,15 @@ version that has no section here.
 
 - What only the receiver knows about streaming its channels, without the plugin carrying any
   video. A new retained topic, `stream`, says where the image's stream server is and what it
-  wants: the port, the form of the request path (`/{sref}` - the receiver's address is
+  wants: the port it listens on (8001 on every image; OpenWebif's own "streaming port" setting
+  is not published), the form of the request path (`/{sref}` - the receiver's address is
   `info.ip`), whether it asks for a login, whether the receiver has a hardware encoder and, where
   the image says, the transcoding port. No credential is published: whether a login is asked for
   is a boolean. A second retained topic, `stream_clients`, is the image's own list of who is being
   served: each client's address, service, name, bouquet and whether it is transcoded, at most 32
   rows with the full count beside them, read every five seconds and published when it changed.
+  The first publish after every connect is a fresh read, and a list that cannot be read is taken
+  off the broker rather than left as it was.
   `cmd/stream_stop` ends one client's stream, the one named by the `host` and `sref` the list
   shows; it needs no permission, as a zap needs none, never stops "all", and refuses a client
   that is not connected with the reason `not_connected`

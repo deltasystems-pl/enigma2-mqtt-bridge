@@ -262,13 +262,31 @@ def test_the_look_asks_for_the_index_and_reads_no_track(live_bridge, receiver, m
     assert asked == []
 
 
-def test_the_look_does_nothing_with_nothing_playing(live_bridge, factory, receiver):
+def test_the_look_does_nothing_with_nothing_playing(live_bridge, factory, receiver, monkeypatch):
+    """Which is what standby is: the image stops the service, and the look asks nothing."""
+    from MQTTBridge import audio
+
     receiver.nav.sref = ""
     receiver.nav.service = None
     receiver.nav.fire(EV_END)
+    receiver.enter_standby()
+    asked = []
+    monkeypatch.setattr(audio, "active_index", lambda session: asked.append(1))
     factory.client.clear()
     audio_tick(live_bridge)
+    assert asked == []
     assert factory.client.all_for(SERVICE) == []
+
+
+def test_the_look_costs_two_calls_and_reads_no_track(live_bridge, receiver, monkeypatch):
+    calls = []
+    for name in ("getNumberOfTracks", "getCurrentTrack", "getTrackInfo"):
+        real = getattr(receiver.audio, name)
+        monkeypatch.setattr(receiver.audio, name,
+                            lambda *args, _name=name, _real=real: calls.append(_name)
+                            or _real(*args))
+    audio_tick(live_bridge)
+    assert calls == ["getNumberOfTracks", "getCurrentTrack"]
 
 
 def test_a_track_the_image_stops_naming_does_not_republish(live_bridge, factory, receiver):

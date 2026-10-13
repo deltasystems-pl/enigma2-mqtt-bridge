@@ -1,6 +1,6 @@
 # ADR-0019: Whether the volume acts on the audio is true, false or unknown, read from the image's setting for the active track's codec
 
-**Status:** proposed
+**Status:** accepted 2026-10-13
 **Date:** 2026-10-13
 **Supersedes:** -
 

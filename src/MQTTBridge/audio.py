@@ -109,8 +109,8 @@ def _count(selection):
 def active_index(session):
     """The index of the track being played, or None when the image will not say.
 
-    One call into the service, for the look that only asks whether the track
-    changed.
+    Two calls into the service - how many tracks, and which one - and no
+    track is read: this is the look that only asks whether the track changed.
     """
     selection = _selection(session)
     if selection is None or not _count(selection):

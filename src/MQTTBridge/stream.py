@@ -5,10 +5,10 @@ Every enigma2 image runs a stream server: a client that asks
 stream. This module carries no video and starts no stream. It publishes the
 facts a consumer needs to use that server well, and takes two commands:
 
-- `stream` - where the server is and what it wants: the port, the form of the
-  path, whether it asks for a login, and whether the receiver has a hardware
-  encoder. Never a credential: whether a login is asked for is a boolean, and
-  the name and the password stay on the receiver.
+- `stream` - where the server is and what it wants: the port it listens on,
+  the form of the path, whether it asks for a login, and whether the receiver
+  has a hardware encoder. Never a credential: whether a login is asked for is
+  a boolean, and the name and the password stay on the receiver.
 - `stream_clients` - who is being served right now, from the image's own list.
 - `cmd/stream_stop` - end one client's stream, the one named by its host and
   its service (ADR-0018).
@@ -20,7 +20,16 @@ facts a consumer needs to use that server well, and takes two commands:
 three images share - OpenATV has a signal, the other two have none - so the
 image's list is read every five seconds, as the volume is reconciled. The look
 is one call that returns a short list; names are resolved and a payload built
-only when that list changed (`zaphistory.py` does the same).
+only when that list changed (`zaphistory.py` does the same). The timer is this
+publisher's own, as every polled area's is: the plugin has no shared tick, and
+another area's timer goes when that area does not bind - a receiver without a
+volume control would then list no clients.
+
+**A list that cannot be read is taken off the broker.** The topic is retained,
+and a consumer offers to stop what it lists. So what is there is the list the
+image holds now or nothing: the first publish after every connect is a fresh
+read, and when the read fails the topic is emptied rather than left saying
+what it said before.
 
 **The image's host, not ours, is what stops a client.** The server compares the
 host it was given with the one it holds, character for character, and it holds
@@ -59,8 +68,14 @@ POLL_MILLISECONDS = 5000
 # the command without waiting for the next look.
 STOP_REFRESH_MILLISECONDS = 2000
 
-# The port every image's stream server listens on unless told otherwise.
-DEFAULT_PORT = 8001
+# The port the stream server listens on. It is not a setting: every image
+# hard-codes it where the server is constructed, in `lib/dvb/streamserver.cpp` -
+# `eStreamServer::eStreamServer() : eServerSocket(8001, eApp)` in OpenViX
+# (`Developer`) and OpenPLi (`scarthgap`), and the same call with a second
+# member behind it in OpenATV (`master`). `config.OpenWebif.streamport` is
+# another thing - the port OpenWebif writes into the links it hands out, which
+# may be one forwarded from elsewhere - and is neither read nor published.
+LISTEN_PORT = 8001
 
 # What a client asks for: the service reference, as it is published, after the
 # slash. A template and not a URL, because the receiver's address is `info.ip`.
@@ -144,11 +159,6 @@ def _port(value):
     except (TypeError, ValueError):
         return None
     return port if 1 <= port <= 65535 else None
-
-
-def stream_port():
-    """The port a stream is asked for on: OpenWebif's setting, or the images' default."""
-    return _port(_config("OpenWebif", "streamport")) or DEFAULT_PORT
 
 
 def authentication():
@@ -267,7 +277,7 @@ class StreamPublisher(Publisher):
     def descriptor(self):
         """The `stream` payload. Settings are read now; nothing here opens a file."""
         return {
-            "port": stream_port(),
+            "port": LISTEN_PORT,
             "path": PATH_TEMPLATE,
             "authentication": authentication(),
             "encoder": self._encoder,
@@ -297,29 +307,46 @@ class StreamPublisher(Publisher):
             })
         return {"count": len(clients), "clients": rows}
 
-    def refresh(self):
-        self.publish(TOPIC, self.descriptor())
-        if not self._clients:
-            return None
+    def _read(self):
+        """The `stream_clients` payload for the image's list now, or None when unreadable."""
         clients = read_clients()
         if clients is None:
+            self._payload = None
+            self._key = None
             return None
         key = tuple(clients)
         if key != self._key or self._payload is None:
             self._payload = self.build(clients)
             self._key = key
-        self.publish(CLIENTS_TOPIC, self._payload)
         return self._payload
 
+    def _take_back(self):
+        """Empty the retained list: what the image holds is not known."""
+        if self.bridge is not None:
+            self.bridge.retract(self.bridge.topic(CLIENTS_TOPIC))
+
+    def refresh(self):
+        self.publish(TOPIC, self.descriptor())
+        if not self._clients:
+            return None
+        known = self._payload is not None
+        payload = self._read()
+        if payload is not None:
+            self.publish(CLIENTS_TOPIC, payload)
+        elif known:
+            # Once, when the list stops being readable; a connect says it again.
+            self._take_back()
+        return payload
+
     def snapshot(self):
+        """Both topics for a connect - the list read now, never the one held from before."""
         topics = {TOPIC: self.descriptor()}
         if self._clients:
-            clients = read_clients()
-            if clients is not None:
-                self._key = tuple(clients)
-                self._payload = self.build(clients)
-            if self._payload is not None:
-                topics[CLIENTS_TOPIC] = self._payload
+            payload = self._read()
+            if payload is not None:
+                topics[CLIENTS_TOPIC] = payload
+            else:
+                self._take_back()
         return topics
 
     # --------------------------------------------------------------- commands --

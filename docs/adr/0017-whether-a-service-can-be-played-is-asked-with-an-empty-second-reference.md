@@ -1,6 +1,6 @@
 # ADR-0017: Whether a service can be played is asked with an empty second reference, and answered once on a topic that is not retained
 
-**Status:** proposed
+**Status:** accepted 2026-10-13
 **Date:** 2026-10-13
 **Supersedes:** - . It amends [ADR-0016](0016-a-commands-id-comes-in-an-envelope-and-only-a-refusal-says-it-back.md)
 in one place: "only a refusal says the id back" gains one exception, the answer to a question.
@@ -44,8 +44,8 @@ A question changes nothing, so there is no state topic for the answer to appear 
 - **The id is in the payload, not in the topic.** One fixed topic, as `last_error` is one: a
   consumer subscribes once, and an access-control list written for the node's tree covers it.
   ADR-0016 rejected an id in a command's topic for the reasons that apply here unchanged.
-- **Absent, not `null`, without an id**, as on `last_error`. A sender without ids reads its
-  answer by `sref`.
+- **A question without an id is answered all the same.** The member is absent, not `null`, as
+  on `last_error`, and the sender tells its answer by `sref`, which every answer carries.
 - **A question that cannot be asked is a refusal on `last_error`**, with the command's id, and
   nothing on `stream_playable`: no reference, text that is none, a service the image has no
   information for, an image that raises or answers with something that is no number.
