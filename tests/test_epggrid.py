@@ -244,6 +244,22 @@ def test_a_renamed_bouquet_retracts_its_old_slug(live_bridge, factory, receiver)
     assert factory.client.last(ROOT + "/epg_grid/sport_4k").text != ""
 
 
+def test_a_bouquet_that_is_gone_does_not_come_back_on_a_reconnect(live_bridge, factory, receiver):
+    """The grid kept for a connect goes with its bouquet, or every connect would send it again."""
+    receiver.service_center.contents[conftest.BOUQUET_ROOT] = [
+        (conftest.FIRST_BOUQUET, "Ulubione TV"),
+        (conftest.SECOND_BOUQUET, "Sport 4K"),
+    ]
+    live_bridge.publisher("channels").refresh()
+    generate(live_bridge)
+    factory.client.clear()
+
+    factory.client.fire_connect()
+
+    assert factory.client.all_for(SPORT) == []
+    assert factory.client.last(ROOT + "/epg_grid/sport_4k").text != ""
+
+
 def test_the_published_slugs_are_remembered_across_a_restart(live_bridge, state_path):
     import json
 

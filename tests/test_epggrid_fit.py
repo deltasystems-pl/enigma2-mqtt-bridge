@@ -234,6 +234,25 @@ def test_only_a_grid_too_big_with_one_event_is_withheld(live_bridge, factory, re
     assert not_published(factory) == []
 
 
+def test_a_grid_never_cut_that_is_too_big_with_one_event_is_withheld_at_its_smallest(
+    live_bridge, factory, receiver, monkeypatch
+):
+    """No cut to start from: the whole grid, two events, one - and the last is what is withheld."""
+    guide(receiver)
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", 15000)
+    measured = watch_measuring(live_bridge, monkeypatch)
+    factory.client.clear()
+
+    generate(live_bridge)
+
+    assert measured == [4, 2, 1]
+    assert [(sent.text, sent.retain) for sent in factory.client.all_for(ULUBIONE)] == [("", True)]
+    listed = not_published(factory)
+    assert [one["topic"] for one in listed] == ["epg_grid/ulubione_tv"]
+    # Two channels at 10 kB an event: the size of one event on each, not of four.
+    assert 20000 < listed[0]["bytes"] < 21000
+
+
 def test_the_cut_is_logged_when_it_starts_and_when_it_moves(live_bridge, receiver, monkeypatch,
                                                             plugin_log):
     monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", LOW)
@@ -347,6 +366,21 @@ def test_a_first_cut_is_found_in_a_few_encodings(make_bridge, factory, settings,
     assert len(measured) <= 6
 
 
+def test_a_first_cut_with_the_default_setting_costs_two_more_encodings(live_bridge, factory,
+                                                                       receiver, monkeypatch):
+    """The whole grid, found too big, and then the counts below it - never the whole grid again."""
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", LOW)
+    guide(receiver)
+    measured = watch_measuring(live_bridge, monkeypatch)
+
+    generate(live_bridge)
+
+    assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 3
+    # Three in all, in whatever order the counts below the setting are tried.
+    assert len(measured) == 3
+    assert measured.count(4) == 1
+
+
 def test_a_grid_that_stays_cut_costs_what_a_grid_that_fits_costs(live_bridge, factory, receiver,
                                                                  monkeypatch):
     """The next pass starts from the last cut: one measurement, and the whole grid never built."""
@@ -445,6 +479,72 @@ def test_one_event_more_is_taken_when_it_fits_to_the_byte(live_bridge, factory, 
     assert measured == [2]
 
 
+def test_one_event_more_that_only_looks_as_if_it_fitted_is_not_taken(live_bridge, factory,
+                                                                     receiver, monkeypatch):
+    """The floor counts characters, and a Polish letter is two bytes.
+
+    So the floor can leave room where the packet has none. The count above the
+    last cut is then encoded, measured and found too big, and the grid stays
+    at the last cut: the larger one is not taken on the floor's word, and
+    nothing above it is tried.
+    """
+    guide(receiver)
+    for sref in (TVP1, TVN):
+        receiver.epg.events[sref][2].title = chr(0x142) * 100
+    generate(live_bridge)
+    assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 4
+    two, three = size_with(factory, 2), size_with(factory, 3)
+
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", two)
+    live_bridge.forget_published()
+    generate(live_bridge)
+    assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 2
+    measured = watch_measuring(live_bridge, monkeypatch)
+
+    # One byte short of three events, and 199 above what the floor counts for them.
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", three - 1)
+    live_bridge.forget_published()
+    factory.client.clear()
+    generate(live_bridge)
+
+    sent = factory.client.all_for(ULUBIONE)
+    assert len(sent) == 1
+    assert sent[0].json()["events_per_channel"] == 2
+    assert packet(sent[0]) == two
+    assert measured == [2, 3]
+    assert live_bridge.not_published() == []
+    assert live_bridge.publisher("epg_grid")._cuts == {"ulubione_tv": 2}
+
+
+def test_a_channel_with_no_event_past_the_cut_adds_nothing_to_the_floor(live_bridge, factory,
+                                                                        receiver, monkeypatch):
+    """One channel has four programmes and the other two - as many as the grid is cut to.
+
+    The floor is asked of each channel's next event, and the short channel has none.
+    """
+    guide(receiver)
+    del receiver.epg.events[TVP1][2:]
+    generate(live_bridge)
+    assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 4
+
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", size_with(factory, 2))
+    live_bridge.forget_published()
+    generate(live_bridge)
+    assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 2
+    measured = watch_measuring(live_bridge, monkeypatch)
+
+    live_bridge.forget_published()
+    factory.client.clear()
+    generate(live_bridge)
+
+    sent = factory.client.all_for(ULUBIONE)
+    assert len(sent) == 1
+    assert sent[0].json()["events_per_channel"] == 2
+    assert titles(sent[0].json()) == [["a00", "a01"], ["b00", "b01"]]
+    # The other channel's third programme alone says that three cannot fit.
+    assert measured == [2]
+
+
 def test_the_search_goes_down_when_the_last_cut_no_longer_fits(live_bridge, factory, receiver,
                                                                monkeypatch):
     monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", LOW)
@@ -527,3 +627,42 @@ def test_a_bouquet_that_is_gone_takes_its_cut_with_it(live_bridge, receiver, mon
     generate(live_bridge)
 
     assert publisher._cuts == {"inne": 3}
+
+
+@pytest.mark.parametrize("lowered", [3, 2])
+def test_a_setting_lowered_to_the_last_cut_or_below_it_is_the_whole_grid(
+    live_bridge, factory, receiver, settings, monkeypatch, plugin_log, lowered
+):
+    """The setting is read at every build, and the cut is kept from the pass before.
+
+    Not by way of `cmd/config`, which refuses this setting, nor of a save,
+    which starts a new publisher without a cut. What changes the setting under
+    a publisher that has one - as the code reads; it was not run on a receiver
+    - is the setup screen while it is open: it edits the plugin's own config
+    elements, and a pass that runs before the save builds with the unsaved
+    value. Setting the value here stands for that.
+
+    A cut that is not below the setting is no place to start a search from:
+    the grid is measured whole, as on a first pass, it says the setting, and
+    the cut is forgotten.
+    """
+    monkeypatch.setattr(bridge_module, "MAX_PACKET_BYTES", LOW)
+    guide(receiver)
+    publisher = generate(live_bridge)
+    assert publisher._cuts == {"ulubione_tv": 3}
+    measured = watch_measuring(live_bridge, monkeypatch)
+
+    settings.epg_grid_events.value = lowered
+    generate(live_bridge)
+
+    payload = factory.client.last(ULUBIONE).json()
+    assert payload["events_per_channel"] == lowered
+    assert [len(channel["events"]) for channel in payload["channels"]] == [lowered, lowered]
+    assert measured == [lowered]
+    assert publisher._cuts == {}
+
+    # Raised again, the cut it comes back to is a new one, and says so.
+    settings.epg_grid_events.value = 4
+    generate(live_bridge)
+    assert factory.client.last(ULUBIONE).json()["events_per_channel"] == 3
+    assert plugin_log().count("is cut from 4 to 3 event(s)") == 2
