@@ -724,6 +724,30 @@ msgstr "Zuletzt gesehen leeren"
 msgid "The receiver switches to channel 1, the first channel of its first bouquet, and empties its list of recently watched channels."
 msgstr "Der Receiver schaltet auf Kanal 1, den ersten Sender des ersten Bouquets, und leert die Liste der zuletzt gesehenen Sender."
 
+#: src/MQTTBridge/webif.py
+msgid "Stop a stream client"
+msgstr "Einen Stream-Client stoppen"
+
+#: src/MQTTBridge/webif.py
+msgid "Client address"
+msgstr "Adresse des Clients"
+
+#: src/MQTTBridge/webif.py
+msgid "The stream to that client stops. A player that reconnects by itself gets a new one."
+msgstr "Der Stream zu diesem Client wird beendet. Ein Player, der sich von selbst neu verbindet, bekommt einen neuen."
+
+#: src/MQTTBridge/webif.py
+msgid "Ask whether a channel can be played now"
+msgstr "Fragen, ob ein Sender jetzt wiedergegeben werden kann"
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver can play that channel now."
+msgstr "Der Receiver kann diesen Sender jetzt wiedergeben."
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver cannot play that channel now."
+msgstr "Der Receiver kann diesen Sender jetzt nicht wiedergeben."
+
 #: src/MQTTBridge/setup.py
 msgid "Plugin updates"
 msgstr "Plugin-Aktualisierungen"

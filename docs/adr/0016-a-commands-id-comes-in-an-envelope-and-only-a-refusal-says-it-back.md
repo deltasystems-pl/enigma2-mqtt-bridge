@@ -1,6 +1,6 @@
 # ADR-0016: A command's id comes in an envelope around its payload, and only a refusal says it back
 
-**Status:** accepted 2026-10-13
+**Status:** accepted 2026-10-13, amended by [ADR-0017](0017-whether-a-service-can-be-played-is-asked-with-an-empty-second-reference.md) ("only a refusal says the id back": the answer to a question, `cmd/stream_playable`, says it too)
 **Date:** 2026-10-13
 **Supersedes:** - . It replaces one sentence of [TOPICS.md](../TOPICS.md) section 2, "no
 correlation id in v1", with an optional id inside contract 1.

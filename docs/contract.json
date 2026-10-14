@@ -64,6 +64,18 @@
       "payload": "json",
       "retained": true
     },
+    "stream": {
+      "payload": "json",
+      "retained": true
+    },
+    "stream_clients": {
+      "payload": "json",
+      "retained": true
+    },
+    "stream_playable": {
+      "payload": "json",
+      "retained": false
+    },
     "recording": {
       "payload": "json",
       "retained": true
@@ -134,6 +146,8 @@
     "history_clear": {
       "since": "0.3.0"
     },
+    "stream_stop": {},
+    "stream_playable": {},
     "volume": {},
     "mute": {},
     "key": {},
@@ -280,12 +294,18 @@
     "screenshot",
     "self_update",
     "service",
+    "service_codecs",
     "softcam",
+    "stream",
+    "stream_clients",
+    "stream_playable",
+    "stream_stop",
     "timers",
     "toast",
     "tuner",
     "uninstall",
     "volume",
+    "volume_passthrough",
     "zap_history"
   ],
   "other_topics": [

@@ -217,6 +217,8 @@ class CommandDispatcher:
             "bouquet": self.bouquet,
             "zap_history": self.zap_history,
             "history_clear": self.history_clear,
+            "stream_stop": self.stream_stop,
+            "stream_playable": self.stream_playable,
             "volume": self.volume,
             "mute": self.mute,
             "key": self.key,
@@ -617,6 +619,50 @@ class CommandDispatcher:
         if publisher is None:
             return zaphistory.CLEAR_NOT_AVAILABLE
         return publisher.clear()
+
+    def stream_stop(self, text, origin=MQTT):
+        """End one stream client's stream: the one its host and its service name.
+
+        No permission, as a zap and standby have none (ADR-0018). Both members
+        and nothing else: an empty payload stops nobody, and there is no
+        spelling of "all of them".
+        """
+        from . import stream
+
+        try:
+            payload = json.loads(text)
+        except (TypeError, ValueError):
+            return "cmd/stream_stop takes a JSON object"
+        if not isinstance(payload, dict) or set(payload) != {"host", "sref"}:
+            return "cmd/stream_stop takes exactly the host and sref fields"
+        host, sref = payload["host"], payload["sref"]
+        if not isinstance(host, str) or not host.strip():
+            return "cmd/stream_stop host must be a non-empty string"
+        if not isinstance(sref, str) or not sref.strip():
+            return "cmd/stream_stop sref must be a non-empty string"
+        publisher = self.publisher("stream")
+        if publisher is None:
+            return stream.STOP_NOT_AVAILABLE
+        return publisher.stop_client(host, sref)
+
+    def stream_playable(self, text, origin=MQTT):
+        """Ask whether one service could be played now; the answer goes out as an event.
+
+        A bare reference or `{"sref": ...}`, as `cmd/zap` takes them. The
+        answer is published on `stream_playable`, not retained, with this
+        command's id when it carried one (ADR-0017); a question that cannot be
+        asked is a refusal on `last_error`, as for every command.
+        """
+        from . import stream
+
+        payload = parse(text)
+        sref = payload.get("sref") if isinstance(payload, dict) else str(text or "")
+        if isinstance(payload, list) or not isinstance(sref, str) or not sref.strip():
+            return "no service reference given"
+        publisher = self.publisher("stream")
+        if publisher is None:
+            return stream.PLAYABLE_NOT_AVAILABLE
+        return publisher.playable(sref.strip(), self.command_id)
 
     def volume(self, text, origin=MQTT):
         from . import volume as volume_module

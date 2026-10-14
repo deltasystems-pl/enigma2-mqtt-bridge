@@ -29,7 +29,8 @@ LAST_ERROR = ROOT + "/last_error"
 
 def test_the_service_payload_has_every_documented_field(live_bridge, factory):
     payload = factory.client.last(SERVICE).json()
-    assert set(payload) == {"sref", "name", "bouquet", "provider", "width", "height"}
+    assert set(payload) == {"sref", "name", "bouquet", "provider", "width", "height",
+                            "video_codec", "interlaced", "frame_rate", "audio_tracks"}
     assert payload["sref"] == TVP1
     assert payload["name"] == "TVP 1 HD"
     assert payload["provider"] == "Cyfrowy Polsat"
@@ -92,7 +93,8 @@ def test_nothing_playing_publishes_an_empty_shape(live_bridge, factory, receiver
     receiver.nav.fire(2)  # evEnd
     payload = factory.client.last(SERVICE).json()
     assert payload == {"sref": None, "name": None, "bouquet": None, "provider": None,
-                       "width": None, "height": None}
+                       "width": None, "height": None, "video_codec": None, "interlaced": None,
+                       "frame_rate": None, "audio_tracks": None}
 
 
 def test_the_service_name_falls_back_to_the_stream_info(live_bridge, factory, receiver):

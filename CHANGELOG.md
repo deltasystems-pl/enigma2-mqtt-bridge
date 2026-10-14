@@ -11,6 +11,48 @@ version that has no section here.
 
 ### Added
 
+- What only the receiver knows about streaming its channels, without the plugin carrying any
+  video. A new retained topic, `stream`, says where the image's stream server is and what it
+  wants: the port it listens on (8001 on every image; OpenWebif's own "streaming port" setting
+  is not published), the form of the request path (`/{sref}` - the receiver's address is
+  `info.ip`), whether it asks for a login, whether the receiver has a hardware encoder and, where
+  the image says, the transcoding port. No credential is published: whether a login is asked for
+  is a boolean. A second retained topic, `stream_clients`, is the image's own list of who is being
+  served: each client's address, service, name, bouquet and whether it is transcoded, at most 32
+  rows with the full count beside them, read every five seconds and published when it changed.
+  The first publish after every connect is a fresh read, and a list that cannot be read is taken
+  off the broker rather than left as it was - as is the list an earlier run left when this run's
+  image has no stream server or one that lists no clients. A row's name and bouquet follow the
+  channel list when that is walked again. A reference longer than 512 characters is left out of
+  its row.
+  `cmd/stream_stop` ends one client's stream, the one named by the `host` and `sref` the list
+  shows; it needs no permission, as a zap needs none, never stops "all", and refuses a client
+  that is not connected with the reason `not_connected`
+  ([ADR-0018](docs/adr/0018-stopping-a-stream-client-needs-no-permission.md)).
+  `cmd/stream_playable` asks the image whether one service could be played now beside everything
+  the receiver is doing - the television, a recording, another stream - and is the one command
+  answered on a topic of its own: one message on `stream_playable`, not retained, with the
+  command's id when it carried one; a reference that is not one playable service is refused
+  ([ADR-0017](docs/adr/0017-whether-a-service-can-be-played-is-asked-with-an-empty-second-reference.md)).
+  The capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable` say which of
+  these the image offers. The OpenWebif page gains both commands, in English, Polish and German.
+  Discovery mode announces nothing for them ([TOPICS.md](docs/TOPICS.md)).
+- `service` says what is on the decoder: `video_codec` (`h264`, `hevc`, `mpeg2`, ...),
+  `interlaced`, `frame_rate`, and `audio_tracks` - each track's description, language, PID, a
+  codec name that is the same on every image (`mp2`, `ac3`, `eac3`, `aac`, ...) and which one is
+  playing. A value the image does not give, or gives as something this plugin does not know, is
+  `null`, never a guess. The topic is also published on the decoder's own events, and when
+  another audio track is picked on the remote - which no event announces, so the active track is
+  asked for every five seconds. The capability `service_codecs` says the image can fill the
+  members in ([TOPICS.md](docs/TOPICS.md)).
+- `volume` gains `passthrough`: whether the audio track being played is handed to the television
+  undecoded, in which case the receiver's volume changes nothing anybody can hear. `true`,
+  `false`, or `null` when it cannot be told - an unknown codec, an image without the setting, or
+  a setting that is neither "downmix" nor "passthrough", or AAC with the image's separate
+  transcode switch on. It follows the track and the image's
+  audio settings within five seconds. The capability `volume_passthrough` says the image has the
+  settings it is read from
+  ([ADR-0019](docs/adr/0019-passthrough-is-true-false-or-unknown.md)).
 - Each bouquet's channel list is on a retained topic of its own, `channels/<bouquet_slug>`, with
   the bouquet's name, its reference, when the list last changed and the services; and a new small
   topic, `bouquets`, is their index: every bouquet in the receiver's order with the slug of its

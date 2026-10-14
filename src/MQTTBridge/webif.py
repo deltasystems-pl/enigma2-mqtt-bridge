@@ -563,6 +563,20 @@ def _update_started(payload):
     return _("The update to version %s has started.") % json.loads(payload)["version"]
 
 
+def _playable_answer(_payload):
+    """What the page says after `stream_playable`: the answer the command just published.
+
+    The topic it goes out on is not retained, so the page reads it where the
+    command left it.
+    """
+    bridge = _bridge()
+    publisher = bridge.publisher("stream") if bridge is not None else None
+    answer = getattr(publisher, "last_answer", None) or {}
+    if answer.get("playable"):
+        return _("The receiver can play that channel now.")
+    return _("The receiver cannot play that channel now.")
+
+
 def _message_payload(values):
     return _json({
         "text": values["text"], "type": values["type"], "timeout": values["timeout"],
@@ -645,6 +659,21 @@ def actions(bouquets=(), node_id="", history=(), versions=()):
                 "The receiver switches to channel 1, the first channel of its first "
                 "bouquet, and empties its list of recently watched channels."
             ),
+        ),
+        Action(
+            "stream_stop", "stream_stop", _("Stop a stream client"),
+            (Field("host", "text", _("Client address")), sref),
+            build=lambda values: _json({"host": values["host"], "sref": values["sref"]}),
+            confirm=lambda _values: _(
+                "The stream to that client stops. A player that reconnects by itself "
+                "gets a new one."
+            ),
+        ),
+        Action(
+            "stream_playable", "stream_playable", _("Ask whether a channel can be played now"),
+            (sref,),
+            build=lambda values: values["sref"],
+            done=_playable_answer,
         ),
         Action(
             "volume", "volume", _("Volume"),
