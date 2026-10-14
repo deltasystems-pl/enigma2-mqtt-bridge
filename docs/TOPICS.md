@@ -1299,7 +1299,9 @@ also descrambles another encrypted channel - a stream to a client, for example -
 The softcam removes the file for a few seconds now and then while it is still decoding, for example
 when a descrambled stream to a client ends. While the file is absent, the last fresh result - its
 `system` and `ecm_ms`, with `active: true` - is published until 15 seconds have passed since that
-ECM was written, and `null` after that, as before. A zap ends it at once. Changed after 0.4.0
+ECM was written, and `null` after that, as before. A zap ends it at once, and so does a poll that
+finds the service free-to-air or cannot tell whether it is encrypted, or finds the file there but
+stale, unreadable or replaced by a link. Changed after 0.4.0
 (unreleased): until then an absent file was `null` at once.
 
 ### `<base>/<node>/oscam`

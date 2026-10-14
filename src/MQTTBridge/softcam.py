@@ -449,15 +449,18 @@ def newest_ecm(path, seen, now):
     looks and gone again before the second is at worst one tick of time counted
     against the cam, never the time since the zap.
 
-    Never later than `now`: a modification time in the future means the clock
-    stepped back after the cam wrote it, and remembering it would hold the
-    count at zero for as long as the step was. A time from before the service
-    started is the previous service's ECM; it may be remembered, but
-    `not_decoding_seconds` never counts from earlier than the service start, so
-    it counts for nothing.
+    A modification time more than a second in the future is ignored: it means
+    the clock stepped back after the cam wrote it, so it is an ECM from before
+    the step - already in `seen`, moved by `_follow_the_clock` - and not a new
+    one. Taking it, even capped at `now`, would hold the count at zero for as
+    long as the step was whenever a dead cam leaves its file behind. The result
+    is never later than `now` either, for the same reason. A time from before
+    the service started is the previous service's ECM; it may be remembered,
+    but `not_decoding_seconds` never counts from earlier than the service start,
+    so it counts for nothing.
     """
     modified = _ecm_modified(path)
-    if modified is not None:
+    if modified is not None and modified <= now + 1:
         seen = max(seen, modified)
     return min(seen, now)
 
@@ -551,6 +554,10 @@ class SoftcamPublisher(NavPublisher):
         self._started_at = time.monotonic()
         self._since = time.time()
         self._clock = (self._since, self._started_at)
+        # Nothing follows the clock while the publisher is stopped, so nothing
+        # remembered from before may survive a start: a step back in between
+        # would leave it in the future and the count at zero until it passed.
+        self._service_since = 0.0
         self._ecm_seen = 0.0
         if not NavPublisher.start(self):
             # A manual restart does not need a service event; only the auto-heal
@@ -708,7 +715,10 @@ class SoftcamPublisher(NavPublisher):
         clock does not step, so how much further the wall clock moved than the
         steady one since the last look is the step, and the remembered times are
         moved by it. A step backward is moved the same way; without that, the
-        count would sit at zero until the clock had caught up.
+        count would sit at zero until the clock had caught up. Steps smaller than
+        `CLOCK_STEP_SECONDS` are not followed, so several of them could add up;
+        a clock adjusted that finely is slewed rather than stepped, so that is
+        accepted.
         """
         wall, steady = time.time(), time.monotonic()
         if self._clock is not None:

@@ -856,12 +856,16 @@ def test_the_newest_ecm_seen_survives_the_file_going_away(tmp_path):
     assert softcam.newest_ecm(path, 950.0, 1020.0) == 950.0
 
 
-def test_an_ecm_time_in_the_future_counts_as_now(tmp_path):
-    """The clock went back after the cam wrote it; it must not freeze the count."""
+def test_an_ecm_time_in_the_future_is_not_a_new_ecm(tmp_path):
+    """Written before the clock stepped back: what was remembered stands."""
     path = str(tmp_path / "ecm.info")
     write_ecm(path, 5000.0)
-    assert softcam.newest_ecm(path, 0.0, 1000.0) == 1000.0
-    # And a remembered one is pulled back the same way.
+    assert softcam.newest_ecm(path, 0.0, 1000.0) == 0.0
+    assert softcam.newest_ecm(path, 900.0, 1000.0) == 900.0
+    # Within a second of the clock it is a new ECM, and counts as now.
+    write_ecm(path, 1000.5)
+    assert softcam.newest_ecm(path, 900.0, 1000.0) == 1000.0
+    # A remembered time ahead of the clock is pulled back to it.
     os.remove(path)
     assert softcam.newest_ecm(path, 5000.0, 1000.0) == 1000.0
 
@@ -1310,6 +1314,49 @@ def test_an_ecm_seen_while_the_detector_could_not_act_is_still_remembered(
     os.remove(lab.ecm)
     publisher._detector.timer.fire()
     assert lab.proc.signals == []
+
+
+def test_a_dead_cam_that_leaves_its_file_after_a_clock_step_back_is_restarted(
+    softcam_bridge, settings, receiver, lab, monkeypatch, plugin_log
+):
+    """The file stays, dated in the future of the new clock; it is not a new ECM."""
+    publisher = watching(softcam_bridge, settings, receiver, zapped_ago=30)
+    write_ecm(lab.ecm, time.time() - 2)
+    publisher._detector.timer.fire()
+
+    monkeypatch.setattr(softcam, "time", SteppedClock(-3600))
+    publisher._detector.timer.fire()
+    assert lab.proc.signals == []
+
+    # Three hundred seconds on, the cam has written nothing and its file is still there.
+    publisher._ecm_seen -= 300
+    publisher._service_since -= 300
+    publisher._since -= 300
+    publisher._detector.timer.fire()
+    assert lab.proc.signals != []
+    assert 300 <= logged_stuck(plugin_log()) < 305
+
+
+def test_a_clock_step_back_while_stopped_is_not_carried_into_the_next_start(
+    softcam_bridge, settings, receiver, lab, monkeypatch
+):
+    """Nothing follows the clock while the publisher is stopped."""
+    publisher = watching(softcam_bridge, settings, receiver, zapped_ago=30)
+    write_ecm(lab.ecm, time.time() - 2)
+    publisher._detector.timer.fire()
+    assert publisher._ecm_seen > 0.0
+
+    publisher.stop()
+    monkeypatch.setattr(softcam, "time", SteppedClock(-3600))
+    assert publisher.start()
+    assert publisher._service_since == 0.0
+    assert publisher._ecm_seen == 0.0
+    os.remove(lab.ecm)
+
+    # A hundred seconds after the start, with no zap and no ECM since.
+    publisher._since -= 100
+    publisher._detector.timer.fire()
+    assert lab.proc.signals != []
 
 
 def test_a_clock_step_back_does_not_stop_the_count(

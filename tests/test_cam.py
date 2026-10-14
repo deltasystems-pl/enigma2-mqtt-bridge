@@ -265,6 +265,18 @@ def test_the_kept_reading_holds_the_parsed_values_only(
     assert "MARKER" not in repr(found._held)
 
 
+def test_a_stopped_publisher_keeps_no_reading(
+    make_bridge, settings, receiver, tmp_path, monkeypatch
+):
+    path = tmp_path / "ecm.info"
+    found = cam_publisher(make_bridge, settings, receiver, path, monkeypatch)
+    written(path, 2)
+    found._poll.timer.fire()
+    assert found._held is not None
+    found.stop()
+    assert found._held is None
+
+
 def test_disabling_cam_retracts_retained_state(live_bridge, factory, settings):
     settings.cam_telemetry.value = True
     live_bridge._replace_configurable_publishers()

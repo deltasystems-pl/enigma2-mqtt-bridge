@@ -202,6 +202,7 @@ class CamPublisher(NavPublisher):
 
     def stop(self):
         self._poll.stop()
+        self._held = None
         NavPublisher.stop(self)
 
     def on_service_event(self, event):

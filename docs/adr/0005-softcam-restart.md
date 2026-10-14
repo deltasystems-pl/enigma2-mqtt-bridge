@@ -146,7 +146,9 @@ current service and counts from the most recent of that, the service start and t
 start. "Not decoding" time therefore grows only while no new ECM appears, whether the file is
 stale or missing meanwhile. In detail:
 
-- The remembered time is forgotten at every zap and at every start of the plugin.
+- The remembered time is forgotten at every zap and at every start of the plugin, and the start
+  forgets the service start too: nothing follows the clock while the plugin is stopped, so a step
+  back in between must not leave either in the future.
 - It is updated once per detector look, ten seconds apart. Sampling more often is not needed: a
   healthy cam writes about every ten seconds and the shortest threshold is thirty, so an ECM that
   was written and removed between two looks costs at most one look's worth of time.
@@ -157,12 +159,16 @@ stale or missing meanwhile. In detail:
   price is one `lstat` every ten seconds on a receiver with the auto-heal off.
 - A modification time from before the service start is the previous service's ECM and counts
   for nothing, because the count never starts earlier than the service start. A modification time
-  later than the clock - the clock stepped back after the cam wrote it - counts as now, so it
-  cannot hold the count at zero for as long as the step was.
+  more than a second later than the clock is ignored: the clock stepped back after the cam wrote
+  it, so it is an ECM from before the step, already remembered and moved with the clock, not a new
+  one. Taking it - even capped at the current time - would hold the count at zero for as long as
+  the step was whenever a dead cam leaves its file behind.
 - A step of the wall clock is not counted as time without an ECM. The steady clock does not step,
   so the difference between how far the two moved since the last look is the step, and the
   remembered times - the plugin's start, the service start and the ECM seen - are moved by it. A
-  zap does the same before it records its own time.
+  zap does the same before it records its own time. Steps smaller than five seconds are not
+  followed, so several could add up; a clock adjusted that finely is slewed rather than stepped,
+  and that is accepted.
 - Unchanged: only the modification time is read, through `lstat`, and only a regular file counts;
   the file is never opened.
 
