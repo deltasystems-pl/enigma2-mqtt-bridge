@@ -1614,7 +1614,7 @@ command that succeeds.
 | `cmd` | string | The command refused |
 | `error` | string | Why, in English, for the person reading the topic. This is the contract's human text |
 | `ts` | int | When, in epoch seconds |
-| `reason` | string, optional | Since 0.3.0. A stable code for the refusal, **only** from a command that defines codes - today `history_clear`, `update_check`'s `not_permitted`, `update`, `uninstall`'s `busy` (and `zap_history`'s `playback`); see §2. Absent, not `null`, otherwise, so every other refusal is exactly what it was. A consumer that knows the code can say the refusal in the household's language, and one that does not ignores the field |
+| `reason` | string, optional | Since 0.3.0. A stable code for the refusal, **only** from a command that defines codes - today `history_clear`, `update_check`'s `not_permitted`, `update`, `uninstall`'s `busy`, `stream_stop`'s `not_connected` and `not_stopped` (added after 0.4.0) (and `zap_history`'s `playback`); see §2. Absent, not `null`, otherwise, so every other refusal is exactly what it was. A consumer that knows the code can say the refusal in the household's language, and one that does not ignores the field |
 | `id` | string, optional | Added after 0.4.0 (unreleased), capability `command_id`. The id the refused command carried in its envelope (section 2), exactly as it was sent. It is the id of the command this refusal is about - also when the refusal is published after that command returned, or by the plugin process that starts after an update - and never the id of another command. Absent, not `null`, when the command carried none or one the plugin could not use, so a refusal without an id is exactly what it was |
 
 ```json
