@@ -814,28 +814,56 @@ def test_the_counter_rolls_over_at_local_midnight_and_survives_a_clock_step(soft
 # ------------------------------------------------------------------- auto-heal --
 
 
+def write_ecm(path, written):
+    """An ECM file whose modification time is `written`. Its contents are never read."""
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("ecm time: 0.434\n")
+    os.utime(path, (written, written))
+
+
 def stuck_for(publisher, seconds, path=None):
     """Make the receiver look like it has not decoded for `seconds`."""
     now = time.time()
     publisher._since = now - seconds - 1
     publisher._service_since = now - seconds - 1
-    target = path or publisher.path
-    with open(target, "w", encoding="utf-8") as handle:
-        handle.write("ecm time: 0.434\n")
-    os.utime(target, (now - seconds - 1, now - seconds - 1))
+    # What earlier looks remembered is part of the receiver's state too.
+    publisher._ecm_seen = now - seconds - 1
+    write_ecm(path or publisher.path, now - seconds - 1)
 
 
-def test_not_decoding_is_measured_from_the_latest_of_three_things(tmp_path):
+def test_not_decoding_is_measured_from_the_latest_of_three_things():
+    assert not_decoding_seconds(0, 0, 0, 1000.0) == 0.0
+    # Nothing seen yet, so the service start is what it counts from.
+    assert not_decoding_seconds(900.0, 0, 0, 1000.0) == 100.0
+    assert not_decoding_seconds(900.0, 0, 950.0, 1000.0) == 50.0
+    # A zap after the last ECM seen restarts the window.
+    assert not_decoding_seconds(990.0, 0, 950.0, 1000.0) == 10.0
+    # So does the plugin's own start.
+    assert not_decoding_seconds(900.0, 995.0, 950.0, 1000.0) == 5.0
+    # A remembered time ahead of the clock is never a negative count.
+    assert not_decoding_seconds(900.0, 0, 1100.0, 1000.0) == 0.0
+
+
+def test_the_newest_ecm_seen_survives_the_file_going_away(tmp_path):
     path = str(tmp_path / "ecm.info")
-    assert not_decoding_seconds(path, 0, 0, 1000.0) == 0.0
-    # Absent is infinitely old, so the service start is what it counts from.
-    assert not_decoding_seconds(path, 900.0, 0, 1000.0) == 100.0
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write("ecm time: 0.434\n")
-    os.utime(path, (950.0, 950.0))
-    assert not_decoding_seconds(path, 900.0, 0, 1000.0) == 50.0
-    # A zap after the last write restarts the window.
-    assert not_decoding_seconds(path, 990.0, 0, 1000.0) == 10.0
+    assert softcam.newest_ecm(path, 0.0, 1000.0) == 0.0
+    write_ecm(path, 950.0)
+    assert softcam.newest_ecm(path, 0.0, 1000.0) == 950.0
+    os.remove(path)
+    assert softcam.newest_ecm(path, 950.0, 1010.0) == 950.0
+    # An older file than the one already seen does not take the time back.
+    write_ecm(path, 900.0)
+    assert softcam.newest_ecm(path, 950.0, 1020.0) == 950.0
+
+
+def test_an_ecm_time_in_the_future_counts_as_now(tmp_path):
+    """The clock went back after the cam wrote it; it must not freeze the count."""
+    path = str(tmp_path / "ecm.info")
+    write_ecm(path, 5000.0)
+    assert softcam.newest_ecm(path, 0.0, 1000.0) == 1000.0
+    # And a remembered one is pulled back the same way.
+    os.remove(path)
+    assert softcam.newest_ecm(path, 5000.0, 1000.0) == 1000.0
 
 
 def test_a_file_replaced_by_a_link_is_not_the_file_whose_age_was_measured(tmp_path):
@@ -844,7 +872,8 @@ def test_a_file_replaced_by_a_link_is_not_the_file_whose_age_was_measured(tmp_pa
         handle.write("x\n")
     link = str(tmp_path / "ecm.info")
     os.symlink(target, link)
-    assert not_decoding_seconds(link, 900.0, 0, 1000.0) == 100.0
+    os.utime(target, (990.0, 990.0))
+    assert softcam.newest_ecm(link, 0.0, 1000.0) == 0.0
 
 
 def test_autoheal_does_nothing_until_it_is_switched_on(
@@ -1053,6 +1082,256 @@ def test_a_declined_autoheal_is_a_log_line_and_not_a_retained_error(
     assert factory.client.last(LAST_ERROR) is None
 
 
+# ----------------------------------------------- an ECM file gone for a moment --
+
+
+def watching(softcam_bridge, settings, receiver, zapped_ago, threshold=90):
+    """An encrypted channel zapped to `zapped_ago` seconds ago, auto-heal on."""
+    settings.softcam_restart_allowed.value = True
+    settings.softcam_autoheal.value = True
+    settings.softcam_autoheal_seconds.value = threshold
+    bridge = softcam_bridge()
+    receiver.info.encrypted = True
+    publisher = bridge.publisher("softcam")
+    now = time.time()
+    # The plugin has been up for a day: only the zap and the ECMs matter.
+    publisher._since = now - 86400
+    publisher._service_since = now - zapped_ago
+    return publisher
+
+
+def logged_stuck(log):
+    """How long the last automatic restart said the cam had not decoded, in seconds."""
+    return int(log.rsplit("the softcam had not decoded for ", 1)[1].split(" s")[0])
+
+
+class SteppedClock:
+    """The `time` module, with a wall clock that has stepped by `step` seconds."""
+
+    def __init__(self, step):
+        self.step = step
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    def time(self):
+        return time.time() + self.step
+
+
+def test_autoheal_leaves_a_working_cam_alone_when_its_ecm_file_vanishes_for_a_moment(
+    softcam_bridge, settings, receiver, lab
+):
+    """Measured: the cam removes the file for about five seconds while decoding.
+
+    It does so when a stream of an encrypted channel to a stream client ends,
+    with the television still decoding, and writes it again at the next ECM. A
+    look that landed in the gap used to count from the zap - here eleven minutes
+    earlier - and restart the cam.
+    """
+    publisher = watching(softcam_bridge, settings, receiver, zapped_ago=672)
+
+    write_ecm(lab.ecm, time.time() - 2)
+    publisher._detector.timer.fire()
+    os.remove(lab.ecm)
+    publisher._detector.timer.fire()
+    write_ecm(lab.ecm, time.time())
+    publisher._detector.timer.fire()
+    assert lab.proc.signals == []
+
+
+def test_a_missing_file_is_counted_from_the_ecm_seen_and_not_from_the_zap(
+    softcam_bridge, settings, receiver, lab, plugin_log
+):
+    publisher = watching(softcam_bridge, settings, receiver, zapped_ago=3600, threshold=60)
+    write_ecm(lab.ecm, time.time() - 30)
+    publisher._detector.timer.fire()
+    os.remove(lab.ecm)
+
+    publisher._detector.timer.fire()
+    assert lab.proc.signals == []
+
+    # The file stays away and no ECM comes: the same look, 45 s later.
+    publisher._ecm_seen -= 45
+    publisher._detector.timer.fire()
+    assert lab.proc.signals != []
+    assert 75 <= logged_stuck(plugin_log()) < 80
+
+
+def test_a_cam_that_writes_no_new_ecm_is_still_restarted_with_the_file_gone(
+    softcam_bridge, settings, receiver, lab, factory, plugin_log
+):
+    publisher = watching(softcam_bridge, settings, receiver, zapped_ago=600)
+    write_ecm(lab.ecm, time.time() - 120)
+    publisher._detector.timer.fire()
+    assert lab.proc.signals != []
+    lab.proc.signals = []
+    run_the_sequence(publisher)
+    assert factory.client.last(SOFTCAM).json()["last_restart_reason"] == "autoheal"
+    # Counted from the last ECM, which is what was true, not from the zap.
+    assert 120 <= logged_stuck(plugin_log()) < 125
+
+    # And with the file removed rather than stale, the same way: from the last
+    # ECM, not from the zap ten minutes ago.
+    publisher._last_started -= softcam.AUTOHEAL_INTERVAL_SECONDS
+    lab.proc.set(healthy(lab.binary))
+    os.remove(lab.ecm)
+    publisher._detector.timer.fire()
+    assert lab.proc.signals != []
+    assert 120 <= logged_stuck(plugin_log()) < 125
+
+
+def test_a_zap_forgets_the_ecm_of_the_previous_service(
+    softcam_bridge, settings, receiver, lab
+):
+    publisher = watching(softcam_bridge, settings, receiver, zapped_ago=600)
+    write_ecm(lab.ecm, time.time() - 5)
+    publisher._detector.timer.fire()
+    assert publisher._ecm_seen > 0.0
+
+    receiver.nav.fire(1)          # evStart
+    assert publisher._ecm_seen == 0.0
+    assert time.time() - publisher._service_since < 5
+    os.remove(lab.ecm)
+    publisher._detector.timer.fire()
+    assert lab.proc.signals == []
+
+
+def test_an_ecm_from_before_the_zap_does_not_count(
+    softcam_bridge, settings, receiver, lab, plugin_log
+):
+    """The previous service's file, left behind: the count starts at the zap."""
+    publisher = watching(softcam_bridge, settings, receiver, zapped_ago=30)
+    write_ecm(lab.ecm, time.time() - 3600)
+    publisher._detector.timer.fire()
+    assert lab.proc.signals == []
+
+    # Seventy seconds later, still nothing new.
+    publisher._service_since -= 70
+    publisher._detector.timer.fire()
+    assert lab.proc.signals != []
+    assert 100 <= logged_stuck(plugin_log()) < 105
+
+
+def test_free_to_air_stays_healthy_after_an_encrypted_ecm_was_seen(
+    softcam_bridge, settings, receiver, lab
+):
+    publisher = watching(softcam_bridge, settings, receiver, zapped_ago=3600)
+    write_ecm(lab.ecm, time.time() - 10)
+    publisher._detector.timer.fire()
+    publisher._ecm_seen -= 600
+
+    receiver.info.encrypted = False
+    os.remove(lab.ecm)
+    publisher._detector.timer.fire()
+    assert lab.proc.signals == []
+
+    # The same receiver on an encrypted channel is a stuck cam.
+    receiver.info.encrypted = True
+    publisher._detector.timer.fire()
+    assert lab.proc.signals != []
+
+
+def test_switching_autoheal_on_finds_the_ecm_seen_while_it_was_off(
+    softcam_bridge, settings, receiver, lab
+):
+    publisher = watching(softcam_bridge, settings, receiver, zapped_ago=600)
+    settings.softcam_autoheal.value = False
+    write_ecm(lab.ecm, time.time() - 2)
+    publisher._detector.timer.fire()
+
+    settings.softcam_autoheal.value = True
+    os.remove(lab.ecm)
+    publisher._detector.timer.fire()
+    assert lab.proc.signals == []
+
+
+def test_a_clock_step_forward_is_not_time_without_an_ecm(
+    softcam_bridge, settings, receiver, lab, monkeypatch
+):
+    """The clock set from the transponder or by NTP, between two looks."""
+    publisher = watching(softcam_bridge, settings, receiver, zapped_ago=600)
+    write_ecm(lab.ecm, time.time() - 2)
+    publisher._detector.timer.fire()
+
+    monkeypatch.setattr(softcam, "time", SteppedClock(3600))
+    os.remove(lab.ecm)
+    publisher._detector.timer.fire()
+    assert lab.proc.signals == []
+
+    # A zap after the step is not moved by it a second time.
+    receiver.nav.fire(1)          # evStart
+    publisher._detector.timer.fire()
+    assert lab.proc.signals == []
+    assert abs(publisher._service_since - softcam.time.time()) < 5
+
+
+def test_a_clock_step_soon_after_the_start_is_not_time_without_an_ecm(
+    softcam_bridge, settings, receiver, lab, monkeypatch
+):
+    """The usual shape at boot: the plugin starts, and then the clock is set."""
+    settings.softcam_restart_allowed.value = True
+    settings.softcam_autoheal.value = True
+    bridge = softcam_bridge()
+    receiver.info.encrypted = True
+    publisher = bridge.publisher("softcam")
+    publisher._service_since = 0.0
+    assert not os.path.exists(lab.ecm)
+
+    monkeypatch.setattr(softcam, "time", SteppedClock(3600))
+    publisher._detector.timer.fire()
+    assert lab.proc.signals == []
+
+
+def test_a_zap_just_after_the_clock_stepped_back_is_counted_from_the_zap(
+    softcam_bridge, settings, receiver, lab, monkeypatch
+):
+    """The zap takes the clock's step into account before the next look can."""
+    publisher = watching(softcam_bridge, settings, receiver, zapped_ago=600)
+    write_ecm(lab.ecm, time.time() - 2)
+    publisher._detector.timer.fire()
+
+    monkeypatch.setattr(softcam, "time", SteppedClock(-3600))
+    receiver.nav.fire(1)          # evStart
+    os.remove(lab.ecm)
+    publisher._detector.timer.fire()
+    assert lab.proc.signals == []
+
+
+def test_an_ecm_seen_while_the_detector_could_not_act_is_still_remembered(
+    softcam_bridge, settings, receiver, lab
+):
+    """A look the gates stop still notes when the cam last wrote."""
+    publisher = watching(softcam_bridge, settings, receiver, zapped_ago=600)
+    receiver.info.encrypted = None          # the image will not say, for a moment
+    write_ecm(lab.ecm, time.time() - 2)
+    publisher._detector.timer.fire()
+
+    receiver.info.encrypted = True
+    os.remove(lab.ecm)
+    publisher._detector.timer.fire()
+    assert lab.proc.signals == []
+
+
+def test_a_clock_step_back_does_not_stop_the_count(
+    softcam_bridge, settings, receiver, lab, monkeypatch
+):
+    publisher = watching(softcam_bridge, settings, receiver, zapped_ago=30)
+    write_ecm(lab.ecm, time.time() - 2)
+    publisher._detector.timer.fire()
+
+    monkeypatch.setattr(softcam, "time", SteppedClock(-3600))
+    os.remove(lab.ecm)
+    publisher._detector.timer.fire()
+    assert lab.proc.signals == []
+
+    # No ECM for well over the threshold since: it is still a stuck cam.
+    publisher._ecm_seen -= 100
+    publisher._service_since -= 100
+    publisher._since -= 100
+    publisher._detector.timer.fire()
+    assert lab.proc.signals != []
+
+
 # -------------------------------------------------------------------- privacy --
 
 # Invented values, in the shape the real file has. 🔴 No value from a receiver.
@@ -1125,7 +1404,7 @@ def test_the_ecm_file_is_never_opened(tmp_path, monkeypatch):
         return real_open(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "open", watched)
-    not_decoding_seconds(path, 0.0, 900.0, 1000.0)
+    softcam.newest_ecm(path, 0.0, 1000.0)
     monkeypatch.undo()
 
     assert path not in opened
