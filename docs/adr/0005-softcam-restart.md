@@ -160,9 +160,11 @@ stale or missing meanwhile. In detail:
 - A modification time from before the service start is the previous service's ECM and counts
   for nothing, because the count never starts earlier than the service start. A modification time
   more than a second later than the clock is ignored: the clock stepped back after the cam wrote
-  it, so it is an ECM from before the step, already remembered and moved with the clock, not a new
-  one. Taking it - even capped at the current time - would hold the count at zero for as long as
-  the step was whenever a dead cam leaves its file behind.
+  it, so it is an ECM from before the step, not a new one. When a look saw it before the step and
+  the step was at least five seconds, it is already remembered and moved with the clock; otherwise
+  the ECM remembered before it stands, which costs at most one look's worth of time. Taking it -
+  even capped at the current time - would hold the count at zero for as long as the step was
+  whenever a dead cam leaves its file behind.
 - A step of the wall clock is not counted as time without an ECM. The steady clock does not step,
   so the difference between how far the two moved since the last look is the step, and the
   remembered times - the plugin's start, the service start and the ECM seen - are moved by it. A

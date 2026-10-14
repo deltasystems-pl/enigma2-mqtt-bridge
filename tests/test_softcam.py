@@ -862,9 +862,12 @@ def test_an_ecm_time_in_the_future_is_not_a_new_ecm(tmp_path):
     write_ecm(path, 5000.0)
     assert softcam.newest_ecm(path, 0.0, 1000.0) == 0.0
     assert softcam.newest_ecm(path, 900.0, 1000.0) == 900.0
-    # Within a second of the clock it is a new ECM, and counts as now.
+    # Within a second of the clock it is a new ECM, and counts as now; two
+    # seconds ahead it is not.
     write_ecm(path, 1000.5)
     assert softcam.newest_ecm(path, 900.0, 1000.0) == 1000.0
+    write_ecm(path, 1002.0)
+    assert softcam.newest_ecm(path, 900.0, 1000.0) == 900.0
     # A remembered time ahead of the clock is pulled back to it.
     os.remove(path)
     assert softcam.newest_ecm(path, 5000.0, 1000.0) == 1000.0

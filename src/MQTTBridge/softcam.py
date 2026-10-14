@@ -451,9 +451,12 @@ def newest_ecm(path, seen, now):
 
     A modification time more than a second in the future is ignored: it means
     the clock stepped back after the cam wrote it, so it is an ECM from before
-    the step - already in `seen`, moved by `_follow_the_clock` - and not a new
-    one. Taking it, even capped at `now`, would hold the count at zero for as
-    long as the step was whenever a dead cam leaves its file behind. The result
+    the step and not a new one. When a look saw it before the step and the step
+    was at least `CLOCK_STEP_SECONDS`, it is already in `seen`, moved by
+    `_follow_the_clock`; otherwise the ECM remembered before it stands, which
+    costs at most one look's worth of time. Taking it, even capped at `now`,
+    would hold the count at zero for as long as the step was whenever a dead
+    cam leaves its file behind. The result
     is never later than `now` either, for the same reason. A time from before
     the service started is the previous service's ECM; it may be remembered,
     but `not_decoding_seconds` never counts from earlier than the service start,
