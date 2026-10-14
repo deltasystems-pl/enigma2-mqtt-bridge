@@ -252,6 +252,16 @@ version that has no section here.
   softcam that has stopped is restarted as before. A step of the receiver's clock - set from the
   transponder or by NTP after boot - is no longer counted as time without an ECM either
   ([ADR-0005](docs/adr/0005-softcam-restart.md#amendment-2026-10-14---counted-from-the-newest-ecm-seen)).
+- `cam` no longer flickers to `active: null` while the channel is still being decoded. A poll
+  that landed in the few seconds the softcam's ECM file is gone - for instance when a
+  descrambled stream to a stream client ends - published `active`, `system` and `ecm_ms` as
+  `null` until the next poll. While the file is absent, the last fresh result is now published
+  again until 15 seconds have passed since that ECM was written, and `null` after that, as
+  before; a zap, a free-to-air service or a file that is there but stale or unreadable ends it at
+  once. Only the parsed `system` and `ecm_ms` are kept between polls, never the file's text.
+  [TOPICS.md](docs/TOPICS.md) now also says that while the receiver descrambles another
+  encrypted channel as well, `system` and `ecm_ms` can describe that channel rather than the one
+  on the television.
 
 ### Documentation
 

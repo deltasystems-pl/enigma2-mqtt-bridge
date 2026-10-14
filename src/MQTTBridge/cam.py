@@ -116,33 +116,62 @@ def _parse_ecm(text):
     return system, milliseconds
 
 
+def _fresh(modified, service_since, current):
+    """Whether an ECM written at `modified` belongs to this service and is recent."""
+    return (
+        modified >= service_since
+        and modified <= current + 1
+        and current - modified <= FRESH_SECONDS
+    )
+
+
 def read_cam(session, path=ECM_PATH, service_since=0.0, now=None):
     """Return only telemetry refreshed after the latest known service start."""
+    return cam_state(session, path, service_since, now)[0]
+
+
+def cam_state(session, path=ECM_PATH, service_since=0.0, now=None, held=None):
+    """`(payload, reading)`: the payload, and the reading to hand back at the next poll.
+
+    A reading is `(system, ecm_ms, modified)` - the two parsed values and the
+    file's modification time, never any of its text. `held` is the one the last
+    poll returned. It is reported again only while the file is **absent** and
+    the reading is still fresh by the rule a file is held to: the cam removes the
+    file for a few seconds while it is still decoding - measured when a
+    descrambled stream to a stream client ended - and writes it again at the
+    next ECM, so a poll that lands in that gap would otherwise say `active: null`
+    for a channel the television is decoding. Once `FRESH_SECONDS` have passed
+    since that ECM, the answer is the one an absent file always gave. A file that
+    is there but stale, malformed or not a regular file ends the reading at once,
+    and so does a poll that finds the service free-to-air or cannot tell.
+    """
     encrypted = _encrypted(session)
     payload = dict(EMPTY)
     payload["encrypted"] = encrypted
+    # A poll that did not see the reading ends it: it is held only from one
+    # poll that saw it to the next.
     if encrypted is False:
         payload["active"] = False
-        return payload
+        return payload, None
     if encrypted is not True:
-        return payload
+        return payload, None
 
     text, modified = _read_bounded(path)
     current = time.time() if now is None else now
-    if (
-        text is None
-        or modified is None
-        or modified < service_since
-        or modified > current + 1
-        or current - modified > FRESH_SECONDS
-    ):
-        return payload
+    if text is None or modified is None:
+        if held is None or os.path.lexists(path) or not _fresh(held[2], service_since, current):
+            return payload, None
+        payload["system"], payload["ecm_ms"] = held[0], held[1]
+        payload["active"] = True
+        return payload, held
+    if not _fresh(modified, service_since, current):
+        return payload, None
     parsed = _parse_ecm(text)
     if parsed is None:
-        return payload
+        return payload, None
     payload["system"], payload["ecm_ms"] = parsed
     payload["active"] = True
-    return payload
+    return payload, (parsed[0], parsed[1], modified)
 
 
 class CamPublisher(NavPublisher):
@@ -155,6 +184,8 @@ class CamPublisher(NavPublisher):
         NavPublisher.__init__(self, bridge)
         self.path = path
         self._service_since = 0.0
+        # The last fresh reading, parsed values only: see `cam_state`.
+        self._held = None
         self._poll = Ticker(self._publish, "cam telemetry")
 
     def start(self):
@@ -178,10 +209,15 @@ class CamPublisher(NavPublisher):
 
         if event == event_id("evStart"):
             self._service_since = time.time()
+            # Nothing read for the previous service carries across a zap.
+            self._held = None
         self._publish()
 
     def _payload(self):
-        return read_cam(self.session, self.path, self._service_since)
+        payload, self._held = cam_state(
+            self.session, self.path, self._service_since, held=self._held
+        )
+        return payload
 
     def _publish(self):
         # An already queued eTimer callback can run after stop/disable. Never
