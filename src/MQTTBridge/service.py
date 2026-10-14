@@ -24,8 +24,17 @@ somebody picks another one on the remote and tells nobody, so `service` asks
 which track is playing every few seconds - two cheap calls, no track read -
 and reads the tracks again only when the answer moved. With nothing playing,
 which is what standby is, it asks nothing.
+
+And the picture - its size, scan and frame rate - is the decoder's word where
+the image has the decoder's files, not the image's service information. After
+enigma2 restarts the decoder goes on showing the same picture, no size event
+comes, and the image's service information reports a picture that is not the
+one on the screen until the next zap. So `service` is also read again a few
+seconds after the plugin starts and after every service start, when the
+decoder has settled.
 """
 
+import os
 import time
 
 from . import audio
@@ -89,6 +98,30 @@ VIDEO_CODECS = {
 
 # The image reports the frame rate in thousandths of a frame a second.
 FRAME_RATE_SCALE = 1000.0
+
+# The first video decoder's own account of its picture, on Broadcom receivers
+# and most others; some boxes have no such directory, and then the image's
+# service information is all there is. Measured on OpenViX 6.6: `xres` and
+# `yres` are hexadecimal without a prefix (`500` is 1280, `2d0` is 720),
+# `progressive` is 1 or 0, and `framerate` is in thousandths, as the image's
+# own number is. The directory holds more; only these four are read.
+DECODER_PATH = "/proc/stb/vmpeg/0"
+
+# Each of those files holds a few characters. More than this is not a number
+# the decoder wrote, and nothing longer is read.
+DECODER_READ_BYTES = 16
+
+# When `service` is read again after the plugin starts and after a service
+# starts, in milliseconds from then. The decoder's files are still the last
+# service's, or `0`, for up to a second after a zap and were settled at three
+# seconds when measured; the second read is for a service whose picture comes
+# later - an encrypted one waits for its first key - and for a tune that takes
+# longer. Two reads, then nothing until the next start: not a poll.
+REREAD_MILLISECONDS = (3000, 8000)
+
+# The decoder's events: each says the decoder has a picture of the service now
+# playing, so its files are that picture's.
+PICTURE_EVENTS = ("evVideoSizeChanged", "evVideoFramerateChanged", "evVideoProgressiveChanged")
 
 # What „nothing is playing" and „nothing is tuned" look like. The keys are all
 # there with null values rather than the topic being absent, because the
@@ -197,8 +230,60 @@ def frame_rate(info):
     return value / FRAME_RATE_SCALE
 
 
-def read_service(session, bouquet_lookup=None):
-    """The `service` payload, or None when nothing is playing."""
+def _decoder_number(name, base):
+    """One of the decoder's files as a number, or None when it is missing, unreadable or not one.
+
+    A proc file the driver answers at once; a few bytes are read and no more.
+    """
+    try:
+        with open(os.path.join(DECODER_PATH, name), encoding="ascii", errors="replace") as handle:
+            text = handle.read(DECODER_READ_BYTES + 1)
+    except OSError:
+        return None
+    if len(text) > DECODER_READ_BYTES:
+        return None
+    try:
+        # `int` takes the newline and any other surrounding white space itself.
+        value = int(text, base)
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
+def read_decoder():
+    """What the decoder says of its picture: {member: value}, a member it cannot give left out.
+
+    A size of 0 is the decoder with no picture yet - right after a zap - and
+    then its scan and frame rate are left over or meaningless too: all four
+    are null, never 0 and never the image's guess. Otherwise each member the
+    decoder gives is its own, and one whose file is missing, unreadable or not
+    a value it can have is left out, for the image's service information to
+    answer.
+    """
+    width = _decoder_number("xres", 16)
+    height = _decoder_number("yres", 16)
+    if width == 0 or height == 0:
+        return {"width": None, "height": None, "interlaced": None, "frame_rate": None}
+    facts = {}
+    if width is not None:
+        facts["width"] = width
+    if height is not None:
+        facts["height"] = height
+    progressive = _decoder_number("progressive", 10)
+    if progressive in (0, 1):
+        facts["interlaced"] = progressive == 0
+    rate = _decoder_number("framerate", 10)
+    if rate:
+        facts["frame_rate"] = rate / FRAME_RATE_SCALE
+    return facts
+
+
+def read_service(session, bouquet_lookup=None, decoder=True):
+    """The `service` payload, or None when nothing is playing.
+
+    `decoder` False leaves the decoder's files out and takes the picture from
+    the image's service information alone.
+    """
     sref = current_service_reference(session)
     if not sref:
         return None
@@ -215,16 +300,24 @@ def read_service(session, bouquet_lookup=None):
             bouquet = bouquet_lookup(sref)
         except Exception:
             LOG.debug("could not work out which bouquet %s came from", sref)
+    picture = {
+        "width": _number(info, "sVideoWidth"),
+        "height": _number(info, "sVideoHeight"),
+        "interlaced": interlaced(info),
+        "frame_rate": frame_rate(info),
+    }
+    if decoder:
+        picture.update(read_decoder())
     return {
         "sref": sref,
         "name": name or None,
         "bouquet": bouquet,
         "provider": _text(info, "sProvider"),
-        "width": _number(info, "sVideoWidth"),
-        "height": _number(info, "sVideoHeight"),
+        "width": picture["width"],
+        "height": picture["height"],
         "video_codec": video_codec(info),
-        "interlaced": interlaced(info),
-        "frame_rate": frame_rate(info),
+        "interlaced": picture["interlaced"],
+        "frame_rate": picture["frame_rate"],
         "audio_tracks": audio.read_tracks(session),
     }
 
@@ -1037,7 +1130,7 @@ class ServicePublisher(NavPublisher):
     # become known with the first frames, each with an event of its own. An
     # image that lacks one of the names simply does not send it.
     events = ("evStart", "evUpdatedInfo", "evNewProgramInfo", "evTunedIn", "evEnd",
-              "evVideoSizeChanged", "evVideoFramerateChanged", "evVideoProgressiveChanged")
+              *PICTURE_EVENTS)
 
     def __init__(self, bridge=None):
         NavPublisher.__init__(self, bridge)
@@ -1051,16 +1144,45 @@ class ServicePublisher(NavPublisher):
         # read. Not the row marked active: a track past the ones listed marks
         # none, and comparing with that would read the tracks at every look.
         self._audio_seen = None
+        self._reread = Ticker(self._read_again, "picture re-read")
+        # Which of `REREAD_MILLISECONDS` the re-read timer is waiting for.
+        self._reread_step = 0
+        # True from a service start until the decoder says it has a picture
+        # or the first re-read: the decoder's files are the last service's
+        # then, so they are not read.
+        self._decoder_held = False
+        self._start_event = None
+        self._picture_events = set()
 
     def start(self):
         if not NavPublisher.start(self):
             return False
+        self._start_event = event_id("evStart")
+        self._picture_events = {event_id(name) for name in PICTURE_EVENTS} - {None}
         self._audio.start(AUDIO_POLL_MILLISECONDS)
+        # After an enigma2 restart the picture is already on the screen and no
+        # event will say so; the first read may also catch a zap still settling.
+        self._arm_rereads()
         return True
 
     def stop(self):
         self._audio.stop()
+        self._reread.stop()
         NavPublisher.stop(self)
+
+    def _arm_rereads(self):
+        """Read `service` again at each of `REREAD_MILLISECONDS` from now, dropping any pending."""
+        self._reread_step = 0
+        self._reread.start(REREAD_MILLISECONDS[0], True)
+
+    def _read_again(self):
+        self._decoder_held = False
+        step = self._reread_step + 1
+        self._reread_step = step
+        if step < len(REREAD_MILLISECONDS):
+            self._reread.start(REREAD_MILLISECONDS[step] - REREAD_MILLISECONDS[step - 1], True)
+        # Publishes only what changed, like every other read.
+        self.refresh()
 
     def extra_capabilities(self):
         """`service_codecs`, where the image can name the video type at all."""
@@ -1084,7 +1206,14 @@ class ServicePublisher(NavPublisher):
     # The resolution arrives after the first frame is decoded, so `evStart`
     # publishes a service with `width: null` and `evUpdatedInfo` publishes it
     # again with the numbers. Both are correct at the moment they are sent.
-    def on_service_event(self, _event):
+    # A start also holds the decoder's files back until the decoder announces
+    # a picture or the first re-read comes, and starts the re-reads over.
+    def on_service_event(self, event):
+        if event == self._start_event:
+            self._decoder_held = True
+            self._arm_rereads()
+        elif event in self._picture_events:
+            self._decoder_held = False
         self.refresh()
 
     def _bouquet_lookup(self):
@@ -1094,7 +1223,8 @@ class ServicePublisher(NavPublisher):
         return None if channels is None else channels.bouquet_for
 
     def read(self):
-        payload = read_service(self.session, self._bouquet_lookup())
+        payload = read_service(self.session, self._bouquet_lookup(),
+                               decoder=not self._decoder_held)
         self._audio_seen = None if payload is None else audio.active_index(self.session)
         return payload
 
