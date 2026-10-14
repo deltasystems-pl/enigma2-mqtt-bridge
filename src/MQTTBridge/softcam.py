@@ -71,7 +71,7 @@ LOG = get_logger("softcam")
 SOFTCAM_DIRECTORY = "/usr/softcams"
 PROC_DIRECTORY = "/proc"
 
-# Only its modification time is ever read. See `not_decoding_seconds`.
+# Only its modification time is ever read. See `newest_ecm`.
 ECM_PATH = "/tmp/ecm.info"
 
 # The kernel's cap on `/proc/<pid>/stat`'s `comm`. Not a formatting choice: it
@@ -92,6 +92,11 @@ SLOW_POLL_SECONDS = 0.05
 # about every 10 seconds - measured, ten advances with gaps of 9 to 11 - so
 # looking more often than that would only resample the same number.
 DETECTOR_MILLISECONDS = 10000
+
+# Between two looks the wall clock and the steady clock move alike, through a
+# busy main loop as much as an idle one, so a difference larger than this is a
+# step of the wall clock and not time passing. Slewing moves it by far less.
+CLOCK_STEP_SECONDS = 5.0
 
 TERM_POLL_MILLISECONDS = 500
 TERM_DEADLINE_SECONDS = 5.0
@@ -428,29 +433,66 @@ def _ecm_modified(path):
     return status.st_mtime
 
 
-def not_decoding_seconds(path, service_since, since, now):
+def newest_ecm(path, seen, now):
+    """The newest ECM the detector has seen, after one more look at the file.
+
+    `seen` is what the earlier looks found for the service being watched, 0.0
+    for nothing yet. The file's modification time replaces it when it is newer;
+    an absent file leaves it as it was. That is the whole point: the cam also
+    removes the file for a few seconds while it is decoding perfectly well -
+    measured when a stream of another encrypted channel to a stream client
+    ended, and probably whenever any other descrambled demux stops - and writes
+    it again at the next ECM. An ECM that was seen is not unseen by that.
+
+    One look per detector tick is enough. A healthy cam writes about every ten
+    seconds and the threshold is at least thirty, so an ECM written between two
+    looks and gone again before the second is at worst one tick of time counted
+    against the cam, never the time since the zap.
+
+    A modification time more than a second in the future is ignored: it means
+    the clock stepped back after the cam wrote it, so it is an ECM from before
+    the step and not a new one. When a look saw it before the step and the step
+    was at least `CLOCK_STEP_SECONDS`, it is already in `seen`, moved by
+    `_follow_the_clock`; otherwise the ECM remembered before it stands, which
+    costs at most one look's worth of time. Taking it, even capped at `now`,
+    would hold the count at zero for as long as the step was whenever a dead
+    cam leaves its file behind. The result
+    is never later than `now` either, for the same reason. A time from before
+    the service started is the previous service's ECM; it may be remembered,
+    but `not_decoding_seconds` never counts from earlier than the service start,
+    so it counts for nothing.
+    """
+    modified = _ecm_modified(path)
+    if modified is not None and modified <= now + 1:
+        seen = max(seen, modified)
+    return min(seen, now)
+
+
+def not_decoding_seconds(service_since, since, seen, now):
     """How long the cam has written no ECM, or 0.0 when there is nothing to count from.
 
-    Counted from the most recent of three things: the file's own modification
-    time, the start of the service being watched, and `since` - the moment this
-    module itself started.
+    Counted from the most recent of three things: the newest ECM seen for this
+    service (`newest_ecm`), the start of the service being watched, and `since` -
+    the moment this module itself started.
 
-    🔴 Written on the *age* of the file rather than on its existence, because the
-    cam **removes** the file when it stops descrambling - measured. Age treats a
-    removed file and a merely stale one identically, which is what makes absence
-    safe to reason about. It is also why the caller gates on „encrypted" first:
-    on a free-to-air channel absence is the normal, healthy state, and a detector
-    that read it as „not decoding" would report a stuck cam on every free-to-air
+    Counted from the newest ECM *seen*, not from whatever the file says at this
+    moment. The cam **removes** the file when it stops descrambling - measured -
+    but it also removes it for a few seconds while it is decoding, and up to
+    0.4.0 a look that landed in that gap counted from the zap, possibly hours
+    earlier, and restarted a working cam. Treating a removed file like a stale
+    one was the mistake: a stale file still carries the time of the last ECM,
+    and a removed one carries nothing. Now "not decoding" time grows only while
+    no fresh ECM appears, whether the file is stale or missing meanwhile.
+    Absence is still why the caller gates on "encrypted" first: on a
+    free-to-air channel no file is the normal, healthy state, and a detector
+    that read it as "not decoding" would report a stuck cam on every free-to-air
     channel in the house.
 
     The service start is in here because a channel-hopping household must not
     accumulate „not decoding" time across services: after a zap the file is up to
     a tuning period behind through no fault of the cam.
     """
-    latest = max(float(service_since or 0.0), float(since or 0.0))
-    modified = _ecm_modified(path)
-    if modified is not None:
-        latest = max(latest, modified)
+    latest = max(float(service_since or 0.0), float(since or 0.0), float(seen or 0.0))
     if latest <= 0.0:
         return 0.0
     return max(0.0, now - latest)
@@ -482,6 +524,10 @@ class SoftcamPublisher(NavPublisher):
         self._started_at = 0.0
         self._since = 0.0
         self._service_since = 0.0
+        # The newest ECM modification time seen for the current service, and the
+        # (wall, steady) pair `_follow_the_clock` compares against.
+        self._ecm_seen = 0.0
+        self._clock = None
 
         self._instances = None
         self._last_restart = None
@@ -510,6 +556,12 @@ class SoftcamPublisher(NavPublisher):
             return False
         self._started_at = time.monotonic()
         self._since = time.time()
+        self._clock = (self._since, self._started_at)
+        # Nothing follows the clock while the publisher is stopped, so nothing
+        # remembered from before may survive a start: a step back in between
+        # would leave it in the future and the count at zero until it passed.
+        self._service_since = 0.0
+        self._ecm_seen = 0.0
         if not NavPublisher.start(self):
             # A manual restart does not need a service event; only the auto-heal
             # window reset does, and it refuses to run without one rather than
@@ -648,7 +700,42 @@ class SoftcamPublisher(NavPublisher):
 
     def on_service_event(self, event):
         if event == event_id("evStart"):
-            self._service_since = time.time()
+            # The clock first, so that a step before this zap is not applied to
+            # the zap's own time again at the next look.
+            self._service_since = self._follow_the_clock()
+            # An ECM of the previous service says nothing about this one.
+            self._ecm_seen = 0.0
+
+    def _follow_the_clock(self):
+        """`time.time()`, after moving the detector's remembered times with any step of it.
+
+        "Not decoding" is a difference of wall-clock times, because the ECM
+        file's modification time is one. A receiver's clock can step - set from
+        the transponder or by NTP some time after boot - and a step that falls
+        between two of the times subtracted would be counted as time without an
+        ECM: a step forward of an hour would read as an hour of not decoding on
+        a working cam, at the next look that finds the file missing. The steady
+        clock does not step, so how much further the wall clock moved than the
+        steady one since the last look is the step, and the remembered times are
+        moved by it. A step backward is moved the same way; without that, the
+        count would sit at zero until the clock had caught up. Steps smaller than
+        `CLOCK_STEP_SECONDS` are not followed, so several of them could add up;
+        a clock adjusted that finely is slewed rather than stepped, so that is
+        accepted.
+        """
+        wall, steady = time.time(), time.monotonic()
+        if self._clock is not None:
+            step = (wall - self._clock[0]) - (steady - self._clock[1])
+            if abs(step) > CLOCK_STEP_SECONDS:
+                LOG.debug("the clock stepped by %d s; the auto-heal follows it", int(step))
+                self._since += step
+                # 0.0 is "none yet" for these two, and stays that.
+                if self._service_since:
+                    self._service_since += step
+                if self._ecm_seen:
+                    self._ecm_seen += step
+        self._clock = (wall, steady)
+        return wall
 
     # ---------------------------------------------------------------- the guards --
 
@@ -891,6 +978,12 @@ class SoftcamPublisher(NavPublisher):
         is the plugin deciding not to act, and a household that records every
         evening would otherwise find a retained error waiting for them.
         """
+        now = self._follow_the_clock()
+        # Noted at every look, whatever the setting and before every gate, so
+        # that switching the auto-heal on - or a gate opening - finds when the
+        # cam last wrote rather than nothing. Noting is not acting: whether to
+        # act still begins with "encrypted", below.
+        self._ecm_seen = newest_ecm(self.path, self._ecm_seen, now)
         if not self.value("softcam_autoheal") or self._busy:
             return
         if self._nav is None:
@@ -904,7 +997,7 @@ class SoftcamPublisher(NavPublisher):
         seconds = self._autoheal_seconds()
         if not seconds:
             return
-        stuck = not_decoding_seconds(self.path, self._service_since, self._since, time.time())
+        stuck = not_decoding_seconds(self._service_since, self._since, self._ecm_seen, now)
         if stuck < seconds:
             return
         # No origin: the automatic restart is never the page's, so it stays

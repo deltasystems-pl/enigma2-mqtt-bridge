@@ -1,6 +1,6 @@
 # ADR-0005: The softcam is restarted by collapsing its instances, counted by process roots
 
-**Status:** accepted 2026-09-22, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) (the box-only permission)
+**Status:** accepted 2026-09-22, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) (the box-only permission), amended 2026-10-14 (see [the amendment](#amendment-2026-10-14---counted-from-the-newest-ecm-seen): the decode signal)
 **Date:** 2026-09-22
 **Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §3, in part - it
 described this feature, and the parts of it corrected below turned out to be wrong when they were
@@ -122,3 +122,59 @@ else's receiver.
   recomputed from a stored local date at publish time rather than reset by a timer, because a
   receiver's clock can step shortly after boot and a timer armed before the step fires at the
   wrong moment.
+
+## Amendment 2026-10-14 - counted from the newest ECM seen
+
+*The decision above stands; one part of it was wrong when it was measured, and the text above is
+left as it was accepted.*
+
+**What was wrong.** "The decode signal" reads absence as infinitely old, and the code said why:
+age treats a removed file and a merely stale one identically. That holds only if the file is
+removed when, and only when, the cam stops descrambling. It is not. Measured on a receiver
+decoding an encrypted channel, with the file rewritten every 10 to 12 seconds: a stream of
+another encrypted channel to a stream client ran for twenty seconds and ended, and the file was
+absent for about five seconds while the television went on decoding, until the next ECM wrote it
+again. A detector look that landed in that gap counted from the start of the service - the last
+zap, more than ten minutes earlier - and logged that the cam had not decoded for that long, with
+a fresh ECM written in the same second. Only the limit of one automatic restart every ten minutes
+held it back that time; on other occasions it restarted a working cam. Any other descrambled
+demux that stops, a recording or timeshift, probably does the same. A stale file still carries
+the time of the last ECM; a removed one carries nothing, and nothing is not "infinitely old".
+
+**Decision.** The detector remembers the newest ECM modification time it has observed for the
+current service and counts from the most recent of that, the service start and the plugin's own
+start. "Not decoding" time therefore grows only while no new ECM appears, whether the file is
+stale or missing meanwhile. In detail:
+
+- The remembered time is forgotten at every zap and at every start of the plugin, and the start
+  forgets the service start too: nothing follows the clock while the plugin is stopped, so a step
+  back in between must not leave either in the future.
+- It is updated once per detector look, ten seconds apart. Sampling more often is not needed: a
+  healthy cam writes about every ten seconds and the shortest threshold is thirty, so an ECM that
+  was written and removed between two looks costs at most one look's worth of time.
+- It is updated at every look, whether the auto-heal is on or not and before the standby and
+  "encrypted" gates, so that switching the auto-heal on, or a gate opening, finds when the cam last
+  wrote rather than nothing. Noting that is not acting on it: the decision still begins with
+  "encrypted", so a missing file on a free-to-air channel stays the healthy state it was. The
+  price is one `lstat` every ten seconds on a receiver with the auto-heal off.
+- A modification time from before the service start is the previous service's ECM and counts
+  for nothing, because the count never starts earlier than the service start. A modification time
+  more than a second later than the clock is ignored: the clock stepped back after the cam wrote
+  it, so it is an ECM from before the step, not a new one. When a look saw it before the step and
+  the step was at least five seconds, it is already remembered and moved with the clock; otherwise
+  the ECM remembered before it stands, which costs at most one look's worth of time. Taking it -
+  even capped at the current time - would hold the count at zero for as long as the step was
+  whenever a dead cam leaves its file behind.
+- A step of the wall clock is not counted as time without an ECM. The steady clock does not step,
+  so the difference between how far the two moved since the last look is the step, and the
+  remembered times - the plugin's start, the service start and the ECM seen - are moved by it. A
+  zap does the same before it records its own time. Steps smaller than five seconds are not
+  followed, so several could add up; a clock adjusted that finely is slewed rather than stepped,
+  and that is accepted.
+- Unchanged: only the modification time is read, through `lstat`, and only a regular file counts;
+  the file is never opened.
+
+**Consequence.** A cam that stops writing is still restarted, after the same threshold, measured
+from its last ECM rather than from the zap; where the file went stale rather than missing, that is
+the same number as before. The cost is one value and one pair of clock readings held in memory,
+and the `lstat` above.
