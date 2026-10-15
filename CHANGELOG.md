@@ -162,6 +162,17 @@ version that has no section here.
 
 ### Fixed
 
+- The picture size and scan on `service` are right after enigma2 restarts. The receiver keeps
+  showing the same picture through the restart, no event says so, and the image's own service
+  information then reported a picture that was not on the screen, a 720p channel as
+  1920 x 1080, until the next zap. `width`, `height`, `interlaced` and `frame_rate` now come
+  from the video decoder (`/proc/stb/vmpeg/0`) where the image has it, while the image itself
+  reports a picture - a radio service or a channel still tuning keeps `null`, never the last
+  channel's picture. The size is taken as a pair, and a scan or frame rate the decoder cannot
+  give is the image's only when the image agrees on the size, `null` otherwise. `service` is
+  also read again three and eight seconds after the plugin starts and after every zap, which is
+  when the decoder has settled. Right after a zap the members are `null`, or briefly the
+  previous channel's, as before ([TOPICS.md](docs/TOPICS.md)).
 - The outcome of an update, or the reason a removal stopped, is no longer lost to a connect that
   could not send it. An error carried to the next session was dropped at the first connect
   whether or not its publish left the receiver; when the socket was gone again before the

@@ -1,6 +1,7 @@
 # ADR-0019: Whether the volume acts on the audio is true, false or unknown, read from the image's setting for the active track's codec
 
 **Status:** accepted 2026-10-13, amended 2026-10-13 (see [the amendment](#amendment-2026-10-13---aac-that-is-being-transcoded-and-how-much-is-read))
+and 2026-10-14 (see [the second amendment](#amendment-2026-10-14---the-picture-comes-from-the-decoder))
 **Date:** 2026-10-13
 **Supersedes:** -
 
@@ -132,3 +133,34 @@ Found in review; the Decision's own rule applied where the first reading missed 
   failed is tried again at the next reconciliation; and where the service listener did not bind
   the track is read at every reconciliation, five seconds, as it was before this amendment but
   for one track. A volume key press never reads the track and does not count towards the six.
+
+## Amendment 2026-10-14 - the picture comes from the decoder
+
+The first amendment says `service.frame_rate` is published "as the image gave it". That is no
+longer the whole truth, and the record is read with this in mind; the rest of it stands, the
+missing upper bound included.
+
+- **What changed.** `service.frame_rate`, `width`, `height` and `interlaced` are read from the
+  first video decoder's own files, `/proc/stb/vmpeg/0/framerate`, `xres`, `yres` and
+  `progressive`, where the image has them. The frame rate is still thousandths divided by a
+  thousand and still published without an upper bound.
+- **What the decoder cannot give.** A file that is missing, unreadable or not a value the decoder
+  can have - a `progressive` that is not 0 or 1, a frame rate of 0 - is answered as the next
+  bullet sets out: a size it cannot give in full leaves all four members to the image's service
+  information; a scan or frame rate it cannot give is the image's only when the two sizes agree,
+  and `null` when they differ. A receiver without the directory publishes what it always did.
+- **No picture is null.** A size of 0 is the decoder with no picture yet, and its scan and frame
+  rate are then meaningless: all four members are `null`, never 0 and never the image's answer.
+- **Only beside the image's own picture, and never mixed.** The decoder is read only while the
+  image's service information reports a picture size, since the files keep the last channel's
+  picture through a radio service or a tune that has not decoded yet; the two sizes are a pair,
+  both the decoder's or both the image's; and when the decoder's size differs from the image's, a
+  scan or frame rate the decoder cannot give is `null`, not the image's (added in review the same
+  day).
+- **Why.** Measured on OpenViX 6.6: after enigma2 restarts the decoder goes on showing the same
+  picture, no size event comes, and the image's service information reports another picture - a
+  720p channel as 1920 x 1080 - until the next zap, while the decoder's files have the truth.
+  Because no event comes, `service` is also read again three and eight seconds after the plugin
+  starts and after every service start; from a service start until the decoder raises one of its
+  own events or the first re-read comes, its files, which still hold the last channel's picture
+  for about a second, are not read ([TOPICS.md](../TOPICS.md)).

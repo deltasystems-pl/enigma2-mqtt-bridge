@@ -3453,6 +3453,18 @@ def no_package_manager(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_video_decoder(tmp_path, monkeypatch):
+    """`service` reads the picture from the decoder's files: none here, unless a test writes them.
+
+    So the picture is the fake image's service information everywhere else, on
+    any machine the suite runs on.
+    """
+    from MQTTBridge import service as service_module
+
+    monkeypatch.setattr(service_module, "DECODER_PATH", str(tmp_path / "no-video-decoder"))
+
+
+@pytest.fixture(autouse=True)
 def no_release_origin(tmp_path, monkeypatch):
     """No test reaches the release origin, writes `/etc/enigma2` or waits for a worker thread.
 

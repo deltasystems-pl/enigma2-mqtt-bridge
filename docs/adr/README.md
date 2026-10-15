@@ -77,7 +77,7 @@ What this costs, what it rules out, and what has to change if it is ever reverse
 | [0016](0016-a-commands-id-comes-in-an-envelope-and-only-a-refusal-says-it-back.md) | A command's id comes in an envelope around its payload, and only a refusal says it back | accepted 2026-10-13, amended by [ADR-0017](0017-whether-a-service-can-be-played-is-asked-with-an-empty-second-reference.md) ("only a refusal says the id back": the answer to a question says it too) |
 | [0017](0017-whether-a-service-can-be-played-is-asked-with-an-empty-second-reference.md) | Whether a service can be played is asked with an empty second reference, and answered once on a topic that is not retained | accepted 2026-10-13, amended 2026-10-13 |
 | [0018](0018-stopping-a-stream-client-needs-no-permission.md) | Stopping a stream client needs no permission, and names exactly one client | accepted 2026-10-13, amended 2026-10-13 |
-| [0019](0019-passthrough-is-true-false-or-unknown.md) | Whether the volume acts on the audio is true, false or unknown, read from the image's setting for the active track's codec | accepted 2026-10-13, amended 2026-10-13 |
+| [0019](0019-passthrough-is-true-false-or-unknown.md) | Whether the volume acts on the audio is true, false or unknown, read from the image's setting for the active track's codec | accepted 2026-10-13, amended 2026-10-13 and 2026-10-14 |
 
 "Superseded in part by a proposed record" means: the earlier text still describes every released
 plugin exactly, and the proposed record says where it will stop doing so. It becomes a supersession

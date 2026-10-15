@@ -528,10 +528,10 @@ standby the household asks for during those seconds is still told apart from the
 | `name` | string \| null | Channel name as the bouquet spells it |
 | `bouquet` | string \| null | The first of the **configured** bouquets (`bouquets_for_select`) that contains the service - `null` when it is in none of them, which is not the same as „no bouquet" |
 | `provider` | string \| null | |
-| `width`, `height` | int \| null | Video resolution; `null` before the first frame is decoded |
+| `width`, `height` | int \| null | Video resolution; `null` before the first frame is decoded. From after 0.4.0 (unreleased) read from the video decoder (`/proc/stb/vmpeg/0`) where the image has it, else from the image's service information - see below |
 | `video_codec` | string \| null | Added after 0.4.0 (unreleased). The video codec on the decoder, as a stable lower-case name: `mpeg2`, `h264`, `hevc`, `mpeg1`, `mpeg4` (MPEG-4 Part 2), `vc1`, `vc1_sm`, `avs`, `avs2`. `null` when the image gives a value that is none of these, or none at all. An open enumeration |
-| `interlaced` | bool \| null | Added after 0.4.0 (unreleased). `true` for an interlaced picture, `false` for a progressive one; `null` before the decoder knows |
-| `frame_rate` | number \| null | Added after 0.4.0 (unreleased). Frames a second - `25.0`, `50.0`, `23.976` - to three decimal places; `null` before the decoder knows. For an interlaced picture it is the frame rate, not the field rate. It is the image's number divided by a thousand and is held to no upper bound: a value no broadcast has is published as the image gave it |
+| `interlaced` | bool \| null | Added after 0.4.0 (unreleased). `true` for an interlaced picture, `false` for a progressive one; `null` before the decoder knows. From the video decoder where the image has it, as `width` |
+| `frame_rate` | number \| null | Added after 0.4.0 (unreleased). Frames a second - `25.0`, `50.0`, `23.976` - to three decimal places; `null` before the decoder knows. For an interlaced picture it is the frame rate, not the field rate. It is the decoder's number (or the image's) divided by a thousand and is held to no upper bound: a value no broadcast has is published as it was given. From the video decoder where the image has it, as `width` |
 | `audio_tracks` | list \| null | Added after 0.4.0 (unreleased). The audio tracks of the service, in the image's order, at most 32. `[]` for a service without audio; `null` when nothing is playing or the image will not say. See below |
 
 Published on `evStart`, `evTunedIn`, `evUpdatedInfo`, `evNewProgramInfo` and `evEnd`, so it
@@ -547,6 +547,27 @@ is - and publishes only when the answer moved. As always, a payload equal to the
 sent again.
 
 With nothing playing every field is `null`; the keys are still all there.
+
+**The picture is the decoder's word** (after 0.4.0, unreleased). `width`, `height`, `interlaced`
+and `frame_rate` are read from the first video decoder's own files, `/proc/stb/vmpeg/0/xres`,
+`yres`, `progressive` and `framerate`, where the image has them - Broadcom receivers do, most
+others too - and only while the image's service information itself reports a picture size: a
+radio service, an audio file, or a tune or a key that has not come yet report none, and the
+files then still hold the last channel's picture, so the members are what the image says, `null`.
+A receiver without the directory publishes what it always did. The size is a pair: both values
+are the decoder's, or - when it cannot give both - all four are the image's. When the decoder's
+size and the image's agree, a scan or frame rate the decoder cannot give (its file is missing,
+unreadable, or not a value it can have) is the image's; when they differ the image is describing
+another picture, and it is `null`. A size of `0` is the decoder with no picture yet, and then all
+four are `null`. The reason is an enigma2 restart: the decoder goes on showing the same
+picture, no size event comes, and the image's service information can report a picture that is
+not the one on the screen - 1920 x 1080 for a 720p channel - until the next zap. For the same
+reason `service` is read again three and eight seconds after the plugin starts and after every
+service start, and published if anything changed; then not again until the next start.
+**Right after a zap** the picture members are `null` or still the previous channel's for up to a
+few seconds, as the decoder itself is: from `evStart` until the decoder raises one of its own
+events or the first re-read comes, its files - which still hold the last channel's picture for
+about a second - are not read, and the image's service information answers alone.
 
 **The codec members say what is on the decoder, not what the channel list says.** The service
 type in the reference says nothing about the codec; `video_codec` is the stream type the image
