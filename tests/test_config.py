@@ -42,6 +42,8 @@ EXPECTED_DEFAULTS = {
     "uninstall_allowed": False,
     "update_check": False,
     "update_allowed": False,
+    "menu_allowed": True,
+    "menu_hotkey": "help_long",
     "log_level": "info",
     "epg_grid_events": 4,
 }
@@ -109,6 +111,7 @@ def test_remote_settings_are_exact_and_strictly_typed():
         "oscam_telemetry": False,
         "softcam_autoheal": False,
         "softcam_autoheal_seconds": 90,
+        "menu_hotkey": "help_long",
     }
 
 
@@ -129,6 +132,7 @@ def test_an_omitted_key_falls_back_to_the_section_that_will_be_saved():
         oscam_telemetry=_Element(True),
         softcam_autoheal=_Element(True),
         softcam_autoheal_seconds=_Element(240),
+        menu_hotkey=_Element("f4"),
     )
 
     values = settings_module.validate_remote_settings(
@@ -140,6 +144,7 @@ def test_an_omitted_key_falls_back_to_the_section_that_will_be_saved():
     assert values["oscam_telemetry"] is True
     assert values["softcam_autoheal"] is True
     assert values["softcam_autoheal_seconds"] == 240
+    assert values["menu_hotkey"] == "f4"
 
 
 @pytest.mark.parametrize("payload", [

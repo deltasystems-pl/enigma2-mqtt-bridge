@@ -16,8 +16,19 @@ def descriptors():
 
 
 def test_three_descriptors_where_the_contract_says():
+    """And the receiver menu's Extensions entry, while `menu_allowed` is on - by default."""
     found = descriptors()
     assert set(found) == {
+        PluginDescriptor.WHERE_SESSIONSTART,
+        PluginDescriptor.WHERE_AUTOSTART,
+        PluginDescriptor.WHERE_PLUGINMENU,
+        PluginDescriptor.WHERE_EXTENSIONSMENU,
+    }
+
+
+def test_without_the_menu_permission_there_is_no_extensions_entry(settings):
+    settings.menu_allowed.value = False
+    assert set(descriptors()) == {
         PluginDescriptor.WHERE_SESSIONSTART,
         PluginDescriptor.WHERE_AUTOSTART,
         PluginDescriptor.WHERE_PLUGINMENU,

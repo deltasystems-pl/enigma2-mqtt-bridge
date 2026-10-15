@@ -33,9 +33,11 @@ def test_info_carries_every_documented_field(connected_bridge, factory):
     payload = factory.client.last(INFO).json()
     assert set(payload) == {
         "image", "enigma", "plugin", "build", "contract", "boxtype", "mac", "ip", "uptime",
-        "wol", "ha_mode", "settings", "capabilities", "not_published",
+        "wol", "ha_mode", "settings", "capabilities", "menu", "not_published",
     }
     assert payload["not_published"] == []
+    # No session, so no menu screen: the member says so rather than going missing.
+    assert payload["menu"] is None
     assert set(payload["wol"]) == {"supported", "armed", "iface", "mechanism"}
     assert payload["plugin"] == __version__
     assert payload["boxtype"] == "vuuno4kse"
@@ -59,6 +61,8 @@ def test_info_carries_every_documented_field(connected_bridge, factory):
         "uninstall_allowed": False,
         "update_check": False,
         "update_allowed": False,
+        "menu_allowed": True,
+        "menu_hotkey": "help_long",
     }
 
 

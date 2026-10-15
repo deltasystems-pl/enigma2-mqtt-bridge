@@ -125,7 +125,8 @@ def test_config_persists_all_values_rebinds_hooks_and_publishes_info(
     assert settings.screenshot_interval.value == 90
     assert settings.screenshot_interval.saved_value == 90
     assert settings.screenshot_delay.value == 9
-    assert receiver.actions.bound == []
+    # The remote is no longer watched; the menu's hotkey, a context of its own, stays bound.
+    assert [entry for entry in receiver.actions.bound if entry[0] == ""] == []
     assert live_bridge.publisher("hdd") is hdd
     assert live_bridge.publisher("epg_grid") is epg_grid
     assert live_bridge.publisher("screenshot")._interval.timer.started == (90000, False)
@@ -144,6 +145,8 @@ def test_config_persists_all_values_rebinds_hooks_and_publishes_info(
         "uninstall_allowed": False,
         "update_check": False,
         "update_allowed": False,
+        "menu_allowed": True,
+        "menu_hotkey": "help_long",
     }
 
 

@@ -18,6 +18,7 @@ from .channels import ChannelsPublisher
 from .epggrid import EpgGridPublisher
 from .epgimport import EpgImportPublisher
 from .hdd import HddPublisher
+from .menu import MenuPublisher
 from .oscam import OscamPublisher
 from .power import PowerPublisher
 from .process import ProcessPublisher
@@ -54,6 +55,7 @@ PUBLISHER_CLASSES = (
     KeyPublisher,
     ScreenPublisher,
     ToastPublisher,
+    MenuPublisher,
 )
 
 

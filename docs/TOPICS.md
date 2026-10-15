@@ -164,7 +164,7 @@ not by the checker; their types are the tables below.
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
 | 0.3.0 -> 0.4.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3); the read-only setting `update_allowed`, the capability `self_update`, the command `update`, `update.transaction` and the subscription to `enigma2mqtt/integration/<node>` (§3); the event topic `relay_request` and the command `relay`, and `cmd/update`'s refusal `no_relay`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
-| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4); a command's id - the envelope every command takes on the broker, the `last_error` member `id` and the capability `command_id` (sections 1 and 2); the `service` members `video_codec`, `interlaced`, `frame_rate` and `audio_tracks` and the capability `service_codecs`; the topics `stream` and `stream_clients`, the event topic `stream_playable`, the commands `stream_stop` and `stream_playable` and the capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable`; the `volume` member `passthrough` and the capability `volume_passthrough`. **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
+| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4); a command's id - the envelope every command takes on the broker, the `last_error` member `id` and the capability `command_id` (sections 1 and 2); the `service` members `video_codec`, `interlaced`, `frame_rate` and `audio_tracks` and the capability `service_codecs`; the topics `stream` and `stream_clients`, the event topic `stream_playable`, the commands `stream_stop` and `stream_playable` and the capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable`; the `volume` member `passthrough` and the capability `volume_passthrough`; the receiver menu - the subscriptions to `enigma2mqtt/menu/<node>` and `homeassistant/status` (§3), the event topic `menu_action`, the `info` member `menu`, the read-only setting `menu_allowed`, the writable setting `menu_hotkey` and the capability `menu`. **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
 
 ---
 
@@ -209,10 +209,12 @@ announcement retained.
                "softcam_autoheal": false, "softcam_autoheal_seconds": 90,
                "deep_standby_allowed": false, "softcam_restart_allowed": false,
                "epg_import_allowed": false, "uninstall_allowed": false,
-               "update_check": false, "update_allowed": false},
+               "update_check": false, "update_allowed": false,
+               "menu_allowed": true, "menu_hotkey": "help_long"},
   "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
                    "volume", "hdd", "process", "channels", "channel_topics", "bouquet_context",
-                   "epg_grid", "keys", "screenshot", "toast", "message", "command_id"],
+                   "epg_grid", "keys", "screenshot", "toast", "menu", "message", "command_id"],
+  "menu": {"screen": "styled", "hotkey": "help_long", "reason": null},
   "not_published": []
 }
 ```
@@ -230,8 +232,9 @@ announcement retained.
 | `uptime` | int | Seconds since boot |
 | `wol` | object | Since 0.3.0. What the **image** says about Wake-on-LAN - whether it has a switch for it and whether that is on. See below |
 | `ha_mode` | string | `discovery` \| `integration` \| `off` - the acknowledgement of `cmd/ha_mode` |
-| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5-3600), `screenshot_delay` (post-zap settling seconds, 1-30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30-600). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`, `uninstall_allowed`, `update_check` and `update_allowed` (bools, off by default). See below. |
+| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5-3600), `screenshot_delay` (post-zap settling seconds, 1-30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30-600), `menu_hotkey` (`help_long` \| `red_long` \| `f3` \| `f4` \| `off`; a long HELP by default; added after 0.4.0, unreleased). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`, `uninstall_allowed`, `update_check`, `update_allowed` and `menu_allowed` (bools, off by default but `menu_allowed`, which is on). See below. |
 | `capabilities` | list of strings | Which hooks this image actually gave the plugin |
+| `menu` | object or null | Which screen the receiver menu is drawn with on this image and which key opens it; `null` where there is no menu - `menu_allowed` off, or no screen could be built. Added after 0.4.0 (unreleased). See below |
 | `not_published` | list of objects | The topics whose payload was too big to send, so they are not on the broker. `[]` when everything fits, which is nearly always. Added after 0.4.0 (unreleased). See below |
 
 **Presence in `settings` is not permission to write it back.** Until 0.2.0 this object was „the
@@ -248,6 +251,7 @@ settings it did mean to change as well.
 | `uninstall_allowed` | 0.3.0 | Whether `cmd/uninstall` is permitted over MQTT. Always present, whichever way it is set. A consumer offers the removal only on a **stated** `true` together with the `uninstall` capability: for a one-way door, silence means no | The same places, and never over MQTT |
 | `update_check` | 0.4.0 | Whether the receiver asks the plugin's release origin, on the internet, which releases there are: once a day, and when `cmd/update_check` asks over MQTT. Not a permission for anything on the receiver, but the one switch that lets it make a connection other than the broker's, so it sits on this side of the line for the same reason. Always present, whichever way it is set | The same places, and never over MQTT |
 | `update_allowed` | 0.4.0 | Whether `cmd/update` is permitted over MQTT - an install of a signed release, which ends in a restart of the interface. Always present, whichever way it is set. A consumer offers an install over MQTT only on a stated `true` together with the `self_update` capability | The same places, and never over MQTT |
+| `menu_allowed` |  | Added after 0.4.0 (unreleased). Whether the receiver offers the Home Assistant menu ([§3](#the-receiver-menu---added-after-040-unreleased-capability-menu)): **on by default**. Off, there is no menu - no Extensions entry, no hotkey, no subscription to `enigma2mqtt/menu/<node>`, no `menu_action`, and no `menu` capability. Always present, whichever way it is set | The same places, and never over MQTT |
 
 The rule behind which side of the line a setting falls on: one that **enables a command** is never
 writable over MQTT - it is set on the receiver (the setup screen, the provisioning file, or the
@@ -272,7 +276,7 @@ nothing else is ever in the list: `power`, `cec_workaround`, `service`, `epg`, `
 `toast`, `message`, `hdd`, `process`, `channels`, `channel_topics`, `bouquet_context`,
 `zap_history`, `history_clear`, `epg_import`, `uninstall`, `self_update`, `command_id`,
 `service_codecs`, `stream`, `stream_clients`, `stream_stop`, `stream_playable`,
-`volume_passthrough`. A build that
+`volume_passthrough`, `menu`. A build that
 has bound no feature area publishes that last name alone - `[]` before it existed - because the
 connection, `info` and the commands are the plugin itself and are not capabilities. `uninstall`
 (since 0.3.0) was the first name with no feature area behind it: it
@@ -304,11 +308,16 @@ server lists clients and cannot stop one claims the first and not the second.
 settings `volume.passthrough` is read from; without it the member is still published, and
 is `null` for every track the receiver might hand on undecoded.
 
+`menu` (added after 0.4.0, unreleased) says the receiver offers the Home Assistant menu: the
+permission `menu_allowed` is on and the image can open a menu screen - the plugin's own, or the
+image's list as the fallback. It is what the companion integration waits for before it acts on a
+`menu_action` from this node ([§3](#the-receiver-menu---added-after-040-unreleased-capability-menu)).
+
 A name is in the list because it **worked on this box**, not because this version of the plugin
 has the code for it. Three things can take one out: the image did not provide the hooks
 (`volume` on a box with no `VolumeControl`), the feature is switched off in the settings
 (`keys` with `publish_keys` off, `screenshot` set to `off`, `epg_grid` with `epg_grid_events` at
-`0`, `cec_workaround` with `cec_standby_workaround` off, `toast` with `osd_toast` off), or the hook raised while it was being
+`0`, `cec_workaround` with `cec_standby_workaround` off, `toast` with `osd_toast` off, `menu` with `menu_allowed` off), or the hook raised while it was being
 attached - which is logged once, with the name that could not be bound.
 
 **A capability can also arrive late.** Some hooks can only bind once enigma2 has built the screen
@@ -423,6 +432,21 @@ receiver: `bouquets_for_select` limited to the bouquets in use brings `channels`
 such a bouquet out, or the bouquet is split into smaller ones. A lower `epg_grid_events` changes
 nothing for a grid that is in the list; `0` switches the grids off
 ([TROUBLESHOOTING.md](TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back)).
+
+**`menu` says how the receiver menu is shown here.** Added after 0.4.0 (unreleased),
+[ADR-0020](adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md)
+and [ADR-0021](adr/0021-the-menu-hotkey-is-offered-the-key-after-the-image.md). `null` when the
+receiver has no menu: `menu_allowed` off, no session, or neither screen could be built. Otherwise:
+
+```json
+"menu": {"screen": "styled", "hotkey": "help_long", "reason": null}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `screen` | string | `styled` - the plugin's own screen, with icons, states and colours - or `fallback` - the image's own list, with the same rows and number keys and no icon or state. Decided when the menu is opened: a styled screen that cannot be built then is replaced by the fallback for that opening and every later one, and `info` is published again |
+| `hotkey` | string or null | The `menu_hotkey` choice that is bound and opens the menu in live TV, or `null` when none does: switched `off`, an image that does not let a plugin bind a key, or a key the image's own user-assignable button setup gives a function of its own - which then runs first, by design |
+| `reason` | string or null | Why `hotkey` is `null`, in English for the person reading the topic; `null` when a key is bound. The Extensions entry "Home Assistant" opens the menu whatever this says |
 
 ### `<base>/<node>/power`
 
@@ -1511,6 +1535,38 @@ every reconnect. The plugin observes keys and **never consumes them** - the rece
 exactly as it would with the plugin absent - and publishing is capped so that holding a button
 cannot flood the broker. `publish_keys` turns the topic off.
 
+### `<base>/<node>/menu_action` - added after 0.4.0 (unreleased)
+
+**Not retained** - QoS 1. One message for each OK on a row of the receiver menu that can be acted
+on ([§3](#the-receiver-menu---added-after-040-unreleased-capability-menu)), published while
+`menu` is a capability. It says which row and what was done to it, and nothing about what that
+means: the companion integration looks the row up in its own configuration and performs the
+action ([ADR-0020](adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md)).
+
+```json
+{"id": "3f9c2e4a1b7d", "rev": 42, "row": "r_blind", "action": "set", "value": 60, "ts": 1792050000}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | string | Twelve lowercase hexadecimal digits, new for every action - for logs and to tell a repeat |
+| `rev` | int | The `rev` of the menu the viewer acted on |
+| `row` | string | The row's `id` |
+| `action` | string | `press` for a `button`, `toggle` for a `toggle`, `set` for a `selector`, a `slider` and an `input` |
+| `value` | string or number | `set` only, absent otherwise: the option chosen, exactly as the menu listed it; the slider's value, `min` plus a whole number of `step`s, an integer when `min` and `step` are; the text typed, cut at the row's `max_length` |
+| `ts` | int | When, in epoch seconds |
+
+**Never sent** for an `indicator`, for a row with `available: false`, while the menu is greyed
+(no broker connection, or Home Assistant's status `offline`), with `menu_allowed` off, or for a row
+the current menu does not hold with that type. Nothing on the receiver waits for an answer: the
+answer is the menu published again with the row's new `value`. Not retained, so a reconnect
+replays no action, and QoS 1, so the broker takes the one that was sent.
+
+The broker's ACL does not protect this topic in every set-up, so the integration treats it as
+untrusted input and acts only on a row its own current configuration holds, with the type that row
+has and a value it validates. Whoever can publish here can do exactly what the menu offers, and
+nothing else.
+
 ### `<base>/<node>/update` - since 0.4.0
 
 Retained. Which releases of the plugin this receiver could install, read from the signed release
@@ -1703,7 +1759,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `softcam_restart` - since 0.3.0 | any (`PRESS` by convention) | Stops **every** running instance of the cam the image selected, then starts exactly one, with the image's own command line | Refused unless `softcam_restart_allowed` is on; refused by the same recording guard as `deep_standby` - while recording, with a timer due within 10 minutes, and when the image will not say; refused for the first 60 seconds after the plugin starts, because the image's own check runs a moment after that and restarting inside that window races a copy already on its way; at most one manual restart a minute; refused while one is already running. 🔴 **The binary is resolved on the box and no part of the command line comes from the payload** |
 | `epg_grid` | any | Rebuilds and republishes **every** `epg_grid/<bouquet_slug>` topic | Refused with a note in `last_error` when `epg_grid_events` is `0` |
 | `epg_import` - since 0.3.0 | any (`PRESS` by convention) | Starts the image's EPG importer, the way its own „Manual" button does, and reports on `epg_import`; the grid is rebuilt afterwards and each bouquet is published only if it changed | Refused, in this order: unless `epg_import_allowed` is on; when the importer is not available (no capability); while an import is already running, whoever started it; by the same recording guard as `deep_standby`; within 10 minutes of the importer's own scheduled run, which the image starts without checking whether one is running, and when that time cannot be read; when the importer has no sources selected. A start that fails is `failed` on `epg_import` **and** the same sentence on `last_error`. 🔴 **The payload is ignored**: nothing from the broker reaches the importer |
-| `config` | `{"publish_keys": false, "screenshot": "interval", "screenshot_interval": 90, "screenshot_delay": 4, "cam_telemetry": false, "oscam_telemetry": false, "softcam_autoheal": false, "softcam_autoheal_seconds": 90}` | Atomically replaces the remotely writable settings subset and publishes fresh `info`/discovery | The original three keys remain required; newer keys are independently optional for older clients and preserve their current values when omitted. Unknown keys and coercion are refused, and a persistence failure applies none of them |
+| `config` | `{"publish_keys": false, "screenshot": "interval", "screenshot_interval": 90, "screenshot_delay": 4, "cam_telemetry": false, "oscam_telemetry": false, "softcam_autoheal": false, "softcam_autoheal_seconds": 90, "menu_hotkey": "help_long"}` | Atomically replaces the remotely writable settings subset and publishes fresh `info`/discovery | The original three keys remain required; newer keys are independently optional for older clients and preserve their current values when omitted. Unknown keys and coercion are refused, and a persistence failure applies none of them |
 | `discovery` | any | Republishes the announcement, the channel list, and the discovery payloads in discovery mode | - |
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
 | `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
@@ -2320,8 +2376,11 @@ refused here like any other key outside the allowlist; they are granted on the r
 screen, the provisioning file or the OpenWebif page - and never over MQTT, and reading a setting and
 writing it are two different permissions. Home Assistant mode has its dedicated command, and active TV bouquet
 context has `cmd/bouquet`; neither broadens this settings API. The command accepts the three original keys plus independently optional `screenshot_delay`,
-`cam_telemetry`, `oscam_telemetry`, `softcam_autoheal` and `softcam_autoheal_seconds`,
-with their JSON types unchanged. An object holding any other key is refused whole, with
+`cam_telemetry`, `oscam_telemetry`, `softcam_autoheal`, `softcam_autoheal_seconds` and - added
+after 0.4.0 (unreleased) - `menu_hotkey`, with their JSON types unchanged. `menu_hotkey` only
+chooses which key opens a menu the receiver already offers; `menu_allowed`, which decides whether
+it does, is refused here like every permission, and with it off the key opens nothing. A new key is
+bound at once, without a reconnect. An object holding any other key is refused whole, with
 `last_error` "the config object contains unknown settings: " and the keys it refused, as in
 `the config object contains unknown settings: 'host', 'update_allowed'`. Their names only, never
 a value: each in single quotes, sorted, separated by a comma and a space; the first five, and
@@ -2488,12 +2547,104 @@ same.
 
 ### Topics the plugin reads
 
-Besides its own command topics, the plugin subscribes to two topics it does not own.
+Besides its own command topics, the plugin subscribes to topics it does not own: two always, and
+two more while `menu_allowed` is on.
 
 | Topic | Published by | What the plugin does with it |
 |---|---|---|
 | `enigma2mqtt/release_index` - since 0.4.0 | The companion integration, retained, after it verified a newer index: `{"index": "<base64 of the exact signed bytes>", "sig": "<base64 of the signature file>"}` | Judges it by the rule for accepting an index ([RELEASE-INDEX.md](RELEASE-INDEX.md)), exactly as an index it fetched itself, and keeps it when the rule accepts it - `update.index.source` is then `relay`. A refusal is a line in the plugin's log, never `last_error`. A payload over 88 KiB is dropped unread. It needs no setting and causes no connection, so a receiver without internet learns of releases this way. The plugin never publishes to it and never retracts it |
 | `enigma2mqtt/integration/<node>` - since 0.4.0 | The companion integration, retained, QoS 1: `{"integration": "0.4.0", "contract": 1, "plugin_min": "0.2.0"}`; retracted when its entry is removed | Keeps it in memory and judges `update.available` and `cmd/update` by it: a release of another contract major than the integration's, or one whose `min_integration` is above `integration`, is `incompatible`, and `plugin_min` raises the floor. An empty payload forgets it, and an unreadable one is ignored. A forged one can only narrow or widen the choice among signed, non-withdrawn releases of one major. The plugin never publishes to it and never retracts it |
+| `enigma2mqtt/menu/<node>` - added after 0.4.0 (unreleased), capability `menu` | The companion integration, retained, QoS 1: the receiver menu (below); an empty payload when there is no menu | Validates it whole and shows it; an invalid payload is ignored with one line in the log and the menu before it stays. Subscribed only while `menu_allowed` is on. The plugin never publishes to it and never retracts it |
+| `homeassistant/status` - added after 0.4.0 (unreleased), capability `menu` | Home Assistant's own birth and last will, `online` or `offline`, under the `ha_discovery_prefix` setting | `offline` greys the receiver menu; `online`, or nothing heard yet, does not. Subscribed only while `menu_allowed` is on, and read for nothing else |
+
+### The receiver menu - added after 0.4.0 (unreleased), capability `menu`
+
+A "Home Assistant" menu on the receiver that Home Assistant keeps up to date: one level of groups,
+each a list of rows, and rows at the top as well. Every row is a control bound to something in
+Home Assistant - a light, a scene, a cover, a script. The viewer opens it with the remote - the
+Extensions menu entry "Home Assistant", and a hotkey (`menu_hotkey`, a long HELP by default) -
+moves with the arrows and acts with OK. **The receiver never learns what a row does and never
+sends a service call**: it sends a row's id and a value on `menu_action` (§1), and Home Assistant
+performs the action and publishes the menu again
+([ADR-0020](adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md)).
+
+The menu is published by the companion integration, retained, at QoS 1, on
+`enigma2mqtt/menu/<node>` - outside `<base>`, like `enigma2mqtt/integration/<node>`, because the
+integration owns it. Each publish is the whole menu. An empty payload means "no menu".
+
+```json
+{"v": 1, "rev": 42, "title": "Home Assistant",
+ "items": [
+   {"type": "group", "id": "g_salon", "label": "Living room", "icon": "sofa",
+    "rows": [
+      {"type": "toggle", "id": "r_lamp", "label": "Lamp", "icon": "lamp",
+       "value": true, "state": "on", "color": "green", "available": true},
+      {"type": "slider", "id": "r_blind", "label": "Blind", "icon": "blinds",
+       "value": 40, "min": 0, "max": 100, "step": 10, "unit": "%",
+       "state": "40 %", "available": true},
+      {"type": "selector", "id": "r_mode", "label": "Heating", "icon": "radiator",
+       "value": "heat", "options": ["off", "heat", "auto"], "state": "heat",
+       "available": true}]},
+   {"type": "button", "id": "r_movie", "label": "Movie night", "icon": "movie",
+    "state": null, "available": true},
+   {"type": "indicator", "id": "r_door", "label": "Front door", "icon": "door",
+    "value": false, "state": "closed", "color": "green", "available": true},
+   {"type": "input", "id": "r_note", "label": "Note", "icon": "note",
+    "value": "", "max_length": 60, "state": "", "available": true}]}
+```
+
+| Field | Rule |
+|---|---|
+| `v` | `1`. A plugin that does not know the number shows no menu and says so in its log, once |
+| `rev` | Integer, higher with every publish of this node's menu within one run of the integration; a new run may start lower. Said back in `menu_action`; the receiver compares `value`s, never `rev` |
+| `title` | Text, cut at 60; `"Home Assistant"` when absent |
+| `items` | The top list: at most **24** entries, each a group or a row, at most **8** groups |
+| `group` | `id`, `label`, `icon` and `rows` - at most 24 rows; a group holds no group |
+| row `type` | `button`, `toggle`, `indicator`, `selector`, `slider` or `input`. An open enumeration: a row of a type the plugin does not know is shown and cannot be acted on |
+| `id` | `[A-Za-z0-9_-]{1,32}`, unique in the whole menu - groups included - and stable for the same row across publishes and restarts |
+| `label` | Text, cut at 60 |
+| `icon` | One of the icon names below; any other name, or none, is drawn with `neutral` |
+| `state` | What the row shows on its right: text, cut at 24, or `null` |
+| `color` | `green`, `red` or `null`, for a `toggle` and an `indicator`: the colour of `state`. Any other value is `null` |
+| `value` | A `toggle` and an `indicator`: `true`, `false` or `null`. A `selector`: one of `options`, or `null`. A `slider`: a number or `null`. An `input`: text or `null`. A `button` has none |
+| `options` | A `selector` only: at most 24 texts, each shown cut at 60 and sent back exactly as listed |
+| `min`, `max`, `step`, `unit` | A `slider` only: numbers, `step` above 0, `max` at least `min`, at most 200 steps between them; `unit` text cut at 8, or `null` |
+| `max_length` | An `input` only: 1-255 |
+| `available` | `false` greys the row and nothing can be done with it; `true` when absent |
+
+Fields the plugin does not know are ignored. Anything else that breaks a rule - a count over its
+bound, a type that is wrong, an id that repeats, a `value` that is not one of the `options`, a
+payload over 64 KiB or one that is not a JSON object - makes the whole payload invalid: it is
+ignored with one line in the log, and the menu shown is the one before it. Every text loses its
+backslashes and line breaks before it is shown, as a toast's does (section 2).
+
+**The icon names** are part of the contract; the integration offers exactly these: `neutral`,
+`lamp`, `ceiling-light`, `blinds`, `scene`, `script`, `power`, `fan`, `lock`, `radiator`,
+`thermometer`, `tv`, `speaker`, `door`, `gate`, `garage`, `alarm`, `camera`, `sofa`, `bed`,
+`kitchen`, `garden`, `movie`, `note`, `home`. Each is drawn with an icon of Material Design Icons,
+under Apache-2.0 ([NOTICE](../NOTICE)).
+
+**What the viewer can do.** OK on a group opens its rows, and EXIT goes back; EXIT on the top
+list closes the menu. OK on a `button` sends `press`, on a `toggle` `toggle`. OK on a `selector`
+lists its options: OK sends the one chosen as `set`, EXIT discards. On a `slider`, LEFT and RIGHT
+move a value on the receiver by `step` within `min` and `max`, shown and not sent; OK sends it as
+`set`, EXIT discards it. OK on an `input` opens the image's keyboard with `value` in it: OK sends
+the text as `set`, EXIT discards. The keys 1-9 pick the row of that number. An `indicator` only
+shows its state. The image's own list, where the plugin's screen cannot be built, has the same rows
+and number keys; a slider there lists its values.
+
+**The pending mark.** After OK on a `toggle`, a `slider` or a `selector` the row shows a mark until
+the menu carries a different `value` for it. When none comes within **5 s**, the row shows its
+real value again and the footer says Home Assistant changed nothing.
+
+**Greyed.** With no connection to the broker, or with Home Assistant's status `offline`, the menu
+stays as it last was, greyed, with a notice, and nothing in it can be acted on. A status of
+`online`, or none heard yet, does not grey it. A menu that never came, or an empty payload, is "no
+menu yet": nothing to act on, and nothing greyed.
+
+**Open while it changes.** A new payload while the menu is open is drawn in place: the selection
+stays on its row, or on the nearest one when that row has gone, and a slider being moved keeps its
+value until OK or EXIT.
 
 ---
 
