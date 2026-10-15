@@ -149,6 +149,12 @@ missing upper bound included.
   service information, as before. A receiver without the directory publishes what it always did.
 - **No picture is null.** A size of 0 is the decoder with no picture yet, and its scan and frame
   rate are then meaningless: all four members are `null`, never 0 and never the image's answer.
+- **Only beside the image's own picture, and never mixed.** The decoder is read only while the
+  image's service information reports a picture size, since the files keep the last channel's
+  picture through a radio service or a tune that has not decoded yet; the two sizes are a pair,
+  both the decoder's or both the image's; and when the decoder's size differs from the image's, a
+  scan or frame rate the decoder cannot give is `null`, not the image's (added in review the same
+  day).
 - **Why.** Measured on OpenViX 6.6: after enigma2 restarts the decoder goes on showing the same
   picture, no size event comes, and the image's service information reports another picture - a
   720p channel as 1920 x 1080 - until the next zap, while the decoder's files have the truth.

@@ -26,7 +26,8 @@ and reads the tracks again only when the answer moved. With nothing playing,
 which is what standby is, it asks nothing.
 
 And the picture - its size, scan and frame rate - is the decoder's word where
-the image has the decoder's files, not the image's service information. After
+the image has the decoder's files and reports a picture at all, not the image's
+service information (`picture`). After
 enigma2 restarts the decoder goes on showing the same picture, no size event
 comes, and the image's service information reports a picture that is not the
 one on the screen until the next zap. So `service` is also read again a few
@@ -233,49 +234,71 @@ def frame_rate(info):
 def _decoder_number(name, base):
     """One of the decoder's files as a number, or None when it is missing, unreadable or not one.
 
-    A proc file the driver answers at once; a few bytes are read and no more.
+    A proc file the driver answers at once. Unbuffered, so one read of a few
+    bytes is all that is asked of it.
     """
     try:
-        with open(os.path.join(DECODER_PATH, name), encoding="ascii", errors="replace") as handle:
-            text = handle.read(DECODER_READ_BYTES + 1)
+        with open(os.path.join(DECODER_PATH, name), "rb", buffering=0) as handle:
+            data = handle.read(DECODER_READ_BYTES + 1)
     except OSError:
         return None
-    if len(text) > DECODER_READ_BYTES:
+    if len(data) > DECODER_READ_BYTES:
         return None
     try:
         # `int` takes the newline and any other surrounding white space itself.
-        value = int(text, base)
+        value = int(data.decode("ascii"), base)
     except ValueError:
         return None
     return value if value >= 0 else None
 
 
 def read_decoder():
-    """What the decoder says of its picture: {member: value}, a member it cannot give left out.
+    """What the decoder says of its picture, each member None when it cannot say.
 
-    A size of 0 is the decoder with no picture yet - right after a zap - and
-    then its scan and frame rate are left over or meaningless too: all four
-    are null, never 0 and never the image's guess. Otherwise each member the
-    decoder gives is its own, and one whose file is missing, unreadable or not
-    a value it can have is left out, for the image's service information to
-    answer.
+    The size is kept as the decoder wrote it, so a 0 - no picture yet - stays
+    a 0 for `picture` to see; the scan and the frame rate are None for
+    anything but a value they can have.
     """
-    width = _decoder_number("xres", 16)
-    height = _decoder_number("yres", 16)
+    progressive = _decoder_number("progressive", 10)
+    rate = _decoder_number("framerate", 10)
+    return {
+        "width": _decoder_number("xres", 16),
+        "height": _decoder_number("yres", 16),
+        "interlaced": (progressive == 0) if progressive in (0, 1) else None,
+        "frame_rate": rate / FRAME_RATE_SCALE if rate else None,
+    }
+
+
+def picture(image):
+    """The picture members of `service`: the image's, or the decoder's where it has a better one.
+
+    `image` is what the image's service information says. The decoder's files
+    are read only while that reports a picture size: a radio service, an
+    audio file, a tune or a key that has not come yet report none, and the
+    files then still hold the last channel's picture. Within that:
+
+    - a size of 0 is the decoder with no picture yet, and its scan and frame
+      rate are then meaningless too: all four are null;
+    - the size is a pair, both the decoder's or both the image's: a decoder
+      that cannot give both leaves all four to the image;
+    - when the two sizes agree, a scan or frame rate the decoder cannot give
+      is the image's; when they differ the image is describing another
+      picture, and it is null.
+    """
+    if image["width"] is None or image["height"] is None:
+        return image
+    facts = read_decoder()
+    width, height = facts["width"], facts["height"]
     if width == 0 or height == 0:
         return {"width": None, "height": None, "interlaced": None, "frame_rate": None}
-    facts = {}
-    if width is not None:
-        facts["width"] = width
-    if height is not None:
-        facts["height"] = height
-    progressive = _decoder_number("progressive", 10)
-    if progressive in (0, 1):
-        facts["interlaced"] = progressive == 0
-    rate = _decoder_number("framerate", 10)
-    if rate:
-        facts["frame_rate"] = rate / FRAME_RATE_SCALE
-    return facts
+    if width is None or height is None:
+        return image
+    result = dict(facts)
+    if (width, height) == (image["width"], image["height"]):
+        for name in ("interlaced", "frame_rate"):
+            if result[name] is None:
+                result[name] = image[name]
+    return result
 
 
 def read_service(session, bouquet_lookup=None, decoder=True):
@@ -300,24 +323,24 @@ def read_service(session, bouquet_lookup=None, decoder=True):
             bouquet = bouquet_lookup(sref)
         except Exception:
             LOG.debug("could not work out which bouquet %s came from", sref)
-    picture = {
+    shown = {
         "width": _number(info, "sVideoWidth"),
         "height": _number(info, "sVideoHeight"),
         "interlaced": interlaced(info),
         "frame_rate": frame_rate(info),
     }
     if decoder:
-        picture.update(read_decoder())
+        shown = picture(shown)
     return {
         "sref": sref,
         "name": name or None,
         "bouquet": bouquet,
         "provider": _text(info, "sProvider"),
-        "width": picture["width"],
-        "height": picture["height"],
+        "width": shown["width"],
+        "height": shown["height"],
         "video_codec": video_codec(info),
-        "interlaced": picture["interlaced"],
-        "frame_rate": picture["frame_rate"],
+        "interlaced": shown["interlaced"],
+        "frame_rate": shown["frame_rate"],
         "audio_tracks": audio.read_tracks(session),
     }
 
@@ -1168,6 +1191,8 @@ class ServicePublisher(NavPublisher):
     def stop(self):
         self._audio.stop()
         self._reread.stop()
+        # The re-read that would have ended the hold is gone with it.
+        self._decoder_held = False
         NavPublisher.stop(self)
 
     def _arm_rereads(self):
