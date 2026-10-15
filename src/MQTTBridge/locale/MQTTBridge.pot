@@ -1130,3 +1130,7 @@ msgstr ""
 #: src/MQTTBridge/menu.py
 msgid "current"
 msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "There are no controls here."
+msgstr ""

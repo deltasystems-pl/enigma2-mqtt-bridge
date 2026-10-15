@@ -383,6 +383,10 @@ class MqttClient:
             )
         return info
 
+    def withdraw(self, info):
+        """Take a QoS 1 publish back out of paho's outgoing queue. Whether it was there."""
+        return withdraw_publish(self._client, info)
+
     def subscribe(self, topic, qos=1):
         client = self._client
         if client is None:
@@ -524,6 +528,48 @@ class MqttClient:
                 self._on_disconnect(reason_code)
         except Exception:
             LOG.exception("the disconnect handler raised; the receiver is unaffected")
+
+
+# paho 2.1's state of a QoS 1 message that is counted in flight:
+# `MessageState.MQTT_MS_WAIT_FOR_PUBACK` (enums.py). An IntEnum, so it compares equal to 2.
+_WAIT_FOR_PUBACK = 2
+
+
+def withdraw_publish(client, info):
+    """Remove a QoS 1 or 2 publish from paho's outgoing queue, so no reconnect sends it.
+
+    paho keeps every QoS 1 message it has not had a PUBACK for - one published while the
+    socket was already gone (`MQTT_ERR_NO_CONN`), one queued behind the in-flight bound, one sent
+    and not acknowledged - and sends it again after the next connect. That is right for state;
+    it is wrong for an event that is only true at the moment it was raised, such as a
+    `menu_action`, which must never arrive minutes late. paho has no public call for this, so
+    the vendored version's own queue is edited under its own lock (paho 2.1.0, `publish` and
+    `_messages_reconnect_reset_out`), and an image whose paho looks different is left alone.
+    Whether the message was taken out.
+    """
+    mid = getattr(info, "mid", None)
+    messages = getattr(client, "_out_messages", None)
+    if client is None or mid is None or messages is None:
+        return False
+    lock = getattr(client, "_out_message_mutex", None)
+    try:
+        if lock is not None:
+            with lock:
+                return _withdraw(client, messages, mid)
+        return _withdraw(client, messages, mid)
+    except Exception:
+        LOG.exception("could not take a publish back out of the outgoing queue")
+        return False
+
+
+def _withdraw(client, messages, mid):
+    message = messages.pop(mid, None)
+    if message is None:
+        return False
+    if getattr(message, "state", None) == _WAIT_FOR_PUBACK:
+        inflight = getattr(client, "_inflight_messages", 0)
+        client._inflight_messages = max(0, int(inflight) - 1)
+    return True
 
 
 def _join_network_thread(client):

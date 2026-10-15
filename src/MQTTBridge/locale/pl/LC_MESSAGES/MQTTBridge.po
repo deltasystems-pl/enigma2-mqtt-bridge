@@ -1130,3 +1130,7 @@ msgstr "OK wybierz   EXIT wstecz"
 #: src/MQTTBridge/menu.py
 msgid "current"
 msgstr "bieżące"
+
+#: src/MQTTBridge/menu.py
+msgid "There are no controls here."
+msgstr "Nie ma tu żadnych elementów sterowania."

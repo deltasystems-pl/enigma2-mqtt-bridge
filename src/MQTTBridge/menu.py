@@ -531,6 +531,9 @@ class MenuController:
             notice = notice_text(greyed)
         elif self.menu is None:
             notice = _("There is no menu from Home Assistant yet.")
+        elif not rows:
+            # A group Home Assistant sent without rows: a line that says so, not an error.
+            notice = _("There are no controls here.")
         else:
             notice = notice_text(self.notice) if self.notice else ""
         initial = self._remembered.get(self._level_key())
@@ -774,6 +777,14 @@ class MenuController:
 # ----------------------------------------------------------------- the publisher --
 
 
+def _acknowledged(info):
+    """Whether the broker has the publish: paho's PUBACK. A publish that failed counts as done."""
+    try:
+        return bool(info.is_published())
+    except Exception:
+        return True
+
+
 class MenuPublisher(Publisher):
     """The capability `menu`: subscriptions, reachability, pending marks, hotkey, screen.
 
@@ -799,6 +810,8 @@ class MenuPublisher(Publisher):
         self._ticker = Ticker(self._expire, "menu pending")
         self._versions_logged = set()
         self._hotkey = None
+        # The `menu_action`s handed to the client and not acknowledged yet.
+        self._unacknowledged = []
 
     # -------------------------------------------------------------- lifecycle --
 
@@ -928,6 +941,16 @@ class MenuPublisher(Publisher):
             self.refresh_screens()
 
     def connection_changed(self):
+        """The broker connection came or went: grey or ungrey, and drop what was not taken.
+
+        A `menu_action` the broker has not acknowledged when the connection goes is taken out of
+        the client's queue: sent after a reconnect it would be an OK from minutes ago (D64).
+        """
+        if self.bridge is not None and not self.bridge.connected:
+            for info in self._unacknowledged:
+                if not _acknowledged(info) and self.bridge.withdraw_event(info):
+                    LOG.info("dropped a menu_action the broker had not acknowledged")
+            self._unacknowledged = []
         self.refresh_screens()
 
     # ---------------------------------------------------------- reachability --
@@ -1016,8 +1039,15 @@ class MenuPublisher(Publisher):
             payload["value"] = value
         info = self.bridge.publish_event(ACTION_SUFFIX, payload, qos=ACTION_QOS)
         if info is None or getattr(info, "rc", 0):
+            # The socket was already gone: the client keeps a QoS 1 message for the next
+            # connect, and an action must never arrive late (D64).
+            if info is not None:
+                self.bridge.withdraw_event(info)
             LOG.warning("menu_action for %s was not sent", current["id"])
             return False
+        self._unacknowledged = [
+            sent for sent in self._unacknowledged if not _acknowledged(sent)
+        ] + [info]
         LOG.info("menu_action %s %s on %s (rev %s)", payload["id"], action, current["id"],
                  menu["rev"])
         if current["type"] in PENDING_TYPES:

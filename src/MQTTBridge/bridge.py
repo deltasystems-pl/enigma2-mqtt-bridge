@@ -1182,6 +1182,16 @@ class Bridge:
             return self._withhold(topic, size, retain=False)
         return self.client.publish(topic, encoded, qos=qos, retain=False)
 
+    def withdraw_event(self, info):
+        """Take an event that was not acknowledged back out of the client's queue.
+
+        For an event that is true only when it was raised: without this, the client would send
+        it again after the next connect (`mqttclient.withdraw_publish`). Whether it was taken.
+        """
+        client = self.client
+        withdraw = getattr(client, "withdraw", None) if client is not None else None
+        return bool(withdraw(info)) if withdraw is not None else False
+
     def _topic_label(self, topic):
         """A topic as `info.not_published` and the log name it: relative to the node's tree."""
         root = self.base_topic + "/" + self.node_id + "/"

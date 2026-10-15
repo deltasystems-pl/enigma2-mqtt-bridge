@@ -1554,13 +1554,16 @@ action ([ADR-0020](adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decid
 | `row` | string | The row's `id` |
 | `action` | string | `press` for a `button`, `toggle` for a `toggle`, `set` for a `selector`, a `slider` and an `input` |
 | `value` | string or number | `set` only, absent otherwise: the option chosen, exactly as the menu listed it; the slider's value, `min` plus a whole number of `step`s, an integer when `min` and `step` are; the text typed, cut at the row's `max_length` |
-| `ts` | int | When, in epoch seconds |
+| `ts` | int | When, in epoch seconds by the receiver's clock. The companion integration refuses an action older than 120 s |
 
 **Never sent** for an `indicator`, for a row with `available: false`, while the menu is greyed
 (no broker connection, or Home Assistant's status `offline`), with `menu_allowed` off, or for a row
 the current menu does not hold with that type. Nothing on the receiver waits for an answer: the
 answer is the menu published again with the row's new `value`. Not retained, so a reconnect
-replays no action, and QoS 1, so the broker takes the one that was sent.
+replays no action, and QoS 1, so the broker takes the one that was sent. **Never queued across a
+disconnect**: an OK without a broker connection is the greyed menu, and sends nothing; an action
+the client had handed over and the broker had not acknowledged when the connection went is taken
+out of the client's queue rather than sent after the reconnect, minutes late.
 
 The broker's ACL does not protect this topic in every set-up, so the integration treats it as
 untrusted input and acts only on a row its own current configuration holds, with the type that row
@@ -2599,13 +2602,13 @@ integration owns it. Each publish is the whole menu. An empty payload means "no 
 | `rev` | Integer, higher with every publish of this node's menu within one run of the integration; a new run may start lower. Said back in `menu_action`; the receiver compares `value`s, never `rev` |
 | `title` | Text, cut at 60; `"Home Assistant"` when absent |
 | `items` | The top list: at most **24** entries, each a group or a row, at most **8** groups |
-| `group` | `id`, `label`, `icon` and `rows` - at most 24 rows; a group holds no group |
+| `group` | `id`, `label`, `icon` and `rows` - at most 24 rows; a group holds no group. A group without rows opens to a line saying there are no controls in it |
 | row `type` | `button`, `toggle`, `indicator`, `selector`, `slider` or `input`. An open enumeration: a row of a type the plugin does not know is shown and cannot be acted on |
 | `id` | `[A-Za-z0-9_-]{1,32}`, unique in the whole menu - groups included - and stable for the same row across publishes and restarts |
 | `label` | Text, cut at 60 |
 | `icon` | One of the icon names below; any other name, or none, is drawn with `neutral` |
 | `state` | What the row shows on its right: text, cut at 24, or `null` |
-| `color` | `green`, `red` or `null`, for a `toggle` and an `indicator`: the colour of `state`. Any other value is `null` |
+| `color` | `green`, `red` or `null`, for a `toggle` and an `indicator`: the colour of `state`. Green means "all good" and red "needs attention"; Home Assistant decides which, row by row, and the receiver draws what it gets. Any other value is `null` |
 | `value` | A `toggle` and an `indicator`: `true`, `false` or `null`. A `selector`: one of `options`, or `null`. A `slider`: a number or `null`. An `input`: text or `null`. A `button` has none |
 | `options` | A `selector` only: at most 24 texts, each shown cut at 60 and sent back exactly as listed |
 | `min`, `max`, `step`, `unit` | A `slider` only: numbers, `step` above 0, `max` at least `min`, at most 200 steps between them; `unit` text cut at 8, or `null` |

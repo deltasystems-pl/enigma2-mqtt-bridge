@@ -3189,10 +3189,11 @@ class FakeMessageInfo:
     `is_published()`, as paho's does.
     """
 
-    def __init__(self, rc=0, qos=0):
+    def __init__(self, rc=0, qos=0, mid=0):
         self.waited = None
         self.rc = rc
         self.qos = qos
+        self.mid = mid
         self.acknowledged = qos == 0
 
     def wait_for_publish(self, timeout=None):
@@ -3232,6 +3233,11 @@ class FakeMQTTClient:
         self.max_inflight = None
         # Set to a paho error code to make every later publish come back rejected.
         self.publish_rc = 0
+        # paho's outgoing queue as far as `mqttclient.withdraw_publish` reads it: every QoS 1
+        # message without its PUBACK, by mid, in the state paho 2.1 gives it.
+        self._out_messages = {}
+        self._inflight_messages = 0
+        self._mid = 0
         self.on_connect = None
         self.on_message = None
         self.on_disconnect = None
@@ -3275,8 +3281,16 @@ class FakeMQTTClient:
 
     def publish(self, topic, payload=None, qos=0, retain=False):
         self.published.append(Published(topic, payload, qos, retain))
-        info = FakeMessageInfo(rc=self.publish_rc, qos=qos)
+        self._mid += 1
+        info = FakeMessageInfo(rc=self.publish_rc, qos=qos, mid=self._mid)
         self.infos.append(info)
+        if qos:
+            # Kept for the next connect whether or not the socket took it, as paho keeps it:
+            # in flight when sent, waiting to be published when there was no connection.
+            sent = not self.publish_rc
+            self._out_messages[self._mid] = types.SimpleNamespace(
+                topic=topic, state=2 if sent else 1)
+            self._inflight_messages += 1 if sent else 0
         return info
 
     def acknowledge(self, count=None):
@@ -3284,6 +3298,12 @@ class FakeMQTTClient:
         waiting = [info for info in self.infos if not info.acknowledged]
         for info in waiting if count is None else waiting[:count]:
             info.acknowledged = True
+            if self._out_messages.pop(info.mid, None) is not None:
+                self._inflight_messages = max(0, self._inflight_messages - 1)
+
+    def queued_for_reconnect(self):
+        """The topics paho would send again after the next connect."""
+        return [message.topic for message in self._out_messages.values()]
 
     # --- what paho's network thread would do --------------------------------
 

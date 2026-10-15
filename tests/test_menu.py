@@ -828,6 +828,62 @@ def test_nothing_is_sent_without_a_menu(world):
     assert world.publisher.send({"id": "r_movie", "type": "button"}, "press") is False
 
 
+def test_an_action_the_broker_has_not_taken_is_dropped_when_the_connection_goes(world):
+    """Never queued across a disconnect (D64): paho would send it again after the reconnect."""
+    world.open()
+    world.ok("r_movie")
+    assert world.client.queued_for_reconnect() == [ACTION_TOPIC]
+    world.client.fire_disconnect()
+    assert world.client.queued_for_reconnect() == []
+    world.client.fire_connect()
+    assert len(world.actions()) == 1
+
+
+def test_an_acknowledged_action_is_not_touched_by_a_disconnect(world, plugin_log):
+    world.open()
+    world.ok("r_movie")
+    world.client.acknowledge()
+    world.client.fire_disconnect()
+    assert "dropped a menu_action" not in plugin_log()
+
+
+def test_an_action_the_socket_refused_is_taken_back_at_once(world):
+    """The disconnect had not reached the main thread yet: the client still looked connected."""
+    world.open()
+    world.client.publish_rc = 4  # MQTT_ERR_NO_CONN
+    world.ok("r_movie")
+    assert world.client.queued_for_reconnect() == []
+    assert world.notice() == "Could not send this to Home Assistant."
+
+
+def test_the_real_client_keeps_a_qos_1_publish_for_the_reconnect_and_it_can_be_withdrawn():
+    """Against the vendored paho itself: what the two tests above rely on."""
+    from MQTTBridge.mqttclient import import_paho, withdraw_publish
+
+    paho = import_paho()
+    client = paho.Client(paho.CallbackAPIVersion.VERSION2, client_id="t", protocol=paho.MQTTv311)
+    info = client.publish(ACTION_TOPIC, b"{}", qos=1)
+    assert info.rc == paho.MQTT_ERR_NO_CONN
+    assert info.mid in client._out_messages
+    assert withdraw_publish(client, info) is True
+    assert client._out_messages == {}
+    assert client._inflight_messages == 0
+    assert withdraw_publish(client, info) is False
+
+
+def test_an_empty_group_opens_to_a_line_that_says_so(world):
+    menu = example()
+    menu["items"].append({"type": "group", "id": "g_empty", "label": "Garden", "icon": "garden",
+                          "rows": []})
+    world.send_menu(menu)
+    world.open()
+    world.ok("g_empty")
+    assert world.screen["list"].list == []
+    assert world.notice() == "There are no controls here."
+    world.exit()
+    assert world.screen.selected() == "g_empty"
+
+
 def test_stopping_the_bridge_closes_the_menu_and_unbinds_the_key(world):
     world.open()
     controller = world.screen.controller
