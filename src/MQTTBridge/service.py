@@ -27,12 +27,11 @@ which is what standby is, it asks nothing.
 
 And the picture - its size, scan and frame rate - is the decoder's word where
 the image has the decoder's files and reports a picture at all, not the image's
-service information (`picture`). After
-enigma2 restarts the decoder goes on showing the same picture, no size event
-comes, and the image's service information reports a picture that is not the
-one on the screen until the next zap. So `service` is also read again a few
-seconds after the plugin starts and after every service start, when the
-decoder has settled.
+service information (`picture`). After enigma2 restarts the decoder goes on
+showing the same picture, no size event comes, and the image's service
+information reports a picture that is not the one on the screen until the next
+zap. So `service` is also read again a few seconds after the plugin starts and
+after every service start, when the decoder has settled.
 """
 
 import os

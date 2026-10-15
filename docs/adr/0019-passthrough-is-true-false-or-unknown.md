@@ -144,9 +144,11 @@ missing upper bound included.
   first video decoder's own files, `/proc/stb/vmpeg/0/framerate`, `xres`, `yres` and
   `progressive`, where the image has them. The frame rate is still thousandths divided by a
   thousand and still published without an upper bound.
-- **Value by value.** A file that is missing, unreadable or not a value the decoder can have - a
-  `progressive` that is not 0 or 1, a frame rate of 0 - leaves that one member to the image's
-  service information, as before. A receiver without the directory publishes what it always did.
+- **What the decoder cannot give.** A file that is missing, unreadable or not a value the decoder
+  can have - a `progressive` that is not 0 or 1, a frame rate of 0 - is answered as the next
+  bullet sets out: a size it cannot give in full leaves all four members to the image's service
+  information; a scan or frame rate it cannot give is the image's only when the two sizes agree,
+  and `null` when they differ. A receiver without the directory publishes what it always did.
 - **No picture is null.** A size of 0 is the decoder with no picture yet, and its scan and frame
   rate are then meaningless: all four members are `null`, never 0 and never the image's answer.
 - **Only beside the image's own picture, and never mixed.** The decoder is read only while the
