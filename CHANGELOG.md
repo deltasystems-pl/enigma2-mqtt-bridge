@@ -11,6 +11,32 @@ version that has no section here.
 
 ### Added
 
+- A "Home Assistant" menu on the receiver that Home Assistant keeps current. The companion
+  integration publishes it, retained, on `enigma2mqtt/menu/<node>`: up to eight groups and rows,
+  each a button, toggle, indicator, selector, slider or input field bound to something in Home
+  Assistant, with the state to show and its colour. The receiver checks the payload whole - an
+  invalid one is ignored with a line in the log and the menu before it stays - draws it with
+  icons, states and colours, and answers an OK with one `menu_action` (QoS 1, never retained): the
+  row's id, `press`, `toggle` or `set`, and the value. It never learns what a row does and never
+  sends a service call. A slider moves on the receiver until OK, a selector lists its options, an
+  input field opens the image's keyboard, and EXIT discards; after OK a row shows a pending mark
+  until Home Assistant changes it, or for five seconds. Without the broker, or with Home
+  Assistant's own status `offline`, the menu stays greyed with a notice and sends nothing, and an
+  action the broker had not acknowledged is never sent after a reconnect. It opens from the
+  Extensions entry "Home Assistant" and by a hotkey, a long HELP by default, which is offered
+  every key press only after the image and takes it only when it opened the menu
+  ([ADR-0020](docs/adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md),
+  [ADR-0021](docs/adr/0021-the-menu-hotkey-is-offered-the-key-after-the-image.md)). Where the
+  plugin's own screen cannot be built, the image's own list is used with the same rows and number
+  keys. New: the box-only permission `menu_allowed` (on by default), the setting `menu_hotkey`
+  (`help_long`, `red_long`, `f3`, `f4`, `off`; writable through `cmd/config`), the capability
+  `menu`, `info.menu` (which screen and which key), the event topic `menu_action`, and the
+  subscriptions to `enigma2mqtt/menu/<node>` and Home Assistant's status topic
+  ([TOPICS.md](docs/TOPICS.md)). English, Polish and German.
+- Twenty-five icons for the menu, from Material Design Icons under Apache-2.0, rendered into the
+  package by `tools/render-icons.py`. Because GPLv2 cannot take Apache-2.0, the package is now
+  distributed under the terms of GPLv3 or later; the source stays GPL-2.0-or-later
+  ([NOTICE](NOTICE)).
 - What only the receiver knows about streaming its channels, without the plugin carrying any
   video. A new retained topic, `stream`, says where the image's stream server is and what it
   wants: the port it listens on (8001 on every image; OpenWebif's own "streaming port" setting

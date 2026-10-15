@@ -105,6 +105,27 @@ EPG-grid refreshes yield between batches of at most four channels and keep the p
 grid until the replacement is ready. A full refresh may therefore take several seconds while the
 interface remains responsive; only a slow-batch or event-loop warning indicates a problem.
 
+## The Home Assistant menu does not open, or shows nothing
+
+- **No "Home Assistant" in the Extensions menu**: `menu_allowed` is off, or `info.capabilities`
+  has no `menu` - the log then says why no menu screen could be built.
+- **The hotkey does nothing**: read `info.menu`. `hotkey` `null` with a reason says why: switched
+  off, an image that does not let a plugin bind a key, or a key the receiver's own button setup
+  gives a function - which runs instead, by design. The hotkey works only in live TV, not over
+  another screen or in a recording. The Extensions entry opens the menu in any case.
+- **"There is no menu from Home Assistant yet."**: nothing is retained on
+  `enigma2mqtt/menu/<node>`, or it was emptied - the integration's options define no menu, or its
+  entry was removed. A payload the receiver refused leaves the menu before it and one line in the
+  log, `ignoring an invalid menu`, with the place it broke the contract.
+- **Greyed, "Home Assistant is not reachable"**: Home Assistant's status topic said `offline`
+  (`homeassistant/status`, or your discovery prefix). It ungreys on the next `online`, which Home
+  Assistant publishes when it starts.
+- **A row shows its mark and then "Home Assistant changed nothing."**: the integration refused the
+  action or the device did not follow; the integration's log says which.
+- **`info.menu.screen` is `fallback`**: the plugin's own screen could not be built on this image
+  or skin, and the receiver's plain list is used. The log has the reason; please report it with
+  the image and the skin.
+
 ## The receiver's memory use keeps climbing
 
 **Watch the curve before believing anything about it.** The plugin publishes the enigma2 process's
