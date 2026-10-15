@@ -55,7 +55,9 @@ def test_package_name_and_architecture():
     assert fields["Package"] == "enigma2-plugin-extensions-mqttbridge"
     # Pure Python: one package installs on every receiver.
     assert fields["Architecture"] == "all"
-    assert fields["License"] == "GPL-2.0-or-later"
+    # The code is GPL-2.0-or-later; the package also carries the menu's Apache-2.0 icons, which
+    # GPLv2 cannot take, so the package is distributed under GPLv3 or later (NOTICE).
+    assert fields["License"] == "GPL-3.0-or-later AND Apache-2.0"
 
 
 def test_version_is_a_build_placeholder():

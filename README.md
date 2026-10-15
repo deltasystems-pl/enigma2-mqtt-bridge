@@ -123,3 +123,10 @@ Home Assistant starts or one without internet, to Home Assistant's relay
 
 [GPL-2.0-or-later](LICENSE), because the plugin imports enigma2's modules. The vendored
 paho-mqtt is used under its EDL-1.0 option; see [NOTICE](NOTICE).
+
+The receiver menu's icons are from [Material Design Icons](https://pictogrammers.com/library/mdi/)
+and are Apache-2.0, which version 2 of the GPL cannot take and version 3 can. So the package - the
+IPK, which carries the icons - is distributed under the terms of the
+[GNU GPL version 3 or later](LICENSE-GPL-3.0.txt), the "or later" of the plugin's own licence; the
+source here stays GPL-2.0-or-later and the icons stay Apache-2.0. [NOTICE](NOTICE) has the
+details.

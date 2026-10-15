@@ -1,0 +1,42 @@
+The icons in this directory
+===========================
+
+Each PNG here is a white rendering, 64x64 pixels, of one icon of Material Design
+Icons by Pictogrammers (https://pictogrammers.com), taken from the npm package
+@mdi/svg 7.4.47 (https://github.com/Templarian/MaterialDesign-SVG, v7.4.47 9e04201d4557e729822fb57f62a316c3dea1d4a8).
+
+The icons are licensed under the Apache License, Version 2.0; the text is in
+LICENSE-Apache-2.0.txt beside this file. They were rendered to PNG for this plugin
+(tools/render-icons.py in the plugin's source repository) and are otherwise unchanged.
+No brand icon is among them.
+
+The plugin is GPL-2.0-or-later. Apache-2.0 is compatible with version 3 of the GNU
+General Public License and not with version 2, so the package that carries these icons
+is distributed under the terms of the GNU General Public License version 3 or later.
+
+Name in the menu    Material Design Icons icon        Author
+alarm               shield-home                       Austin Andrews
+bed                 bed                               Google
+blinds              blinds                            Austin Andrews
+camera              cctv                              Roberto Graham
+ceiling-light       ceiling-light                     GreenTurtwig
+door                door                              Haley Halcyon
+fan                 fan                               Austin Andrews
+garage              garage                            Alex Efremo
+garden              flower                            Google
+gate                gate                              Simran
+home                home                              Google
+kitchen             countertop                        Google
+lamp                lightbulb                         Google
+lock                lock                              Google
+movie               movie                             Google
+neutral             checkbox-blank-circle-outline     Google
+note                note-text                         Austin Andrews
+power               power                             Google
+radiator            radiator                          Austin Andrews
+scene               palette                           Google
+script              script-text                       Michael Irigoyen
+sofa                sofa                              Michael Irigoyen
+speaker             speaker                           Google
+thermometer         thermometer                       Austin Andrews
+tv                  television                        Google

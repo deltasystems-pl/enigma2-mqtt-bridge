@@ -6,7 +6,7 @@ Priority: optional
 Depends: python3-core, python3-json, python3-threading, python3-netclient
 Maintainer: Damian Wilczek <deltasystems-pl@users.noreply.github.com>
 Homepage: https://github.com/deltasystems-pl/enigma2-mqtt-bridge
-License: GPL-2.0-or-later
+License: GPL-3.0-or-later AND Apache-2.0
 Description: Push receiver state to MQTT and take commands back.
  Keeps one MQTT session to your broker and publishes the receiver's state the
  moment enigma2 raises the event - zap, EPG change, standby, recording, volume,
