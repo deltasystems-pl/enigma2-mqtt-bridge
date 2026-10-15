@@ -256,6 +256,7 @@ def test_a_row_without_available_is_available():
     (0, 0.1, [0, 0.1, 0.2, 0.3]),
     (16.5, 0.5, [16.5, 17.0, 17.5]),
     (-3, 1.5, [-3.0, -1.5, 0.0]),
+    (0.0, 10.0, [0, 10, 20]),
 ])
 def test_a_slider_steps_without_binary_noise(minimum, step, values):
     row = {"min": minimum, "max": minimum + step * 100, "step": step}
@@ -263,6 +264,20 @@ def test_a_slider_steps_without_binary_noise(minimum, step, values):
     assert got == values
     assert all(isinstance(value, int) for value in got) == (
         float(minimum).is_integer() and float(step).is_integer())
+
+
+def test_a_slider_has_every_step_its_bounds_allow_despite_binary_noise():
+    """0.3 / 0.1 is 2.9999999999999996 in floating point: still four values."""
+    row = {"min": 0, "max": 0.3, "step": 0.1}
+    assert menu_module.slider_count(row) == 3
+    assert menu_module.slider_value(row, 3) == 0.3
+
+
+def test_a_value_outside_the_slider_starts_at_its_nearest_bound():
+    row = {"min": 0, "max": 100, "step": 10}
+    assert menu_module.slider_index(row, 150) == 10
+    assert menu_module.slider_index(row, -40) == 0
+    assert menu_module.slider_index(row, None) == 0
 
 
 def test_a_slider_value_is_shown_without_noise():
@@ -690,7 +705,10 @@ def test_the_number_keys_pick_their_row(world):
     (action,) = world.actions()
     assert action["row"] == "r_movie"
     world.screen.key_number(9)
+    world.screen.key_number(0)
     assert len(world.actions()) == 1
+    # 0 is no row: nothing opened either (the last row would have opened the keyboard).
+    assert world.screen is not None
 
 
 def test_a_row_of_an_unknown_type_cannot_be_acted_on(world):
@@ -804,6 +822,17 @@ def test_a_slider_being_moved_is_not_overwritten(world):
     assert world.actions()[-1]["value"] == 50
 
 
+def test_a_slider_whose_row_becomes_unavailable_loses_its_moved_value(world):
+    world.open()
+    world.ok("g_salon")
+    world.select("r_blind")
+    world.screen.key_right()
+    world.send_menu(changed(world.menu, "r_blind", available=False))
+    assert world.view()["r_blind"]["state"] == "40 %"
+    world.ok("r_blind")
+    assert world.actions() == []
+
+
 def test_an_action_says_the_rev_it_acted_on(world):
     world.open()
     world.send_menu(changed(world.menu, "r_door", state="open"))
@@ -822,6 +851,38 @@ def test_nothing_is_sent_for_a_row_the_menu_does_not_hold(world):
     assert publisher.send({"id": "r_door", "type": "indicator"}, "toggle") is False
     assert publisher.send({"id": "r_movie", "type": "button"}, "set", 3) is False
     assert world.actions() == []
+
+
+def test_nothing_is_sent_for_a_row_of_another_type_now(world):
+    """The screen showed a toggle; the menu holds a button there now - and press would fit it."""
+    world.send_menu()
+    assert world.publisher.send({"id": "r_movie", "type": "toggle"}, "press") is False
+    assert world.actions() == []
+
+
+def test_nothing_is_sent_while_greyed_whoever_asks(world):
+    world.send_menu()
+    world.status("offline")
+    assert world.publisher.send({"id": "r_movie", "type": "button"}, "press") is False
+    assert world.actions() == []
+
+
+def test_nothing_is_sent_for_an_unavailable_row_whoever_asks(world):
+    world.send_menu(changed(example(), "r_movie", available=False))
+    assert world.publisher.send({"id": "r_movie", "type": "button"}, "press") is False
+    assert world.actions() == []
+
+
+def test_typed_text_is_cut_at_the_rows_max_length_whoever_asks(world):
+    world.send_menu(changed(example(), "r_note", max_length=3))
+    assert world.publisher.send({"id": "r_note", "type": "input"}, "set", "abcdef") is True
+    assert world.actions()[-1]["value"] == "abc"
+
+
+def test_publish_event_sends_nothing_without_a_connection(world):
+    world.client.fire_disconnect()
+    assert world.bridge.publish_event("menu_action", {"row": "r_movie"}) is None
+    assert world.client.all_for(ACTION_TOPIC) == []
 
 
 def test_nothing_is_sent_without_a_menu(world):
@@ -934,6 +995,13 @@ def test_a_key_the_image_takes_first_never_reaches_the_menu(world):
     world.send_menu()
     world.long_help()
     assert taken == ["something"]
+    assert world.screen is None
+
+
+def test_another_action_in_the_menus_context_opens_nothing(world):
+    world.receiver.actions.bindKey("elsewhere", "generic", KEY_RED, 1 << LONG, CONTEXT, "other")
+    world.send_menu()
+    assert world.press(KEY_RED, MAKE, LONG, BREAK) == [0, 0, 0]
     assert world.screen is None
 
 
