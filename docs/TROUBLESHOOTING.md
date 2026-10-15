@@ -111,8 +111,10 @@ interface remains responsive; only a slow-batch or event-loop warning indicates 
   has no `menu` - the log then says why no menu screen could be built.
 - **The hotkey does nothing**: read `info.menu`. `hotkey` `null` with a reason says why: switched
   off, an image that does not let a plugin bind a key, or a key the receiver's own button setup
-  gives a function - which runs instead, by design. The hotkey works only in live TV, not over
-  another screen or in a recording. The Extensions entry opens the menu in any case.
+  gives a function - which runs instead, by design. The hotkey works in live TV and while a
+  recording or a media file plays, not over another screen, and not on a key the player uses
+  itself (OpenATV's media player seeks back on a long RED). The Extensions entry opens the menu in
+  any case.
 - **"There is no menu from Home Assistant yet."**: nothing is retained on
   `enigma2mqtt/menu/<node>`, or it was emptied - the integration's options define no menu, or its
   entry was removed. A payload the receiver refused leaves the menu before it and one line in the

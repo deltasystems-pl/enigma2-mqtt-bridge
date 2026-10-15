@@ -18,13 +18,17 @@ rectangle, and the icon is tried with `flags=BT_SCALE | BT_KEEP_ASPECT_RATIO` (o
 every desktop), then without `flags`, then not at all. `RT_ELLIPSIS` is added where the image has
 it.
 
+**The number keys** move the selection to the row of that number and do nothing else; OK acts
+(D66). The image's `ChoiceBox` cannot be told that: a digit there either picks its row - and acts
+- or does nothing. So the fallback is given no number keys at all.
+
 **Decided once per opening (D21).** The styled screen is first built with
 `session.instantiateDialog`, which constructs, skins and lays it out without touching the dialog
 stack, and deleted again: only when that worked is it opened with `session.open`. A screen whose
 constructor raises inside `session.open` would leave the session with the info bar's execution
 ended and nothing executing - a television that no longer answers its remote. Anything that fails
-in the trial is the reason the image's own `ChoiceBox` is used instead, as it is: the same rows,
-ids and number keys, no icon and no state.
+in the trial is the reason the image's own `ChoiceBox` is used instead, as it is: the same rows
+and ids, no icon and no state.
 
 **The keys.** OK, EXIT, LEFT and RIGHT through `OkCancelActions` and `DirectionActions`, and 1-9
 through `NumberActions`, at priority -1, before the list's own bindings. LEFT and RIGHT are
@@ -547,8 +551,10 @@ class _TrialController:
 class ChoiceBoxAdapter:
     """The image's own `ChoiceBox`, as it is, in the role of the styled screen (D21).
 
-    The same rows and ids, the number keys 1-9 on the first nine rows; no icon, no state, no
-    colour. A pick is the controller's OK and EXIT its EXIT, and the list is opened again after
+    The same rows and ids; no icon, no state, no colour. No number keys: the image's list acts
+    on a digit - `goKey` runs its entry - and has no way to only move the selection, which is
+    all a digit does in the menu (D66). An empty key is the one every image reads as "none"
+    (OpenViX and OpenATV skip it, OpenPLi maps it to the key named "", which no button sends). A pick is the controller's OK and EXIT its EXIT, and the list is opened again after
     each until the controller closes - so the menu stays on screen as the styled one does. The
     title carries the notice, which is the one line the image's list gives to say anything. A
     menu that changes while the list is open shows at the next pick.
@@ -580,7 +586,7 @@ class ChoiceBoxAdapter:
             # The image's list needs something to show: the notice says why there is nothing.
             choices = [(view.get("notice") or _("There is no menu from Home Assistant yet."),
                         None)]
-        keys = [str(number + 1) if number < 9 else "" for number in range(len(choices))]
+        keys = [""] * len(choices)
         initial = view.get("initial")
         ids = [choice[1] for choice in choices]
         selection = ids.index(initial) if initial in ids else 0

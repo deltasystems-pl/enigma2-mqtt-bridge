@@ -19,9 +19,11 @@ the wildcard at the very end (`sys.maxsize`).
   else (`PRIORITY`), so **every binding of the image is asked first**. Whatever the image or the
   user has put on the key - the image's own function, a plugin assigned in its button setup -
   runs, and the plugin never hears of the press.
-- It answers yes only when it opened the menu: in live TV - the info bar is the executing screen
-  - with the menu ready. Anywhere else it answers no and the key goes on as if the plugin were
-  not there.
+- It answers yes only when it opened the menu: in live TV or a player - the info bar, the
+  image's movie player or its media player is the executing screen - with the menu ready
+  (`menu.hotkey_screen`). Anywhere else it answers no and the key goes on as if the plugin were
+  not there. In a player, too, every binding of the player is asked first, so a key the player
+  uses - OpenATV's media player seeks on a long RED - stays the player's.
 - Only the long press is mapped for HELP and RED, so a short press reaches nobody new. On every
   image read (OpenViX, OpenATV, OpenPLi) a long press suppresses the break that follows it for
   every binding, so the short-press function of the same key does not run after a long press.

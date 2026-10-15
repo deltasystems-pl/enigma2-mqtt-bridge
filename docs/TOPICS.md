@@ -444,8 +444,8 @@ receiver has no menu: `menu_allowed` off, no session, or neither screen could be
 
 | Field | Type | Meaning |
 |---|---|---|
-| `screen` | string | `styled` - the plugin's own screen, with icons, states and colours - or `fallback` - the image's own list, with the same rows and number keys and no icon or state. Decided when the menu is opened: a styled screen that cannot be built then is replaced by the fallback for that opening and every later one, and `info` is published again |
-| `hotkey` | string or null | The `menu_hotkey` choice that is bound and opens the menu in live TV, or `null` when none does: switched `off`, an image that does not let a plugin bind a key, or a key the image's own user-assignable button setup gives a function of its own - which then runs first, by design |
+| `screen` | string | `styled` - the plugin's own screen, with icons, states and colours - or `fallback` - the image's own list, with the same rows and no icon, state or number keys. Decided when the menu is opened: a styled screen that cannot be built then is replaced by the fallback for that opening and every later one, and `info` is published again |
+| `hotkey` | string or null | The `menu_hotkey` choice that is bound and opens the menu in live TV and in the image's movie player, or `null` when none does: switched `off`, an image that does not let a plugin bind a key, or a key the image's own user-assignable button setup gives a function of its own - which then runs first, by design; that setup is the same in live TV and in the movie player. The key opens the menu in the image's media player too, unless that player uses the key itself, which it then keeps: OpenATV's media player seeks back on a long RED. Over any other screen the key does nothing new |
 | `reason` | string or null | Why `hotkey` is `null`, in English for the person reading the topic; `null` when a key is bound. The Extensions entry "Home Assistant" opens the menu whatever this says |
 
 ### `<base>/<node>/power`
@@ -2565,8 +2565,8 @@ two more while `menu_allowed` is on.
 A "Home Assistant" menu on the receiver that Home Assistant keeps up to date: one level of groups,
 each a list of rows, and rows at the top as well. Every row is a control bound to something in
 Home Assistant - a light, a scene, a cover, a script. The viewer opens it with the remote - the
-Extensions menu entry "Home Assistant", and a hotkey (`menu_hotkey`, a long HELP by default) -
-moves with the arrows and acts with OK. **The receiver never learns what a row does and never
+Extensions menu entry "Home Assistant", and a hotkey (`menu_hotkey`, a long HELP by default) in
+live TV and the players - moves with the arrows and acts with OK. **The receiver never learns what a row does and never
 sends a service call**: it sends a row's id and a value on `menu_action` (§1), and Home Assistant
 performs the action and publishes the menu again
 ([ADR-0020](adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md)).
@@ -2632,9 +2632,10 @@ list closes the menu. OK on a `button` sends `press`, on a `toggle` `toggle`. OK
 lists its options: OK sends the one chosen as `set`, EXIT discards. On a `slider`, LEFT and RIGHT
 move a value on the receiver by `step` within `min` and `max`, shown and not sent; OK sends it as
 `set`, EXIT discards it. OK on an `input` opens the image's keyboard with `value` in it: OK sends
-the text as `set`, EXIT discards. The keys 1-9 pick the row of that number. An `indicator` only
-shows its state. The image's own list, where the plugin's screen cannot be built, has the same rows
-and number keys; a slider there lists its values.
+the text as `set`, EXIT discards. The keys 1-9 move the selection to the row of that number and
+do nothing else; OK acts. An `indicator` only shows its state. The image's own list, where the
+plugin's screen cannot be built, has the same rows and no number keys - it would act on a digit;
+a slider there lists its values.
 
 **The pending mark.** After OK on a `toggle`, a `slider` or a `selector` the row shows a mark until
 the menu carries a different `value` for it. When none comes within **5 s**, the row shows its

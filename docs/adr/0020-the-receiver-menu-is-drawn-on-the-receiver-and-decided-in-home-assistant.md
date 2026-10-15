@@ -42,7 +42,8 @@ Three things are true of the path between them:
    an unknown row type is shown and cannot be acted on, because the enumeration is open.
 3. **What is not applied is discarded.** A slider moves a local value until OK (EXIT discards it),
    a selector lists its options and sends only the one chosen, an input field is the image's
-   keyboard. Only OK sends.
+   keyboard. Only OK sends: the keys 1-9 move the selection to their row and do nothing else
+   (maintainer's decision D66), so a digit pressed by mistake switches nothing.
 4. **The pending mark is compared on `value`, never on `rev`.** After OK on a toggle, a slider or
    a selector the row shows a mark until the menu carries a different value for it, or for five
    seconds, after which it shows the real value and the footer says Home Assistant changed
@@ -61,8 +62,8 @@ Three things are true of the path between them:
    geometry from the desktop height, as the toast does, and has a second way for every optional
    drawing call. It is built on trial off the dialog stack before it is opened, because a screen
    that raises inside `session.open` leaves the session with nothing executing. Anything that
-   fails is the reason the image's own `ChoiceBox` is used as it is - same rows, ids and number
-   keys - and `info.menu.screen` says which one the receiver uses. The module knows nothing about
+   fails is the reason the image's own `ChoiceBox` is used as it is - same rows and ids, but no
+   number keys, because the image's list acts on a digit and cannot be made only to move (D66) - and `info.menu.screen` says which one the receiver uses. The module knows nothing about
    menus, so the next list (the planned channel list) reuses it.
 8. **On by default, set on the receiver.** `menu_allowed` is a box-only permission, on by default
    because the menu does nothing the user did not put into it in Home Assistant; off, there is no

@@ -1,6 +1,6 @@
 # ADR-0021: The menu hotkey is offered the key after the image, and takes it only when it opened the menu
 
-**Status:** accepted 2026-10-15
+**Status:** accepted 2026-10-15, amended 2026-10-15 (the players, below)
 **Date:** 2026-10-15
 **Supersedes:** -
 
@@ -48,9 +48,10 @@ the image's help. A long press on the physical remote was not measured.
    other plugins at ordinary priorities, and before the unhandled-key marker. Whatever the image
    or the user put on the key runs first and the plugin never hears of the press - including a
    function the user assigns in the image's button setup later.
-3. **It answers yes only when it opened the menu**: when the info bar is the executing dialog
-   (live TV) and no menu is open. Over any other screen, in a movie, or with the menu already
-   open, it answers no and the key goes on as if the plugin were not there.
+3. **It answers yes only when it opened the menu**: when the info bar (live TV), the image's
+   movie player or its media player is the executing dialog, and no menu is open (see the
+   amendment). Over any other screen, or with the menu already open, it answers no and the key
+   goes on as if the plugin were not there.
 4. **HELP and RED are mapped on the long press only**, so a short press reaches no new binding.
    F3 and F4, keyboard keys, are mapped on their break, as the images' button setups map them.
 5. **`info.menu.hotkey` says only what can open the menu.** The bound choice, or `null` with the
@@ -70,3 +71,36 @@ the image's help. A long press on the physical remote was not measured.
   need pressing again. That is the image's behaviour and is left alone.
 - Whether a physical long press arrives with the long flag on a given remote and image is a
   hardware question (H11), as is any keymap translation an image applies to a remote's keys.
+
+## Amendment 2026-10-15 - the players
+
+The maintainer asked for the hotkey in the movie player as well (D67), under the same rule: only
+on a key the image leaves unassigned there. The players were read in the same three trees:
+`Screens/InfoBar.py`'s `MoviePlayer` and the `Plugins/Extensions/MediaPlayer` plugin, every
+context their classes and mixins bind, and every map of `data/keymap.xml` that holds a long HELP,
+a long RED, F3 or F4.
+
+- **The movie player** (`MoviePlayer`, recordings and files from the movie list) carries the
+  image's button setup on all three: `InfoBarButtonSetup` on OpenViX and OpenATV, `InfoBarHotkey`
+  on OpenPLi, with the same settings as live TV. Its help map handles `displayHelp` only. Its seek,
+  EPG, menu and extension maps hold none of the four keys - OpenViX maps RED in
+  `InfobarEPGActions` on the break only, and OpenATV's `ColorActions` there handle only BLUE.
+- **The media player** (`MediaPlayer`) has no button setup. Its own maps hold none of the four keys
+  except on OpenATV, whose `MediaPlayerSeekActions` seek back on a long RED (`seekBackManual`);
+  OpenViX has the same entries commented out.
+
+| Key | OpenViX movie player | OpenViX media player | OpenATV movie player | OpenATV media player | OpenPLi movie player | OpenPLi media player |
+|---|---|---|---|---|---|---|
+| HELP, held | free | free | free | free | free | free |
+| RED, held | HbbTV, from the button setup's default | free | free | **the player's** (seek back) | free | free |
+| F3 | free | free | free | free | free | free |
+| F4 | free | free | free | free | free | free |
+
+"Free" is free by default: a function the user puts on the key in the button setup takes it in the
+movie player as in live TV. Nothing changes in how the key is bound - every binding of the player
+is still asked first, so a key a player uses stays the player's, on these images and on any other.
+The hotkey also opens the menu over a player built on `MoviePlayer` by another plugin, under the
+same rule. `info.menu.hotkey` keeps describing live TV and the movie player, which share the
+button setup; the one known exception in a player, OpenATV's media player on a long RED, is in
+TOPICS.md rather than in `info`, because it cannot be read from the receiver without knowing which
+contexts a screen binds.

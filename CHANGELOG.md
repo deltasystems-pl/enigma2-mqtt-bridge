@@ -23,12 +23,14 @@ version that has no section here.
   until Home Assistant changes it, or for five seconds. Without the broker, or with Home
   Assistant's own status `offline`, the menu stays greyed with a notice and sends nothing, and an
   action the broker had not acknowledged is never sent after a reconnect. It opens from the
-  Extensions entry "Home Assistant" and by a hotkey, a long HELP by default, which is offered
-  every key press only after the image and takes it only when it opened the menu
+  Extensions entry "Home Assistant" and, in live TV and the players, by a hotkey, a long HELP by
+  default, which is offered every key press only after the image and takes it only when it
+  opened the menu
   ([ADR-0020](docs/adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md),
-  [ADR-0021](docs/adr/0021-the-menu-hotkey-is-offered-the-key-after-the-image.md)). Where the
-  plugin's own screen cannot be built, the image's own list is used with the same rows and number
-  keys. New: the box-only permission `menu_allowed` (on by default), the setting `menu_hotkey`
+  [ADR-0021](docs/adr/0021-the-menu-hotkey-is-offered-the-key-after-the-image.md)). The keys
+  1-9 only move the selection; OK acts. Where the plugin's own screen cannot be built, the
+  image's own list is used with the same rows. New: the box-only permission `menu_allowed` (on
+  by default), the setting `menu_hotkey`
   (`help_long`, `red_long`, `f3`, `f4`, `off`; writable through `cmd/config`), the capability
   `menu`, `info.menu` (which screen and which key), the event topic `menu_action`, and the
   subscriptions to `enigma2mqtt/menu/<node>` and Home Assistant's status topic

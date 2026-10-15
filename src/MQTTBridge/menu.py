@@ -102,6 +102,9 @@ COLOURS = (GREEN, RED)
 ONLINE = "online"
 OFFLINE = "offline"
 
+# Where the image's media player plugin lives (`Plugins/Extensions/MediaPlayer/plugin.py`).
+MEDIA_PLAYER_MODULE = "Plugins.Extensions.MediaPlayer"
+
 # Why the menu is greyed, when it is.
 GREY_BROKER = "broker"
 GREY_HOME_ASSISTANT = "home_assistant"
@@ -763,18 +766,45 @@ class MenuController:
         return True
 
     def key_number(self, number):
-        """1-9 pick the row of that number on this level: the selection moves there, then OK."""
+        """1-9 move the selection to the row of that number on this level, and do nothing else.
+
+        OK acts (D66): a digit pressed by mistake must not switch a lamp.
+        """
         entries = self.entries()
         if not 1 <= number <= len(entries):
             return None
         ident = entries[number - 1]["id"]
         if self.screen is not None:
             self.screen.select(ident)
-        self.key_ok(ident)
         return ident
 
 
 # ----------------------------------------------------------------- the publisher --
+
+
+def hotkey_screen(dialog):
+    """Whether the hotkey may open the menu over `dialog`: live TV or a player.
+
+    The info bar itself; the image's movie player (`Screens.InfoBar.MoviePlayer`, and the
+    players plugins build on it); and the image's media player plugin. Every other screen - a
+    list, a menu, the EPG - keeps the key to itself.
+    """
+    try:
+        from Screens.InfoBar import InfoBar
+    except Exception:
+        return False
+    if dialog is getattr(InfoBar, "instance", None):
+        return True
+    try:
+        from Screens.InfoBar import MoviePlayer
+    except Exception:
+        MoviePlayer = None
+    if MoviePlayer is not None and isinstance(dialog, MoviePlayer):
+        return True
+    return any(
+        cls.__name__ == "MediaPlayer" and cls.__module__.startswith(MEDIA_PLAYER_MODULE)
+        for cls in type(dialog).__mro__
+    )
 
 
 def _acknowledged(info):
@@ -1071,16 +1101,16 @@ class MenuPublisher(Publisher):
             self._controllers.remove(controller)
 
     def hotkey_pressed(self, session=None):
-        """The hotkey, in live TV only: True when it opened the menu, so the key is consumed."""
+        """The hotkey: True when it opened the menu, so the key is consumed.
+
+        Only over live TV or a player (D67, `hotkey.py`): the info bar, the image's movie
+        player, or its media player is the executing dialog. Anywhere else the key goes on.
+        """
         session = session or self.session
         if session is None or self._controllers:
             return False
-        try:
-            from Screens.InfoBar import InfoBar
-        except Exception:
-            return False
-        infobar = getattr(InfoBar, "instance", None)
-        if infobar is None or getattr(session, "current_dialog", None) is not infobar:
+        dialog = getattr(session, "current_dialog", None)
+        if dialog is None or not hotkey_screen(dialog):
             return False
         return self.open(session)
 

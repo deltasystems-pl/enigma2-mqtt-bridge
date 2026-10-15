@@ -462,6 +462,83 @@ def test_a_short_help_is_left_to_the_image(world):
     assert world.screen is None
 
 
+def test_the_hotkey_opens_the_menu_over_the_movie_player(world):
+    """D67: in a recording, too - the menu opens over the playing video."""
+    from conftest import MoviePlayer
+
+    world.send_menu()
+    player = world.session.open(MoviePlayer)
+    assert world.long_help()[1] == 1
+    assert world.screen is not None
+    world.exit()
+    assert world.session.current_dialog is player
+
+
+def test_the_hotkey_opens_the_menu_over_a_player_built_on_the_movie_player(world):
+    from conftest import MoviePlayer
+
+    class PluginPlayer(MoviePlayer):
+        pass
+
+    world.send_menu()
+    world.session.open(PluginPlayer)
+    world.long_help()
+    assert world.screen is not None
+
+
+def test_the_hotkey_opens_the_menu_over_the_images_media_player(world):
+    from conftest import ModelScreen
+
+    media_player = type("MediaPlayer", (ModelScreen,),
+                        {"__module__": "Plugins.Extensions.MediaPlayer.plugin"})
+    world.send_menu()
+    world.session.open(media_player)
+    world.long_help()
+    assert world.screen is not None
+
+
+def test_another_screen_of_the_media_player_plugin_is_not_a_player(world):
+    from conftest import ModelScreen
+
+    settings_screen = type("MediaPlayerSettings", (ModelScreen,),
+                           {"__module__": "Plugins.Extensions.MediaPlayer.settings"})
+    world.send_menu()
+    world.session.open(settings_screen)
+    assert world.long_help() == [0, 0, 0]
+    assert world.screen is None
+
+
+def test_a_screen_called_media_player_from_elsewhere_is_not_a_player(world):
+    from conftest import ModelScreen
+
+    lookalike = type("MediaPlayer", (ModelScreen,), {"__module__": "Plugins.Extensions.Other"})
+    world.send_menu()
+    world.session.open(lookalike)
+    assert world.long_help() == [0, 0, 0]
+    assert world.screen is None
+
+
+def test_a_key_the_player_uses_stays_the_players(world):
+    """OpenATV's media player seeks back on a long RED: the player is asked first and keeps it."""
+    from conftest import ModelScreen
+
+    seeks = []
+    media_player = type("MediaPlayer", (ModelScreen,),
+                        {"__module__": "Plugins.Extensions.MediaPlayer.plugin"})
+    world.client.fire_message("enigma2/" + NODE + "/cmd/config", json.dumps({
+        "publish_keys": True, "screenshot": "on_zap", "screenshot_interval": 60,
+        "menu_hotkey": "red_long"}).encode())
+    world.receiver.actions.bindKey("keymap.xml", "generic", KEY_RED, 1 << LONG,
+                                   "MediaPlayerSeekActions", "seekBackManual")
+    world.receiver.actions.bindAction("MediaPlayerSeekActions", 0,
+                                      lambda context, action: seeks.append(action) or 1)
+    world.send_menu()
+    world.session.open(media_player)
+    world.press(KEY_RED, MAKE, LONG, BREAK)
+    assert seeks == ["seekBackManual"]
+    assert world.screen is None
+
+
 def test_the_hotkey_does_nothing_over_another_screen(world):
     world.send_menu()
     world.session.open(ChoiceBox, title="the image's own", list=[("a", 1)])
@@ -699,16 +776,30 @@ def test_an_unavailable_row_is_greyed_and_cannot_be_acted_on(world):
     assert world.notice() == "This is unavailable in Home Assistant."
 
 
-def test_the_number_keys_pick_their_row(world):
+def test_a_number_key_moves_the_selection_and_ok_acts(world):
+    """D66: a digit only jumps to its row; nothing is sent until OK."""
     world.open()
     world.screen.key_number(2)
+    assert world.screen.selected() == "r_movie"
+    assert world.actions() == []
+    world.screen.key_ok()
     (action,) = world.actions()
     assert action["row"] == "r_movie"
+    world.screen.key_number(4)
+    assert world.screen.selected() == "r_note"
+    assert world.screen is not None, "the input row's keyboard opens only on OK"
+    world.screen.key_number(2)
     world.screen.key_number(9)
     world.screen.key_number(0)
+    assert world.screen.selected() == "r_movie", "9 and 0 are no row here"
     assert len(world.actions()) == 1
-    # 0 is no row: nothing opened either (the last row would have opened the keyboard).
-    assert world.screen is not None
+
+
+def test_a_number_key_on_a_group_does_not_open_it(world):
+    world.open()
+    world.screen.key_number(1)
+    assert world.screen.selected() == "g_salon"
+    assert world.screen.controller.level == menu_module.TOP
 
 
 def test_a_row_of_an_unknown_type_cannot_be_acted_on(world):
@@ -1096,7 +1187,8 @@ def test_the_fallback_is_the_images_list_with_the_same_rows_ids_and_keys(world, 
     box = world.session.current_dialog
     assert box.list == [("Salon", "g_salon"), ("Movie night", "r_movie"),
                         ("Front door", "r_door"), ("Note", "r_note")]
-    assert box.keys == ["1", "2", "3", "4"]
+    # No number keys: the image's list would act on a digit (D66).
+    assert box.keys == ["", "", "", ""]
     assert box.title == "Home Assistant"
     box.close(("Movie night", "r_movie"))
     MainLoop.advance(0)
