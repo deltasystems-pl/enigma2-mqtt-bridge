@@ -554,7 +554,8 @@ class ChoiceBoxAdapter:
     The same rows and ids; no icon, no state, no colour. No number keys: the image's list acts
     on a digit - `goKey` runs its entry - and has no way to only move the selection, which is
     all a digit does in the menu (D66). An empty key is the one every image reads as "none"
-    (OpenViX and OpenATV skip it, OpenPLi maps it to the key named "", which no button sends). A pick is the controller's OK and EXIT its EXIT, and the list is opened again after
+    (OpenViX and OpenATV skip it, OpenPLi maps it to the key named "", which no button sends).
+    A pick is the controller's OK and EXIT its EXIT, and the list is opened again after
     each until the controller closes - so the menu stays on screen as the styled one does. The
     title carries the notice, which is the one line the image's list gives to say anything. A
     menu that changes while the list is open shows at the next pick.
