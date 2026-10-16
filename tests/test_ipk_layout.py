@@ -100,6 +100,33 @@ def test_maintainer_scripts_are_executable_in_the_checkout():
         assert script.stat().st_mode & stat.S_IXUSR, f"CONTROL/{name} is not executable"
 
 
+def test_the_scripts_the_workflows_run_directly_are_executable_in_git():
+    """CI and the release run `./tools/<script>`, so git must carry the executable bit.
+
+    The tests run the build through `bash`, which does not care about the mode;
+    a script that lost its bit passes here and fails in CI with "Permission denied".
+    """
+    workflows = REPO_ROOT / ".github" / "workflows"
+    names = set()
+    for workflow in workflows.glob("*.yml"):
+        for word in workflow.read_text(encoding="utf-8").split():
+            if word.startswith("./tools/"):
+                names.add(word[2:])
+    assert "tools/build-ipk.sh" in names
+    if shutil.which("git") is None or not (REPO_ROOT / ".git").exists():
+        pytest.skip("no git checkout to read the index from")
+    for name in sorted(names):
+        entry = subprocess.run(
+            ["git", "ls-files", "-s", "--", name],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        assert entry, f"{name} is not tracked"
+        assert entry[0] == "100755", f"{name} is mode {entry[0]} in git, not 100755"
+
+
 def test_maintainer_scripts_are_packaged_and_their_mode_is_asserted_from_the_archive():
     build = (REPO_ROOT / "tools" / "build-ipk.sh").read_text(encoding="utf-8")
     assert "cp CONTROL/postinst CONTROL/prerm" in build
