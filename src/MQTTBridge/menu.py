@@ -82,6 +82,10 @@ MAX_LENGTH_RANGE = (1, 255)
 
 PENDING_SECONDS = 5
 
+# How many unknown row types are named in the log, each once: a broker client could invent
+# new ones forever.
+MAX_TYPES_LOGGED = 32
+
 GROUP = "group"
 BUTTON = "button"
 TOGGLE = "toggle"
@@ -849,6 +853,7 @@ class MenuPublisher(Publisher):
         self._controllers = []
         self._ticker = Ticker(self._expire, "menu pending")
         self._versions_logged = set()
+        self._types_logged = set()
         self._hotkey = None
         # The `menu_action`s handed to the client and not acknowledged yet.
         self._unacknowledged = []
@@ -934,11 +939,18 @@ class MenuPublisher(Publisher):
 
     def on_message(self, topic, payload, retain=False):
         if topic == self.menu_topic():
-            self.on_menu(payload)
+            self.on_menu(payload, retain)
         elif topic == self.status_topic():
             self.on_status(payload)
 
-    def on_menu(self, payload):
+    def on_menu(self, payload, retain=True):
+        """A menu from the integration. `retain` is the flag the broker delivered it with.
+
+        A menu that arrives live - retain flag 0, which the broker sets on everything it
+        forwards to a subscription that already exists - was published by the integration just
+        now, so Home Assistant is running (D71). A retained replay on subscribing proves nothing:
+        it can be days old.
+        """
         try:
             menu = parse_menu(payload)
         except UnknownVersion as error:
@@ -947,6 +959,7 @@ class MenuPublisher(Publisher):
                 LOG.warning("ignoring the menu: %s", error)
             self.menu = None
             self.menu_seen = True
+            self._heard_live(retain)
             self._menu_changed()
             return
         except InvalidMenu as error:
@@ -959,7 +972,28 @@ class MenuPublisher(Publisher):
         else:
             LOG.debug("menu rev %s: %d item(s), %d row(s)", menu["rev"], len(menu["items"]),
                       len(menu["rows"]))
+            self._log_unknown_types(menu)
+        self._heard_live(retain)
         self._menu_changed()
+
+    def _log_unknown_types(self, menu):
+        """One line per row type this plugin does not know, the first time it is seen (D72)."""
+        for row in menu["rows"].values():
+            if row["type"] in ROW_TYPES:
+                continue
+            kind = clean_text(row["type"], LABEL_LIMIT)
+            if kind in self._types_logged or len(self._types_logged) >= MAX_TYPES_LOGGED:
+                continue
+            self._types_logged.add(kind)
+            LOG.warning("the menu has rows of a type this plugin does not know (%s); they are "
+                        "shown and cannot be acted on", kind)
+
+    def _heard_live(self, retain):
+        """A live menu is Home Assistant's own word that it is running (D71)."""
+        if retain or self.ha_status == ONLINE:
+            return
+        LOG.info("a menu arrived live from Home Assistant: it is online")
+        self.ha_status = ONLINE
 
     def on_status(self, payload):
         if isinstance(payload, (bytes, bytearray)):
@@ -983,9 +1017,19 @@ class MenuPublisher(Publisher):
     def connection_changed(self):
         """The broker connection came or went: grey or ungrey, and drop what was not taken.
 
+        Home Assistant's status is forgotten either way (D71): its birth, `online`, is not
+        retained, so one published while this receiver was away is never heard, and an
+        `offline` from before would grey the menu for good. Forgotten is "never heard", which
+        does not grey; the next `offline`, `online` or live menu says where it stands.
+
         A `menu_action` the broker has not acknowledged when the connection goes is taken out of
-        the client's queue: sent after a reconnect it would be an OK from minutes ago (D64).
+        the client's queue: sent after a reconnect it would be an OK from minutes ago (D64). The
+        client does the same on its network thread before paho sends anything again
+        (`mqttclient.MqttClient.publish`, `transient`), which holds even when this runs late.
         """
+        if self.ha_status is not None:
+            LOG.info("the broker connection changed; Home Assistant's status is unknown again")
+            self.ha_status = None
         if self.bridge is not None and not self.bridge.connected:
             for info in self._unacknowledged:
                 if not _acknowledged(info) and self.bridge.withdraw_event(info):

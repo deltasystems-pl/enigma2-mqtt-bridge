@@ -372,6 +372,13 @@ class World:
         self.client.fire_message(MENU_TOPIC, raw if raw is not None else payload(self.menu),
                                  retain=True)
 
+    def send_live(self, menu=None, raw=None):
+        """The integration publishing while this receiver is subscribed: retain flag 0."""
+        if menu is not None:
+            self.menu = menu
+        self.client.fire_message(MENU_TOPIC, raw if raw is not None else payload(self.menu),
+                                 retain=False)
+
     def status(self, text):
         self.client.fire_message(STATUS_TOPIC, text.encode("utf-8"))
 
@@ -897,15 +904,39 @@ def test_a_number_key_on_a_group_does_not_open_it(world):
     assert world.screen.controller.level == menu_module.TOP
 
 
-def test_a_row_of_an_unknown_type_cannot_be_acted_on(world):
+def test_a_row_of_an_unknown_type_is_shown_inert_and_logged_once(world, plugin_log):
+    """D72: label and state as sent, nothing on OK, one log line - not one per redraw."""
     menu = example()
     menu["items"].append({"type": "dial", "id": "r_dial", "label": "Dial", "state": "3",
                           "available": True})
     world.send_menu(menu)
     world.open()
+    assert [entry[0] for entry in world.screen["list"].list][-1] == "r_dial"
+    row = world.view()["r_dial"]
+    assert (row["label"], row["state"], row["dim"]) == ("Dial", "3", False)
+    world.ok("r_dial")
     world.ok("r_dial")
     assert world.actions() == []
-    assert world.view()["r_dial"]["state"] == "3"
+    assert world.notice() == "This row only shows a state."
+    assert world.screen.key_right() == 0
+    # Another publish, and every redraw since: still the one line.
+    world.send_menu(changed(menu, "r_dial", state="4"))
+    world.send_live(changed(world.menu, "r_door", state="open"))
+    assert world.view()["r_dial"]["state"] == "4"
+    assert plugin_log().count("rows of a type this plugin does not know (dial)") == 1
+
+
+def test_unknown_row_types_are_each_named_once_and_only_so_many(world, plugin_log):
+    menu = example()
+    menu["items"] = [{"type": f"t{n}", "id": f"r{n}", "label": "X", "available": True}
+                     for n in range(menu_module.MAX_ITEMS)]
+    world.send_menu(menu)
+    menu["items"] = [{"type": f"u{n}", "id": f"r{n}", "label": "X", "available": True}
+                     for n in range(menu_module.MAX_ITEMS)]
+    world.send_menu(menu)
+    log = plugin_log()
+    assert log.count("rows of a type this plugin does not know") == menu_module.MAX_TYPES_LOGGED
+    assert log.count("does not know (t0)") == 1
 
 
 # ------------------------------------------------------------------- greying --
@@ -944,6 +975,81 @@ def test_an_unknown_status_changes_nothing(world):
     world.status("offline")
     world.status("restarting")
     assert world.publisher.ha_status == "offline"
+
+
+def test_home_assistant_offline_is_forgotten_when_the_broker_connection_goes(world):
+    """D71: Home Assistant came back while the receiver was away; its birth is not retained."""
+    world.open()
+    world.status("offline")
+    world.client.fire_disconnect()
+    assert world.publisher.ha_status is None
+    assert world.publisher.greyed() == "broker"
+    # Home Assistant published `online` now - to nobody, as far as this receiver goes.
+    world.client.fire_connect()
+    assert world.publisher.greyed() is None
+    assert world.notice() == ""
+    world.ok("r_movie")
+    assert len(world.actions()) == 1
+
+
+def test_home_assistant_status_is_forgotten_on_a_reconnect_the_main_loop_saw_late(world):
+    """The disconnect and the connect reach the main loop together: forgotten all the same."""
+    world.open()
+    world.status("offline")
+    world.client.fire_connect()
+    assert world.publisher.ha_status is None
+    assert world.publisher.greyed() is None
+
+
+def test_an_offline_after_the_reconnect_greys_again(world):
+    world.open()
+    world.status("offline")
+    world.client.fire_disconnect()
+    world.client.fire_connect()
+    world.status("offline")
+    assert world.publisher.greyed() == "home_assistant"
+
+
+def test_a_live_menu_says_home_assistant_is_online(world, plugin_log):
+    """D71: only a running integration publishes a menu now, so Home Assistant is up."""
+    world.open()
+    world.status("offline")
+    assert world.publisher.greyed() == "home_assistant"
+    world.send_live(changed(world.menu, "r_door", state="open"))
+    assert world.publisher.ha_status == "online"
+    assert world.publisher.greyed() is None
+    assert world.notice() == ""
+    assert world.view()["r_door"]["state"] == "open"
+    world.ok("r_movie")
+    assert len(world.actions()) == 1
+    world.send_live(changed(world.menu, "r_door", state="closed"))
+    assert plugin_log().count("a menu arrived live from Home Assistant") == 1
+
+
+@pytest.mark.parametrize("raw", [b"", payload(_broken(v=2))], ids=["empty", "newer-version"])
+def test_a_live_empty_or_newer_menu_says_home_assistant_is_online_too(world, raw):
+    world.send_menu()
+    world.status("offline")
+    world.send_live(raw=raw)
+    assert world.publisher.greyed() is None
+
+
+def test_a_retained_menu_says_nothing_about_home_assistant(world):
+    """The replay on subscribing can be days old: Home Assistant may be down since."""
+    world.open()
+    world.status("offline")
+    world.send_menu(changed(world.menu, "r_door", state="open"))
+    assert world.publisher.ha_status == "offline"
+    assert world.publisher.greyed() == "home_assistant"
+    world.ok("r_movie")
+    assert world.actions() == []
+
+
+def test_a_live_invalid_menu_says_nothing_about_home_assistant(world):
+    world.send_menu()
+    world.status("offline")
+    world.send_live(raw=b'{"v": 1, "rev": 43, "items": [{"type": "toggle", "id": "a b"}]}')
+    assert world.publisher.greyed() == "home_assistant"
 
 
 def test_greyed_the_rows_can_still_be_browsed(world):
