@@ -144,14 +144,19 @@ def clean_text(value, limit):
 
     The backslash goes for the toast's reason - enigma2's renderer reads `\\c` and `\\n` as
     escapes, after reordering right-to-left text, where no pattern over the string finds them.
-    A row is one line, so every control character and line separator becomes a space.
+    A row is one line, so every control character and line separator becomes a space. The
+    invisible format characters (Unicode category Cf: the bidirectional overrides and isolates,
+    the zero-width space and joiners, the soft hyphen, the byte order mark) are dropped: they
+    draw nothing and can make a row read as something it is not.
     """
     text = strip_backslashes(str(value))
-    text = "".join(
-        " " if unicodedata.category(character) in ("Cc", "Zl", "Zp") else character
-        for character in text
-    )
-    return text[:limit]
+    pieces = []
+    for character in text:
+        category = unicodedata.category(character)
+        if category == "Cf":
+            continue
+        pieces.append(" " if category in ("Cc", "Zl", "Zp") else character)
+    return "".join(pieces)[:limit]
 
 
 def format_number(value):
@@ -167,11 +172,13 @@ def format_number(value):
 
 
 def _is_number(value):
-    return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-    )
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        # A JSON integer too large for a float (10**400): no slider has it.
+        return False
 
 
 def _text(raw, name, limit, required=False, default=None):
@@ -299,6 +306,9 @@ def parse_menu(payload):
         raw = json.loads(text)
     except ValueError:
         raise InvalidMenu("the payload is not JSON") from None
+    except RecursionError:
+        # Thousands of nested brackets fit in 64 KiB and exhaust the parser's stack.
+        raise InvalidMenu("the payload is nested too deeply") from None
     if not isinstance(raw, dict):
         raise InvalidMenu("the payload is not a JSON object")
     version = raw.get("v")

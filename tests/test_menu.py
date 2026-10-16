@@ -193,6 +193,30 @@ def test_a_payload_over_64_kib_is_refused_unread():
         parse_menu(payload(menu))
 
 
+def test_a_payload_nested_too_deeply_for_the_parser_is_refused():
+    """30000 brackets fit under 64 KiB and exhaust the JSON parser's stack: a refusal."""
+    raw = b"[" * 30000 + b"]" * 30000
+    assert len(raw) < 65536
+    with pytest.raises(InvalidMenu, match="nested too deeply"):
+        parse_menu(raw)
+    with pytest.raises(InvalidMenu):
+        parse_menu(raw.decode("ascii"))
+
+
+@pytest.mark.parametrize("field", ["min", "max", "step", "value"])
+def test_a_slider_number_too_large_for_a_float_is_refused(field):
+    with pytest.raises(InvalidMenu, match="number"):
+        parse_menu(payload(_with(SLIDER, **{field: 10 ** 400})))
+
+
+def test_a_payload_too_large_for_a_float_reaches_the_world_as_a_refusal(world, plugin_log):
+    world.send_menu()
+    world.send_menu(raw=payload(_with(SLIDER, max=10 ** 400)))
+    world.send_menu(raw=b"[" * 30000 + b"]" * 30000)
+    assert world.publisher.menu["rev"] == 42
+    assert plugin_log().count("ignoring an invalid menu, keeping the one before it") == 2
+
+
 def test_a_version_this_plugin_does_not_know_is_its_own_refusal():
     with pytest.raises(UnknownVersion) as raised:
         parse_menu(payload(_broken(v=2)))
@@ -227,6 +251,27 @@ def test_text_is_cut_and_loses_what_the_renderer_would_read():
     assert row["state"] == "S" * 24
     assert menu["rows"]["r_s"]["unit"] == "percent!"
     assert menu["rows"]["r_i"]["label"] == "acFFFF0000b c d"
+
+
+def test_invisible_format_characters_are_dropped_from_every_text():
+    """Bidi overrides and isolates, zero-width characters, soft hyphen, BOM: Unicode Cf."""
+    hidden = "".join(chr(code) for code in (
+        0x202E, 0x202A, 0x2066, 0x2069, 0x200B, 0x200C, 0x200D, 0x2060, 0x00AD, 0xFEFF))
+    menu = parse_menu(payload(_broken(
+        title="Ho" + hidden + "me",
+        items=[dict(TOGGLE, label="La" + chr(0x202E) + "mp", state="o" + chr(0x200B) + "n"),
+               dict(SELECTOR, options=["a" + chr(0x2066), "b"], value="a" + chr(0x2066)),
+               dict(SLIDER, unit="%" + chr(0x200D))],
+    )))
+    assert menu["title"] == "Home"
+    assert menu["rows"]["r_x"]["label"] == "Lamp"
+    assert menu["rows"]["r_x"]["state"] == "on"
+    # Shown without it; sent back exactly as it came.
+    assert menu["rows"]["r_o"]["options"][0] == ("a" + chr(0x2066), "a")
+    assert menu["rows"]["r_s"]["unit"] == "%"
+    # Letters of other scripts stay, accents and right-to-left alike.
+    letters = "Zaz" + chr(0xF3) + chr(0x142) + chr(0x107) + " " + chr(0x5E9) + chr(0x5DC)
+    assert menu_module.clean_text(letters, 60) == letters
 
 
 def test_what_the_plugin_does_not_know_is_neutral_or_ignored():
