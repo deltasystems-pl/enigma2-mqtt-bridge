@@ -355,10 +355,12 @@ def screen_class():
             content.setFont(0, gFont("Regular", shape["row_font"]))
             content.setFont(1, gFont("Regular", shape["state_font"]))
             content.setItemHeight(shape["row"])
+            self._close_failed = False
             self["menuActions"] = ActionMap(
                 ["OkCancelActions", "DirectionActions"],
                 {"ok": self.key_ok, "cancel": self.key_cancel,
-                 "left": self.key_left, "right": self.key_right},
+                 "left": self.key_left, "right": self.key_right,
+                 "up": self.key_up, "down": self.key_down},
                 -1,
             )
             self["menuNumbers"] = NumberActionMap(
@@ -468,6 +470,20 @@ def screen_class():
         def key_right(self):
             return self._adjust(1)
 
+        def _moved(self):
+            try:
+                self.controller.key_move(self.selected())
+            except Exception:
+                LOG.exception("UP or DOWN on the menu raised")
+            # Never consumed: the list moves the selection.
+            return 0
+
+        def key_up(self):
+            return self._moved()
+
+        def key_down(self):
+            return self._moved()
+
         def key_number(self, number):
             try:
                 self.controller.key_number(int(number))
@@ -477,19 +493,34 @@ def screen_class():
         # ---------------------------------------------------- the controller --
 
         def open_keyboard(self, title, text, callback):
+            def answered(answer=None):
+                try:
+                    callback(answer)
+                finally:
+                    # The menu is on top again: a close that failed under the keyboard now can.
+                    self._retry_close()
+
             try:
                 from Screens.VirtualKeyBoard import VirtualKeyBoard
 
-                self.session.openWithCallback(callback, VirtualKeyBoard, title=title, text=text)
+                self.session.openWithCallback(answered, VirtualKeyBoard, title=title, text=text)
             except Exception:
                 LOG.exception("the image's keyboard could not be opened")
                 callback(None)
 
         def close_menu(self):
+            """Close the screen; when that fails - another dialog on top - once more later."""
             try:
                 self.close()
             except Exception:
-                LOG.exception("the menu screen could not be closed")
+                self._close_failed = True
+                LOG.exception("the menu screen could not be closed; trying again when it is "
+                              "back on top")
+
+        def _retry_close(self):
+            if self._close_failed:
+                self._close_failed = False
+                self.close_menu()
 
         def _closed(self):
             controller = self.controller
@@ -519,13 +550,34 @@ def open_styled(session, controller):
     except Exception as error:
         LOG.exception("the styled menu screen could not be built")
         return f"{type(error).__name__}: {error}"
+    executing = getattr(session, "in_exec", None)
     try:
         screen = session.open(cls, shape, controller)
     except Exception as error:
         LOG.exception("the styled menu screen could not be opened")
+        _restore_executing(session, executing)
         return f"{type(error).__name__}: {error}"
     controller.attach(screen)
     return None
+
+
+def _restore_executing(session, executing):
+    """Give the execution back to the dialog `session.open` took it from, if it is gone.
+
+    `Session.open` ends the executing dialog's execution and stacks it (`pushCurrent`) before it
+    builds the new screen. A constructor that raises there - the trial passed, so this is rare -
+    leaves nothing executing, and the fallback's own open would then be refused ("modal open are
+    allowed only from a screen which is modal"). `popCurrent` puts the stacked dialog back and
+    lets it execute again, as a close would.
+    """
+    if executing is not True or getattr(session, "in_exec", None) is not False:
+        return
+    if not getattr(session, "dialog_stack", None):
+        return
+    try:
+        session.popCurrent()
+    except Exception:
+        LOG.exception("the screen under the menu could not be given back its execution")
 
 
 class _TrialController:

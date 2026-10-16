@@ -46,6 +46,9 @@ class Controller:
     def key_number(self, number):
         self.keys.append(("number", number))
 
+    def key_move(self, selected):
+        self.keys.append(("move", selected))
+
 
 def test_the_geometry_scales_with_the_desktop_height():
     small = styledlist.geometry(1280, 720)
@@ -181,11 +184,20 @@ def test_the_screen_binds_ok_exit_arrows_and_numbers_but_no_colour_key():
     screen = _rows()
     actions = screen["menuActions"]
     assert set(actions.contexts) == {"OkCancelActions", "DirectionActions"}
-    assert set(actions.actions) == {"ok", "cancel", "left", "right"}
+    assert set(actions.actions) == {"ok", "cancel", "left", "right", "up", "down"}
     assert actions.prio == -1
     numbers = screen["menuNumbers"]
     assert numbers.contexts == ["NumberActions"]
     assert set(numbers.actions) == {str(number) for number in range(1, 10)}
+
+
+def test_up_and_down_tell_the_controller_and_are_never_consumed():
+    controller = Controller()
+    screen = _rows(controller)
+    screen.select("b")
+    assert screen.key_up() == 0
+    assert screen.key_down() == 0
+    assert controller.keys == [("move", "b"), ("move", "b")]
 
 
 def test_a_key_that_raises_never_reaches_the_main_loop():
@@ -196,9 +208,14 @@ def test_a_key_that_raises_never_reaches_the_main_loop():
         def key_adjust(self, selected, direction):
             raise RuntimeError("boom")
 
+        def key_move(self, selected):
+            raise RuntimeError("boom")
+
     screen = _rows(Raising())
     screen.key_ok()
     assert screen.key_left() == 0
+    assert screen.key_up() == 0
+    assert screen.key_down() == 0
 
 
 @pytest.mark.parametrize("name", ICON_NAMES)

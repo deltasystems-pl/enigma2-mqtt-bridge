@@ -773,12 +773,12 @@ def test_a_selector_lists_its_options_ok_sets_and_exit_discards(world):
     rows = world.screen.controller.view()["rows"]
     assert [row["label"] for row in rows] == ["off", "heat", "auto"]
     assert [row["state"] for row in rows] == ["", "current", ""]
-    assert world.screen.selected() == "o1", "the list starts on the current option"
+    assert world.screen.selected() == "oheat", "the list starts on the current option"
     world.exit()
     assert world.actions() == []
     assert [entry[0] for entry in world.screen["list"].list] == ["r_lamp", "r_blind", "r_mode"]
     world.ok("r_mode")
-    world.ok("o2")
+    world.ok("oauto")
     (action,) = world.actions()
     assert (action["action"], action["row"], action["value"]) == ("set", "r_mode", "auto")
     assert world.view()["r_mode"]["state"] == "auto \u2026"
@@ -937,6 +937,221 @@ def test_unknown_row_types_are_each_named_once_and_only_so_many(world, plugin_lo
     log = plugin_log()
     assert log.count("rows of a type this plugin does not know") == menu_module.MAX_TYPES_LOGGED
     assert log.count("does not know (t0)") == 1
+
+
+def test_ok_on_the_option_already_set_sends_nothing(world):
+    """D70: the list closes - no action, no pending mark, no notice."""
+    world.open()
+    world.ok("r_movie")
+    world.ok("g_salon")
+    world.ok("r_mode")
+    world.ok("oheat")
+    assert len(world.actions()) == 1
+    assert world.screen.controller.level == menu_module.IN_GROUP
+    row = world.view()["r_mode"]
+    assert (row["pending"], row["state"]) == (False, "heat")
+    assert world.notice() == ""
+    assert world.publisher.pending == {}
+
+
+def test_a_slider_moved_back_to_its_value_sends_nothing(world):
+    world.open()
+    world.ok("g_salon")
+    world.select("r_blind")
+    world.screen.key_right()
+    world.screen.key_left()
+    assert world.view()["r_blind"]["state"] == "< 40 % >"
+    world.ok("r_blind")
+    assert world.actions() == []
+    row = world.view()["r_blind"]
+    assert (row["pending"], row["state"]) == (False, "40 %")
+    assert world.notice() == ""
+    assert "LEFT/RIGHT change" not in world.screen["legend"].getText()
+
+
+def test_a_slider_held_at_its_bound_sends_nothing(world):
+    world.send_menu(changed(example(), "r_blind", value=100, state="100 %"))
+    world.open()
+    world.ok("g_salon")
+    world.select("r_blind")
+    assert world.screen.key_right() == 1
+    assert world.view()["r_blind"]["state"] == "< 100 % >"
+    world.ok("r_blind")
+    assert world.actions() == []
+    assert world.view()["r_blind"]["state"] == "100 %"
+
+
+def test_typed_text_equal_to_the_value_sends_nothing(world):
+    world.send_menu(changed(example(), "r_note", value="milk"))
+    world.open()
+    world.ok("r_movie")
+    assert world.notice() == "Sent to Home Assistant."
+    world.ok("r_note")
+    world.session.current_dialog.close("milk")
+    MainLoop.advance(0)
+    assert len(world.actions()) == 1
+    assert world.notice() == ""
+    world.ok("r_note")
+    world.session.current_dialog.close("milk and bread")
+    MainLoop.advance(0)
+    assert world.actions()[-1]["value"] == "milk and bread"
+
+
+def test_a_change_back_while_another_value_is_pending_is_sent(world):
+    """Asked for `auto`, not applied yet: picking `heat`, the value still shown, is a change."""
+    world.open()
+    world.ok("g_salon")
+    world.ok("r_mode")
+    world.ok("oauto")
+    world.ok("r_mode")
+    world.ok("oheat")
+    assert [action["value"] for action in world.actions()] == ["auto", "heat"]
+    # `heat` asked for and still the value: the same again is no change.
+    world.ok("r_mode")
+    world.ok("oheat")
+    assert len(world.actions()) == 2
+
+
+def test_the_value_already_set_picked_from_the_fallback_list_sends_nothing(world, monkeypatch):
+    _no_styled_screen(monkeypatch)
+    world.send_menu()
+    world.long_help()
+    for pick in (("Salon", "g_salon"), ("Blind", "r_blind"), ("40 %", "v40")):
+        world.session.current_dialog.close(pick)
+        MainLoop.advance(0)
+    assert world.actions() == []
+    box = world.session.current_dialog
+    assert [entry[1] for entry in box.list] == ["r_lamp", "r_blind", "r_mode"]
+    assert box.title == "Home Assistant / Salon"
+
+
+def test_options_reordered_while_listed_keep_the_highlight_on_the_same_option(world):
+    world.open()
+    world.ok("g_salon")
+    world.ok("r_mode")
+    world.select("oauto")
+    world.send_live(changed(world.menu, "r_mode", options=["auto", "heat", "off"]))
+    assert [entry[0] for entry in world.screen["list"].list] == ["oauto", "oheat", "ooff"]
+    assert world.screen.selected() == "oauto"
+    world.screen.key_ok()
+    assert world.actions()[-1]["value"] == "auto"
+
+
+def test_an_option_gone_while_the_fallback_list_shows_it_sends_nothing(world, monkeypatch):
+    _no_styled_screen(monkeypatch)
+    world.send_menu()
+    world.long_help()
+    for pick in (("Salon", "g_salon"), ("Heating", "r_mode")):
+        world.session.current_dialog.close(pick)
+        MainLoop.advance(0)
+    box = world.session.current_dialog
+    assert [entry[1] for entry in box.list] == ["ooff", "oheat", "oauto"]
+    world.send_menu(changed(world.menu, "r_mode", options=["off", "heat"]))
+    box.close(("auto", "oauto"))
+    MainLoop.advance(0)
+    assert world.actions() == []
+    assert [entry[1] for entry in world.session.current_dialog.list] == ["ooff", "oheat"]
+
+
+def test_up_or_down_discards_a_moved_slider(world):
+    """D23: only OK applies; moving off the row is not OK."""
+    world.open()
+    world.ok("g_salon")
+    world.select("r_blind")
+    world.screen.key_right()
+    assert "LEFT/RIGHT change" in world.screen["legend"].getText()
+    assert world.screen.key_down() == 0, "the list moves the selection itself"
+    assert world.view()["r_blind"]["state"] == "40 %"
+    assert "LEFT/RIGHT change" not in world.screen["legend"].getText()
+    world.screen.key_right()
+    assert world.screen.key_up() == 0
+    assert world.screen.controller.slider is None
+    world.select("r_mode")
+    world.exit()
+    assert world.screen.controller.level == menu_module.TOP
+    assert world.actions() == []
+
+
+def test_a_slider_left_without_up_or_down_is_discarded_by_the_next_key(world):
+    """A page key moves the list without telling the menu: the next key finds it elsewhere."""
+    world.open()
+    world.ok("g_salon")
+    world.select("r_blind")
+    world.screen.key_right()
+    world.select("r_mode")
+    world.exit()
+    assert world.screen.controller.level == menu_module.TOP, "EXIT went back"
+    world.ok("g_salon")
+    world.select("r_blind")
+    world.screen.key_right()
+    world.select("r_lamp")
+    assert world.screen.key_left() == 0
+    assert world.screen.controller.slider is None
+    assert world.view()["r_blind"]["state"] == "40 %"
+    world.select("r_blind")
+    world.screen.key_right()
+    world.select("r_mode")
+    world.screen.key_ok()
+    assert world.screen.controller.level == menu_module.OPTIONS
+    assert world.screen.controller.slider is None
+    world.exit()
+    world.select("r_blind")
+    world.screen.key_right()
+    world.screen.key_number(1)
+    assert world.screen.selected() == "r_lamp"
+    assert world.screen.controller.slider is None
+    assert world.actions() == []
+
+
+def test_a_closed_menu_takes_no_key(world, monkeypatch):
+    """The publisher stopped with the screen still up: no key acts, draws or sends."""
+    world.open()
+    world.ok("g_salon")
+    world.select("r_blind")
+    world.screen.key_right()
+    screen = world.screen
+    controller = screen.controller
+    publisher = world.publisher
+    publisher.stop()
+    assert controller.closed
+    sent, drawn, selected = [], [], []
+    monkeypatch.setattr(publisher, "send", lambda *arguments: sent.append(arguments) or True)
+    monkeypatch.setattr(screen, "render", drawn.append)
+    monkeypatch.setattr(screen, "select", selected.append)
+    for ident in ("r_lamp", "r_mode", "r_blind"):
+        controller.key_ok(ident)
+    assert controller.key_adjust("r_blind", 1) is False
+    assert controller.key_number(1) is None
+    controller.key_move("r_blind")
+    controller.key_cancel("r_lamp")
+    assert (sent, drawn, selected) == ([], [], [])
+    assert controller.level == menu_module.IN_GROUP
+
+
+def test_a_close_refused_under_the_keyboard_is_done_when_the_keyboard_goes(world, monkeypatch,
+                                                                         plugin_log):
+    world.open()
+    screen = world.screen
+    world.ok("r_note")
+    keyboard = world.session.current_dialog
+    assert isinstance(keyboard, VirtualKeyBoard)
+    original = screen.close
+
+    def close(*retval):
+        # An image whose close insists on being the executing dialog.
+        if world.session.current_dialog is not screen:
+            raise AssertionError("screen == self.current_dialog")
+        original(*retval)
+
+    monkeypatch.setattr(screen, "close", close)
+    world.publisher.stop()
+    assert "trying again when it is back on top" in plugin_log()
+    keyboard.close("bread")
+    MainLoop.advance(0)
+    MainLoop.advance(0)
+    assert world.screen is None
+    assert not isinstance(world.session.current_dialog, VirtualKeyBoard)
+    assert world.actions() == []
 
 
 # ------------------------------------------------------------------- greying --
@@ -1381,6 +1596,50 @@ def test_a_styled_screen_that_cannot_be_built_leaves_the_session_alone(world, mo
     assert world.info()["menu"]["screen"] == "fallback"
 
 
+def test_a_styled_screen_that_fails_in_the_real_open_gives_the_session_back(world, monkeypatch):
+    """The trial passed and `session.open` raised: the info bar executes again, then the list."""
+    from conftest import ModelScreen
+
+    built = []
+
+    class Flaky(ModelScreen):
+        def __init__(self, session, shape, controller):
+            built.append(controller)
+            if len(built) > 1:
+                raise RuntimeError("the skin went away")
+            ModelScreen.__init__(self, session)
+
+    monkeypatch.setattr(styledlist, "screen_class", lambda: Flaky)
+    infobar = world.session.current_dialog
+    world.send_menu()
+    world.long_help()
+    assert len(built) == 2
+    assert isinstance(world.session.current_dialog, ChoiceBox)
+    assert world.session.dialog_stack[-1][0] is infobar
+    assert world.session.in_exec
+    assert world.info()["menu"]["screen"] == "fallback"
+    world.session.current_dialog.close(None)
+    MainLoop.advance(0)
+    assert world.session.current_dialog is infobar
+    assert infobar.execing
+
+
+def test_a_failed_open_with_nothing_executing_before_is_left_alone(world, monkeypatch):
+    """Only an execution the failed open ended is given back."""
+    calls = []
+    session = world.session
+
+    def refused(*arguments, **kwargs):
+        raise RuntimeError("Modal open are allowed only from a screen which is modal!")
+
+    monkeypatch.setattr(session, "open", refused)
+    monkeypatch.setattr(session, "popCurrent", lambda: calls.append("pop"))
+    monkeypatch.setattr(session, "in_exec", False)
+    controller = menu_module.MenuController(world.publisher)
+    assert styledlist.open_styled(session, controller).startswith("RuntimeError")
+    assert calls == []
+
+
 def test_the_fallback_is_the_images_list_with_the_same_rows_ids_and_keys(world, monkeypatch):
     _no_styled_screen(monkeypatch)
     world.send_menu()
@@ -1405,9 +1664,9 @@ def test_the_fallback_is_the_images_list_with_the_same_rows_ids_and_keys(world, 
     box.close(("Blind", "r_blind"))
     MainLoop.advance(0)
     box = world.session.current_dialog
-    assert box.list[0] == ("0 %", "v0") and box.list[-1] == ("100 %", "v10")
+    assert box.list[0] == ("0 %", "v0") and box.list[-1] == ("100 %", "v100")
     assert box.selection == 4, "the list of values starts on the current one"
-    box.close(("70 %", "v7"))
+    box.close(("70 %", "v70"))
     MainLoop.advance(0)
     assert world.actions()[-1]["value"] == 70
     world.session.current_dialog.close(None)

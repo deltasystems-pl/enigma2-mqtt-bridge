@@ -499,7 +499,12 @@ class MenuController:
         return row
 
     def entries(self):
-        """The rows of the current level: the contract's dicts, or the options as rows."""
+        """The rows of the current level: the contract's dicts, or the options as rows.
+
+        An option's id is made from its value, never from its place in the list: a menu that
+        reorders the options while they are listed keeps the selection on the same option, and
+        an OK picks what was highlighted - or nothing, when that option is gone.
+        """
         menu = self.menu
         if menu is None:
             return []
@@ -509,15 +514,15 @@ class MenuController:
         if self.level == OPTIONS:
             row = self._row(self.chooser)
             return [
-                {"type": "option", "id": f"o{index}", "label": shown, "value": raw,
+                {"type": "option", "id": "o" + raw, "label": shown, "value": raw,
                  "current": raw == row["value"]}
-                for index, (raw, shown) in enumerate(row["options"])
+                for raw, shown in row["options"]
             ]
         if self.level == VALUES:
             row = self._row(self.chooser)
             current = slider_index(row, row["value"]) if row["value"] is not None else None
             return [
-                {"type": "option", "id": f"v{index}",
+                {"type": "option", "id": "v" + repr(slider_value(row, index)),
                  "label": slider_text(row, slider_value(row, index)),
                  "value": slider_value(row, index), "current": index == current}
                 for index in range(slider_count(row) + 1)
@@ -651,8 +656,34 @@ class MenuController:
 
     # ----------------------------------------------------------------- the keys --
 
+    def _left_slider(self, selected):
+        """A slider moved and not applied is discarded once the selection is on another row.
+
+        D23: only OK applies it. Moving away is not OK, and leaving it moved would make EXIT on
+        the next row discard it instead of going back, and the legend speak of it there.
+        Whether the slider was dropped.
+        """
+        if self.slider is None or self.slider[0] == selected:
+            return False
+        self.slider = None
+        return True
+
+    def _unchanged(self, row, value):
+        """D70: the value the row has already, and no other one asked for: nothing to send.
+
+        While a pending mark holds another value the viewer asked for, the row's value is not
+        the last word - picking it again is a change back, and is sent.
+        """
+        if value != row["value"]:
+            return False
+        pending = self.publisher.pending_for(row["id"])
+        return pending is None or pending.get("sent") in (None, value)
+
     def key_ok(self, selected):
+        if self.closed:
+            return
         self.notice = None
+        self._left_slider(selected)
         entries = {entry["id"]: entry for entry in self.entries()}
         entry = entries.get(selected)
         if entry is None:
@@ -662,7 +693,8 @@ class MenuController:
         if self.level in (OPTIONS, VALUES):
             row = self._row(self.chooser)
             self._leave_chooser()
-            if row is not None and not self.publisher.greyed():
+            if (row is not None and not self.publisher.greyed()
+                    and not self._unchanged(row, entry["value"])):
                 self._send(row, "set", entry["value"])
             self.refresh()
             return
@@ -698,7 +730,8 @@ class MenuController:
             if self.slider is not None and self.slider[0] == row["id"]:
                 value = self.slider[1]
                 self.slider = None
-                self._send(row, "set", value)
+                if not self._unchanged(row, value):
+                    self._send(row, "set", value)
             elif self.adjustable:
                 self.notice = NOTICE_USE_ARROWS
             else:
@@ -725,12 +758,15 @@ class MenuController:
     def _typed(self, ident, answer):
         if self.closed:
             return
+        self.notice = None
         if answer is None:
             self.refresh()
             return
         row = self._row(ident)
         if row is not None and row["type"] == INPUT and not self.publisher.greyed():
-            self._send(row, "set", str(answer)[: row["max_length"]])
+            text = str(answer)[: row["max_length"]]
+            if not self._unchanged(row, text):
+                self._send(row, "set", text)
         self.refresh()
 
     def _send(self, row, action, value):
@@ -742,7 +778,10 @@ class MenuController:
 
     def key_cancel(self, selected=None):
         """EXIT: discard what was not applied, or go back, or close."""
+        if self.closed:
+            return
         self.notice = None
+        self._left_slider(selected)
         if self.slider is not None:
             self.slider = None
             self.refresh()
@@ -760,10 +799,12 @@ class MenuController:
 
     def key_adjust(self, selected, direction):
         """LEFT (-1) or RIGHT (+1) on the selected row. True when it was a slider's."""
-        if not self.adjustable or self.level not in (TOP, IN_GROUP):
+        if self.closed or not self.adjustable or self.level not in (TOP, IN_GROUP):
             return False
         row = self._row(selected)
         if row is None or row["type"] != SLIDER:
+            if self._left_slider(selected):
+                self.refresh()
             return False
         self.notice = None
         if not self.publisher.actionable(row):
@@ -784,13 +825,27 @@ class MenuController:
 
         OK acts (D66): a digit pressed by mistake must not switch a lamp.
         """
+        if self.closed:
+            return None
         entries = self.entries()
         if not 1 <= number <= len(entries):
             return None
         ident = entries[number - 1]["id"]
+        if self._left_slider(ident):
+            self.refresh()
         if self.screen is not None:
             self.screen.select(ident)
         return ident
+
+    def key_move(self, selected):
+        """UP or DOWN, before the list moves the selection off `selected`: never consumed.
+
+        The selection leaves the row, so a slider moved on it and not applied is discarded.
+        """
+        if self.closed or self.slider is None:
+            return
+        self.slider = None
+        self.refresh()
 
 
 # ----------------------------------------------------------------- the publisher --
