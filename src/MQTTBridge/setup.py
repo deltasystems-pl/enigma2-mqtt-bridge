@@ -84,22 +84,46 @@ def setting_labels():
         ("uninstall_allowed", _("Allow removing the plugin remotely")),
         ("update_check", _("Check daily for plugin updates")),
         ("update_allowed", _("Allow plugin updates over MQTT")),
-        ("menu_allowed", _("Allow the Home Assistant menu")),
-        ("menu_hotkey", _("Key that opens the Home Assistant menu")),
         ("log_level", _("Log level")),
         ("epg_grid_events", _("EPG grid events per channel")),
+        ("menu_allowed", _("Allow the Home Assistant menu")),
+        ("menu_hotkey", _("Key that opens the Home Assistant menu")),
+        ("menu_transparency", _("Menu background transparency")),
     )
+
+
+def section_headings():
+    """Setting name, and the heading the screen shows above it: where a section begins."""
+    return {"menu_allowed": _("Menu")}
+
+
+def is_heading(entry):
+    """Whether a list entry is a heading - `(text,)`, with no setting behind it.
+
+    The images' own setup screens write a section heading this way, and their `ConfigList`
+    skips an entry of one item when it selects, saves, cancels and asks what changed. This
+    screen does the same in every loop it runs over its entries.
+    """
+    return not isinstance(entry, (tuple, list)) or len(entry) < 2
 
 
 def build_entries(settings):
     entries = []
+    headings = section_headings()
     for name, label in setting_labels():
         element = getattr(settings, name, None)
         if element is None:
             LOG.warning("no such setting: %s", name)
             continue
+        if name in headings:
+            entries.append((headings[name],))
         entries.append(getConfigListEntry(label, element))
     return entries
+
+
+def setting_entries(entries):
+    """The entries that hold a setting: every one but the headings."""
+    return [entry for entry in entries if not is_heading(entry)]
 
 
 def status_text(bridge, settings):
@@ -207,8 +231,30 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
             # line is never worth an exception in front of a user.
             LOG.debug("the status line could not be refreshed")
 
+    def _on_heading(self):
+        """Whether the selection is on a heading, where a key meant for a setting finds none."""
+        try:
+            return is_heading(self["config"].getCurrent())
+        except Exception:
+            return False
+
+    # OpenViX's ConfigListScreen (read in its source) guards a heading in every path but these
+    # two: MENU and TEXT read the selected entry's setting without asking whether it has one. On
+    # a heading they do nothing here; anywhere else they are the image's own.
+    def keyMenu(self, *arguments):
+        if self._on_heading():
+            return None
+        parent = getattr(ConfigListScreen, "keyMenu", None)
+        return parent(self, *arguments) if parent is not None else None
+
+    def keyText(self, *arguments):
+        if self._on_heading():
+            return None
+        parent = getattr(ConfigListScreen, "keyText", None)
+        return parent(self, *arguments) if parent is not None else None
+
     def _anything_changed(self):
-        for entry in self.entries:
+        for entry in setting_entries(self.entries):
             element = entry[1]
             checker = getattr(element, "isChanged", None)
             try:
@@ -225,7 +271,7 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
         return False
 
     def keySave(self):
-        for entry in self.entries:
+        for entry in setting_entries(self.entries):
             element = entry[1]
             try:
                 element.save()
@@ -323,7 +369,7 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
             self._discard()
 
     def _discard(self):
-        for entry in self.entries:
+        for entry in setting_entries(self.entries):
             element = entry[1]
             try:
                 element.cancel()

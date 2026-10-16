@@ -1,6 +1,6 @@
 # ADR-0009: The OpenWebif page trusts OpenWebif, and exposes every setting and command
 
-**Status:** accepted 2026-09-23, amended by [ADR-0010](0010-the-page-inside-openwebif.md) (how OpenWebif opens the page)
+**Status:** accepted 2026-09-23, amended by [ADR-0010](0010-the-page-inside-openwebif.md) (how OpenWebif opens the page), amended by [ADR-0022](0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md) (the Menu subpage)
 **Date:** 2026-09-23
 **Supersedes:** [ADR-0002](0002-scope-after-m0.md) §5, in part - the clause that the page „is
 authenticated by OpenWebif, and it fails closed when OpenWebif authentication is off", and the
@@ -154,3 +154,15 @@ unchanged.
 - **Reversing this** would mean a login of the plugin's own - which ADR-0002 rightly refused to
   invent - or a page that again answers nobody on a default receiver. Neither makes the receiver
   safer while OpenWebif hands out `saveconfig`.
+
+## Note, 2026-10-16 - the menu's settings are on a subpage
+
+*Amended by [ADR-0022](0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md);
+nothing above is reversed.* "Exposes every setting" now reads: every setting is on the page, each
+in exactly one place. The receiver menu's three - `menu_allowed`, `menu_hotkey` and
+`menu_transparency` - are on the Menu subpage (`<mount>/menu`) with the menu creator, and the main
+page's form shows what they are set to and links there instead of carrying them. The subpage's form
+takes every rule of this record - the `Host` check, same-origin `Origin`, the session's token,
+exactly the form's fields, the sealed rendered values - and the subpage is exactly as open as
+OpenWebif, like the rest of the page. The tests that held "every setting on the form" hold "every
+setting on the main form or the Menu subpage, each on exactly one".

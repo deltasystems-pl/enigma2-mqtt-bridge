@@ -1134,3 +1134,327 @@ msgstr "bieżące"
 #: src/MQTTBridge/menu.py
 msgid "There are no controls here."
 msgstr "Nie ma tu żadnych elementów sterowania."
+
+#: src/MQTTBridge/setup.py
+msgid "Menu"
+msgstr "Menu"
+
+#: src/MQTTBridge/setup.py
+msgid "Menu background transparency"
+msgstr "Przezroczystość tła menu"
+
+#: src/MQTTBridge/webif.py
+msgid "not heard from since the connection to the broker"
+msgstr "bez wiadomości od połączenia z brokerem"
+
+#: src/MQTTBridge/webif.py
+msgid "The background transparency applies the next time the menu is opened."
+msgstr "Przezroczystość tła działa od następnego otwarcia menu."
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant checks every save with the rules of its own menu options and stores the menu; this page edits a copy."
+msgstr "Home Assistant sprawdza każdy zapis regułami swoich opcji menu i przechowuje menu; ta strona edytuje kopię."
+
+#: src/MQTTBridge/webif.py
+msgid "The menu creator needs JavaScript. The settings above work without it."
+msgstr "Kreator menu wymaga JavaScriptu. Ustawienia powyżej działają bez niego."
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant menu: %s. Key: %s. Background transparency: %s %%."
+msgstr "Menu Home Assistant: %s. Klawisz: %s. Przezroczystość tła: %s %%."
+
+#: src/MQTTBridge/webif.py
+msgid "none received"
+msgstr "nie otrzymano"
+
+#: src/MQTTBridge/webif.py
+msgid "%s entities, received %s ago"
+msgstr "encji: %s, otrzymany %s temu"
+
+#: src/MQTTBridge/webif.py
+msgid "online"
+msgstr "online"
+
+#: src/MQTTBridge/webif.py
+msgid "offline"
+msgstr "offline"
+
+#: src/MQTTBridge/webif.py
+msgid "Loading the catalogue from Home Assistant..."
+msgstr "Wczytuję katalog z Home Assistant..."
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant has not sent a catalogue for this receiver yet. Is the companion integration set up for it, in a version with the menu creator?"
+msgstr "Home Assistant nie przysłał jeszcze katalogu dla tego odbiornika. Czy integracja jest dla niego skonfigurowana, w wersji z kreatorem menu?"
+
+#: src/MQTTBridge/webif.py
+msgid "The catalogue comes from a newer Home Assistant integration than this plugin understands. Update the plugin."
+msgstr "Katalog pochodzi z nowszej integracji Home Assistant, niż rozumie ta wtyczka. Zaktualizuj wtyczkę."
+
+#: src/MQTTBridge/webif.py
+msgid "The menu is switched off on this receiver."
+msgstr "Menu jest wyłączone na tym odbiorniku."
+
+#: src/MQTTBridge/webif.py
+msgid "The plugin is not running."
+msgstr "Wtyczka nie działa."
+
+#: src/MQTTBridge/webif.py
+msgid "The plugin is being updated."
+msgstr "Wtyczka jest aktualizowana."
+
+#: src/MQTTBridge/webif.py
+msgid "The catalogue could not be loaded. Reload the page."
+msgstr "Nie udało się wczytać katalogu. Odśwież stronę."
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant left %s entities out of the catalogue: it was too large. They cannot be chosen here."
+msgstr "Home Assistant pominął w katalogu encje (%s), bo był za duży. Nie można ich tu wybrać."
+
+#: src/MQTTBridge/webif.py
+msgid "Top level"
+msgstr "Poziom główny"
+
+#: src/MQTTBridge/webif.py
+msgid "Add a group"
+msgstr "Dodaj grupę"
+
+#: src/MQTTBridge/webif.py
+msgid "Add a row"
+msgstr "Dodaj wiersz"
+
+#: src/MQTTBridge/webif.py
+msgid "New group"
+msgstr "Nowa grupa"
+
+#: src/MQTTBridge/webif.py
+msgid "Group"
+msgstr "Grupa"
+
+#: src/MQTTBridge/webif.py
+msgid "Label"
+msgstr "Etykieta"
+
+#: src/MQTTBridge/webif.py
+msgid "Icon"
+msgstr "Ikona"
+
+#: src/MQTTBridge/webif.py
+msgid "Default"
+msgstr "Domyślna"
+
+#: src/MQTTBridge/webif.py
+msgid "Entity"
+msgstr "Encja"
+
+#: src/MQTTBridge/webif.py
+msgid "Search by name, entity id or area"
+msgstr "Szukaj po nazwie, identyfikatorze encji lub obszarze"
+
+#: src/MQTTBridge/webif.py
+msgid "No entity matches."
+msgstr "Żadna encja nie pasuje."
+
+#: src/MQTTBridge/webif.py
+msgid "Control"
+msgstr "Sterowanie"
+
+#: src/MQTTBridge/webif.py
+msgid "Place"
+msgstr "Miejsce"
+
+#: src/MQTTBridge/webif.py
+msgid "Up"
+msgstr "W górę"
+
+#: src/MQTTBridge/webif.py
+msgid "Down"
+msgstr "W dół"
+
+#: src/MQTTBridge/webif.py
+msgid "Remove"
+msgstr "Usuń"
+
+#: src/MQTTBridge/webif.py
+msgid "Save the menu"
+msgstr "Zapisz menu"
+
+#: src/MQTTBridge/webif.py
+msgid "Reload"
+msgstr "Wczytaj ponownie"
+
+#: src/MQTTBridge/webif.py
+msgid "Saving..."
+msgstr "Zapisuję..."
+
+#: src/MQTTBridge/webif.py
+msgid "There are changes that are not saved."
+msgstr "Są niezapisane zmiany."
+
+#: src/MQTTBridge/webif.py
+msgid "The menu is empty. Add a group or a row."
+msgstr "Menu jest puste. Dodaj grupę lub wiersz."
+
+#: src/MQTTBridge/webif.py
+msgid "No rows in this group yet."
+msgstr "W tej grupie nie ma jeszcze wierszy."
+
+#: src/MQTTBridge/webif.py
+msgid "Missing in Home Assistant: %s"
+msgstr "Brak w Home Assistant: %s"
+
+#: src/MQTTBridge/webif.py
+msgid "Not in the catalogue: %s"
+msgstr "Nie ma w katalogu: %s"
+
+#: src/MQTTBridge/webif.py
+msgid "hidden"
+msgstr "ukryta"
+
+#: src/MQTTBridge/webif.py
+msgid "configuration"
+msgstr "konfiguracja"
+
+#: src/MQTTBridge/webif.py
+msgid "diagnostic"
+msgstr "diagnostyka"
+
+#: src/MQTTBridge/webif.py
+msgid "Choose an entity for every row before saving."
+msgstr "Przed zapisem wybierz encję dla każdego wiersza."
+
+#: src/MQTTBridge/webif.py
+msgid "Give every group a label before saving."
+msgstr "Przed zapisem nadaj każdej grupie etykietę."
+
+#: src/MQTTBridge/webif.py
+msgid "The menu holds at most %s groups."
+msgstr "Menu mieści najwyżej %s grup."
+
+#: src/MQTTBridge/webif.py
+msgid "The top level holds at most %s entries."
+msgstr "Poziom główny mieści najwyżej %s pozycji."
+
+#: src/MQTTBridge/webif.py
+msgid "A group holds at most %s rows."
+msgstr "Grupa mieści najwyżej %s wierszy."
+
+#: src/MQTTBridge/webif.py
+msgid "Slider"
+msgstr "Suwak"
+
+#: src/MQTTBridge/webif.py
+msgid "Indicator"
+msgstr "Wskaźnik"
+
+#: src/MQTTBridge/webif.py
+msgid "Button"
+msgstr "Przycisk"
+
+#: src/MQTTBridge/webif.py
+msgid "Selector"
+msgstr "Lista wyboru"
+
+#: src/MQTTBridge/webif.py
+msgid "Input field"
+msgstr "Pole tekstowe"
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant says:"
+msgstr "Home Assistant odpowiada:"
+
+#: src/MQTTBridge/webif.py
+msgid "Where:"
+msgstr "Gdzie:"
+
+#: src/MQTTBridge/webif.py
+msgid "Saved. Home Assistant stored the menu."
+msgstr "Zapisano. Home Assistant przechowuje menu."
+
+#: src/MQTTBridge/webif.py
+msgid "Saved. Loading the menu as Home Assistant stored it..."
+msgstr "Zapisano. Wczytuję menu w postaci zapisanej przez Home Assistant..."
+
+#: src/MQTTBridge/webif.py
+msgid "The menu was changed elsewhere since this page loaded it. Reload to see it - your changes here stay on the page until you do."
+msgstr "Menu zmieniono gdzie indziej od chwili wczytania tej strony. Wczytaj je ponownie, by je zobaczyć - Twoje zmiany zostają na stronie do tego czasu."
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant refused the menu."
+msgstr "Home Assistant odrzucił menu."
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant is busy with another save. Try again in a moment."
+msgstr "Home Assistant obsługuje inny zapis. Spróbuj za chwilę."
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant does not see this receiver offering the menu creator yet. Try again in a moment."
+msgstr "Home Assistant nie widzi jeszcze, że ten odbiornik oferuje kreator menu. Spróbuj za chwilę."
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant did not answer. The menu may still have been saved: reload to see."
+msgstr "Home Assistant nie odpowiedział. Menu mogło mimo to zostać zapisane: wczytaj ponownie, by sprawdzić."
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver has no connection to the MQTT broker. Nothing was saved."
+msgstr "Odbiornik nie ma połączenia z brokerem MQTT. Niczego nie zapisano."
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver does not offer the menu creator now."
+msgstr "Odbiornik nie oferuje teraz kreatora menu."
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver could not read what this page sent. Reload the page."
+msgstr "Odbiornik nie mógł odczytać tego, co wysłała ta strona. Odśwież stronę."
+
+#: src/MQTTBridge/webif.py
+msgid "The menu is too large to send."
+msgstr "Menu jest za duże, by je wysłać."
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant answered: %s"
+msgstr "Home Assistant odpowiedział: %s"
+
+#: src/MQTTBridge/webif.py
+msgid "The menu is switched off on this receiver: switch it on above to build the menu here."
+msgstr "Menu jest wyłączone na tym odbiorniku: włącz je powyżej, by budować tu menu."
+
+#: src/MQTTBridge/webif.py
+msgid "The menu creator needs the plugin running with the menu on."
+msgstr "Kreator menu wymaga działającej wtyczki z włączonym menu."
+
+#: src/MQTTBridge/webif.py
+msgid "from a newer Home Assistant integration than this plugin understands"
+msgstr "z nowszej integracji Home Assistant, niż rozumie ta wtyczka"
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant menu"
+msgstr "Menu Home Assistant"
+
+#: src/MQTTBridge/webif.py
+msgid "Catalogue"
+msgstr "Katalog"
+
+#: src/MQTTBridge/webif.py
+msgid "Entities left out of the catalogue"
+msgstr "Encje pominięte w katalogu"
+
+#: src/MQTTBridge/webif.py
+msgid "The Home Assistant menu"
+msgstr "Menu Home Assistant"
+
+#: src/MQTTBridge/webif.py
+msgid "Menu settings and the menu creator"
+msgstr "Ustawienia menu i kreator menu"
+
+#: src/MQTTBridge/webif.py
+msgid "Menu creator"
+msgstr "Kreator menu"
+
+#: src/MQTTBridge/webif.py
+msgid "Menu settings"
+msgstr "Ustawienia menu"
+
+#: src/MQTTBridge/webif.py
+msgid "Back to MQTT Bridge"
+msgstr "Wróć do MQTT Bridge"

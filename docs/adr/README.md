@@ -67,7 +67,7 @@ What this costs, what it rules out, and what has to change if it is ever reverse
 | [0006](0006-volatile-fields-and-publish-on-change.md) | A self-stamped field takes no part in publish-on-change | accepted 2026-09-22 |
 | [0007](0007-cec-standby-workaround.md) | The CEC standby workaround identifies the television's standby when it is queued, and holds the echo across the close | accepted 2026-09-22, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) |
 | [0008](0008-discreet-toast.md) | The discreet toast is made of widgets that bind no keys, refuses a timeout it cannot honour, and is deleted rather than closed | accepted 2026-09-23, amended 2026-09-23 and 2026-09-25, amended by [ADR-0009](0009-the-openwebif-page-trusts-openwebif.md) |
-| [0009](0009-the-openwebif-page-trusts-openwebif.md) | The OpenWebif page trusts OpenWebif, and exposes every setting and command | accepted 2026-09-23, amended by [ADR-0010](0010-the-page-inside-openwebif.md) |
+| [0009](0009-the-openwebif-page-trusts-openwebif.md) | The OpenWebif page trusts OpenWebif, and exposes every setting and command | accepted 2026-09-23, amended by [ADR-0010](0010-the-page-inside-openwebif.md) and [ADR-0022](0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md) (the menu's settings on a subpage) |
 | [0010](0010-the-page-inside-openwebif.md) | OpenWebif's panel load gets a fragment framing the page, and the page shows the last screenshot | accepted 2026-09-23 |
 | [0011](0011-epg-import-on-demand.md) | The EPG import uses the importer enigma2 loaded, and is followed by polling, never hooked | accepted 2026-09-23 |
 | [0012](0012-wake-on-lan-is-the-image-s-switch.md) | Wake-on-LAN is reported from the image, and armed only through the image's own switch | accepted 2026-09-23 |
@@ -78,8 +78,9 @@ What this costs, what it rules out, and what has to change if it is ever reverse
 | [0017](0017-whether-a-service-can-be-played-is-asked-with-an-empty-second-reference.md) | Whether a service can be played is asked with an empty second reference, and answered once on a topic that is not retained | accepted 2026-10-13, amended 2026-10-13 |
 | [0018](0018-stopping-a-stream-client-needs-no-permission.md) | Stopping a stream client needs no permission, and names exactly one client | accepted 2026-10-13, amended 2026-10-13 |
 | [0019](0019-passthrough-is-true-false-or-unknown.md) | Whether the volume acts on the audio is true, false or unknown, read from the image's setting for the active track's codec | accepted 2026-10-13, amended 2026-10-13 and 2026-10-14 |
-| [0020](0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md) | The receiver menu is drawn on the receiver and decided in Home Assistant | accepted 2026-10-15 |
+| [0020](0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md) | The receiver menu is drawn on the receiver and decided in Home Assistant | accepted 2026-10-15, amended 2026-10-16 (a see-through background), extended by [ADR-0022](0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md) |
 | [0021](0021-the-menu-hotkey-is-offered-the-key-after-the-image.md) | The menu hotkey is offered the key after the image, and takes it only when it opened the menu | accepted 2026-10-15 |
+| [0022](0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md) | The menu creator page runs a script; every other page stays script-free | accepted 2026-10-16 |
 
 "Superseded in part by a proposed record" means: the earlier text still describes every released
 plugin exactly, and the proposed record says where it will stop doing so. It becomes a supersession

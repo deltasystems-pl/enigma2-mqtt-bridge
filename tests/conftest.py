@@ -3590,6 +3590,7 @@ def fresh_receiver():
     """Every singleton the receiver stubs keep, put back between tests."""
     from MQTTBridge import enigma2 as enigma2_module
     from MQTTBridge import keys as keys_module
+    from MQTTBridge import menueditor as menueditor_module
     from MQTTBridge import remote as remote_module
     from MQTTBridge import service as service_module
 
@@ -3642,6 +3643,8 @@ def fresh_receiver():
         keys_module.forget_image_keys()
         remote_module.forget_rate_limit()
         plugin_component_module.plugins = PluginComponent()
+        # The OpenWebif page as never mounted: a test that mounts it says so.
+        menueditor_module.forget_mounted()
 
     reset()
     yield

@@ -70,6 +70,20 @@ fragment and nothing else: an
 style element and no data. The frame is the full page, under its own headers,
 which admit OpenWebif's origin and nobody else's. Every navigation - a tab, a
 bookmark, the frame itself - gets the full page (ADR-0010).
+
+**The Menu subpage** (`<mount>/menu`) holds the receiver menu's settings and the
+menu creator (ADR-0022). Its settings form is the main form's rules on three
+fields, and works without script. The creator is the one script this plugin
+serves - a static file, `creator.js`, under a CSP of its own that admits a script
+from this origin and nothing else, on that page only; the main page and the
+fragment stay script-free. The creator reads `catalogue.json` - the exact bytes of
+the catalogue Home Assistant published - and posts the edited menu to `save`,
+which holds the request until Home Assistant answers on MQTT or
+`menueditor.ANSWER_SECONDS` pass. A save does not replace the session's token: the
+page saves again without a reload, and the edit carries the revision it started
+from, which is what keeps a stale copy from being written back. Only the main
+page resource tells a panel load from a navigation; the creator's `fetch` calls
+reach their own resources and are never answered with the fragment.
 """
 
 import hmac
@@ -101,11 +115,17 @@ except ImportError:  # OpenWebif is optional; tests exercise the resource as a d
     class http:  # noqa: N801
         BAD_REQUEST = 400
         FORBIDDEN = 403
+        NOT_ALLOWED = 405
         CONFLICT = 409
         INTERNAL_SERVER_ERROR = 500
 
 
-from . import buildid, updateview
+try:
+    from twisted.web.server import NOT_DONE_YET
+except ImportError:  # Twisted's own value, for the tests.
+    NOT_DONE_YET = 1
+
+from . import buildid, menueditor, updateview
 from . import config as settings_module
 from . import log as log_module
 from .i18n import _
@@ -152,9 +172,38 @@ FRAME_STYLE = "display:block;width:100%;height:calc(100vh - 140px);min-height:48
 # The name a confirmed settings save goes by in the session. Not a command.
 SETTINGS_ACTION = "settings"
 
+# The Menu subpage, `<mount>/menu`: its own settings form and the creator's save.
+MENU_CHILD = "menu"
+MENU_SETTINGS_FORM = "menu_settings"
+MENU_EDIT_FORM = "menu_edit"
+CREATOR_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "creator.js")
+MAX_SCRIPT_BYTES = 262144
+# The main page's settings form: every setting but the menu's, which are on the subpage only -
+# one place to change each.
+MAIN_SETTING_NAMES = tuple(
+    name for name in settings_module.SETTING_NAMES
+    if name not in settings_module.MENU_SETTING_NAMES
+)
+MENU_SETTING_NAMES = settings_module.MENU_SETTING_NAMES
+
+# The main page's policy, byte for byte as it has always been: no script at all.
+PAGE_CSP = (
+    "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
+    "form-action 'self'; frame-ancestors 'self'"
+)
+# The Menu subpage's: a script from this origin, fetches to this origin, nothing inline that
+# runs, no `<base>` to move where its relative addresses point.
+MENU_CSP = (
+    "default-src 'none'; script-src 'self'; connect-src 'self'; img-src 'self'; "
+    "style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'"
+)
+# What is not a document - the catalogue, a save's answer, the script - is never framed.
+DATA_CSP = "default-src 'none'; frame-ancestors 'none'"
+
 # The setup screen's order, in the groups the page shows. A setting in none of
 # them is still shown - under behaviour - and a test fails, so a new setting is
-# placed on purpose rather than by accident.
+# placed on purpose rather than by accident. The menu's settings are on the Menu
+# subpage instead (`MENU_SETTING_NAMES`).
 SETTING_GROUPS = (
     ("identity", ("enabled", "node_id", "friendly_name")),
     ("broker", ("host", "port", "tls", "ca_file", "username", "password")),
@@ -175,7 +224,6 @@ SETTING_GROUPS = (
             "softcam_autoheal",
             "softcam_autoheal_seconds",
             "epg_grid_events",
-            "menu_hotkey",
         ),
     ),
     (
@@ -188,7 +236,6 @@ SETTING_GROUPS = (
             "uninstall_allowed",
             "update_check",
             "update_allowed",
-            "menu_allowed",
             "cec_standby_workaround",
             "osd_toast",
         ),
@@ -880,10 +927,10 @@ def _setting_labels():
 def _grouped():
     """`(group, names)` in the page's order, every setting in exactly one group."""
     placed = {name for _group, names in SETTING_GROUPS for name in names}
-    extra = tuple(name for name in settings_module.SETTING_NAMES if name not in placed)
+    extra = tuple(name for name in MAIN_SETTING_NAMES if name not in placed)
     groups = []
     for group, names in SETTING_GROUPS:
-        names = tuple(name for name in names if name in settings_module.SETTING_NAMES)
+        names = tuple(name for name in names if name in MAIN_SETTING_NAMES)
         if group == "behaviour":
             names += extra
         groups.append((group, names))
@@ -901,11 +948,11 @@ def _group_label(group):
     }.get(group, group)
 
 
-def _rendered_values(section):
-    """What the settings form shows, name to value - every setting but the secrets."""
+def _rendered_values(section, names=MAIN_SETTING_NAMES):
+    """What a settings form shows, name to value - every setting of `names` but the secrets."""
     return {
         name: settings_module.value(name, section)
-        for name in settings_module.SETTING_NAMES
+        for name in names
         if name not in settings_module.SECRET_NAMES
     }
 
@@ -953,8 +1000,8 @@ def _untouched(name, raw, rendered):
         return False
 
 
-def _changes(request, section):
-    """The settings the form changes, validated.
+def _changes(request, section, names=MAIN_SETTING_NAMES):
+    """The settings the form changes, validated - the form of `names`.
 
     🔴 A field counts only when its submitted value differs from the value the
     form was rendered with - an untouched field never overwrites a newer value
@@ -963,7 +1010,7 @@ def _changes(request, section):
     """
     rendered = _unseal(request)
     changes = {}
-    for name in settings_module.SETTING_NAMES:
+    for name in names:
         if settings_module.SETTING_KINDS.get(name) == "bool":
             raw = _bool_arg(request, name)
         else:
@@ -999,8 +1046,12 @@ def _uninstalling(bridge):
         return False
 
 
-def _apply(request, bridge, changes):
-    """Save through the path the rest of the plugin uses, chosen by what changed."""
+def _apply(request, bridge, changes, answer=None):
+    """Save through the path the rest of the plugin uses, chosen by what changed.
+
+    `answer(request, message)` renders the page the form was on: the main page by default.
+    """
+    answer = answer or _answer
     remote = set(settings_module.REMOTE_SETTING_NAMES)
     if _uninstalling(bridge):
         # Saved, not applied: the setup screen's rule, in the same words.
@@ -1011,9 +1062,9 @@ def _apply(request, bridge, changes):
             "is installed again."
         )
     elif bridge.running and set(changes) <= remote:
-        raw = bridge.remote_settings()
-        raw.update(changes)
-        values = settings_module.validate_remote_settings(raw, bridge.settings)
+        # `cmd/config`'s own validation, of exactly what changed: every key it leaves out keeps
+        # the value it has.
+        values = settings_module.validate_remote_settings(changes, bridge.settings)
         error = bridge.apply_remote_settings(values)
         done = _("Settings saved.")
     else:
@@ -1025,7 +1076,7 @@ def _apply(request, bridge, changes):
     if error:
         raise RuntimeError(error)
     _rotate(request)
-    return _answer(request, done)
+    return answer(request, done)
 
 
 # ----------------------------------------------------------- the POST handlers --
@@ -1035,7 +1086,7 @@ def _save_settings(request):
     bridge = _bridge()
     if bridge is None:
         raise RuntimeError("the bridge is unavailable")
-    _exact(request, ("csrf", "form", "rendered") + tuple(settings_module.SETTING_NAMES))
+    _exact(request, ("csrf", "form", "rendered") + MAIN_SETTING_NAMES)
     changes = _changes(request, bridge.settings)
     if not changes:
         return _answer(request, _("Nothing to save: every setting already has that value."))
@@ -1172,7 +1223,7 @@ def _confirmed(request):
 # ------------------------------------------------------------------ rendering --
 
 
-def _set_headers(request, content_type="text/html; charset=utf-8"):
+def _set_headers(request, content_type="text/html; charset=utf-8", csp=PAGE_CSP):
     request.setHeader("content-type", content_type)
     request.setHeader("cache-control", "no-store")
     request.setHeader("x-content-type-options", "nosniff")
@@ -1183,11 +1234,7 @@ def _set_headers(request, content_type="text/html; charset=utf-8"):
     # save and every command from a real browser was a 403. `same-origin`
     # still sends nothing to another site.
     request.setHeader("referrer-policy", "same-origin")
-    request.setHeader(
-        "content-security-policy",
-        "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
-        "form-action 'self'; frame-ancestors 'self'",
-    )
+    request.setHeader("content-security-policy", csp)
 
 
 def _failed(request):
@@ -1217,6 +1264,14 @@ def _answer(request, message="", code=None):
         return _failed(request)
 
 
+def _segments(request):
+    return [
+        part.decode("utf-8", "replace") if isinstance(part, bytes) else str(part)
+        for part in (getattr(request, "prepath", None) or [])
+        if part
+    ]
+
+
 def _mount_path(request):
     """Where this page is mounted, as the browser reached it.
 
@@ -1224,12 +1279,19 @@ def _mount_path(request):
     `addExternalChild`, but it is OpenWebif that decides what to do with it, so
     the page asks the request rather than hard-coding its own name.
     """
-    segments = [part for part in (getattr(request, "prepath", None) or []) if part]
-    joined = "/".join(
-        part.decode("utf-8", "replace") if isinstance(part, bytes) else str(part)
-        for part in segments
-    )
+    joined = "/".join(_segments(request))
     return "/" + joined if joined else ""
+
+
+def _main_mount(request):
+    """The main page's path, from a request that reached the Menu subpage or one of its files.
+
+    Everything before the last `menu` segment: the subpage is that child of the main page.
+    """
+    segments = _segments(request)
+    if MENU_CHILD in segments:
+        segments = segments[:len(segments) - 1 - segments[::-1].index(MENU_CHILD)]
+    return "/" + "/".join(segments) if segments else ""
 
 
 def _e(value):
@@ -1280,6 +1342,13 @@ def _setting_control(name, current):
         else:
             options = [(choice, choice) for choice in choices]
         return _select(name, options, current)
+    if name == "menu_transparency":
+        # The television's nine steps, as a list: a number field would offer the values between.
+        options = [
+            (str(percent), f"{percent} %")
+            for percent in settings_module.MENU_TRANSPARENCY_CHOICES
+        ]
+        return _select(name, options, str(current))
     if kind == "int":
         minimum, maximum = settings_module.INTEGER_LIMITS[name]
         return (
@@ -1299,7 +1368,27 @@ def _setting_control(name, current):
     )
 
 
-def _settings_section(section, token):
+def _menu_summary(section):
+    """The receiver menu's three settings in one sentence, as the main page shows them."""
+    allowed = settings_module.value("menu_allowed", section)
+    hotkey = settings_module.value("menu_hotkey", section)
+    return _("Home Assistant menu: %s. Key: %s. Background transparency: %s %%.") % (
+        _("On") if allowed else _("Off"),
+        _(MENU_HOTKEY_LABELS.get(hotkey, str(hotkey))),
+        settings_module.value("menu_transparency", section),
+    )
+
+
+def _menu_line(section, mount):
+    """The main page's word on the menu: what it is set to, and where it is changed."""
+    target = _e(mount + "/" + MENU_CHILD)
+    return (
+        f"<p class='menu-line'>{_e(_menu_summary(section))} "
+        f"<a href='{target}'>{_e(_('Menu settings and the menu creator'))}</a></p>"
+    )
+
+
+def _settings_section(section, token, mount=""):
     labels = _setting_labels()
     groups = []
     for group, names in _grouped():
@@ -1312,7 +1401,8 @@ def _settings_section(section, token):
     hint = _("Passwords are never shown. Leave a password empty to keep the stored one.")
     return (
         f"<section><h2>{_e(_('Settings'))}</h2><p>{_e(hint)}</p>"
-        "<form method='post' class='settings'>"
+        + _menu_line(section, mount)
+        + "<form method='post' class='settings'>"
         + _hidden("form", SETTINGS_FORM)
         + _hidden("csrf", token)
         + _hidden("rendered", _seal(token, _rendered_values(section)))
@@ -1516,17 +1606,20 @@ figure.shot img{width:360px;max-width:100%;height:auto;display:block}
 """
 
 
-def _document(request, body, head=""):
-    icon = _e(_mount_path(request) + "/icon")
+def _document(request, body, head="", mount=None, csp=PAGE_CSP, subtitle=None):
+    """A whole page: `mount` is the main page's path, which the icon is under."""
+    mount = _mount_path(request) if mount is None else mount
+    icon = _e(mount + "/icon")
+    subtitle = _("Receiver integration status") if subtitle is None else subtitle
     document = (
         f"<!doctype html><html><head><meta charset='utf-8'>{head}"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         f"<title>MQTT Bridge</title><style>{_STYLE}</style></head><body><main>"
         f"<header><img src='{icon}' alt=''><div><h1>MQTT Bridge</h1>"
-        f"<p>{_e(_('Receiver integration status'))}</p></div></header>"
+        f"<p>{_e(subtitle)}</p></div></header>"
         f"{body}</main></body></html>"
     )
-    _set_headers(request)
+    _set_headers(request, csp=csp)
     return document.encode("utf-8")
 
 
@@ -1600,7 +1693,7 @@ def _page(request, message=""):
     body = (
         notice
         + _status_section(bridge, section)
-        + _settings_section(section, token)
+        + _settings_section(section, token, _mount_path(request))
         + _updates_section(bridge)
         + _actions_section(request, bridge, token)
         + _topics_section(bridge)
@@ -1629,6 +1722,298 @@ def _confirmation(request, label, sentence, key, payload, token, detail=""):
         f"<p><a href='{back}'>{_e(_('Cancel'))}</a></p></section>"
     )
     return _document(request, body)
+
+
+# ------------------------------------------------------------- the Menu subpage --
+
+
+def _menu_publisher(bridge):
+    """The receiver menu's publisher - running only while `menu_allowed` is on - or None."""
+    try:
+        return bridge.publisher("menu") if bridge is not None and bridge.running else None
+    except Exception:
+        return None
+
+
+def _age(seconds):
+    """A duration as the status line says it: seconds, minutes or hours."""
+    seconds = max(0, int(seconds))
+    if seconds < 120:
+        return f"{seconds} s"
+    if seconds < 7200:
+        return f"{seconds // 60} min"
+    return f"{seconds // 3600} h"
+
+
+def _catalogue_text(publisher, now=None):
+    if publisher is None:
+        return "-"
+    status = publisher.editor.status()
+    if status["revision"] is None:
+        if status["reason"] == menueditor.NEWER_CATALOGUE:
+            return _("from a newer Home Assistant integration than this plugin understands")
+        return _("none received")
+    now = time.time() if now is None else now
+    return _("%s entities, received %s ago") % (status["entities"], _age(now - status["received"]))
+
+
+def _home_assistant_text(publisher):
+    status = getattr(publisher, "ha_status", None) if publisher is not None else None
+    if status == "online":
+        return _("online")
+    if status == "offline":
+        return _("offline")
+    return _("not heard from since the connection to the broker")
+
+
+def _menu_status_section(bridge, section, publisher):
+    connected = bridge is not None and bool(bridge.connected)
+    status = publisher.editor.status() if publisher is not None else {}
+    left_out = status.get("left_out")
+    rows = (
+        (_("Home Assistant menu"),
+         _("On") if settings_module.value("menu_allowed", section) else _("Off")),
+        (_("MQTT"), _("Connected") if connected else _("Disconnected")),
+        (_("Home Assistant"), _home_assistant_text(publisher) if connected else "-"),
+        (_("Catalogue"), _catalogue_text(publisher)),
+        (_("Entities left out of the catalogue"), "-" if left_out is None else str(left_out)),
+    )
+    return f"<section><h2>{_e(_('Status'))}</h2><dl>{_rows(rows)}</dl></section>"
+
+
+def _menu_settings_section(section, token):
+    labels = _setting_labels()
+    controls = "".join(
+        f"<label><span>{_e(labels.get(name, name))}</span>"
+        f"{_setting_control(name, settings_module.value(name, section))}</label>"
+        for name in MENU_SETTING_NAMES
+    )
+    hint = _("The background transparency applies the next time the menu is opened.")
+    return (
+        f"<section><h2>{_e(_('Menu settings'))}</h2><p>{_e(hint)}</p>"
+        "<form method='post' class='settings'>"
+        + _hidden("form", MENU_SETTINGS_FORM)
+        + _hidden("csrf", token)
+        + _hidden("rendered", _seal(token, _rendered_values(section, MENU_SETTING_NAMES)))
+        + f"<fieldset><legend>{_e(_('Menu'))}</legend>{controls}</fieldset>"
+        + f"<button type='submit'>{_e(_('Save settings'))}</button></form></section>"
+    )
+
+
+def creator_texts():
+    """Every sentence the menu creator shows, in the household's language, by key."""
+    return {
+        "loading": _("Loading the catalogue from Home Assistant..."),
+        "none": _("Home Assistant has not sent a catalogue for this receiver yet. Is the "
+                  "companion integration set up for it, in a version with the menu creator?"),
+        "newer": _("The catalogue comes from a newer Home Assistant integration than this "
+                   "plugin understands. Update the plugin."),
+        "menu_off": _("The menu is switched off on this receiver."),
+        "not_running": _("The plugin is not running."),
+        "updating": _("The plugin is being updated."),
+        "load_failed": _("The catalogue could not be loaded. Reload the page."),
+        "left_out": _("Home Assistant left %s entities out of the catalogue: it was too large. "
+                      "They cannot be chosen here."),
+        "top": _("Top level"),
+        "add_group": _("Add a group"),
+        "add_row": _("Add a row"),
+        "new_group": _("New group"),
+        "group": _("Group"),
+        "label": _("Label"),
+        "icon": _("Icon"),
+        "default": _("Default"),
+        "entity": _("Entity"),
+        "search": _("Search by name, entity id or area"),
+        "no_matches": _("No entity matches."),
+        "control": _("Control"),
+        "place": _("Place"),
+        "up": _("Up"),
+        "down": _("Down"),
+        "remove": _("Remove"),
+        "save": _("Save the menu"),
+        "reload": _("Reload"),
+        "saving": _("Saving..."),
+        "unsaved": _("There are changes that are not saved."),
+        "empty_menu": _("The menu is empty. Add a group or a row."),
+        "empty_group": _("No rows in this group yet."),
+        "missing": _("Missing in Home Assistant: %s"),
+        "not_listed": _("Not in the catalogue: %s"),
+        "hidden": _("hidden"),
+        "config": _("configuration"),
+        "diagnostic": _("diagnostic"),
+        "choose_entity": _("Choose an entity for every row before saving."),
+        "name_group": _("Give every group a label before saving."),
+        "limit_groups": _("The menu holds at most %s groups."),
+        "limit_top": _("The top level holds at most %s entries."),
+        "limit_rows": _("A group holds at most %s rows."),
+        "control_toggle": _("Toggle"),
+        "control_slider": _("Slider"),
+        "control_indicator": _("Indicator"),
+        "control_button": _("Button"),
+        "control_selector": _("Selector"),
+        "control_input": _("Input field"),
+        "ha_says": _("Home Assistant says:"),
+        "where": _("Where:"),
+        "result_saved": _("Saved. Home Assistant stored the menu."),
+        "result_waiting": _("Saved. Loading the menu as Home Assistant stored it..."),
+        "result_stale": _("The menu was changed elsewhere since this page loaded it. Reload to "
+                          "see it - your changes here stay on the page until you do."),
+        "result_invalid": _("Home Assistant refused the menu."),
+        "result_busy": _("Home Assistant is busy with another save. Try again in a moment."),
+        "result_not_claimed": _("Home Assistant does not see this receiver offering the menu "
+                                "creator yet. Try again in a moment."),
+        "result_no_answer": _("Home Assistant did not answer. The menu may still have been "
+                              "saved: reload to see."),
+        "result_not_connected": _("The receiver has no connection to the MQTT broker. Nothing "
+                                  "was saved."),
+        "result_not_allowed": _("The receiver does not offer the menu creator now."),
+        "result_unreadable": _("The receiver could not read what this page sent. Reload the "
+                               "page."),
+        "result_too_big": _("The menu is too large to send."),
+        "result_rejected": _("Request rejected."),
+        "result_out_of_date": _("This page is out of date: it was changed in another tab or "
+                                "window since it was opened. Reload the page and try again."),
+        "result_unknown": _("Home Assistant answered: %s"),
+    }
+
+
+def _creator_section(request, bridge, section, publisher, token):
+    if not settings_module.value("menu_allowed", section):
+        text = _("The menu is switched off on this receiver: switch it on above to build the "
+                 "menu here.")
+        return f"<section><h2>{_e(_('Menu creator'))}</h2><p>{_e(text)}</p></section>"
+    if publisher is None:
+        text = _("The menu creator needs the plugin running with the menu on.")
+        return f"<section><h2>{_e(_('Menu creator'))}</h2><p>{_e(text)}</p></section>"
+    base = _main_mount(request) + "/" + MENU_CHILD
+    from .menu import ICON_NAMES, LABEL_LIMIT, MAX_GROUPS, MAX_ITEMS, MAX_ROWS
+
+    attributes = {
+        "data-catalogue": base + "/catalogue.json",
+        "data-save": base + "/save",
+        "data-csrf": token,
+        "data-icons": _json(list(ICON_NAMES)),
+        "data-limits": _json({"groups": MAX_GROUPS, "top": MAX_ITEMS, "rows": MAX_ROWS,
+                              "text": LABEL_LIMIT}),
+        "data-texts": _json(creator_texts()),
+    }
+    rendered = "".join(f" {name}='{_e(value)}'" for name, value in attributes.items())
+    hint = _("Home Assistant checks every save with the rules of its own menu options and "
+             "stores the menu; this page edits a copy.")
+    noscript = _("The menu creator needs JavaScript. The settings above work without it.")
+    return (
+        f"<section><h2>{_e(_('Menu creator'))}</h2><p>{_e(hint)}</p>"
+        f"<div id='creator'{rendered}></div>"
+        f"<noscript><p class='notice'>{_e(noscript)}</p></noscript>"
+        f"<script src='{_e(base + '/creator.js')}'></script></section>"
+    )
+
+
+_MENU_STYLE = (
+    ".creator .item{border:1px solid #c8ceca;padding:10px;margin:8px 0;display:grid;gap:8px}"
+    ".creator .group{background:#eef1ef}.creator .row{background:#fff}"
+    ".creator .tools{display:flex;flex-wrap:wrap;gap:6px}"
+    ".creator .tools button{padding:4px 8px}"
+    ".creator .pick{display:grid;gap:4px;max-height:16rem;overflow:auto}"
+    ".creator .pick button{text-align:left;background:#fff;color:#202522}"
+    ".creator .pick button.active{outline:2px solid #087f5b}"
+    ".creator .meta{color:#59615c;font-size:13px}.creator .bad{color:#a4161a;font-weight:600}"
+    ".creator .bar{position:sticky;bottom:0;background:#f4f5f4;padding:8px 0;"
+    "display:flex;gap:8px;flex-wrap:wrap;align-items:center}"
+    ".creator label{grid-template-columns:140px 1fr}"
+)
+
+
+def _menu_page(request, message=""):
+    bridge = _bridge()
+    mount = _main_mount(request)
+    if bridge is not None and _updating(bridge):
+        notice = f"<p class='notice'>{_e(message)}</p>" if message else ""
+        doors = f"<p class='notice'>{_e(household_doors(bridge.self_update))}</p>"
+        return _document(request, notice + doors, mount=mount, csp=MENU_CSP)
+    section = _section(bridge)
+    token = _csrf_token(request)
+    publisher = _menu_publisher(bridge)
+    notice = f"<p class='notice'>{_e(message)}</p>" if message else ""
+    back = _e(mount + "/")
+    body = (
+        notice
+        + f"<p><a href='{back}'>{_e(_('Back to MQTT Bridge'))}</a></p>"
+        + _menu_status_section(bridge, section, publisher)
+        + _menu_settings_section(section, token)
+        + f"<div class='creator'>{_creator_section(request, bridge, section, publisher, token)}"
+        + "</div>"
+    )
+    head = f"<style>{_MENU_STYLE}</style>"
+    return _document(request, body, head, mount=mount, csp=MENU_CSP,
+                     subtitle=_("The Home Assistant menu"))
+
+
+def _menu_answer(request, message="", code=None):
+    """The Menu subpage, or the failure page when building it raised."""
+    if code is not None:
+        request.setResponseCode(code)
+    try:
+        return _menu_page(request, message)
+    except Exception:
+        LOG.exception("the Menu page could not be rendered")
+        return _failed(request)
+
+
+def _save_menu_settings(request):
+    bridge = _bridge()
+    if bridge is None:
+        raise RuntimeError("the bridge is unavailable")
+    _exact(request, ("csrf", "form", "rendered") + MENU_SETTING_NAMES)
+    changes = _changes(request, bridge.settings, MENU_SETTING_NAMES)
+    if not changes:
+        return _menu_answer(request, _("Nothing to save: every setting already has that value."))
+    return _apply(request, bridge, changes, _menu_answer)
+
+
+def _json_bytes(payload):
+    return json.dumps(payload, ensure_ascii=True, sort_keys=True,
+                      separators=(",", ":")).encode("ascii")
+
+
+def _set_data_headers(request, content_type="application/json"):
+    request.setHeader("content-type", content_type)
+    request.setHeader("cache-control", "no-store")
+    request.setHeader("x-content-type-options", "nosniff")
+    request.setHeader("referrer-policy", "same-origin")
+    request.setHeader("content-security-policy", DATA_CSP)
+
+
+def _json_answer(request, payload, code=None):
+    if code is not None:
+        request.setResponseCode(code)
+    _set_data_headers(request)
+    return _json_bytes(payload)
+
+
+def _same_origin_fetch(request):
+    """`Sec-Fetch-Site` is `same-origin` where the browser sends it; absent is allowed.
+
+    A browser too old to send it is not refused for that: the `Host` check, the same-origin
+    `Origin` of a POST and the token are what keep another site out.
+    """
+    site = request.getHeader("sec-fetch-site")
+    return site is None or site.strip().lower() == "same-origin"
+
+
+def mounted():
+    """OpenWebif took the page (the WebChilds hook): the menu creator can be offered now.
+
+    The hook runs whenever OpenWebif loads it, before or after the bridge has connected, so a
+    running bridge is told to say its capabilities again.
+    """
+    menueditor.mark_mounted()
+    try:
+        bridge = _bridge()
+        if bridge is not None and bridge.running:
+            bridge.announce_capabilities()
+    except Exception:
+        LOG.exception("the bridge could not be told that the OpenWebif page is mounted")
 
 
 # ------------------------------------------------------------------ resources --
@@ -1683,6 +2068,213 @@ class ScreenshotResource(resource.Resource):
         return recorded[0]
 
 
+class CreatorScriptResource(resource.Resource):
+    """`<mount>/menu/creator.js` - the menu creator, the one script this plugin serves.
+
+    A file shipped in the package, read as it is: nothing in it is built per request, so no
+    request can put anything into it.
+    """
+
+    isLeaf = True
+
+    def render_GET(self, request):
+        if not _host_allowed(request):
+            return _misdirected(request)
+        try:
+            with open(CREATOR_SCRIPT, "rb") as handle:
+                script = handle.read(MAX_SCRIPT_BYTES)
+        except OSError:
+            request.setResponseCode(404)
+            _set_data_headers(request, "text/plain; charset=utf-8")
+            return b""
+        _set_data_headers(request, "text/javascript; charset=utf-8")
+        return script
+
+
+class CatalogueResource(resource.Resource):
+    """`<mount>/menu/catalogue.json` - the last valid catalogue, exactly as Home Assistant sent it.
+
+    Or, when there is none, `{"catalogue": null, "reason": ...}`: `menu_off`, `not_running`,
+    `updating`, `none` (nothing received, or Home Assistant took it back) or `newer` (a
+    catalogue of a version this plugin does not know).
+    """
+
+    isLeaf = True
+
+    def render_GET(self, request):
+        if not _host_allowed(request):
+            return _misdirected(request)
+        if not _same_origin_fetch(request):
+            return _json_answer(request, {"catalogue": None, "reason": "rejected"},
+                                http.FORBIDDEN)
+        try:
+            bridge = _bridge()
+            if bridge is not None and _updating(bridge):
+                return _json_answer(request, {"catalogue": None, "reason": "updating"})
+            if bridge is None or not bridge.running:
+                return _json_answer(request, {"catalogue": None, "reason": "not_running"})
+            publisher = _menu_publisher(bridge)
+            if publisher is None:
+                return _json_answer(request, {"catalogue": None, "reason": "menu_off"})
+            catalogue = publisher.editor.catalogue
+            if catalogue is None:
+                return _json_answer(request, {"catalogue": None,
+                                              "reason": publisher.editor.reason or "none"})
+            _set_data_headers(request)
+            return catalogue["raw"]
+        except Exception:
+            LOG.exception("the menu catalogue could not be served")
+            return _json_answer(request, {"catalogue": None, "reason": "failed"},
+                                http.INTERNAL_SERVER_ERROR)
+
+
+def _held(request, editor, base, menu):
+    """Publish the edit and keep the request open until its answer: `NOT_DONE_YET`, or the answer.
+
+    The answer is written when Home Assistant's comes, or `menueditor.ANSWER_SECONDS` pass, or
+    the connection to the broker goes - whichever is first; the editor calls back exactly once.
+    A browser that went away in the meantime is not written to.
+    """
+    state = {"open": True}
+
+    def gone(_failure=None):
+        state["open"] = False
+
+    try:
+        request.notifyFinish().addErrback(gone)
+    except Exception:
+        LOG.debug("this request cannot say when its client goes away")
+
+    def answered(answer):
+        if not state["open"]:
+            LOG.info("the page that saved the menu was gone before the answer: %s",
+                     answer.get("result"))
+            return
+        state["open"] = False
+        try:
+            request.write(_json_bytes(answer))
+            request.finish()
+        except Exception:
+            LOG.exception("the answer to a menu save could not be written")
+
+    refusal = editor.submit(base, menu, answered)
+    if refusal is not None:
+        return _json_bytes({"result": refusal})
+    return NOT_DONE_YET
+
+
+class MenuSaveResource(resource.Resource):
+    """`<mount>/menu/save` - one save of the menu creator, answered when Home Assistant answers.
+
+    A POST with the page's token, `form=menu_edit`, the catalogue `base` the edit started from
+    and the whole `menu` as JSON - exactly these fields. The same `Host`, same-origin and token
+    rules as every other form, and `Sec-Fetch-Site` when the browser sends it. The answer is
+    JSON: Home Assistant's `result`, `revision`, `path` and `detail`, or the receiver's own
+    `no_answer`, `not_connected`, `not_allowed`, `busy`, `unreadable`, `too_big`, `rejected` or
+    `out_of_date`. The token is not replaced, so the page saves again without a reload.
+    """
+
+    isLeaf = True
+
+    def render_GET(self, request):
+        if not _host_allowed(request):
+            return _misdirected(request)
+        return _json_answer(request, {"result": "rejected"}, http.NOT_ALLOWED)
+
+    def render_POST(self, request):
+        if not _host_allowed(request):
+            return _misdirected(request)
+        content_type = (request.getHeader("content-type") or "").split(";", 1)[0].lower()
+        if (content_type != "application/x-www-form-urlencoded" or not _same_origin(request)
+                or not _same_origin_fetch(request)):
+            return _json_answer(request, {"result": "rejected"}, http.FORBIDDEN)
+        _set_data_headers(request)
+        try:
+            bridge = _bridge()
+            if bridge is not None and _updating(bridge):
+                return _json_answer(request, {"result": menueditor.NOT_ALLOWED}, http.CONFLICT)
+            _check_token(request)
+            _exact(request, ("csrf", "form", "base", "menu"))
+            if _single_arg(request, "form") != MENU_EDIT_FORM:
+                raise ValueError("unknown form")
+            base = _single_arg(request, "base")
+            text = _single_arg(request, "menu", menueditor.MAX_EDIT_BYTES)
+            try:
+                menu = json.loads(text)
+            except (ValueError, RecursionError, OverflowError):
+                raise ValueError("the menu is not JSON") from None
+            if not menueditor.is_revision(base) or not isinstance(menu, list):
+                raise ValueError("not an edit")
+            publisher = _menu_publisher(bridge)
+            if publisher is None or _uninstalling(bridge):
+                return _json_answer(request, {"result": menueditor.NOT_ALLOWED})
+            return _held(request, publisher.editor, base, menu)
+        except _OutOfDate:
+            return _json_answer(request, {"result": "out_of_date"}, http.FORBIDDEN)
+        except PermissionError:
+            return _json_answer(request, {"result": "rejected"}, http.FORBIDDEN)
+        except (KeyError, TypeError, ValueError):
+            return _json_answer(request, {"result": menueditor.UNREADABLE}, http.BAD_REQUEST)
+        except Exception:
+            LOG.exception("the menu creator's save could not be completed")
+            return _json_answer(request, {"result": "failed"}, http.INTERNAL_SERVER_ERROR)
+
+
+class MenuPageResource(resource.Resource):
+    """`<mount>/menu` - the receiver menu's settings and the menu creator (ADR-0022).
+
+    Always the whole page: the panel load is the main page's question, and nothing loads this
+    one into OpenWebif's panel. Its settings form takes the main form's rules.
+    """
+
+    isLeaf = False
+
+    def __init__(self):
+        resource.Resource.__init__(self)
+        self.putChild(b"creator.js", CreatorScriptResource())
+        self.putChild(b"catalogue.json", CatalogueResource())
+        self.putChild(b"save", MenuSaveResource())
+        self.putChild(b"", self)
+
+    def render_GET(self, request):
+        if not _host_allowed(request):
+            return _misdirected(request)
+        return _menu_answer(request)
+
+    def render_POST(self, request):
+        if not _host_allowed(request):
+            return _misdirected(request)
+        content_type = (request.getHeader("content-type") or "").split(";", 1)[0].lower()
+        if content_type != "application/x-www-form-urlencoded" or not _same_origin(request):
+            return _menu_answer(request, _("Request rejected."), http.FORBIDDEN)
+        if _doors_closed():
+            return _menu_answer(request, code=http.CONFLICT)
+        try:
+            if _single_arg(request, "form") != MENU_SETTINGS_FORM:
+                raise ValueError("unknown form")
+            _check_token(request)
+            return _save_menu_settings(request)
+        except _OutOfDate:
+            return _menu_answer(
+                request,
+                _(
+                    "This page is out of date: it was changed in another tab or window "
+                    "since it was opened. Reload the page and try again."
+                ),
+                http.FORBIDDEN,
+            )
+        except PermissionError:
+            return _menu_answer(request, _("Request rejected."), http.FORBIDDEN)
+        except (KeyError, TypeError, ValueError) as error:
+            return _menu_answer(request, _("Nothing was changed: %s") % error, http.BAD_REQUEST)
+        except Exception:
+            LOG.exception("the Menu page could not complete a request")
+            return _menu_answer(
+                request, _("Nothing was changed; see the plugin log."),
+                http.INTERNAL_SERVER_ERROR,
+            )
+
+
 def _fragment(request):
     """What OpenWebif's panel load gets: a frame of the page and a link to a tab.
 
@@ -1718,6 +2310,7 @@ class MQTTBridgeWebResource(resource.Resource):
         resource.Resource.__init__(self)
         self.putChild(b"icon", PluginIconResource())
         self.putChild(b"screen.jpg", ScreenshotResource())
+        self.putChild(MENU_CHILD.encode("ascii"), MenuPageResource())
         # `/mqttbridge/` is the same page as `/mqttbridge`. Twisted resolves the
         # trailing slash to an empty child, and without this the receiver
         # answers 404 to a perfectly ordinary URL - measured on the box.

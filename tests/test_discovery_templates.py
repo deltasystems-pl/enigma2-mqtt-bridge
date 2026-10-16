@@ -39,6 +39,7 @@ from MQTTBridge import (
     discovery,
     hdd,
     keys,
+    menueditor,
     process,
     recording,
     stream,
@@ -81,7 +82,7 @@ def every_capability():
 
     The core ones, one per publisher, the extra ones a publisher claims on top
     (`history_clear`, `channel_topics`, `service_codecs`, the three of the
-    stream area, `volume_passthrough`), and the ones with no publisher behind
+    stream area, `volume_passthrough`, `menu_editor`), and the ones with no publisher behind
     them (`message`, `uninstall`, `self_update`, `command_id`).
     `test_every_capability_is_in_every_capability` fails when a new one is not
     added here.
@@ -99,6 +100,7 @@ def every_capability():
     names.add(stream.STOP_CAPABILITY)
     names.add(stream.PLAYABLE_CAPABILITY)
     names.add(volume.PASSTHROUGH_CAPABILITY)
+    names.add(menueditor.EDITOR_CAPABILITY)
     return sorted(names)
 
 

@@ -82,8 +82,13 @@ VISIBLE_ROWS = 8
 STATE_SHARE = 0.34
 
 # enigma2 skin colours are #AARRGGBB, alpha 00 opaque; a list entry's colour is 0xRRGGBB.
-BACKGROUND = "#08101820"
-PANEL = "#0018242f"
+# The screen's background and the list's panel take the `menu_transparency` setting as their
+# alpha (`background_colour`); the selection bar, the text and the icons stay opaque, so what is
+# selected and what is written can always be read.
+BACKGROUND_RGB = "101820"
+PANEL_RGB = "18242f"
+BACKGROUND = "#00" + BACKGROUND_RGB
+PANEL = "#00" + PANEL_RGB
 SELECTED = "#001f5f8b"
 TITLE_COLOUR = "#0041bdf5"
 MARKER_COLOUR = "#007a8894"
@@ -126,8 +131,31 @@ def geometry(desktop_width, desktop_height, rows=VISIBLE_ROWS):
     return shape
 
 
+def alpha(percent):
+    """The skin alpha byte for a transparency in percent: 0 opaque, 80 % -> 0xCC.
+
+    Anything that is not a percent from 0 to 100 is opaque: a screen that cannot be read is
+    worse than one that hides the picture.
+    """
+    if isinstance(percent, bool) or not isinstance(percent, int) or not 0 <= percent <= 100:
+        return 0
+    return int(round(percent * 255 / 100.0))
+
+
+def background_colour(rgb, percent):
+    """`#AARRGGBB` of one of the two see-through layers at `percent` transparency."""
+    return f"#{alpha(percent):02x}{rgb}"
+
+
 def build_skin(shape):
-    """The embedded skin, with every number already a plain integer."""
+    """The embedded skin, with every number already a plain integer.
+
+    `shape["transparency"]` - the `menu_transparency` setting, read when the menu is opened - is
+    the see-through of the screen's background and the list's panel; absent is opaque.
+    """
+    percent = shape.get("transparency", 0)
+    background = background_colour(BACKGROUND_RGB, percent)
+    panel = background_colour(PANEL_RGB, percent)
     return (
         '<screen name="{name}" position="{x},{y}" size="{width},{height}" '
         'flags="wfNoBorder" backgroundColor="{background}">'
@@ -149,8 +177,8 @@ def build_skin(shape):
         "</screen>"
     ).format(
         name=SKIN_NAME,
-        background=BACKGROUND,
-        panel=PANEL,
+        background=background,
+        panel=panel,
         selected=SELECTED,
         title_colour=TITLE_COLOUR,
         marker_colour=MARKER_COLOUR,
@@ -531,16 +559,19 @@ def screen_class():
     return _screen_class
 
 
-def open_styled(session, controller):
+def open_styled(session, controller, transparency=0):
     """Open the styled screen for `controller`. None when it is open, otherwise why not.
 
     Built once on trial with `instantiateDialog` - off the dialog stack - and deleted, then
     opened for real. See the module for why a constructor must never fail inside `open`.
+    `transparency` is the background's see-through in percent, for this opening: the skin is
+    built per opening, so a change applies the next time the menu opens.
     """
     try:
         shape = desktop_geometry()
         if shape is None:
             return "the image will not say how big its desktop is"
+        shape["transparency"] = transparency
         cls = screen_class()
         trial = session.instantiateDialog(cls, shape, _TrialController(controller))
         if trial is None:

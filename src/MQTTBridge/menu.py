@@ -21,8 +21,10 @@ Three parts live here:
   slider moves a local value with LEFT and RIGHT that is sent only on OK; an input field opens the
   image's keyboard. EXIT discards whatever was not applied, and goes back; so does leaving a
   moved slider's row. OK on the value a row already has sends nothing (D70).
-- **The publisher** (`MenuPublisher`): the capability `menu`, the two subscriptions, Home
-  Assistant's reachability, the pending marks, the hotkey and `info.menu`.
+- **The publisher** (`MenuPublisher`): the capability `menu`, the subscriptions, Home
+  Assistant's reachability, the pending marks, the hotkey and `info.menu`. It also owns the menu
+  creator's receiver half (`menueditor.py`): the catalogue and the edits, subscribed with the
+  menu and only while it is offered, and the capability `menu_editor`.
 
 **Greyed (D14).** With no broker connection, or with Home Assistant's own status topic saying
 `offline`, the menu stays on screen as it last was, greyed, with a notice, and nothing in it can be
@@ -46,6 +48,7 @@ import secrets
 import time
 import unicodedata
 
+from . import menueditor
 from .enigma2 import Ticker
 from .i18n import _
 from .log import get_logger
@@ -913,6 +916,8 @@ class MenuPublisher(Publisher):
         self._hotkey = None
         # The `menu_action`s handed to the client and not acknowledged yet.
         self._unacknowledged = []
+        # The menu creator's catalogue and the saves waiting for their answers.
+        self.editor = menueditor.MenuEditor(self)
 
     # -------------------------------------------------------------- lifecycle --
 
@@ -948,7 +953,15 @@ class MenuPublisher(Publisher):
     def claimed(self):
         return self.screen_kind is not None
 
+    def extra_capabilities(self):
+        """`menu_editor`, while OpenWebif has the page that edits the menu (`webif.mounted`)."""
+        return [menueditor.EDITOR_CAPABILITY] if menueditor.mounted() else []
+
     def stop(self):
+        try:
+            self.editor.stop()
+        except Exception:
+            LOG.exception("the menu creator's waiting saves could not be answered")
         try:
             self._ticker.stop()
             if self._hotkey is not None:
@@ -984,7 +997,8 @@ class MenuPublisher(Publisher):
         return self.bridge.discovery_prefix + STATUS_SUFFIX
 
     def topics(self):
-        return [topic for topic in (self.menu_topic(), self.status_topic()) if topic]
+        own = [topic for topic in (self.menu_topic(), self.status_topic()) if topic]
+        return own + self.editor.topics()
 
     def subscribe(self, client):
         for topic in self.topics():
@@ -998,6 +1012,8 @@ class MenuPublisher(Publisher):
             self.on_menu(payload, retain)
         elif topic == self.status_topic():
             self.on_status(payload)
+        elif topic in self.editor.topics():
+            self.editor.on_message(topic, payload, retain)
 
     def on_menu(self, payload, retain=True):
         """A menu from the integration. `retain` is the flag the broker delivered it with.
@@ -1091,6 +1107,8 @@ class MenuPublisher(Publisher):
                 if not _acknowledged(info) and self.bridge.withdraw_event(info):
                     LOG.info("dropped a menu_action the broker had not acknowledged")
             self._unacknowledged = []
+            # A save on the menu creator is never queued either (`menueditor.py`).
+            self.editor.connection_changed(False)
         self.refresh_screens()
 
     # ---------------------------------------------------------- reachability --
@@ -1235,7 +1253,8 @@ class MenuPublisher(Publisher):
         controller = None
         if self.screen_kind == styledlist.STYLED:
             controller = MenuController(self, adjustable=True)
-            refusal = styledlist.open_styled(session, controller)
+            refusal = styledlist.open_styled(session, controller,
+                                             self.value("menu_transparency") or 0)
             if refusal is not None:
                 LOG.warning("the styled menu screen could not be built (%s); the image's own "
                             "list is used", refusal)

@@ -40,11 +40,15 @@ def session_of(screen):
 
 def test_every_setting_appears_exactly_once(settings):
     screen = build(settings)
-    elements = [entry[1] for entry in screen.entries]
+    elements = [entry[1] for entry in setup_screen.setting_entries(screen.entries)]
     for name in settings_module.SETTING_NAMES:
         element = getattr(settings, name)
         assert elements.count(element) == 1, name
     assert len(elements) == len(settings_module.SETTING_NAMES)
+    # Besides the settings, the headings and nothing else.
+    headings = [entry for entry in screen.entries if setup_screen.is_heading(entry)]
+    assert len(screen.entries) == len(elements) + len(headings)
+    assert headings == [(label,) for label in setup_screen.section_headings().values()]
 
 
 def test_the_screen_order_is_the_configuration_order(settings):

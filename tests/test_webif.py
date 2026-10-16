@@ -49,6 +49,9 @@ PNG = b"\x89PNG\r\n\x1a\n"
 FORM = "application/x-www-form-urlencoded"
 
 SETTING_NAMES = settings_module.SETTING_NAMES
+# The main page's form: every setting but the menu's, which are on the Menu subpage.
+MAIN_SETTING_NAMES = webif.MAIN_SETTING_NAMES
+MENU_SETTING_NAMES = settings_module.MENU_SETTING_NAMES
 TEXT_SETTINGS = [
     name for name in SETTING_NAMES if settings_module.SETTING_KINDS[name] == "text"
 ]
@@ -189,6 +192,21 @@ def get(resource, session=None, **kwargs):
     return request, resource.render_GET(request)
 
 
+def menu_child(resource, name=None):
+    """The Menu subpage's resource - or one of its files - as Twisted finds it under the page."""
+    child = resource.children[b"menu"]
+    return child if name is None else child.children[name.encode("ascii")]
+
+
+def menu_get(resource, session=None, name=None, **kwargs):
+    """A GET of the Menu subpage, or of `name` under it, with the path Twisted leaves behind."""
+    segments = (b"mqttbridge", b"menu") + ((name.encode("ascii"),) if name else ())
+    kwargs.setdefault("prepath", segments)
+    kwargs.setdefault("uri", b"/" + b"/".join(segments))
+    request = _Request(session=session, **kwargs)
+    return request, menu_child(resource, name).render_GET(request)
+
+
 def token(session):
     return webif._csrf_token(_Request(session=session))
 
@@ -213,7 +231,7 @@ def settings_fields(section, **overrides):
     the session's token, exactly as the page does.
     """
     fields = {"form": "settings", "rendered": webif._rendered_values(section)}
-    for name in SETTING_NAMES:
+    for name in MAIN_SETTING_NAMES:
         kind = settings_module.SETTING_KINDS[name]
         current = settings_module.value(name, section)
         if kind == "bool":
@@ -783,16 +801,26 @@ def test_a_field_changed_on_a_stale_form_still_wins(connected_bridge, page, fact
 # ------------------------------------------------------------ what the page shows --
 
 
-def test_every_setting_is_on_the_form_and_nothing_else(connected_bridge, page):
+def test_every_setting_is_on_the_main_form_or_the_menu_page_each_on_exactly_one(
+    connected_bridge, page
+):
     _request, body = get(page(connected_bridge))
-    names = re.findall(r"name='([^']+)'", settings_form(body))
-    assert set(names) == {"form", "csrf", "rendered"} | set(SETTING_NAMES)
+    main = re.findall(r"name='([^']+)'", settings_form(body))
+    _request, menu_body = menu_get(page(connected_bridge))
+    menu = re.findall(r"name='([^']+)'", settings_form(menu_body))
+    assert set(main) == {"form", "csrf", "rendered"} | set(MAIN_SETTING_NAMES)
+    assert set(menu) == {"form", "csrf", "rendered"} | set(MENU_SETTING_NAMES)
+    # A checkbox is two inputs of one name, so each form is read as a set of names.
+    assert set(main) | set(menu) >= set(SETTING_NAMES)
+    assert not set(main) & set(menu) & set(SETTING_NAMES)
     assert b"oscam_identity_salt" not in body
+    assert b"oscam_identity_salt" not in menu_body
 
 
-def test_every_setting_is_placed_in_exactly_one_group():
+def test_every_main_page_setting_is_placed_in_exactly_one_group():
     placed = [name for _group, names in webif.SETTING_GROUPS for name in names]
-    assert sorted(placed) == sorted(SETTING_NAMES)
+    assert sorted(placed) == sorted(MAIN_SETTING_NAMES)
+    assert not set(placed) & set(MENU_SETTING_NAMES)
 
 
 def test_the_permissions_and_kill_switches_are_one_group():
@@ -800,7 +828,7 @@ def test_the_permissions_and_kill_switches_are_one_group():
     assert set(groups["permissions"]) == {
         "deep_standby_allowed", "wol_arm", "softcam_restart_allowed", "epg_import_allowed",
         "uninstall_allowed", "update_check", "update_allowed", "cec_standby_workaround",
-        "osd_toast", "menu_allowed",
+        "osd_toast",
     }
 
 
@@ -1034,7 +1062,14 @@ def test_the_limits_table_is_each_elements_own_limits(settings):
     ]
     assert sorted(settings_module.INTEGER_LIMITS) == sorted(integers)
     for name in integers:
-        assert tuple(getattr(settings, name).limits) == settings_module.INTEGER_LIMITS[name], name
+        element = getattr(settings, name)
+        if name in settings_module.INTEGER_STEPS:
+            # A selection of its steps, not a ConfigInteger: the choices are the range.
+            low, high = settings_module.INTEGER_LIMITS[name]
+            step = settings_module.INTEGER_STEPS[name]
+            assert [key for key, _label in element.choices] == list(range(low, high + 1, step))
+        else:
+            assert tuple(element.limits) == settings_module.INTEGER_LIMITS[name], name
         low, high = settings_module.INTEGER_LIMITS[name]
         assert settings_module.validate_setting(name, str(low)) == low
         with pytest.raises(ValueError):
