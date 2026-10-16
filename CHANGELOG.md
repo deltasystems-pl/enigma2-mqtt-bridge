@@ -11,6 +11,36 @@ version that has no section here.
 
 ### Added
 
+- The menu creator: the Home Assistant menu built from the receiver's OpenWebif, on a new Menu
+  page (`/mqttbridge/menu`) - groups and rows, an entity picked by typing part of its name, entity
+  id or area, its control, label and icon, moved and removed - as the companion integration's own
+  menu options offer them. Home Assistant stays the owner and no Home Assistant token is on the
+  receiver: the integration publishes a catalogue of what can be chosen, retained, on
+  `enigma2mqtt/menu_catalogue/<node>` (at most 1 MiB; the receiver keeps its exact bytes and the
+  page shows every string in it as text); a save is published once on the new event topic
+  `menu_edit` (QoS 1, never retained, never queued across a disconnect) with the revision it
+  started from; and Home Assistant validates it, stores it or refuses it, and answers on
+  `enigma2mqtt/menu_edit_result/<node>`. The save waits for that answer at most ten seconds, and a
+  save from a stale copy is refused and the page asks to reload, keeping the unsaved edit until it
+  does. Editing is always on while the menu is: anyone who can reach the receiver's web interface or
+  publish on the broker can choose which entities the television controls, and the catalogue shows
+  every entity's name and area to anyone on the broker ([SECURITY.md](SECURITY.md)). The page is
+  the only one with a script - a static file, `creator.js`, under a policy of its own; the main
+  page keeps its policy and stays script-free
+  ([ADR-0022](docs/adr/0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md)).
+  New: the capability `menu_editor`, the event topic `menu_edit` and the two subscriptions
+  ([TOPICS.md](docs/TOPICS.md)). English, Polish and German.
+- The setting `menu_transparency`: how see-through the menu's background is, 0 % to 80 % in steps of
+  10, 20 % by default - the screen's background and the list's panel; the bar on the selected row,
+  the text and the icons stay solid. It applies the next time the menu opens, is writable through
+  `cmd/config` and is in `info.settings`. The receiver's settings screen has a "Menu" section with
+  the three menu settings, and the OpenWebif page has them on the Menu page; the main page shows
+  them in one line with a link there.
+- `cmd/config` takes any part of its keys: each one left out keeps its value, also `publish_keys`,
+  `screenshot` and `screenshot_interval`, which up to 0.4.0 were required. An empty object is
+  valid, changes nothing and publishes `info` again. A value between the transparency's steps is
+  refused, never rounded.
+
 - A "Home Assistant" menu on the receiver that Home Assistant keeps current. The companion
   integration publishes it, retained, on `enigma2mqtt/menu/<node>`: up to eight groups and rows,
   each a button, toggle, indicator, selector, slider or input field bound to something in Home

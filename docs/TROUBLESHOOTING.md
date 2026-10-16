@@ -136,6 +136,31 @@ interface remains responsive; only a slow-batch or event-loop warning indicates 
 - **`info.menu.screen` is `fallback`**: the plugin's own screen could not be built on this image
   or skin, and the receiver's plain list is used. The log has the reason; please report it with
   the image and the skin.
+- **The background is not see-through, or looks different from the setting**: the transparency
+  (`menu_transparency`) applies the next time the menu is opened, not to a menu on screen. A skin
+  can restyle the plugin's screen by its name, `MQTTBridgeList`, and then its colours win; and an
+  image whose screen does not blend the plugin's alpha over the picture shows the background
+  opaque. Please report an image that does, with the image and the skin.
+
+## The menu creator does not load or does not save
+
+- **"Home Assistant has not sent a catalogue for this receiver yet."**: nothing is retained on
+  `enigma2mqtt/menu_catalogue/<node>`. The companion integration publishes it only while the
+  receiver claims `menu_editor` in `info.capabilities`, which needs `menu_allowed` on and the
+  OpenWebif page mounted; an integration without the menu creator never publishes one. A catalogue
+  the receiver refused leaves the one before it and the log line `ignoring an invalid menu
+  catalogue`.
+- **"...a newer Home Assistant integration than this plugin understands"**: update the plugin.
+- **The page says it needs JavaScript**: the browser runs no script, or blocks it. The settings on
+  the page work without it.
+- **"Home Assistant did not answer."**: no answer came within ten seconds. Reload: the save may have
+  landed. The plugin's log says `menu edit ... did not answer`; Home Assistant's log says why it did
+  not answer, if it got the edit.
+- **"The menu was changed elsewhere..."**: Home Assistant's menu changed since the page loaded it -
+  in its own options, in another tab, or another save. Reload, then make your change again.
+- **"Home Assistant refused the menu."** with what and where: the menu breaks one of the rules of
+  the integration's menu options - an entity that cannot be used now, a control it does not take,
+  too many rows. Nothing was saved.
 
 ## The receiver's memory use keeps climbing
 

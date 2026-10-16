@@ -44,7 +44,11 @@ and settings survive a plugin upgrade.
 | `update_allowed` | `off` | Gate for `cmd/update`, which installs a signed release of the plugin over MQTT and restarts the interface to run it. Off by default because it replaces the code that takes the commands. The receiver's own screens and the OpenWebif page do not need it |
 | `menu_allowed` | `on` | Offer the Home Assistant menu: the Extensions entry "Home Assistant", the hotkey, and the subscription to the menu the companion integration publishes. On by default because the menu can do only what you put into it in Home Assistant; see below |
 | `menu_hotkey` | `HELP, held` | The key that opens the Home Assistant menu in live TV and while a recording or a media file plays: HELP held, RED held, F3, F4, or off. A key the receiver itself uses keeps doing what it did; see below |
+| `menu_transparency` | `20 %` | How see-through the Home Assistant menu's background is: 0 % (opaque) to 80 %, in steps of 10. The text, the icons and the bar on the selected row stay solid. It applies the next time the menu is opened |
 | `log_level` | `info` | `error` / `warning` / `info` / `debug` |
+
+The setup screen shows the three menu settings last, under the heading **Menu**; the OpenWebif page
+has them on its own [Menu page](#the-menu-page-and-the-menu-creator).
 
 🔴 **`deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`,
 `uninstall_allowed`, `update_check`, `update_allowed` and `menu_allowed` are never writable over
@@ -157,6 +161,11 @@ receiver's choices too, so put into the menu only what you would hand to whoever
 `menu_allowed` off removes the menu, the entry and the hotkey. Where the receiver cannot draw the
 plugin's own screen, it uses its own plain list with the same rows; the number keys do nothing
 there, because that list would act on a digit.
+
+The menu's background lets the picture show through, 20 % by default (`menu_transparency`); 0 %
+makes it opaque. The receiver's own plain list is drawn as the receiver draws it. The menu can be
+built from the receiver's web interface as well as in Home Assistant: see the
+[Menu page](#the-menu-page-and-the-menu-creator).
 
 ### What the softcam restart does
 
@@ -390,7 +399,9 @@ picture is there - no script involved. A capture that fails leaves the previous 
 time, and the reason is on `last_error`. The picture is kept in memory, so after the plugin
 restarts the page has none until the next capture, while the broker still holds the retained one.
 
-**What it changes.** Every setting on this page's table above, in the setup screen's order. The
+**What it changes.** Every setting on this page's table above, in the setup screen's order - but
+the three of the Home Assistant menu, which the page shows as one line with a link to the
+[Menu page](#the-menu-page-and-the-menu-creator), where they are changed. The
 passwords are **write-only**: their fields are always empty, an empty field keeps the stored
 password, and clearing one is done on the setup screen. Every text value refuses control characters
 and line breaks - enigma2's settings file has no escaping, so a line break would plant a second
@@ -438,7 +449,7 @@ in the browser is the receiver's IP address, `localhost`, or the receiver's host
 `.local`), which is what stops a hostile web site from reaching it through a name it controls; and
 every change must come from the page itself (its `Origin`), carrying the token the page put into
 the form. That token is kept in the browser's OpenWebif session, is accepted only from the POST
-body - never from the address; the page reads every field from the body alone - and is replaced after every change that took effect; a refused
+body - never from the address; the page reads every field from the body alone - and is replaced after every change that took effect, but a save of the menu creator, which the Menu page repeats without a reload; a refused
 request leaves it as it was, so the page you are looking at still works. A confirmation step
 carries a separate token that is good for exactly one attempt at exactly that action. But while
 OpenWebif authentication is off, any web page a household member opens can already switch the
@@ -465,6 +476,39 @@ mounted under that interface's authentication, not OpenWebif's; this has not bee
 
 🟡 If the setup screen is open on the television while the page saves, both edit the same settings:
 the television's *Cancel* restores what the page saved, and its *Save* writes whatever it shows.
+
+### The Menu page and the menu creator
+
+`http://<receiver-address>/mqttbridge/menu`, linked from the main page. It has the Home Assistant
+menu's three settings - `menu_allowed`, `menu_hotkey` and `menu_transparency` - with the main
+page's rules, and a status line: whether the menu is on, the broker connection, whether Home
+Assistant was heard from, and when the catalogue (below) arrived and how many entities Home
+Assistant left out of it.
+
+Below them is the **menu creator**: the same menu you build in the companion integration's options
+in Home Assistant, built here. Groups - add, rename, choose an icon, move, remove - and rows: pick an
+entity by typing part of its name, its entity id or its area (hidden, configuration and diagnostic
+entities are marked), choose its control from those the entity allows, and optionally a label and
+an icon; move a row up, down or into another group, or remove it. *Save the menu* sends the whole
+menu. It needs the companion integration in a version with the menu creator, the menu switched on,
+and JavaScript in the browser - the settings above work without it.
+
+- **Home Assistant decides.** The page edits a copy; Home Assistant checks every save with the
+  rules of its own menu options and stores the menu, or says what it refused and where. No Home
+  Assistant login is on the receiver: the page goes through the broker.
+- **A save waits up to ten seconds for Home Assistant's answer.** Without one the page says so and
+  offers to reload - the save may still have landed, and the reload shows it.
+- **When the menu was changed elsewhere** since the page loaded it - in Home Assistant, or in
+  another tab - the save is refused, and the page asks you to reload; your changes stay on the page
+  until you do. A save in Home Assistant's own options afterwards, from an older copy, replaces what
+  was saved here: Home Assistant is the owner of the menu.
+- **Who can use it**: whoever OpenWebif lets in, like the rest of the page, and editing is always
+  on while the menu is - see [SECURITY.md](../SECURITY.md).
+
+The page is the one page of the plugin that runs a script, `creator.js`, a file in the package,
+under a policy that admits no other script and no other site
+([ADR-0022](adr/0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md)).
+Everything Home Assistant sends to it is shown as text.
 
 ## Provisioning file
 
@@ -522,11 +566,17 @@ topic write homeassistant/device/<node_id>/#
 topic write homeassistant/device_automation/<node_id>/#
 topic read enigma2mqtt/release_index
 topic read enigma2mqtt/integration/<node_id>
+topic read enigma2mqtt/menu/<node_id>
+topic read enigma2mqtt/menu_catalogue/<node_id>
+topic read enigma2mqtt/menu_edit_result/<node_id>
+topic read homeassistant/status
 ```
 
-The two `read` lines (since 0.4.0) let the receiver hear the release index and the version of the
-companion integration that Home Assistant publishes; without them it learns of releases only from
-the internet, and cannot ask Home Assistant for a package.
+The first two `read` lines (since 0.4.0) let the receiver hear the release index and the version of
+the companion integration that Home Assistant publishes; without them it learns of releases only
+from the internet, and cannot ask Home Assistant for a package. The other four are the Home
+Assistant menu's: the menu itself, the menu creator's catalogue and Home Assistant's answers to a
+save, and Home Assistant's own status under your discovery prefix (`homeassistant` by default).
 
 Then **verify it by effect**. Subscribe as a privileged user to a topic the box has no business
 touching and publish there as the box's user: the message must not arrive. Mosquitto drops an
