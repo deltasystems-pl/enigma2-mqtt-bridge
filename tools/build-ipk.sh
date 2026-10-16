@@ -116,6 +116,10 @@ rm -rf "$REPO_ROOT/build"          # where the tree used to be staged
 mkdir -p "$STAGE/data/$PLUGIN_DIR" "$STAGE/data/$WEBIF_EXTERNAL_DIR" "$STAGE/control" "$DIST"
 
 cp -r src/MQTTBridge/. "$STAGE/data/$PLUGIN_DIR/"
+# The package is distributed under GPLv3 or later (NOTICE, CONTROL's License): the licence texts
+# and the notice travel with it, beside the code. The icons' own Apache-2.0 text and notice are
+# already in icons/.
+cp LICENSE LICENSE-GPL-3.0.txt NOTICE "$STAGE/data/$PLUGIN_DIR/"
 cp src/WebInterface/WebChilds/External/MQTTBridge.py "$STAGE/data/$WEBIF_EXTERNAL_DIR/"
 find "$STAGE/data" -name '__pycache__' -type d -prune -exec rm -rf {} +
 find "$STAGE/data" -name '*.pyc' -delete
@@ -186,6 +190,14 @@ for script in ./postinst ./prerm; do
     mode=$(tar tzvf "$STAGE/control.tar.gz" | awk -v f="$script" '$NF == f {print $1}')
     [ "$mode" = "-rwxr-xr-x" ] || {
         echo "build-ipk.sh: $script is $mode, expected -rwxr-xr-x" >&2; exit 1
+    }
+done
+
+# The licence files, read back out of the archive: a package that says GPLv3 carries its text.
+DATA_LIST=$(tar tzf "$STAGE/data.tar.gz")
+for licence in LICENSE LICENSE-GPL-3.0.txt NOTICE icons/LICENSE-Apache-2.0.txt icons/NOTICE; do
+    grep -qxF "./$PLUGIN_DIR/$licence" <<< "$DATA_LIST" || {
+        echo "build-ipk.sh: the package does not carry $licence" >&2; exit 1
     }
 done
 

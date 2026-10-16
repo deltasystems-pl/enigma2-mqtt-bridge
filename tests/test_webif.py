@@ -800,7 +800,7 @@ def test_the_permissions_and_kill_switches_are_one_group():
     assert set(groups["permissions"]) == {
         "deep_standby_allowed", "wol_arm", "softcam_restart_allowed", "epg_import_allowed",
         "uninstall_allowed", "update_check", "update_allowed", "cec_standby_workaround",
-        "osd_toast",
+        "osd_toast", "menu_allowed",
     }
 
 

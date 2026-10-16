@@ -1042,3 +1042,95 @@ msgstr ""
 #: src/MQTTBridge/updateview.py
 msgid "An answer arrived, but its download address had already expired by the receiver's clock. If the receiver's clock is wrong, set it and try again."
 msgstr ""
+
+#: src/MQTTBridge/config.py
+msgid "HELP, held"
+msgstr ""
+
+#: src/MQTTBridge/config.py
+msgid "RED, held"
+msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "Allow the Home Assistant menu"
+msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "Key that opens the Home Assistant menu"
+msgstr ""
+
+#: src/MQTTBridge/plugin.py
+msgid "Home Assistant"
+msgstr ""
+
+#: src/MQTTBridge/plugin.py
+msgid "The menu Home Assistant sends to this receiver"
+msgstr ""
+
+#: src/MQTTBridge/plugin.py
+msgid "The Home Assistant menu is not available: the plugin is not running."
+msgstr ""
+
+#: src/MQTTBridge/plugin.py
+msgid "The Home Assistant menu cannot be opened on this receiver now."
+msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "Sent to Home Assistant."
+msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "Home Assistant changed nothing."
+msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "Could not send this to Home Assistant."
+msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "This row only shows a state."
+msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "This is unavailable in Home Assistant."
+msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "Use LEFT and RIGHT to change the value, then OK."
+msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "No connection to the MQTT broker. Showing the last menu."
+msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "Home Assistant is not reachable. Showing the last menu."
+msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "There is no menu from Home Assistant yet."
+msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "OK apply   EXIT discard"
+msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "LEFT/RIGHT change   OK apply   EXIT discard"
+msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "OK select   LEFT/RIGHT adjust   EXIT back"
+msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "OK select   EXIT back"
+msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "current"
+msgstr ""
+
+#: src/MQTTBridge/menu.py
+msgid "There are no controls here."
+msgstr ""

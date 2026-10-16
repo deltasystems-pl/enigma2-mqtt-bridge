@@ -1,0 +1,253 @@
+{
+  "about": "The receiver menu's icons: each name of the topic contract (docs/TOPICS.md, 'The icon names') and the Material Design Icons icon it is drawn with. tools/render-icons.py import fills in each icon's upstream metadata from the archive named in 'source'; tools/render-icons.py render draws src/MQTTBridge/icons/<name>.png from assets/icons/mdi/<mdi>.svg.",
+  "icons": {
+    "alarm": {
+      "added_in": "1.7.12",
+      "author": "Austin Andrews",
+      "licence": "Apache-2.0",
+      "mdi": "shield-home",
+      "tags": [
+        "Home Automation"
+      ]
+    },
+    "bed": {
+      "added_in": "1.5.54",
+      "author": "Google",
+      "licence": "Apache-2.0",
+      "mdi": "bed",
+      "tags": [
+        "Home Automation",
+        "Holiday"
+      ]
+    },
+    "blinds": {
+      "added_in": "1.5.54",
+      "author": "Austin Andrews",
+      "licence": "Apache-2.0",
+      "mdi": "blinds",
+      "tags": [
+        "Home Automation"
+      ]
+    },
+    "camera": {
+      "added_in": "2.0.46",
+      "author": "Roberto Graham",
+      "licence": "Apache-2.0",
+      "mdi": "cctv",
+      "tags": [
+        "Home Automation"
+      ]
+    },
+    "ceiling-light": {
+      "added_in": "1.9.32",
+      "author": "GreenTurtwig",
+      "licence": "Apache-2.0",
+      "mdi": "ceiling-light",
+      "tags": [
+        "Home Automation"
+      ]
+    },
+    "door": {
+      "added_in": "2.1.19",
+      "author": "Haley Halcyon",
+      "licence": "Apache-2.0",
+      "mdi": "door",
+      "tags": [
+        "Home Automation"
+      ]
+    },
+    "fan": {
+      "added_in": "1.5.54",
+      "author": "Austin Andrews",
+      "licence": "Apache-2.0",
+      "mdi": "fan",
+      "tags": [
+        "Home Automation",
+        "Automotive"
+      ]
+    },
+    "garage": {
+      "added_in": "1.8.36",
+      "author": "Alex Efremo",
+      "licence": "Apache-2.0",
+      "mdi": "garage",
+      "tags": [
+        "Home Automation"
+      ]
+    },
+    "garden": {
+      "added_in": "1.5.54",
+      "author": "Google",
+      "licence": "Apache-2.0",
+      "mdi": "flower",
+      "tags": [
+        "Nature",
+        "Agriculture"
+      ]
+    },
+    "gate": {
+      "added_in": "1.5.54",
+      "author": "Simran",
+      "licence": "Apache-2.0",
+      "mdi": "gate",
+      "tags": [
+        "Home Automation"
+      ]
+    },
+    "home": {
+      "added_in": "1.5.54",
+      "author": "Google",
+      "licence": "Apache-2.0",
+      "mdi": "home",
+      "tags": [
+        "Home Automation",
+        "Places"
+      ]
+    },
+    "kitchen": {
+      "added_in": "6.1.95",
+      "author": "Google",
+      "licence": "Apache-2.0",
+      "mdi": "countertop",
+      "tags": [
+        "Home Automation"
+      ]
+    },
+    "lamp": {
+      "added_in": "1.5.54",
+      "author": "Google",
+      "licence": "Apache-2.0",
+      "mdi": "lightbulb",
+      "tags": [
+        "Home Automation"
+      ]
+    },
+    "lock": {
+      "added_in": "1.5.54",
+      "author": "Google",
+      "licence": "Apache-2.0",
+      "mdi": "lock",
+      "tags": [
+        "Lock",
+        "Home Automation",
+        "Automotive"
+      ]
+    },
+    "movie": {
+      "added_in": "1.5.54",
+      "author": "Google",
+      "licence": "Apache-2.0",
+      "mdi": "movie",
+      "tags": [
+        "Video / Movie"
+      ]
+    },
+    "neutral": {
+      "added_in": "1.5.54",
+      "author": "Google",
+      "licence": "Apache-2.0",
+      "mdi": "checkbox-blank-circle-outline",
+      "tags": [
+        "Form"
+      ]
+    },
+    "note": {
+      "added_in": "1.5.54",
+      "author": "Austin Andrews",
+      "licence": "Apache-2.0",
+      "mdi": "note-text",
+      "tags": []
+    },
+    "power": {
+      "added_in": "1.5.54",
+      "author": "Google",
+      "licence": "Apache-2.0",
+      "mdi": "power",
+      "tags": [
+        "Home Automation"
+      ]
+    },
+    "radiator": {
+      "added_in": "1.5.54",
+      "author": "Austin Andrews",
+      "licence": "Apache-2.0",
+      "mdi": "radiator",
+      "tags": [
+        "Home Automation"
+      ]
+    },
+    "scene": {
+      "added_in": "1.5.54",
+      "author": "Google",
+      "licence": "Apache-2.0",
+      "mdi": "palette",
+      "tags": [
+        "Color",
+        "Drawing / Art"
+      ]
+    },
+    "script": {
+      "added_in": "3.0.39",
+      "author": "Michael Irigoyen",
+      "licence": "Apache-2.0",
+      "mdi": "script-text",
+      "tags": [
+        "Gaming / RPG"
+      ]
+    },
+    "sofa": {
+      "added_in": "1.5.54",
+      "author": "Michael Irigoyen",
+      "licence": "Apache-2.0",
+      "mdi": "sofa",
+      "tags": [
+        "Home Automation"
+      ]
+    },
+    "speaker": {
+      "added_in": "1.5.54",
+      "author": "Google",
+      "licence": "Apache-2.0",
+      "mdi": "speaker",
+      "tags": [
+        "Audio",
+        "Home Automation"
+      ]
+    },
+    "thermometer": {
+      "added_in": "1.5.54",
+      "author": "Austin Andrews",
+      "licence": "Apache-2.0",
+      "mdi": "thermometer",
+      "tags": [
+        "Weather",
+        "Home Automation",
+        "Automotive"
+      ]
+    },
+    "tv": {
+      "added_in": "1.5.54",
+      "author": "Google",
+      "licence": "Apache-2.0",
+      "mdi": "television",
+      "tags": [
+        "Device / Tech",
+        "Home Automation"
+      ]
+    }
+  },
+  "render": {
+    "colour": "#ffffff",
+    "size": 64
+  },
+  "source": {
+    "git_commit": "9e04201d4557e729822fb57f62a316c3dea1d4a8",
+    "git_repository": "https://github.com/Templarian/MaterialDesign-SVG",
+    "git_tag": "v7.4.47",
+    "integrity": "sha512-WQ2gDll12T9WD34fdRFgQVgO8bag3gavrAgJ0frN4phlwdJARpE6gO1YvLEMJR0KKgoc+/Ea/A0Pp11I00xBvw==",
+    "package": "@mdi/svg",
+    "sha256": "de92e5dc9ce46c392ab5c53aa7190b19f82b40cb48872a083f788c7e13e91fef",
+    "tarball": "https://registry.npmjs.org/@mdi/svg/-/svg-7.4.47.tgz",
+    "version": "7.4.47"
+  }
+}

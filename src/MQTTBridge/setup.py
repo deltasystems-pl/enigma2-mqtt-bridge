@@ -84,6 +84,8 @@ def setting_labels():
         ("uninstall_allowed", _("Allow removing the plugin remotely")),
         ("update_check", _("Check daily for plugin updates")),
         ("update_allowed", _("Allow plugin updates over MQTT")),
+        ("menu_allowed", _("Allow the Home Assistant menu")),
+        ("menu_hotkey", _("Key that opens the Home Assistant menu")),
         ("log_level", _("Log level")),
         ("epg_grid_events", _("EPG grid events per channel")),
     )

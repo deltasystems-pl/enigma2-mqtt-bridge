@@ -9,6 +9,13 @@ version. The full text is in LICENSE.
 The plugin imports enigma2's own Python modules, which are GPL-2.0; that is why
 the plugin itself is GPL-2.0-or-later.
 
+The package (the IPK) also carries the receiver menu's icons, which are
+Apache-2.0 (below). Apache-2.0 is compatible with version 3 of the GNU General
+Public License and not with version 2, so the package as a whole is distributed
+under the terms of the GNU General Public License version 3 or later - the
+"or later" of the plugin's own licence. The text is in LICENSE-GPL-3.0.txt. The
+source in this repository stays GPL-2.0-or-later, the icons stay Apache-2.0.
+
 
 Third-party components
 ======================
@@ -58,3 +65,29 @@ paho-mqtt
   a soft job - `continue-on-error`, so it never blocks a merge or a release -
   and its only output is a warning on the run when this file has fallen behind.
   A vendored dependency has no package manager to nag you; this is the nag.
+
+Material Design Icons
+---------------------
+
+  Upstream project   https://pictogrammers.com/library/mdi/
+  Upstream package   @mdi/svg 7.4.47 (npm), from
+                     https://github.com/Templarian/MaterialDesign-SVG
+                     tag v7.4.47, commit 9e04201d4557e729822fb57f62a316c3dea1d4a8
+  License            Apache-2.0
+
+  The receiver menu draws one icon for each name of its contract. The SVGs of
+  the 25 icons used are in assets/icons/mdi/, with the upstream licence
+  statement beside them, and assets/icons/manifest.json says which icon each
+  name is, who drew it, and the archive's SHA-512. tools/render-icons.py takes
+  them out of the npm archive - checking that each one is not a brand icon,
+  which the upstream licence leaves under its owner's terms, and is not
+  deprecated - and renders them to the 64x64 PNGs in src/MQTTBridge/icons/.
+  The PNGs are white renderings of the SVGs and nothing else is changed.
+
+  Installed on the receiver at:
+
+    /usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge/icons/
+
+  together with the Apache License text (LICENSE-Apache-2.0.txt) and a NOTICE
+  naming every icon. This is why the package is distributed under GPLv3 terms,
+  above.

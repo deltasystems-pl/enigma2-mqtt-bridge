@@ -36,6 +36,8 @@ PROVISIONING_PATH = "/etc/enigma2/mqttbridge.json"
 HA_MODES = ("discovery", "integration", "off")
 LOG_LEVELS = ("error", "warning", "info", "debug")
 SCREENSHOT_MODES = ("off", "on_zap", "interval")
+# The keys that may open the receiver menu (`hotkey.py`), and `off`.
+MENU_HOTKEYS = ("help_long", "red_long", "f3", "f4", "off")
 REMOTE_SETTING_NAMES = (
     "publish_keys",
     "screenshot",
@@ -48,6 +50,8 @@ REMOTE_SETTING_NAMES = (
     # is in the read-only list below.
     "softcam_autoheal",
     "softcam_autoheal_seconds",
+    # Not a permission either: which key opens a menu the receiver already allows.
+    "menu_hotkey",
 )
 # Published in `info.settings` and refused by `cmd/config`, like any other key
 # that is not in the allowlist above. A setting that *enables* a command is
@@ -60,7 +64,7 @@ REMOTE_SETTING_NAMES = (
 # receiver's to decide and not the broker's.
 READ_ONLY_SETTING_NAMES = (
     "deep_standby_allowed", "softcam_restart_allowed", "epg_import_allowed",
-    "uninstall_allowed", "update_check", "update_allowed",
+    "uninstall_allowed", "update_check", "update_allowed", "menu_allowed",
 )
 # A refusal names the keys it refused, and they are the sender's words: this many
 # of them, each cut to this length, so the sentence on `last_error` stays short.
@@ -112,6 +116,8 @@ SETTING_NAMES = (
     "uninstall_allowed",
     "update_check",
     "update_allowed",
+    "menu_allowed",
+    "menu_hotkey",
     "log_level",
     "epg_grid_events",
 )
@@ -153,6 +159,8 @@ SETTING_KINDS = {
     "uninstall_allowed": "bool",
     "update_check": "bool",
     "update_allowed": "bool",
+    "menu_allowed": "bool",
+    "menu_hotkey": "choice",
     "log_level": "choice",
     "epg_grid_events": "int",
 }
@@ -160,6 +168,7 @@ SETTING_KINDS = {
 CHOICES = {
     "ha_mode": HA_MODES,
     "screenshot": SCREENSHOT_MODES,
+    "menu_hotkey": MENU_HOTKEYS,
     "log_level": LOG_LEVELS,
 }
 
@@ -281,6 +290,21 @@ def _build():
     # the commands, so it is granted on the receiver and never over MQTT. The television
     # and the OpenWebif page need it for nothing - whoever stands there could set it.
     section.update_allowed = ConfigYesNo(default=False)
+    # On by default (D53), and never writable over MQTT: the receiver menu shows what Home
+    # Assistant sends and sends back only a row's id and a value (`menu.py`), so what it can do
+    # is what the user put into the menu in Home Assistant. Off, there is no menu, no Extensions
+    # entry, no hotkey and no subscription to the menu topic.
+    section.menu_allowed = ConfigYesNo(default=True)
+    section.menu_hotkey = ConfigSelection(
+        default="help_long",
+        choices=[
+            ("help_long", _("HELP, held")),
+            ("red_long", _("RED, held")),
+            ("f3", "F3"),
+            ("f4", "F4"),
+            ("off", _("off")),
+        ],
+    )
     section.log_level = ConfigSelection(
         default="info", choices=[(level, level) for level in LOG_LEVELS]
     )
@@ -509,6 +533,7 @@ def validate_remote_settings(raw, section=None):
     autoheal_seconds = raw.get(
         "softcam_autoheal_seconds", value("softcam_autoheal_seconds", section)
     )
+    menu_hotkey = raw.get("menu_hotkey", value("menu_hotkey", section))
     if not isinstance(publish_keys, bool):
         raise ValueError("publish_keys must be true or false")
     if not isinstance(screenshot, str) or screenshot not in SCREENSHOT_MODES:
@@ -538,6 +563,8 @@ def validate_remote_settings(raw, section=None):
         raise ValueError(
             f"softcam_autoheal_seconds must be between {minimum} and {maximum}"
         )
+    if not isinstance(menu_hotkey, str) or menu_hotkey not in MENU_HOTKEYS:
+        raise ValueError("menu_hotkey must be one of " + ", ".join(MENU_HOTKEYS))
     return {
         "publish_keys": publish_keys,
         "screenshot": screenshot,
@@ -547,6 +574,7 @@ def validate_remote_settings(raw, section=None):
         "oscam_telemetry": oscam_telemetry,
         "softcam_autoheal": autoheal,
         "softcam_autoheal_seconds": autoheal_seconds,
+        "menu_hotkey": menu_hotkey,
     }
 
 

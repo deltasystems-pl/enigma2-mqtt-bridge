@@ -5,8 +5,15 @@ up when a feed rejects the package or a receiver refuses to install it, long
 after the commit. The template is cheap to assert here instead.
 """
 
+import io
+import os
+import shutil
 import stat
+import subprocess
+import tarfile
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTROL = REPO_ROOT / "CONTROL" / "control"
@@ -55,7 +62,9 @@ def test_package_name_and_architecture():
     assert fields["Package"] == "enigma2-plugin-extensions-mqttbridge"
     # Pure Python: one package installs on every receiver.
     assert fields["Architecture"] == "all"
-    assert fields["License"] == "GPL-2.0-or-later"
+    # The code is GPL-2.0-or-later; the package also carries the menu's Apache-2.0 icons, which
+    # GPLv2 cannot take, so the package is distributed under GPLv3 or later (NOTICE).
+    assert fields["License"] == "GPL-3.0-or-later AND Apache-2.0"
 
 
 def test_version_is_a_build_placeholder():
@@ -91,6 +100,33 @@ def test_maintainer_scripts_are_executable_in_the_checkout():
         assert script.stat().st_mode & stat.S_IXUSR, f"CONTROL/{name} is not executable"
 
 
+def test_the_scripts_the_workflows_run_directly_are_executable_in_git():
+    """CI and the release run `./tools/<script>`, so git must carry the executable bit.
+
+    The tests run the build through `bash`, which does not care about the mode;
+    a script that lost its bit passes here and fails in CI with "Permission denied".
+    """
+    workflows = REPO_ROOT / ".github" / "workflows"
+    names = set()
+    for workflow in workflows.glob("*.yml"):
+        for word in workflow.read_text(encoding="utf-8").split():
+            if word.startswith("./tools/"):
+                names.add(word[2:])
+    assert "tools/build-ipk.sh" in names
+    if shutil.which("git") is None or not (REPO_ROOT / ".git").exists():
+        pytest.skip("no git checkout to read the index from")
+    for name in sorted(names):
+        entry = subprocess.run(
+            ["git", "ls-files", "-s", "--", name],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        assert entry, f"{name} is not tracked"
+        assert entry[0] == "100755", f"{name} is mode {entry[0]} in git, not 100755"
+
+
 def test_maintainer_scripts_are_packaged_and_their_mode_is_asserted_from_the_archive():
     build = (REPO_ROOT / "tools" / "build-ipk.sh").read_text(encoding="utf-8")
     assert "cp CONTROL/postinst CONTROL/prerm" in build
@@ -98,6 +134,56 @@ def test_maintainer_scripts_are_packaged_and_their_mode_is_asserted_from_the_arc
     # the check that survives a change of staging filesystem.
     assert 'chmod 755 "$STAGE/control/postinst" "$STAGE/control/prerm"' in build
     assert "for script in ./postinst ./prerm; do" in build
+
+
+LICENCE_FILES = ("LICENSE", "LICENSE-GPL-3.0.txt", "NOTICE")
+
+
+def test_the_licence_texts_and_the_notice_are_packaged_beside_the_plugin():
+    """The package says GPL-3.0-or-later AND Apache-2.0: it carries both texts and the notice."""
+    for name in LICENCE_FILES:
+        assert (REPO_ROOT / name).is_file(), name
+    for name in ("LICENSE-Apache-2.0.txt", "NOTICE"):
+        assert (REPO_ROOT / "src" / "MQTTBridge" / "icons" / name).is_file(), name
+    build = (REPO_ROOT / "tools" / "build-ipk.sh").read_text(encoding="utf-8")
+    assert 'cp LICENSE LICENSE-GPL-3.0.txt NOTICE "$STAGE/data/$PLUGIN_DIR/"' in build
+    # And read back out of the built archive, where a build cannot pass without them.
+    assert ("for licence in LICENSE LICENSE-GPL-3.0.txt NOTICE icons/LICENSE-Apache-2.0.txt "
+            "icons/NOTICE; do") in build
+
+
+def test_the_built_package_carries_the_licence_files(tmp_path):
+    """The whole build, on a copy of this tree, where the build tools are installed."""
+    missing = [tool for tool in ("bash", "msgfmt", "ar", "tar", "gzip")
+               if shutil.which(tool) is None]
+    if missing:
+        if os.environ.get("MQTTBRIDGE_REQUIRE_BUILD_TOOLS"):
+            pytest.fail("the package build needs " + ", ".join(missing))
+        pytest.skip("the package build needs " + ", ".join(missing))
+    tree = tmp_path / "tree"
+    shutil.copytree(REPO_ROOT, tree, ignore=shutil.ignore_patterns(
+        ".git", "dist", "__pycache__", ".venv", "venv", "*.pyc"))
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    environment["SOURCE_DATE_EPOCH"] = "1790000000"
+    result = subprocess.run(["bash", "tools/build-ipk.sh", "--allow-unreleased"], cwd=tree,
+                            capture_output=True, text=True, env=environment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    (ipk,) = (tree / "dist").glob("*.ipk")
+    members = subprocess.run(["ar", "p", str(ipk), "data.tar.gz"], capture_output=True,
+                             check=True).stdout
+    with tarfile.open(fileobj=io.BytesIO(members), mode="r:gz") as data:
+        names = set(data.getnames())
+    plugin = "./usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge/"
+    for name in LICENCE_FILES:
+        assert plugin + name in names, name
+        packaged = data_text(members, plugin + name)
+        assert packaged == (REPO_ROOT / name).read_text(encoding="utf-8")
+    assert plugin + "icons/LICENSE-Apache-2.0.txt" in names
+
+
+def data_text(data_tar_gz, member):
+    with tarfile.open(fileobj=io.BytesIO(data_tar_gz), mode="r:gz") as data:
+        return data.extractfile(member).read().decode("utf-8")
 
 
 def test_optional_openwebif_shim_is_packaged_from_its_unique_external_path():

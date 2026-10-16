@@ -358,6 +358,11 @@ class Bridge:
             return "could not persist the plugin settings"
 
         self._replace_configurable_publishers()
+        # The menu's hotkey is rebound in place rather than by replacing the publisher: the
+        # menu it holds, and a screen that may be open on it, belong to this session.
+        menu = self.publisher("menu")
+        if menu is not None:
+            menu.rebind_hotkey()
         # No reconnect follows this path, so nothing else would retract what the
         # new settings stopped publishing: `publish_keys` switched off here takes
         # the `keys` capability, and with it the eight device triggers, which
@@ -602,6 +607,9 @@ class Bridge:
         # Before anything connects: an installer may have written the broker in.
         settings_module.import_provisioning(self._provisioning_path, self.settings)
         configure_logging(self.value("log_level"), self._log_path)
+        # The Extensions entry follows `menu_allowed` whether or not a session follows: an idle
+        # plugin still has the entry the setting says, and says why when it is chosen.
+        self._sync_menu_entry()
 
         self._ensure_identity()
         register_secret(self.value("password"))
@@ -670,6 +678,14 @@ class Bridge:
             buildid.display_version(__version__, self._build),
         )
         self.client.start()
+
+    def _sync_menu_entry(self):
+        try:
+            from .plugin import sync_menu_entry
+
+            sync_menu_entry(bool(self.value("menu_allowed")))
+        except Exception:
+            LOG.exception("the menu's Extensions entry could not be updated")
 
     def _idle(self, reason):
         self._stop_timers()
@@ -1073,6 +1089,12 @@ class Bridge:
         integration = self._self_update.integration_topic()
         if integration:
             self.client.subscribe(integration, qos=COMMAND_QOS)
+        # The receiver menu and Home Assistant's status - only while `menu_allowed` is on, which
+        # is when the menu publisher runs.
+        menu = self.publisher("menu")
+        if menu is not None:
+            menu.subscribe(self.client)
+            menu.connection_changed()
         self.state.save()
         if self._pending_error is not None:
             # Said once, so only a publish the client took counts as said: a
@@ -1092,6 +1114,10 @@ class Bridge:
         if topic == self._self_update.integration_topic():
             self._self_update.on_integration(payload)
             return
+        menu = self.publisher("menu")
+        if menu is not None and menu.handles(topic):
+            menu.on_message(topic, payload, retain)
+            return
         if topic == RELEASE_INDEX_TOPIC:
             if self._self_update.closed:
                 LOG.info("not judging a relayed index now: an update is being applied")
@@ -1101,7 +1127,10 @@ class Bridge:
         self._commands.handle(topic, payload, retain)
 
     def on_disconnect(self, reason_code):
-        pass
+        # The menu greys itself without a broker (D14), and an open one says so at once.
+        menu = self.publisher("menu")
+        if menu is not None:
+            menu.connection_changed()
 
     # ----------------------------------------------------------------- publishing --
 
@@ -1131,6 +1160,39 @@ class Bridge:
             # It fits again, so it is on the broker and off the list.
             self._report_not_published()
         return info
+
+    def publish_event(self, suffix, payload, qos=COMMAND_QOS):
+        """An event the receiver raises: JSON, never retained, at `qos`. The client's answer.
+
+        None when nothing was handed to the client.
+
+        Only on an open session, and never while the plugin removes itself or an update has
+        taken the node's topics back - as for every other publish. Held to the packet bound like
+        any payload, although the one event published this way, `menu_action`, is a few hundred
+        bytes by construction.
+        """
+        if self.client is None or not self.connected:
+            return None
+        if self._uninstaller.closed or self._self_update.silent:
+            return None
+        topic = self.topic(suffix)
+        encoded = _encoded(payload)
+        size = _oversize(topic, encoded)
+        if size:
+            return self._withhold(topic, size, retain=False)
+        # Transient: one the broker has not acknowledged when the connection goes is dropped at
+        # the next connect, before the client would send it again (D64).
+        return self.client.publish(topic, encoded, qos=qos, retain=False, transient=True)
+
+    def withdraw_event(self, info):
+        """Take an event that was not acknowledged back out of the client's queue.
+
+        For an event that is true only when it was raised: without this, the client would send
+        it again after the next connect (`mqttclient.withdraw_publish`). Whether it was taken.
+        """
+        client = self.client
+        withdraw = getattr(client, "withdraw", None) if client is not None else None
+        return bool(withdraw(info)) if withdraw is not None else False
 
     def _topic_label(self, topic):
         """A topic as `info.not_published` and the log name it: relative to the node's tree."""
@@ -1464,10 +1526,22 @@ class Bridge:
             "ha_mode": self.value("ha_mode"),
             "settings": self.published_settings(),
             "capabilities": self.capabilities(),
+            # Which screen the receiver menu uses and which key opens it; null without the menu.
+            "menu": self._menu_info(),
             # Empty on nearly every receiver: the retained topics a payload was
             # too big for, which are therefore not on the broker (`_withhold`).
             "not_published": not_published,
         }
+
+    def _menu_info(self):
+        menu = self.publisher("menu")
+        if menu is None or not menu.claimed():
+            return None
+        try:
+            return menu.info()
+        except Exception:
+            LOG.exception("info.menu could not be read")
+            return None
 
     def publish_snapshot(self, info=None):
         """Everything this node knows, as a consumer would want it on subscribe."""

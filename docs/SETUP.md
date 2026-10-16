@@ -42,10 +42,13 @@ and settings survive a plugin upgrade.
 | `uninstall_allowed` | `off` | Gate for `cmd/uninstall`, which removes the plugin from the receiver. Off by default because it is a one-way door: afterwards only the receiver's own plugin menu or SSH can put the plugin back. See below |
 | `update_check` | `off` | Let the receiver ask the plugin's release origin on the internet which releases exist - once a day, and when `cmd/update_check` asks - and publish what it found on the `update` topic. Off by default because the receiver then makes no connection but the broker's. A receiver without internet learns of releases from Home Assistant instead, which needs no setting. It only checks; nothing is installed. See below |
 | `update_allowed` | `off` | Gate for `cmd/update`, which installs a signed release of the plugin over MQTT and restarts the interface to run it. Off by default because it replaces the code that takes the commands. The receiver's own screens and the OpenWebif page do not need it |
+| `menu_allowed` | `on` | Offer the Home Assistant menu: the Extensions entry "Home Assistant", the hotkey, and the subscription to the menu the companion integration publishes. On by default because the menu can do only what you put into it in Home Assistant; see below |
+| `menu_hotkey` | `HELP, held` | The key that opens the Home Assistant menu in live TV and while a recording or a media file plays: HELP held, RED held, F3, F4, or off. A key the receiver itself uses keeps doing what it did; see below |
 | `log_level` | `info` | `error` / `warning` / `info` / `debug` |
 
 🔴 **`deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`,
-`uninstall_allowed`, `update_check` and `update_allowed` are never writable over MQTT.** They are
+`uninstall_allowed`, `update_check`, `update_allowed` and `menu_allowed` are never writable over
+MQTT.** They are
 set on the receiver - here, in the provisioning file, or on the [OpenWebif page](#the-openwebif-page)
 - and published in `info.settings` so that a consumer can hide a control the box would always
 refuse, but `cmd/config` rejects them like any other key outside its allowlist - the whole command,
@@ -119,6 +122,41 @@ and then appears when you close it. A sender that asks for `"style": "toast"` ge
   while it is in standby is refused on `last_error` rather than kept for later.
 
 A skin may define a screen called `MQTTBridgeToast` to restyle it, as it can any other screen.
+
+### What the Home Assistant menu does
+
+With the companion integration, you choose in Home Assistant what the receiver's menu offers -
+lights, switches, covers, scenes, scripts, a selector, a number, a text - in up to eight groups.
+The receiver shows it on the television:
+
+- **Open it** from the Extensions menu (the entry "Home Assistant") or by
+  holding HELP in live TV or while a recording or a media file plays (`menu_hotkey`). A key the
+  receiver already uses - for example a function you assigned in its own button setup, or a key
+  the player uses - keeps doing that, and the menu does not open from it;
+  `info.menu.hotkey` then says so. The Extensions entry always works, and you can put it on any key
+  in the receiver's button setup.
+- **Use it** with the arrows and OK; EXIT goes back. OK switches a light or a switch, runs a scene
+  or a script, opens a list of choices, or opens the keyboard for text. On a number - a dimmer, a
+  blind's position - LEFT and RIGHT change the value on the receiver and OK sends it; EXIT, or
+  moving to another row, forgets it. OK on the choice, number or text the row already has sends
+  nothing and just closes the list or keyboard. The keys 1-9 jump to the row of that number; OK
+  then acts. A row whose state is green is all good, red needs attention. A row of a kind this
+  receiver does not know yet - from a newer Home Assistant integration - shows its state and does
+  nothing on OK.
+- **What it shows** comes from Home Assistant and changes on the screen as it changes there.
+  After OK a row shows a small mark until Home Assistant has done it; when nothing has changed after
+  five seconds the line at the bottom says so.
+- **Without the broker, or while Home Assistant is down**, the menu stays on the screen greyed,
+  with a line saying why, and nothing in it can be used. It never sends a choice later. When the
+  receiver gets its broker connection back, the menu is usable again at once unless Home
+  Assistant says it is down.
+
+The receiver only says which row was chosen and the value; Home Assistant decides what that does,
+and does nothing for a row it does not have. Anybody who can publish on your broker can send the
+receiver's choices too, so put into the menu only what you would hand to whoever holds the remote.
+`menu_allowed` off removes the menu, the entry and the hotkey. Where the receiver cannot draw the
+plugin's own screen, it uses its own plain list with the same rows; the number keys do nothing
+there, because that list would act on a digit.
 
 ### What the softcam restart does
 

@@ -373,6 +373,42 @@ enigma.eListbox = eListbox
 enigma.getDesktop = getDesktop
 
 
+class eListboxPythonMultiContent:
+    """The content of a list whose rows are drawn from Python: it keeps what it is told."""
+
+    def __init__(self):
+        self.fonts = {}
+        self.item_height = None
+        self.entries = []
+
+    def setFont(self, index, font):
+        self.fonts[index] = font
+
+    def setItemHeight(self, height):
+        self.item_height = height
+
+    def setList(self, entries):
+        self.entries = list(entries)
+
+
+class gFont:
+    def __init__(self, face, size):
+        self.face = face
+        self.size = size
+
+
+enigma.eListboxPythonMultiContent = eListboxPythonMultiContent
+enigma.gFont = gFont
+# The values OpenViX's `enigma.py` gives them; only their being distinct bits matters here.
+enigma.RT_HALIGN_LEFT = 0
+enigma.RT_HALIGN_RIGHT = 2
+enigma.RT_HALIGN_CENTER = 4
+enigma.RT_VALIGN_CENTER = 16
+enigma.RT_ELLIPSIS = 64
+enigma.BT_SCALE = 128
+enigma.BT_KEEP_ASPECT_RATIO = 256
+
+
 # ------------------------------------------------------- services and references --
 
 
@@ -839,14 +875,33 @@ enigma.eEPGCache = EPGCache
 
 
 class KeyActionMap:
+    """`eActionMap`, after `lib/actions/action.cpp` (OpenViX, OpenATV and OpenPLi agree).
+
+    Bindings are asked in priority order - the lowest number first, and within one priority the
+    older first - and the first that answers non-zero ends the press. A wildcard binding (context
+    `""`) is called with the key and its flag; a named context only for a key a keymap mapped into
+    it with that flag (`bindKey`), and then with the context and the action. A long press
+    suppresses the break that follows it for the named contexts; the wildcards still get it here,
+    as some forks deliver it (`remote.py`).
+    """
+
     _instance = None
 
     def __init__(self):
         self.bound = []
         self.pressed = []
+        # (domain, device, key, flag bits, context, action), as the keymap parser binds them.
+        self.keys = []
+        self._long = set()
         # The bindings a C++ widget makes for itself, with no action map: see
         # `eListbox` above.
         self.native = []
+
+    def bindKey(self, domain, device, key, flags, context, action):
+        self.keys.append((domain, device, int(key), int(flags), context, action))
+
+    def unbindKeyDomain(self, domain):
+        self.keys = [entry for entry in self.keys if entry[0] != domain]
 
     @classmethod
     def getInstance(cls):
@@ -868,8 +923,27 @@ class KeyActionMap:
         as it does on the box.
         """
         self.pressed.append((device, key, flags))
-        for _context, _priority, function in list(self.bound):
-            function(key, flags)
+        if flags == 0:
+            self._long.discard(key)
+        elif flags == 3:
+            self._long.add(key)
+        calls = []
+        for context, _priority, function in sorted(self.bound, key=lambda entry: entry[1]):
+            if context == "":
+                calls.append((function, (key, flags)))
+                continue
+            if flags == 1 and key in self._long:
+                continue
+            for _domain, name, code, bits, mapped, action in self.keys:
+                if (mapped == context and code == key and bits & (1 << flags)
+                        and name in ("generic", device)):
+                    calls.append((function, (context, action)))
+        if flags == 1:
+            self._long.discard(key)
+        for function, arguments in calls:
+            if function(*arguments):
+                return 1
+        return 0
 
 
 enigma.eActionMap = KeyActionMap
@@ -1448,6 +1522,8 @@ class MenuList(GUIComponent):
         GUIComponent.__init__(self)
         self.list = list(entries or [])
         self.selection = 0
+        # The content object, `l` on every image, which a multi-content list sets fonts on.
+        self.l = content() if content is not None else None  # noqa: E741
 
     def setList(self, entries):
         self.list = list(entries or [])
@@ -1461,11 +1537,78 @@ class MenuList(GUIComponent):
     def getSelectionIndex(self):
         return self.selection
 
+    def getSelectedIndex(self):
+        return self.selection
+
     def moveToIndex(self, index):
         self.selection = index
 
 
 menu_list_module.MenuList = MenuList
+
+multi_content_module = _module("Components.MultiContent")
+
+
+def MultiContentEntryText(pos=(0, 0), size=(0, 0), font=0, flags=0, text="", color=None,
+                          color_sel=None, backcolor=None, backcolor_sel=None, **kwargs):
+    """The tuple the image builds; here a dict, so a test can read what a row draws."""
+    return {"kind": "text", "pos": pos, "size": size, "font": font, "flags": flags,
+            "text": text, "color": color, "color_sel": color_sel}
+
+
+def MultiContentEntryPixmapAlphaBlend(pos=(0, 0), size=(0, 0), png=None, backcolor=None,
+                                      backcolor_sel=None, flags=0):
+    return {"kind": "pixmap", "pos": pos, "size": size, "png": png, "flags": flags}
+
+
+def MultiContentEntryRectangle(*args, **kwargs):
+    """Importable and broken, as on OpenViX 6.6: its binary has no `TYPE_RECT`."""
+    raise AttributeError("type object 'eListboxPythonMultiContent' has no attribute 'TYPE_RECT'")
+
+
+multi_content_module.MultiContentEntryText = MultiContentEntryText
+multi_content_module.MultiContentEntryPixmapAlphaBlend = MultiContentEntryPixmapAlphaBlend
+multi_content_module.MultiContentEntryRectangle = MultiContentEntryRectangle
+
+load_pixmap_module = _module("Tools.LoadPixmap")
+
+
+class LoadedPixmap:
+    def __init__(self, path):
+        self.path = path
+
+
+def LoadPixmap(path, desktop=None, cached=None, **kwargs):
+    import os
+
+    return LoadedPixmap(path) if os.path.isfile(path) else None
+
+
+load_pixmap_module.LoadPixmap = LoadPixmap
+
+plugin_component_module = _module("Components.PluginComponent")
+
+
+class PluginComponent:
+    """`Components/PluginComponent.py`'s list, as far as adding and removing a descriptor goes."""
+
+    def __init__(self):
+        self.pluginList = []
+        self.plugins = {}
+
+    def addPlugin(self, plugin):
+        self.pluginList.append(plugin)
+        self.plugins.setdefault(plugin.where, []).append(plugin)
+
+    def removePlugin(self, plugin):
+        self.pluginList.remove(plugin)
+        self.plugins[plugin.where].remove(plugin)
+
+    def getPlugins(self, where):
+        return list(self.plugins.get(where, []))
+
+
+plugin_component_module.plugins = PluginComponent()
 
 source_module = _module("Components.Sources.Source")
 
@@ -1547,6 +1690,32 @@ class Screen(dict):
     def widgets(self):
         """The screen's items. The setup-screen tests predate the dict model."""
         return self
+
+    def execBegin(self):
+        # Screen.pyc: a close asked for before is done now; `onExecBegin` and the one-off
+        # `onFirstExecBegin` run and may open another dialog; then every item executes.
+        if self.close_on_next_exec is not None:
+            pending = self.close_on_next_exec
+            self.close_on_next_exec = None
+            self.execing = True
+            self.close(*pending)
+            return
+        single = self.onFirstExecBegin
+        self.onFirstExecBegin = []
+        for function in self.onExecBegin + single:
+            function()
+            if not self.stand_alone and self.session.current_dialog != self:
+                return
+        for value in list(self.values()):
+            value.execBegin()
+        self.execing = True
+
+    def execEnd(self):
+        for value in list(self.values()):
+            value.execEnd()
+        self.execing = False
+        for function in self.onExecEnd:
+            function()
 
     def setTitle(self, title):
         self.title = title
@@ -2096,6 +2265,40 @@ class MessageBox(ModelScreen):
 
 message_box_module.MessageBox = MessageBox
 
+choice_box_module = _module("Screens.ChoiceBox")
+
+
+class ChoiceBox(ModelScreen):
+    """`Screens/ChoiceBox.py`, with the keyword arguments all three images accept.
+
+    A test picks with `close(entry)` - the tuple, as the image's OK closes with it - or
+    cancels with `close(None)`.
+    """
+
+    def __init__(self, session, title="", list=None, keys=None, selection=0, **kwargs):
+        ModelScreen.__init__(self, session)
+        self.title = title
+        self.list = list or []
+        self.keys = keys
+        self.selection = selection
+
+
+choice_box_module.ChoiceBox = ChoiceBox
+
+virtual_keyboard_module = _module("Screens.VirtualKeyBoard")
+
+
+class VirtualKeyBoard(ModelScreen):
+    """The image's on-screen keyboard: OK closes with the text, EXIT with None."""
+
+    def __init__(self, session, title="", text="", **kwargs):
+        ModelScreen.__init__(self, session)
+        self.title = title
+        self.text = text
+
+
+virtual_keyboard_module.VirtualKeyBoard = VirtualKeyBoard
+
 
 class ModalSession:
     """`StartEnigma.Session`: a dialog stack, one dialog executing, deferred pops."""
@@ -2139,6 +2342,11 @@ class ModalSession:
 
     def instantiateDialog(self, screen, *arguments, **kwargs):
         return screen(self, *arguments, **kwargs)
+
+    def deleteDialog(self, screen):
+        # StartEnigma.py: hide, then close - never the dialog stack.
+        screen.hide()
+        screen.doClose()
 
     def pushCurrent(self):
         if self.current_dialog is not None:
@@ -2981,10 +3189,11 @@ class FakeMessageInfo:
     `is_published()`, as paho's does.
     """
 
-    def __init__(self, rc=0, qos=0):
+    def __init__(self, rc=0, qos=0, mid=0):
         self.waited = None
         self.rc = rc
         self.qos = qos
+        self.mid = mid
         self.acknowledged = qos == 0
 
     def wait_for_publish(self, timeout=None):
@@ -3024,6 +3233,11 @@ class FakeMQTTClient:
         self.max_inflight = None
         # Set to a paho error code to make every later publish come back rejected.
         self.publish_rc = 0
+        # paho's outgoing queue as far as `mqttclient.withdraw_publish` reads it: every QoS 1
+        # message without its PUBACK, by mid, in the state paho 2.1 gives it.
+        self._out_messages = {}
+        self._inflight_messages = 0
+        self._mid = 0
         self.on_connect = None
         self.on_message = None
         self.on_disconnect = None
@@ -3067,8 +3281,16 @@ class FakeMQTTClient:
 
     def publish(self, topic, payload=None, qos=0, retain=False):
         self.published.append(Published(topic, payload, qos, retain))
-        info = FakeMessageInfo(rc=self.publish_rc, qos=qos)
+        self._mid += 1
+        info = FakeMessageInfo(rc=self.publish_rc, qos=qos, mid=self._mid)
         self.infos.append(info)
+        if qos:
+            # Kept for the next connect whether or not the socket took it, as paho keeps it:
+            # in flight when sent, waiting to be published when there was no connection.
+            sent = not self.publish_rc
+            self._out_messages[self._mid] = types.SimpleNamespace(
+                topic=topic, state=2 if sent else 1, info=info)
+            self._inflight_messages += 1 if sent else 0
         return info
 
     def acknowledge(self, count=None):
@@ -3076,6 +3298,12 @@ class FakeMQTTClient:
         waiting = [info for info in self.infos if not info.acknowledged]
         for info in waiting if count is None else waiting[:count]:
             info.acknowledged = True
+            if self._out_messages.pop(info.mid, None) is not None:
+                self._inflight_messages = max(0, self._inflight_messages - 1)
+
+    def queued_for_reconnect(self):
+        """The topics paho would send again after the next connect."""
+        return [message.topic for message in self._out_messages.values()]
 
     # --- what paho's network thread would do --------------------------------
 
@@ -3413,6 +3641,7 @@ def fresh_receiver():
         enigma2_module.forget_missing()
         keys_module.forget_image_keys()
         remote_module.forget_rate_limit()
+        plugin_component_module.plugins = PluginComponent()
 
     reset()
     yield

@@ -105,6 +105,38 @@ EPG-grid refreshes yield between batches of at most four channels and keep the p
 grid until the replacement is ready. A full refresh may therefore take several seconds while the
 interface remains responsive; only a slow-batch or event-loop warning indicates a problem.
 
+## The Home Assistant menu does not open, or shows nothing
+
+- **No "Home Assistant" in the Extensions menu**: `menu_allowed` is off, or `info.capabilities`
+  has no `menu` - the log then says why no menu screen could be built.
+- **The hotkey does nothing**: read `info.menu`. `hotkey` `null` with a reason says why: switched
+  off, an image that does not let a plugin bind a key, or a key the receiver's own button setup
+  gives a function - which runs instead, by design. The hotkey works in live TV and while a
+  recording or a media file plays, not over another screen, and not on a key the player uses
+  itself (OpenATV's media player seeks back on a long RED). The Extensions entry opens the menu in
+  any case.
+- **"There is no menu from Home Assistant yet."**: nothing is retained on
+  `enigma2mqtt/menu/<node>`, or it was emptied - the integration's options define no menu, or its
+  entry was removed. A payload the receiver refused leaves the menu before it and one line in the
+  log, `ignoring an invalid menu`, with the place it broke the contract.
+- **Greyed, "Home Assistant is not reachable"**: Home Assistant's status topic said `offline`
+  (`homeassistant/status`, or your discovery prefix) since the receiver's broker connection last
+  came up. It ungreys on the next `online`, which Home Assistant publishes when it starts, on the
+  next menu the integration publishes - any change to a row in the menu - and when the receiver's
+  broker connection goes and comes back, since the status is forgotten then. The log says
+  `Home Assistant says offline` when it greyed and `a menu arrived live from Home Assistant` when a
+  menu lifted it.
+- **A row does nothing on OK and the log says `rows of a type this plugin does not know`**: the
+  integration is newer than the plugin and sends a kind of row this version cannot work; it stays
+  shown, inert, until the plugin is updated.
+- **OK on a list or the keyboard closes it and nothing is sent**: the choice, number or text was
+  already the row's value, so there was nothing to change.
+- **A row shows its mark and then "Home Assistant changed nothing."**: the integration refused the
+  action or the device did not follow; the integration's log says which.
+- **`info.menu.screen` is `fallback`**: the plugin's own screen could not be built on this image
+  or skin, and the receiver's plain list is used. The log has the reason; please report it with
+  the image and the skin.
+
 ## The receiver's memory use keeps climbing
 
 **Watch the curve before believing anything about it.** The plugin publishes the enigma2 process's

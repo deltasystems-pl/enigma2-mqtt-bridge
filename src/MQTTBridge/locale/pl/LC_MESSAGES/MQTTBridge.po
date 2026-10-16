@@ -1042,3 +1042,95 @@ msgstr "Dekoder nie ma dostępu do internetu, a Home Assistant nie odpowiedział
 #: src/MQTTBridge/updateview.py
 msgid "An answer arrived, but its download address had already expired by the receiver's clock. If the receiver's clock is wrong, set it and try again."
 msgstr "Nadeszła odpowiedź, ale według zegara dekodera jej adres pobierania już wygasł. Jeśli zegar dekodera jest źle ustawiony, ustaw go i spróbuj ponownie."
+
+#: src/MQTTBridge/config.py
+msgid "HELP, held"
+msgstr "HELP, przytrzymany"
+
+#: src/MQTTBridge/config.py
+msgid "RED, held"
+msgstr "CZERWONY, przytrzymany"
+
+#: src/MQTTBridge/setup.py
+msgid "Allow the Home Assistant menu"
+msgstr "Zezwalaj na menu Home Assistant"
+
+#: src/MQTTBridge/setup.py
+msgid "Key that opens the Home Assistant menu"
+msgstr "Przycisk otwierający menu Home Assistant"
+
+#: src/MQTTBridge/plugin.py
+msgid "Home Assistant"
+msgstr "Home Assistant"
+
+#: src/MQTTBridge/plugin.py
+msgid "The menu Home Assistant sends to this receiver"
+msgstr "Menu, które Home Assistant wysyła do tego odbiornika"
+
+#: src/MQTTBridge/plugin.py
+msgid "The Home Assistant menu is not available: the plugin is not running."
+msgstr "Menu Home Assistant jest niedostępne: wtyczka nie działa."
+
+#: src/MQTTBridge/plugin.py
+msgid "The Home Assistant menu cannot be opened on this receiver now."
+msgstr "Menu Home Assistant nie może być teraz otwarte na tym odbiorniku."
+
+#: src/MQTTBridge/menu.py
+msgid "Sent to Home Assistant."
+msgstr "Wysłano do Home Assistant."
+
+#: src/MQTTBridge/menu.py
+msgid "Home Assistant changed nothing."
+msgstr "Home Assistant niczego nie zmienił."
+
+#: src/MQTTBridge/menu.py
+msgid "Could not send this to Home Assistant."
+msgstr "Nie udało się wysłać tego do Home Assistant."
+
+#: src/MQTTBridge/menu.py
+msgid "This row only shows a state."
+msgstr "Ten wiersz tylko pokazuje stan."
+
+#: src/MQTTBridge/menu.py
+msgid "This is unavailable in Home Assistant."
+msgstr "To jest niedostępne w Home Assistant."
+
+#: src/MQTTBridge/menu.py
+msgid "Use LEFT and RIGHT to change the value, then OK."
+msgstr "Zmień wartość strzałkami W LEWO i W PRAWO, potem OK."
+
+#: src/MQTTBridge/menu.py
+msgid "No connection to the MQTT broker. Showing the last menu."
+msgstr "Brak połączenia z brokerem MQTT. Pokazuję ostatnie menu."
+
+#: src/MQTTBridge/menu.py
+msgid "Home Assistant is not reachable. Showing the last menu."
+msgstr "Home Assistant jest nieosiągalny. Pokazuję ostatnie menu."
+
+#: src/MQTTBridge/menu.py
+msgid "There is no menu from Home Assistant yet."
+msgstr "Home Assistant nie przysłał jeszcze menu."
+
+#: src/MQTTBridge/menu.py
+msgid "OK apply   EXIT discard"
+msgstr "OK zastosuj   EXIT odrzuć"
+
+#: src/MQTTBridge/menu.py
+msgid "LEFT/RIGHT change   OK apply   EXIT discard"
+msgstr "LEWO/PRAWO zmień   OK zastosuj   EXIT odrzuć"
+
+#: src/MQTTBridge/menu.py
+msgid "OK select   LEFT/RIGHT adjust   EXIT back"
+msgstr "OK wybierz   LEWO/PRAWO ustaw   EXIT wstecz"
+
+#: src/MQTTBridge/menu.py
+msgid "OK select   EXIT back"
+msgstr "OK wybierz   EXIT wstecz"
+
+#: src/MQTTBridge/menu.py
+msgid "current"
+msgstr "bieżące"
+
+#: src/MQTTBridge/menu.py
+msgid "There are no controls here."
+msgstr "Nie ma tu żadnych elementów sterowania."

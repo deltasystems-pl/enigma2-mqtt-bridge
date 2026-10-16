@@ -175,6 +175,7 @@ SETTING_GROUPS = (
             "softcam_autoheal",
             "softcam_autoheal_seconds",
             "epg_grid_events",
+            "menu_hotkey",
         ),
     ),
     (
@@ -187,6 +188,7 @@ SETTING_GROUPS = (
             "uninstall_allowed",
             "update_check",
             "update_allowed",
+            "menu_allowed",
             "cec_standby_workaround",
             "osd_toast",
         ),
@@ -197,6 +199,13 @@ SCREENSHOT_LABELS = {
     "off": "Off",
     "on_zap": "After a channel change",
     "interval": "Periodically",
+}
+MENU_HOTKEY_LABELS = {
+    "help_long": "HELP, held",
+    "red_long": "RED, held",
+    "f3": "F3",
+    "f4": "F4",
+    "off": "off",
 }
 _ASSIGNMENT_SECRET = re.compile(
     r"""(?ix)
@@ -1266,6 +1275,8 @@ def _setting_control(name, current):
         choices = settings_module.CHOICES.get(name, ())
         if name == "screenshot":
             options = [(choice, _(SCREENSHOT_LABELS.get(choice, choice))) for choice in choices]
+        elif name == "menu_hotkey":
+            options = [(choice, _(MENU_HOTKEY_LABELS.get(choice, choice))) for choice in choices]
         else:
             options = [(choice, choice) for choice in choices]
         return _select(name, options, current)

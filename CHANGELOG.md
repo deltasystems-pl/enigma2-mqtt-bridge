@@ -11,6 +11,40 @@ version that has no section here.
 
 ### Added
 
+- A "Home Assistant" menu on the receiver that Home Assistant keeps current. The companion
+  integration publishes it, retained, on `enigma2mqtt/menu/<node>`: up to eight groups and rows,
+  each a button, toggle, indicator, selector, slider or input field bound to something in Home
+  Assistant, with the state to show and its colour. The receiver checks the payload whole - an
+  invalid one is ignored with a line in the log and the menu before it stays - draws it with
+  icons, states and colours, and answers an OK with one `menu_action` (QoS 1, never retained): the
+  row's id, `press`, `toggle` or `set`, and the value. It never learns what a row does and never
+  sends a service call. A slider moves on the receiver until OK, a selector lists its options, an
+  input field opens the image's keyboard, and EXIT - or, for a slider, leaving its row - discards;
+  OK on the value a row already has sends nothing. After OK a row shows a pending mark
+  until Home Assistant changes it, or for five seconds. Without the broker, or with Home
+  Assistant's own status `offline`, the menu stays greyed with a notice and sends nothing, and an
+  action the broker had not acknowledged is never sent after a reconnect - the MQTT client drops
+  it as the broker accepts the next connection. Home Assistant's status is forgotten whenever the
+  broker connection changes, and a menu published live counts as `online`, so a birth message
+  missed while the receiver was away cannot keep the menu greyed. A row of a type the plugin does
+  not know is shown, does nothing, and is named in the log once. It opens from the
+  Extensions entry "Home Assistant" and, in live TV and the players, by a hotkey, a long HELP by
+  default, which is offered every key press only after the image and takes it only when it
+  opened the menu
+  ([ADR-0020](docs/adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md),
+  [ADR-0021](docs/adr/0021-the-menu-hotkey-is-offered-the-key-after-the-image.md)). The keys
+  1-9 only move the selection; OK acts. Where the plugin's own screen cannot be built, the
+  image's own list is used with the same rows. New: the box-only permission `menu_allowed` (on
+  by default), the setting `menu_hotkey`
+  (`help_long`, `red_long`, `f3`, `f4`, `off`; writable through `cmd/config`), the capability
+  `menu`, `info.menu` (which screen and which key), the event topic `menu_action`, and the
+  subscriptions to `enigma2mqtt/menu/<node>` and Home Assistant's status topic
+  ([TOPICS.md](docs/TOPICS.md)). English, Polish and German.
+- Twenty-five icons for the menu, from Material Design Icons under Apache-2.0, rendered into the
+  package by `tools/render-icons.py`. Because GPLv2 cannot take Apache-2.0, the package is now
+  distributed under the terms of GPLv3 or later; the source stays GPL-2.0-or-later
+  ([NOTICE](NOTICE)). The package carries `LICENSE`, `LICENSE-GPL-3.0.txt` and `NOTICE` in the
+  plugin's directory, beside the icons' own Apache-2.0 text and notice.
 - What only the receiver knows about streaming its channels, without the plugin carrying any
   video. A new retained topic, `stream`, says where the image's stream server is and what it
   wants: the port it listens on (8001 on every image; OpenWebif's own "streaming port" setting

@@ -3,9 +3,10 @@
 
 `docs/TOPICS.md` is the topic contract, written for people. `docs/contract.json` is the same
 contract written for a machine: every state topic with its payload kind and retain flag, every
-command, every `info` member with its type, every setting with its type and whether `cmd/config`
-may write it, every capability name, the fixed topics outside the node's tree, the contract major,
-the named in-major exceptions, and the planned additions. Two checks run on it:
+command, every `info` member with its type (and the members of `info.wol`, `info.build` and
+`info.menu` with theirs), every setting with its type and whether `cmd/config` may write it,
+every capability name, the fixed topics outside the node's tree, the contract major, the named
+in-major exceptions, and the planned additions. Two checks run on it:
 
 1. **Agreement.** The prose is parsed at the places where it states the contract - the state-topic
    headings of section 1, the command table of section 2, the `info` field tables, the settings
@@ -223,7 +224,7 @@ def _member_table(lines: list[str], member: str) -> dict:
     return {_first_name(row[0]): _plain_type(row[1]) for row in tables[0]}
 
 
-def _info(text: str) -> tuple[dict, dict, dict, list[str]]:
+def _info(text: str) -> tuple[dict, dict, dict, dict, list[str]]:
     sections = [
         lines
         for heading, lines in _sections("\n".join(_top_section(text, "## 1.")), "### ")
@@ -237,10 +238,11 @@ def _info(text: str) -> tuple[dict, dict, dict, list[str]]:
     members = {_first_name(row[0]): _plain_type(row[1]) for row in tables[0]}
     wol = _member_table(sections[0], "wol")
     build = _member_table(sections[0], "build")
+    menu = _member_table(sections[0], "menu")
     settings_rows = [row for row in tables[0] if _first_name(row[0]) == "settings"]
     if len(settings_rows) != 1:
         raise ContractParseError("the `info` table has no single `settings` row")
-    return members, wol, build, settings_rows[0]
+    return members, wol, build, menu, settings_rows[0]
 
 
 def _settings(text: str, settings_row: list[str]) -> tuple[dict, list[str]]:
@@ -366,7 +368,7 @@ def _parse(text: str) -> tuple[dict, list[str]]:
     major = CONTRACT_MAJOR.findall(text)
     if len(major) != 1:
         raise ContractParseError("expected one 'current contract major is **N**' sentence")
-    members, wol, build, settings_row = _info(text)
+    members, wol, build, menu, settings_row = _info(text)
     settings, problems = _settings(text, settings_row)
     parsed = {
         "contract": int(major[0]),
@@ -375,6 +377,7 @@ def _parse(text: str) -> tuple[dict, list[str]]:
         "info_members": members,
         "info_wol_members": wol,
         "info_build_members": build,
+        "info_menu_members": menu,
         "settings": settings,
         "capabilities": _capabilities(text),
         "other_topics": _other_topics(text),
@@ -394,6 +397,7 @@ LABELS = {
     "info_members": "info member",
     "info_wol_members": "info.wol member",
     "info_build_members": "info.build member",
+    "info_menu_members": "info.menu member",
     "settings": "setting",
     "capabilities": "capability",
     "other_topics": "topic",

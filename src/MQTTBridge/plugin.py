@@ -16,6 +16,10 @@ Three descriptors:
 * `WHERE_AUTOSTART` with reason 1 - the shutdown edge, where the bridge gets to
   say `offline` properly instead of leaving it to the last will;
 * `WHERE_PLUGINMENU` - the setup screen.
+
+And one more while `menu_allowed` is on: `WHERE_EXTENSIONSMENU`, "Home Assistant", which opens
+the receiver menu (`menu.py`). The setting can change while enigma2 runs, so the entry is also
+added to and taken out of the image's plugin list at run time (`sync_menu_entry`).
 """
 
 from .i18n import _
@@ -25,8 +29,12 @@ LOG = get_logger("plugin")
 
 PLUGIN_NAME = "MQTT Bridge"
 PLUGIN_ICON = "plugin.png"
+MENU_NAME = "Home Assistant"
 
 _bridge = None
+# The Extensions entry: one object for the life of the process, because the image's plugin list
+# finds a descriptor by its function, and adding a second would list the menu twice.
+_menu_entry = None
 
 
 def get_bridge():
@@ -83,6 +91,71 @@ def open_setup(session, **kwargs):
         LOG.exception("the setup screen could not be opened")
 
 
+def open_menu(session, **kwargs):
+    """The Extensions entry: the receiver menu, or a sentence saying why it cannot open."""
+    try:
+        menu = _bridge.publisher("menu") if _bridge is not None else None
+        if menu is not None and menu.claimed() and menu.open(session):
+            return
+        from Screens.MessageBox import MessageBox
+
+        if _bridge is None or not _bridge.running:
+            text = _("The Home Assistant menu is not available: the plugin is not running.")
+        else:
+            text = _("The Home Assistant menu cannot be opened on this receiver now.")
+        session.open(MessageBox, text, getattr(MessageBox, "TYPE_INFO", 1), timeout=10)
+    except Exception:
+        LOG.exception("the receiver menu could not be opened")
+
+
+def menu_entry():
+    """The Extensions entry's descriptor, built once; None where the image has no descriptors."""
+    global _menu_entry
+    if _menu_entry is None:
+        from Plugins.Plugin import PluginDescriptor
+
+        _menu_entry = PluginDescriptor(
+            name=_(MENU_NAME),
+            description=_("The menu Home Assistant sends to this receiver"),
+            where=PluginDescriptor.WHERE_EXTENSIONSMENU,
+            fnc=open_menu,
+            needsRestart=False,
+        )
+    return _menu_entry
+
+
+def _menu_allowed():
+    try:
+        from .config import value
+
+        return bool(value("menu_allowed"))
+    except Exception:
+        LOG.exception("menu_allowed could not be read; the menu entry is left out")
+        return False
+
+
+def sync_menu_entry(allowed):
+    """Put the Extensions entry into the image's plugin list, or take it out. Never raises."""
+    try:
+        from Components.PluginComponent import plugins
+    except Exception as error:
+        from .enigma2 import missing
+
+        missing("Components.PluginComponent", error)
+        return False
+    try:
+        entry = menu_entry()
+        present = entry in list(getattr(plugins, "pluginList", []) or [])
+        if allowed and not present:
+            plugins.addPlugin(entry)
+        elif not allowed and present:
+            plugins.removePlugin(entry)
+        return True
+    except Exception:
+        LOG.exception("the menu's Extensions entry could not be changed")
+        return False
+
+
 def Plugins(**kwargs):
     try:
         from Plugins.Plugin import PluginDescriptor
@@ -114,7 +187,7 @@ def Plugins(**kwargs):
                 fnc=open_setup,
                 needsRestart=False,
             ),
-        ]
+        ] + ([menu_entry()] if _menu_allowed() else [])
     except Exception:
         LOG.exception("the plugin descriptors could not be built")
         return []

@@ -25,6 +25,9 @@ The receiver's device page in Home Assistant, with the companion integration.
   [hass-enigma2-mqtt](https://github.com/deltasystems-pl/hass-enigma2-mqtt).
 - The receiver's zap history, a page inside OpenWebif with every setting and command, and an
   optional softcam restart and EPG import (both off until you allow them on the box).
+- A "Home Assistant" menu on the television: lights, covers, scenes and scripts you choose in
+  the companion integration, opened from the Extensions menu or by holding HELP. The receiver
+  only says which row was chosen; Home Assistant does the rest.
 - Updates of the plugin itself, only to releases on a signed list: from the television, the
   OpenWebif page or over MQTT (off until you allow it on the box), keeping the channel you were
   watching and putting the previous version back when the new one does not start. A receiver
@@ -123,3 +126,11 @@ Home Assistant starts or one without internet, to Home Assistant's relay
 
 [GPL-2.0-or-later](LICENSE), because the plugin imports enigma2's modules. The vendored
 paho-mqtt is used under its EDL-1.0 option; see [NOTICE](NOTICE).
+
+The receiver menu's icons are from [Material Design Icons](https://pictogrammers.com/library/mdi/)
+and are Apache-2.0, which version 2 of the GPL cannot take and version 3 can. So the package - the
+IPK, which carries the icons - is distributed under the terms of the
+[GNU GPL version 3 or later](LICENSE-GPL-3.0.txt), the "or later" of the plugin's own licence; the
+source here stays GPL-2.0-or-later and the icons stay Apache-2.0. [NOTICE](NOTICE) has the
+details. The package carries both GPL texts, the Apache-2.0 text and the notices in the plugin's
+directory on the receiver.

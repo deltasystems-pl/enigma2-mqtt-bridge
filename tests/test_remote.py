@@ -179,7 +179,7 @@ def test_publish_keys_off_means_the_remote_is_not_watched(make_bridge, factory, 
     bridge.start()
     factory.client.fire_connect()
     assert "keys" not in bridge.capabilities()
-    assert receiver.actions.bound == []
+    assert [entry for entry in receiver.actions.bound if entry[0] == ""] == []
 
 
 def test_the_binding_is_at_the_lowest_possible_priority(live_bridge, receiver):
@@ -191,7 +191,7 @@ def test_the_binding_is_at_the_lowest_possible_priority(live_bridge, receiver):
 
 def test_stopping_unbinds(live_bridge, receiver):
     live_bridge.publisher("keys").stop()
-    assert receiver.actions.bound == []
+    assert [entry for entry in receiver.actions.bound if entry[0] == ""] == []
 
 
 def test_stopping_forgets_an_in_progress_key(live_bridge, factory):
