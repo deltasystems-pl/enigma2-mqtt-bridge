@@ -11,9 +11,11 @@ path may block the thread that draws the television.
 """
 
 import importlib.util
+import socket
 import sys
 import threading
 import time
+import types
 
 import pytest
 
@@ -449,3 +451,189 @@ def test_reload_does_not_accumulate_pump_listeners(monkeypatch, make_bridge, fac
     bridge.stop()
     assert shared.recv_msg.get() == []
     assert len(factory.clients) == 3
+
+
+# --------------------------------------------- transient events and paho's queue --
+
+
+def _real_client():
+    paho = mqttclient.import_paho()
+    return paho, paho.Client(paho.CallbackAPIVersion.VERSION2, client_id="t",
+                             protocol=paho.MQTTv311)
+
+
+def test_withdrawing_a_message_in_flight_takes_one_off_the_in_flight_count():
+    """Against the vendored paho: sent, no PUBACK yet - counted in flight until withdrawn."""
+    paho, client = _real_client()
+    near, far = socket.socketpair()
+    client._sock = near
+    try:
+        first = client.publish("a", b"1", qos=1)
+        second = client.publish("b", b"2", qos=1)
+        assert (first.rc, second.rc) == (0, 0)
+        assert far.recv(4096), "both went to the socket"
+        state = client._out_messages[first.mid].state
+        assert state == paho.MessageState.MQTT_MS_WAIT_FOR_PUBACK
+        assert client._inflight_messages == 2
+        assert mqttclient.withdraw_publish(client, first) is True
+        assert client._inflight_messages == 1
+        assert mqttclient.withdraw_publish(client, first) is False
+        assert client._inflight_messages == 1
+        assert list(client._out_messages) == [second.mid]
+    finally:
+        client._sock = None
+        near.close()
+        far.close()
+
+
+def test_a_message_waiting_for_the_connection_is_not_counted_in_flight():
+    paho, client = _real_client()
+    client._inflight_messages = 3
+    info = client.publish("a", b"1", qos=1)
+    assert info.rc == paho.MQTT_ERR_NO_CONN
+    assert mqttclient.withdraw_publish(client, info) is True
+    assert client._inflight_messages == 3
+
+
+def test_a_mid_given_to_another_message_since_is_not_withdrawn():
+    """Acknowledged, and its mid reused by a later publish: that one is not ours to take."""
+    _paho, client = _real_client()
+    later = client.publish("state", b"1", qos=1)
+    stale = types.SimpleNamespace(mid=later.mid)
+    assert mqttclient.withdraw_publish(client, stale) is False
+    assert later.mid in client._out_messages
+
+
+def _read_packet(connection):
+    """One MQTT packet: (the first byte, the rest)."""
+    first = connection.recv(1)
+    if not first:
+        raise ConnectionError("closed")
+    length, shift = 0, 0
+    while True:
+        byte = connection.recv(1)[0]
+        length += (byte & 0x7F) << shift
+        shift += 7
+        if not byte & 0x80:
+            break
+    body = b""
+    while len(body) < length:
+        chunk = connection.recv(length - len(body))
+        if not chunk:
+            raise ConnectionError("closed")
+        body += chunk
+    return first[0], body
+
+
+def _publish_topic(body):
+    size = int.from_bytes(body[:2], "big")
+    return body[2:2 + size].decode("utf-8")
+
+
+def test_a_transient_publish_is_never_sent_again_after_a_reconnect():
+    """D64, against the vendored paho with its own network thread and a broker on a socket.
+
+    The main loop never runs here, as if it were busy: the drop has to happen on paho's thread,
+    in on_connect, before `_handle_connack` sends the queue again. A state publish beside it is
+    still sent again, as it must be.
+    """
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(2)
+    server.settimeout(10)
+    port = server.getsockname()[1]
+    client = mqttclient.MqttClient(
+        mqttclient.BrokerSettings(host="127.0.0.1", port=port, client_id="t"),
+        dispatcher=lambda function, *args: None,
+    )
+    try:
+        client.start()
+        first, _address = server.accept()
+        first.settimeout(10)
+        assert _read_packet(first)[0] >> 4 == 1  # CONNECT
+        first.sendall(b"\x20\x02\x00\x00")  # CONNACK, accepted
+        # Wait for paho to take the CONNACK before publishing on the session.
+        deadline = time.monotonic() + 10
+        while not client._client.is_connected() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        event = client.publish("enigma2/n/menu_action", b"{}", qos=1, transient=True)
+        state = client.publish("enigma2/n/state", b"on", qos=1, retain=True)
+        assert (event.rc, state.rc) == (0, 0)
+        sent = sorted(_publish_topic(_read_packet(first)[1]) for _ in range(2))
+        assert sent == ["enigma2/n/menu_action", "enigma2/n/state"]
+        # No PUBACK: the connection goes with both unacknowledged.
+        first.close()
+        second, _address = server.accept()
+        second.settimeout(10)
+        assert _read_packet(second)[0] >> 4 == 1  # CONNECT again
+        second.sendall(b"\x20\x02\x00\x00")
+        header, body = _read_packet(second)
+        assert header >> 4 == 3 and header & 0x08, "a PUBLISH sent again, flagged DUP"
+        assert _publish_topic(body) == "enigma2/n/state"
+        second.settimeout(0.5)
+        with pytest.raises(socket.timeout):
+            _read_packet(second)
+        assert event.mid not in client._client._out_messages
+        assert client._transient == {}
+        second.close()
+    finally:
+        client.stop()
+        server.close()
+
+
+def test_an_acknowledged_transient_publish_is_forgotten_at_the_next_one(factory):
+    client = mqttclient.MqttClient(
+        mqttclient.BrokerSettings(host="10.0.0.5"), dispatcher=lambda function, *args: None,
+        client_factory=factory,
+    )
+    client.start()
+    first = client.publish("e", b"1", qos=1, transient=True)
+    factory.client.acknowledge()
+    second = client.publish("e", b"2", qos=1, transient=True)
+    assert client._transient == {second.mid: second}
+    assert first.mid not in client._transient
+
+
+def test_a_transient_publish_refused_is_not_remembered(factory):
+    client = mqttclient.MqttClient(
+        mqttclient.BrokerSettings(host="10.0.0.5"), dispatcher=lambda function, *args: None,
+        client_factory=factory,
+    )
+    client.start()
+    factory.client.publish_rc = 4  # MQTT_ERR_NO_CONN
+    client.publish("e", b"1", qos=1, transient=True)
+    assert client._transient == {}
+
+
+def test_a_connect_drops_only_transient_publishes_and_says_so(factory, plugin_log):
+    queued = []
+    client = mqttclient.MqttClient(
+        mqttclient.BrokerSettings(host="10.0.0.5"),
+        dispatcher=lambda function, *args: queued.append(function), client_factory=factory,
+    )
+    client.start()
+    client.publish("event", b"1", qos=1, transient=True)
+    client.publish("state", b"1", qos=1, retain=True)
+    factory.client.fire_disconnect()
+    factory.client.fire_connect()
+    assert factory.client.queued_for_reconnect() == ["state"]
+    assert "dropped 1 event(s) the broker had not acknowledged" in plugin_log()
+    # Handed to the main loop all the same.
+    assert len(queued) == 2
+
+
+def test_a_drop_that_raises_still_hands_the_connect_on(factory, plugin_log, monkeypatch):
+    queued = []
+    client = mqttclient.MqttClient(
+        mqttclient.BrokerSettings(host="10.0.0.5"),
+        dispatcher=lambda function, *args: queued.append(function), client_factory=factory,
+    )
+    client.start()
+
+    def broken(_client):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(client, "_drop_transient", broken)
+    factory.client.fire_connect()
+    assert len(queued) == 1
+    assert "could not drop the unacknowledged events" in plugin_log()

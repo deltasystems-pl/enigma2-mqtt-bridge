@@ -247,6 +247,11 @@ class MqttClient:
         self._dispatch_count = 0
         self._dispatch_delay_total = 0.0
         self._dispatch_delay_max = 0.0
+        # Events true only when they were raised (`publish(..., transient=True)`): mid -> the
+        # publish's info, until the broker acknowledges it or a reconnect drops it. Shared with
+        # paho's network thread, so only under this lock.
+        self._transient = {}
+        self._transient_lock = threading.Lock()
 
     @property
     def usable(self):
@@ -350,7 +355,13 @@ class MqttClient:
 
     # ------------------------------------------------------------------- publish --
 
-    def publish(self, topic, payload=None, qos=0, retain=False):
+    def publish(self, topic, payload=None, qos=0, retain=False, transient=False):
+        """Hand a publish to paho. Its answer, or None when there was nothing to hand it to.
+
+        `transient` marks an event that is true only at the moment it was raised, such as a
+        `menu_action`: if the connection goes before the broker acknowledges it, the next
+        connect takes it out of paho's queue before paho sends it again (`_paho_on_connect`).
+        """
         client = self._client
         if client is None:
             LOG.debug("no session; dropping a publish")
@@ -362,7 +373,14 @@ class MqttClient:
         else:
             data = str(payload).encode("utf-8")
         try:
-            info = client.publish(topic, data, qos=qos, retain=retain)
+            if transient:
+                # Held across the publish, so a connect on the network thread sees the
+                # message and its mark together or neither.
+                with self._transient_lock:
+                    info = client.publish(topic, data, qos=qos, retain=retain)
+                    self._track_transient(info)
+            else:
+                info = client.publish(topic, data, qos=qos, retain=retain)
         except Exception:
             LOG.exception("publishing failed")
             return None
@@ -386,6 +404,36 @@ class MqttClient:
     def withdraw(self, info):
         """Take a QoS 1 publish back out of paho's outgoing queue. Whether it was there."""
         return withdraw_publish(self._client, info)
+
+    def _track_transient(self, info):
+        """Remember a transient publish paho kept; forget the ones the broker has. Lock held."""
+        mid = getattr(info, "mid", None)
+        if mid is None or getattr(info, "rc", 0):
+            # Not taken, or taken without a connection: the caller withdraws it at once.
+            return
+        self._transient = {
+            known: other for known, other in self._transient.items() if not _settled(other)
+        }
+        self._transient[mid] = info
+
+    def _drop_transient(self, client):
+        """On paho's network thread, at CONNACK: withdraw every transient publish still queued.
+
+        paho 2.1 calls `on_connect` from `_handle_connack` and only then sends everything in
+        `_out_messages` again, on the same thread - so a `menu_action` from before the
+        disconnect is taken out here whether or not the main loop has heard of the disconnect
+        yet (D64). Locks: this thread holds paho's `_in_callback_mutex`, then takes ours, then
+        paho's `_out_message_mutex`; the main thread takes ours, then `_out_message_mutex`, and
+        with paho's loop thread running its publish never waits for `_in_callback_mutex`
+        (`_packet_queue`), so there is no cycle.
+        """
+        with self._transient_lock:
+            pending, self._transient = self._transient, {}
+            dropped = sum(1 for info in pending.values() if withdraw_publish(client, info))
+        if dropped:
+            LOG.info("dropped %d event(s) the broker had not acknowledged before the "
+                     "connection went", dropped)
+        return dropped
 
     def subscribe(self, topic, qos=1):
         client = self._client
@@ -418,6 +466,10 @@ class MqttClient:
     # These four run on paho's network thread. They hand over and return.
 
     def _paho_on_connect(self, client, userdata, flags, reason_code, properties=None):
+        try:
+            self._drop_transient(client)
+        except Exception:
+            LOG.exception("could not drop the unacknowledged events before the resend")
         self._queue_dispatch("connect", self._handle_connect, reason_code)
 
     def _paho_on_message(self, client, userdata, message):
@@ -555,21 +607,34 @@ def withdraw_publish(client, info):
     try:
         if lock is not None:
             with lock:
-                return _withdraw(client, messages, mid)
-        return _withdraw(client, messages, mid)
+                return _withdraw(client, messages, mid, info)
+        return _withdraw(client, messages, mid, info)
     except Exception:
         LOG.exception("could not take a publish back out of the outgoing queue")
         return False
 
 
-def _withdraw(client, messages, mid):
-    message = messages.pop(mid, None)
+def _withdraw(client, messages, mid, info):
+    message = messages.get(mid)
     if message is None:
         return False
+    owner = getattr(message, "info", None)
+    if owner is not None and owner is not info:
+        # The mid was acknowledged and given to another message since: not ours to take.
+        return False
+    del messages[mid]
     if getattr(message, "state", None) == _WAIT_FOR_PUBACK:
         inflight = getattr(client, "_inflight_messages", 0)
         client._inflight_messages = max(0, int(inflight) - 1)
     return True
+
+
+def _settled(info):
+    """Whether the broker has a publish, or it never went anywhere: either way nothing to drop."""
+    try:
+        return bool(info.is_published())
+    except Exception:
+        return True
 
 
 def _join_network_thread(client):

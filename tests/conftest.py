@@ -3289,7 +3289,7 @@ class FakeMQTTClient:
             # in flight when sent, waiting to be published when there was no connection.
             sent = not self.publish_rc
             self._out_messages[self._mid] = types.SimpleNamespace(
-                topic=topic, state=2 if sent else 1)
+                topic=topic, state=2 if sent else 1, info=info)
             self._inflight_messages += 1 if sent else 0
         return info
 

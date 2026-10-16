@@ -1180,7 +1180,9 @@ class Bridge:
         size = _oversize(topic, encoded)
         if size:
             return self._withhold(topic, size, retain=False)
-        return self.client.publish(topic, encoded, qos=qos, retain=False)
+        # Transient: one the broker has not acknowledged when the connection goes is dropped at
+        # the next connect, before the client would send it again (D64).
+        return self.client.publish(topic, encoded, qos=qos, retain=False, transient=True)
 
     def withdraw_event(self, info):
         """Take an event that was not acknowledged back out of the client's queue.
