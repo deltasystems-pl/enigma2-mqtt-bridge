@@ -519,7 +519,6 @@ def screen_class():
 
         def _retry_close(self):
             if self._close_failed:
-                self._close_failed = False
                 self.close_menu()
 
         def _closed(self):

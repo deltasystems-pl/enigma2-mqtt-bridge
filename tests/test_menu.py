@@ -1088,6 +1088,7 @@ def test_a_slider_left_without_up_or_down_is_discarded_by_the_next_key(world):
     assert world.screen.key_left() == 0
     assert world.screen.controller.slider is None
     assert world.view()["r_blind"]["state"] == "40 %"
+    assert "LEFT/RIGHT change" not in world.screen["legend"].getText(), "drawn again"
     world.select("r_blind")
     world.screen.key_right()
     world.select("r_mode")
@@ -1100,7 +1101,16 @@ def test_a_slider_left_without_up_or_down_is_discarded_by_the_next_key(world):
     world.screen.key_number(1)
     assert world.screen.selected() == "r_lamp"
     assert world.screen.controller.slider is None
+    assert "LEFT/RIGHT change" not in world.screen["legend"].getText(), "drawn again"
     assert world.actions() == []
+    # OK on a row that is neither a group nor a list - a toggle - leaves no slider behind either.
+    world.select("r_blind")
+    world.screen.key_right()
+    world.select("r_lamp")
+    world.screen.key_ok()
+    assert world.actions()[-1]["action"] == "toggle"
+    assert world.screen.controller.slider is None
+    assert world.view()["r_blind"]["state"] == "40 %"
 
 
 def test_a_closed_menu_takes_no_key(world, monkeypatch):
@@ -1407,6 +1417,16 @@ def test_an_action_the_broker_has_not_taken_is_dropped_when_the_connection_goes(
     assert len(world.actions()) == 1
 
 
+def test_an_action_is_dropped_at_the_reconnect_the_main_loop_has_not_seen_go(world):
+    """paho reconnected on its own thread before the main loop handled the disconnect (D64)."""
+    world.open()
+    world.ok("r_movie")
+    assert world.client.queued_for_reconnect() == [ACTION_TOPIC]
+    world.client.fire_connect()
+    assert world.client.queued_for_reconnect() == []
+    assert len(world.actions()) == 1
+
+
 def test_an_acknowledged_action_is_not_touched_by_a_disconnect(world, plugin_log):
     world.open()
     world.ok("r_movie")
@@ -1635,9 +1655,45 @@ def test_a_failed_open_with_nothing_executing_before_is_left_alone(world, monkey
     monkeypatch.setattr(session, "open", refused)
     monkeypatch.setattr(session, "popCurrent", lambda: calls.append("pop"))
     monkeypatch.setattr(session, "in_exec", False)
+    monkeypatch.setattr(session, "dialog_stack", [(object(), True)])
     controller = menu_module.MenuController(world.publisher)
     assert styledlist.open_styled(session, controller).startswith("RuntimeError")
     assert calls == []
+
+
+class _Stacked:
+    def __init__(self, in_exec, stack, raises=False):
+        self.in_exec = in_exec
+        self.dialog_stack = stack
+        self.raises = raises
+        self.pops = 0
+
+    def popCurrent(self):
+        self.pops += 1
+        if self.raises:
+            raise RuntimeError("no dialog")
+
+
+@pytest.mark.parametrize("before, after, stack, pops", [
+    pytest.param(True, False, [1], 1, id="the-open-ended-it"),
+    pytest.param(False, False, [1], 0, id="nothing-executed-before"),
+    pytest.param(None, False, [1], 0, id="a-session-that-does-not-say"),
+    pytest.param(True, True, [1], 0, id="still-executing"),
+    pytest.param(True, None, [1], 0, id="cannot-tell-after"),
+    pytest.param(True, False, [], 0, id="nothing-stacked"),
+])
+def test_the_execution_is_given_back_only_when_the_failed_open_took_it(before, after, stack,
+                                                                       pops):
+    session = _Stacked(after, stack)
+    styledlist._restore_executing(session, before)
+    assert session.pops == pops
+
+
+def test_a_pop_that_raises_is_a_line_in_the_log(plugin_log):
+    session = _Stacked(False, [1], raises=True)
+    styledlist._restore_executing(session, True)
+    assert session.pops == 1
+    assert "could not be given back its execution" in plugin_log()
 
 
 def test_the_fallback_is_the_images_list_with_the_same_rows_ids_and_keys(world, monkeypatch):

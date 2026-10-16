@@ -760,7 +760,6 @@ class MenuController:
     def _typed(self, ident, answer):
         if self.closed:
             return
-        self.notice = None
         if answer is None:
             self.refresh()
             return
