@@ -9,6 +9,7 @@ that opens is the executing dialog and a close pops it on the next turn of the m
 
 import json
 import re
+import sys
 
 import pytest
 from conftest import (
@@ -537,6 +538,55 @@ def test_a_key_the_player_uses_stays_the_players(world):
     world.press(KEY_RED, MAKE, LONG, BREAK)
     assert seeks == ["seekBackManual"]
     assert world.screen is None
+
+
+def test_the_hotkey_opens_the_menu_over_a_player_built_on_the_media_player(world):
+    """A plugin's class built on the image's media player is that player too."""
+    from conftest import ModelScreen
+
+    media_player = type("MediaPlayer", (ModelScreen,),
+                        {"__module__": "Plugins.Extensions.MediaPlayer.plugin"})
+    built_on_it = type("PluginMediaPlayer", (media_player,),
+                       {"__module__": "Plugins.Extensions.SomePlayer.plugin"})
+    world.send_menu()
+    world.session.open(built_on_it)
+    world.long_help()
+    assert world.screen is not None
+
+
+def test_the_media_player_counts_on_an_image_without_the_movie_player(world, monkeypatch):
+    from conftest import ModelScreen, infobar_module
+
+    monkeypatch.delattr(infobar_module, "MoviePlayer")
+    media_player = type("MediaPlayer", (ModelScreen,),
+                        {"__module__": "Plugins.Extensions.MediaPlayer.plugin"})
+    world.send_menu()
+    world.session.open(media_player)
+    world.long_help()
+    assert world.screen is not None
+
+
+def test_with_the_info_bar_unreadable_no_screen_takes_the_hotkey(world, monkeypatch):
+    """`Screens.InfoBar` cannot be imported: the answer is no, over a player as well."""
+    from conftest import ModelScreen
+
+    media_player = type("MediaPlayer", (ModelScreen,),
+                        {"__module__": "Plugins.Extensions.MediaPlayer.plugin"})
+    player = media_player(world.session)
+    monkeypatch.setitem(sys.modules, "Screens.InfoBar", None)
+    assert menu_module.hotkey_screen(player) is False
+    assert menu_module.hotkey_screen(None) is False
+
+
+def test_the_hotkey_opens_nothing_while_no_dialog_executes(world, monkeypatch):
+    """Before the info bar exists - no instance, nothing executing - the key goes on."""
+    from conftest import InfoBar
+
+    world.send_menu()
+    monkeypatch.setattr(InfoBar, "instance", None)
+    monkeypatch.setattr(world.session, "current_dialog", None)
+    assert world.publisher.hotkey_pressed(world.session) is False
+    assert world.publisher._controllers == []
 
 
 def test_the_hotkey_does_nothing_over_another_screen(world):
@@ -1215,6 +1265,16 @@ def test_the_fallback_is_the_images_list_with_the_same_rows_ids_and_keys(world, 
     MainLoop.advance(0)
     assert not isinstance(world.session.current_dialog, ChoiceBox)
     assert world.publisher._controllers == []
+
+
+def test_the_fallback_with_no_menu_yet_says_so_and_has_no_number_key(world, monkeypatch):
+    _no_styled_screen(monkeypatch)
+    world.long_help()
+    box = world.session.current_dialog
+    assert isinstance(box, ChoiceBox)
+    assert box.list == [("There is no menu from Home Assistant yet.", None)]
+    # One key for the one entry, and an empty one: the image reads it as none (D66).
+    assert box.keys == [""]
 
 
 def test_an_image_without_the_styled_screens_parts_uses_the_fallback_from_the_start(
