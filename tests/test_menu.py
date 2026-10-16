@@ -194,13 +194,28 @@ def test_a_payload_over_64_kib_is_refused_unread():
 
 
 def test_a_payload_nested_too_deeply_for_the_parser_is_refused():
-    """30000 brackets fit under 64 KiB and exhaust the JSON parser's stack: a refusal."""
+    """30000 brackets fit under 64 KiB: a refusal, never an escaping exception.
+
+    Up to Python 3.13 they exhaust the JSON parser's stack; 3.14 parses them into
+    a list, which is refused as not an object. Either way it is a refusal.
+    """
     raw = b"[" * 30000 + b"]" * 30000
     assert len(raw) < 65536
-    with pytest.raises(InvalidMenu, match="nested too deeply"):
+    with pytest.raises(InvalidMenu, match="nested too deeply|not a JSON object"):
         parse_menu(raw)
     with pytest.raises(InvalidMenu):
         parse_menu(raw.decode("ascii"))
+
+
+def test_a_parser_running_out_of_stack_is_a_refusal(monkeypatch):
+    """The RecursionError guard, on every Python, whatever depth the parser copes with."""
+
+    def exhausted(_text):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(menu_module.json, "loads", exhausted)
+    with pytest.raises(InvalidMenu, match="nested too deeply"):
+        parse_menu(b"{}")
 
 
 @pytest.mark.parametrize("field", ["min", "max", "step", "value"])
