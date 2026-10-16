@@ -679,7 +679,7 @@ class MenuController:
         if value != row["value"]:
             return False
         pending = self.publisher.pending_for(row["id"])
-        return pending is None or pending.get("sent") in (None, value)
+        return pending is None or pending.get("sent") == value
 
     def key_ok(self, selected):
         if self.closed:
