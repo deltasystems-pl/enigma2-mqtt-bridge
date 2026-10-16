@@ -64,8 +64,8 @@ def test_the_step_rule_is_the_transparencys_alone():
 
 
 @pytest.mark.parametrize("raw, value", [
-    (30, 30), ("30", 30), (None, 20), (True, 20), (False, 20), (35, 20), ("35", 20), (90, 20), (30.0, 20),
-    ("x", 20),
+    (30, 30), ("30", 30), (None, 20), (True, 20), (False, 20), (35, 20), ("35", 20), (90, 20),
+    (30.0, 20), ("x", 20),
 ])
 def test_the_value_read_is_always_one_of_the_steps(raw, value):
     """The element's keys are ints; whatever an image hands back, the reader gets a step."""
