@@ -19,14 +19,16 @@ Three parts live here:
   same for the styled screen and for the image's own list (`styledlist.py`). The top list holds
   groups and rows; OK on a group opens its rows, one level deep. A selector opens its options; a
   slider moves a local value with LEFT and RIGHT that is sent only on OK; an input field opens the
-  image's keyboard. EXIT discards whatever was not applied, and goes back.
+  image's keyboard. EXIT discards whatever was not applied, and goes back; so does leaving a
+  moved slider's row. OK on the value a row already has sends nothing (D70).
 - **The publisher** (`MenuPublisher`): the capability `menu`, the two subscriptions, Home
   Assistant's reachability, the pending marks, the hotkey and `info.menu`.
 
 **Greyed (D14).** With no broker connection, or with Home Assistant's own status topic saying
 `offline`, the menu stays on screen as it last was, greyed, with a notice, and nothing in it can be
-acted on. A menu that never came, or an empty payload, is "no menu yet" - not greyed, and nothing to
-act on.
+acted on. Home Assistant's status is forgotten whenever the broker connection changes, and a menu
+that arrives live counts as `online` (D71). A menu that never came, or an empty payload, is "no
+menu yet" - not greyed, and nothing to act on.
 
 **Pending (D54).** After OK on a toggle, a slider or a selector the row shows a pending mark until
 the menu topic carries a different value for it. Five seconds without one and the row shows its

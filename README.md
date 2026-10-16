@@ -132,4 +132,5 @@ and are Apache-2.0, which version 2 of the GPL cannot take and version 3 can. So
 IPK, which carries the icons - is distributed under the terms of the
 [GNU GPL version 3 or later](LICENSE-GPL-3.0.txt), the "or later" of the plugin's own licence; the
 source here stays GPL-2.0-or-later and the icons stay Apache-2.0. [NOTICE](NOTICE) has the
-details.
+details. The package carries both GPL texts, the Apache-2.0 text and the notices in the plugin's
+directory on the receiver.

@@ -1,6 +1,6 @@
 # ADR-0020: The receiver menu is drawn on the receiver and decided in Home Assistant
 
-**Status:** accepted 2026-10-15
+**Status:** accepted 2026-10-15, amended 2026-10-16 (D70, D71, D72)
 **Date:** 2026-10-15
 **Supersedes:** -
 
@@ -37,13 +37,23 @@ Three things are true of the path between them:
 2. **The payload is checked whole, on the receiver too.** Bounds (24 entries, 8 groups, 24 rows,
    24 options, 200 slider steps, 64 KiB), types, ids and the slider's arithmetic. An invalid
    payload is ignored with one log line and the menu before it stays: a menu that half-applies is
-   worse than an old one. Text loses backslashes and line breaks - the toast's rule - and is cut
-   at the contract's lengths again. An icon name outside the contract's list is the neutral icon;
-   an unknown row type is shown and cannot be acted on, because the enumeration is open.
+   worse than an old one. A payload nested too deeply for the JSON parser, or a slider number too
+   large for a float, is invalid the same way and never an exception. Text loses backslashes and
+   line breaks - the toast's rule - and the invisible format characters (Unicode Cf: bidirectional
+   overrides, zero-width characters), and is cut at the contract's lengths again. An icon name
+   outside the contract's list is the neutral icon. A row of a type this plugin does not know is
+   shown with its label and state and OK on it sends nothing, because the enumeration is open;
+   the log names the type once, not on every publish or redraw (maintainer's decision D72).
 3. **What is not applied is discarded.** A slider moves a local value until OK (EXIT discards it),
    a selector lists its options and sends only the one chosen, an input field is the image's
    keyboard. Only OK sends: the keys 1-9 move the selection to their row and do nothing else
-   (maintainer's decision D66), so a digit pressed by mistake switches nothing.
+   (maintainer's decision D66), so a digit pressed by mistake switches nothing. A slider moved and
+   not applied is discarded when the selection leaves its row. OK on the value the row already
+   has sends nothing - the option already set, a slider back at its value, the same text - and the
+   list or keyboard just closes, with no pending mark and no notice (D70); while a pending mark
+   holds another value the viewer asked for, the row's value picked again is a change back and is
+   sent. An option is identified by its value, not its place, so a menu that reorders options
+   while they are listed cannot turn an OK into another option.
 4. **The pending mark is compared on `value`, never on `rev`.** After OK on a toggle, a slider or
    a selector the row shows a mark until the menu carries a different value for it, or for five
    seconds, after which it shows the real value and the footer says Home Assistant changed
@@ -53,17 +63,27 @@ Three things are true of the path between them:
    saying `offline`, the last menu stays on screen greyed, with a notice, and nothing can be acted
    on - the household sees why the lamp will not answer. A status never heard does not grey: Home
    Assistant does not retain its birth message, and a receiver that connects after it would
-   otherwise grey a healthy menu.
+   otherwise grey a healthy menu. For the same reason the status is forgotten - back to never
+   heard - whenever the broker connection goes or comes back: an `online` published while the
+   receiver was away would never undo the `offline` from before, and the menu would stay greyed
+   for good. A menu that arrives live (retain flag 0, so the integration published it just now)
+   is proof that Home Assistant runs and sets the status `online`; a retained replay on
+   subscribing can be days old and proves nothing (D71).
 6. **An action is never queued.** The receiver's MQTT client keeps every unacknowledged QoS 1
    publish for the next connect; a `menu_action` is taken back out of that queue when the
-   connection goes, and when the socket was already gone as it was published, so an OK from
-   minutes ago never switches a lamp. The integration also refuses one older than 120 s.
+   socket was already gone as it was published, when the main loop learns the connection went,
+   and - the one that does not depend on the main loop being quick - by the client itself on
+   paho's network thread as the broker accepts the next connection, in `on_connect`, before paho
+   sends its queue again. So an OK from minutes ago never switches a lamp. The integration also
+   refuses one older than 120 s.
 7. **One screen module, one fallback.** The styled screen (`styledlist.py`) computes its
    geometry from the desktop height, as the toast does, and has a second way for every optional
    drawing call. It is built on trial off the dialog stack before it is opened, because a screen
-   that raises inside `session.open` leaves the session with nothing executing. Anything that
-   fails is the reason the image's own `ChoiceBox` is used as it is - same rows and ids, but no
-   number keys, because the image's list acts on a digit and cannot be made only to move (D66) - and `info.menu.screen` says which one the receiver uses. The module knows nothing about
+   that raises inside `session.open` leaves the session with nothing executing; should the real
+   open raise all the same, the dialog it took the execution from is given it back first. Anything
+   that fails is the reason the image's own `ChoiceBox` is used as it is - same rows and ids, but
+   no number keys, because the image's list acts on a digit and cannot be made only to move (D66)
+   - and `info.menu.screen` says which one the receiver uses. The module knows nothing about
    menus, so the next list (the planned channel list) reuses it.
 8. **On by default, set on the receiver.** `menu_allowed` is a box-only permission, on by default
    because the menu does nothing the user did not put into it in Home Assistant; off, there is no

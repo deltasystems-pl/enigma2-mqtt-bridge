@@ -137,14 +137,19 @@ The receiver shows it on the television:
   in the receiver's button setup.
 - **Use it** with the arrows and OK; EXIT goes back. OK switches a light or a switch, runs a scene
   or a script, opens a list of choices, or opens the keyboard for text. On a number - a dimmer, a
-  blind's position - LEFT and RIGHT change the value on the receiver and OK sends it; EXIT forgets
-  it. The keys 1-9 jump to the row of that number; OK then acts. A row whose state is green is all
-  good, red needs attention.
+  blind's position - LEFT and RIGHT change the value on the receiver and OK sends it; EXIT, or
+  moving to another row, forgets it. OK on the choice, number or text the row already has sends
+  nothing and just closes the list or keyboard. The keys 1-9 jump to the row of that number; OK
+  then acts. A row whose state is green is all good, red needs attention. A row of a kind this
+  receiver does not know yet - from a newer Home Assistant integration - shows its state and does
+  nothing on OK.
 - **What it shows** comes from Home Assistant and changes on the screen as it changes there.
   After OK a row shows a small mark until Home Assistant has done it; when nothing has changed after
   five seconds the line at the bottom says so.
 - **Without the broker, or while Home Assistant is down**, the menu stays on the screen greyed,
-  with a line saying why, and nothing in it can be used. It never sends a choice later.
+  with a line saying why, and nothing in it can be used. It never sends a choice later. When the
+  receiver gets its broker connection back, the menu is usable again at once unless Home
+  Assistant says it is down.
 
 The receiver only says which row was chosen and the value; Home Assistant decides what that does,
 and does nothing for a row it does not have. Anybody who can publish on your broker can send the

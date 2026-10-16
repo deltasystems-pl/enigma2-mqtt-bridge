@@ -19,10 +19,15 @@ version that has no section here.
   icons, states and colours, and answers an OK with one `menu_action` (QoS 1, never retained): the
   row's id, `press`, `toggle` or `set`, and the value. It never learns what a row does and never
   sends a service call. A slider moves on the receiver until OK, a selector lists its options, an
-  input field opens the image's keyboard, and EXIT discards; after OK a row shows a pending mark
+  input field opens the image's keyboard, and EXIT - or, for a slider, leaving its row - discards;
+  OK on the value a row already has sends nothing. After OK a row shows a pending mark
   until Home Assistant changes it, or for five seconds. Without the broker, or with Home
   Assistant's own status `offline`, the menu stays greyed with a notice and sends nothing, and an
-  action the broker had not acknowledged is never sent after a reconnect. It opens from the
+  action the broker had not acknowledged is never sent after a reconnect - the MQTT client drops
+  it as the broker accepts the next connection. Home Assistant's status is forgotten whenever the
+  broker connection changes, and a menu published live counts as `online`, so a birth message
+  missed while the receiver was away cannot keep the menu greyed. A row of a type the plugin does
+  not know is shown, does nothing, and is named in the log once. It opens from the
   Extensions entry "Home Assistant" and, in live TV and the players, by a hotkey, a long HELP by
   default, which is offered every key press only after the image and takes it only when it
   opened the menu
@@ -38,7 +43,8 @@ version that has no section here.
 - Twenty-five icons for the menu, from Material Design Icons under Apache-2.0, rendered into the
   package by `tools/render-icons.py`. Because GPLv2 cannot take Apache-2.0, the package is now
   distributed under the terms of GPLv3 or later; the source stays GPL-2.0-or-later
-  ([NOTICE](NOTICE)).
+  ([NOTICE](NOTICE)). The package carries `LICENSE`, `LICENSE-GPL-3.0.txt` and `NOTICE` in the
+  plugin's directory, beside the icons' own Apache-2.0 text and notice.
 - What only the receiver knows about streaming its channels, without the plugin carrying any
   video. A new retained topic, `stream`, says where the image's stream server is and what it
   wants: the port it listens on (8001 on every image; OpenWebif's own "streaming port" setting

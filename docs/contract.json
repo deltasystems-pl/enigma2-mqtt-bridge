@@ -328,13 +328,13 @@
     "zap_history"
   ],
   "other_topics": [
+    "<ha_discovery_prefix>/status",
     "enigma2mqtt/discovery/<node>/config",
     "enigma2mqtt/integration/<node>",
     "enigma2mqtt/menu/<node>",
     "enigma2mqtt/release_index",
     "homeassistant/device/<node>/config",
-    "homeassistant/device_automation/<node>/<colour>_<press>/config",
-    "homeassistant/status"
+    "homeassistant/device_automation/<node>/<colour>_<press>/config"
   ],
   "exceptions": [
     {
