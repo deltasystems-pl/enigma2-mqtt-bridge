@@ -200,7 +200,6 @@ msgstr "Zatrzymany"
 msgid "MQTT"
 msgstr "MQTT"
 
-
 #: src/MQTTBridge/webif.py
 msgid "Receiver integration status"
 msgstr "Stan integracji dekodera"
@@ -208,7 +207,6 @@ msgstr "Stan integracji dekodera"
 #: src/MQTTBridge/webif.py
 msgid "Status"
 msgstr "Stan"
-
 
 #: src/MQTTBridge/webif.py
 msgid "Sanitized log tail"
@@ -218,13 +216,9 @@ msgstr "Oczyszczony fragment dziennika"
 msgid "Request rejected."
 msgstr "Żądanie odrzucone."
 
-
-
-
 #: src/MQTTBridge/webif.py
 msgid "Logging is unavailable."
 msgstr "Dziennik jest niedostępny."
-
 
 #: src/MQTTBridge/webif.py
 msgid "The MQTT Bridge page could not be built; see the plugin log."
@@ -625,7 +619,6 @@ msgstr "Ta strona jest nieaktualna: od jej otwarcia coś zmieniono w innej karci
 #: src/MQTTBridge/webif.py
 msgid "Full size"
 msgstr "Pełny rozmiar"
-
 
 #: src/MQTTBridge/webif.py
 msgid "Open in a new tab"
@@ -1376,10 +1369,6 @@ msgid "Saved. Loading the menu as Home Assistant stored it..."
 msgstr "Zapisano. Wczytuję menu w postaci zapisanej przez Home Assistant..."
 
 #: src/MQTTBridge/webif.py
-msgid "The menu was changed elsewhere since this page loaded it. Reload to see it - your changes here stay on the page until you do."
-msgstr "Menu zmieniono gdzie indziej od chwili wczytania tej strony. Wczytaj je ponownie, by je zobaczyć - Twoje zmiany zostają na stronie do tego czasu."
-
-#: src/MQTTBridge/webif.py
 msgid "Home Assistant refused the menu."
 msgstr "Home Assistant odrzucił menu."
 
@@ -1392,10 +1381,6 @@ msgid "Home Assistant does not see this receiver offering the menu creator yet. 
 msgstr "Home Assistant nie widzi jeszcze, że ten odbiornik oferuje kreator menu. Spróbuj za chwilę."
 
 #: src/MQTTBridge/webif.py
-msgid "Home Assistant did not answer. The menu may still have been saved: reload to see."
-msgstr "Home Assistant nie odpowiedział. Menu mogło mimo to zostać zapisane: wczytaj ponownie, by sprawdzić."
-
-#: src/MQTTBridge/webif.py
 msgid "The receiver has no connection to the MQTT broker. Nothing was saved."
 msgstr "Odbiornik nie ma połączenia z brokerem MQTT. Niczego nie zapisano."
 
@@ -1406,10 +1391,6 @@ msgstr "Odbiornik nie oferuje teraz kreatora menu."
 #: src/MQTTBridge/webif.py
 msgid "The receiver could not read what this page sent. Reload the page."
 msgstr "Odbiornik nie mógł odczytać tego, co wysłała ta strona. Odśwież stronę."
-
-#: src/MQTTBridge/webif.py
-msgid "The menu is too large to send."
-msgstr "Menu jest za duże, by je wysłać."
 
 #: src/MQTTBridge/webif.py
 msgid "Home Assistant answered: %s"
@@ -1458,3 +1439,63 @@ msgstr "Ustawienia menu"
 #: src/MQTTBridge/webif.py
 msgid "Back to MQTT Bridge"
 msgstr "Wróć do MQTT Bridge"
+
+#: src/MQTTBridge/webif.py
+msgid "%d h"
+msgstr "%d godz."
+
+#: src/MQTTBridge/webif.py
+msgid "Your unsaved changes will be lost."
+msgstr "Niezapisane zmiany zostaną utracone."
+
+#: src/MQTTBridge/webif.py
+msgid "Saved; Home Assistant's copy has not arrived yet."
+msgstr "Zapisano; kopia z Home Assistant jeszcze nie dotarła."
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant refused the save: the menu was changed elsewhere since this page loaded it. Reload to see it - your changes here stay on the page until you do."
+msgstr "Home Assistant odrzucił zapis: menu zmieniono gdzie indziej od chwili wczytania tej strony. Wczytaj je ponownie, by je zobaczyć - Twoje zmiany zostają na stronie do tego czasu."
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver is already waiting for Home Assistant to answer other saves. Try again in a moment."
+msgstr "Odbiornik czeka już na odpowiedź Home Assistant na inne zapisy. Spróbuj za chwilę."
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver got no answer from Home Assistant within ten seconds. The menu may still have been saved: reload to see."
+msgstr "Odbiornik nie dostał odpowiedzi od Home Assistant w ciągu dziesięciu sekund. Menu mogło mimo to zostać zapisane: wczytaj ponownie, by sprawdzić."
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver refused the menu: it is too large to send."
+msgstr "Odbiornik odrzucił menu: jest za duże, by je wysłać."
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver refused the request. Reload the page."
+msgstr "Odbiornik odrzucił żądanie. Odśwież stronę."
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver refused the save: this page is out of date - it was changed in another tab or window since it was opened. Reload the page and try again."
+msgstr "Odbiornik odrzucił zapis: ta strona jest nieaktualna - zmieniono ją w innej karcie lub oknie od chwili otwarcia. Odśwież stronę i spróbuj ponownie."
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver could not complete the save; see the plugin log."
+msgstr "Odbiornik nie mógł dokończyć zapisu; zobacz dziennik wtyczki."
+
+#: src/MQTTBridge/webif.py
+msgid "%d s"
+msgstr "%d s"
+
+#: src/MQTTBridge/webif.py
+msgid "%d min"
+msgstr "%d min"
+
+#: src/MQTTBridge/webif.py
+msgid "editing from the receiver is switched off in Home Assistant"
+msgstr "edycja z odbiornika jest wyłączona w Home Assistant"
+
+#: src/MQTTBridge/webif.py
+msgid "Editing the menu from the receiver is switched off in Home Assistant: the companion integration's options, under the receiver menu, can switch it on."
+msgstr "Edycja menu z odbiornika jest wyłączona w Home Assistant: można ją włączyć w opcjach integracji, w części menu odbiornika."
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant refused the save: editing the menu from the receiver is switched off in its integration options."
+msgstr "Home Assistant odrzucił zapis: edycja menu z odbiornika jest wyłączona w opcjach integracji."

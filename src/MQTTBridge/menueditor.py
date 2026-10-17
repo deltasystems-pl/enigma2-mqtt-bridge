@@ -31,6 +31,7 @@ OpenWebif's requests run there - and nothing raises into it.
 """
 
 import json
+import math
 import re
 import secrets
 import time
@@ -64,6 +65,15 @@ ANSWER_SECONDS = 10
 MAX_PENDING = 4
 PATH_LIMIT = 200
 DETAIL_LIMIT = 200
+# A number in a catalogue, an answer or a save is a version, a count or a place in a list.
+# Python 3.9 before 3.9.14 converts a JSON integer of any length, in time that grows with the
+# square of its digits - on the main loop, and a megabyte of digits fits in a catalogue - so a
+# longer one is refused before it is converted, and so is a float of more characters than any
+# float needs, and NaN and the infinities, which JSON does not have.
+MAX_INT_DIGITS = 32
+MAX_FLOAT_CHARACTERS = 64
+# How many unknown catalogue versions are named in the log, each once.
+MAX_VERSIONS_LOGGED = 8
 
 # What Home Assistant answers.
 SAVED = "saved"
@@ -71,12 +81,16 @@ STALE = "stale"
 INVALID = "invalid"
 BUSY = "busy"
 NOT_CLAIMED = "not_claimed"
+# Editing from the receiver is switched off in the integration's options (its default).
+DISABLED = "disabled"
 # What the receiver answers itself, without Home Assistant.
 NO_ANSWER = "no_answer"
 NOT_CONNECTED = "not_connected"
 NOT_ALLOWED = "not_allowed"
 UNREADABLE = "unreadable"
 TOO_BIG = "too_big"
+# More saves waiting than `MAX_PENDING`: the receiver's own word, never Home Assistant's `busy`.
+RECEIVER_BUSY = "receiver_busy"
 
 # Why there is no catalogue to show.
 NO_CATALOGUE = "none"
@@ -118,14 +132,45 @@ class NewerCatalogue(InvalidCatalogue):
     """A catalogue of a `v` this plugin does not know: a newer integration, not a broken one."""
 
     def __init__(self, version):
-        InvalidCatalogue.__init__(self, f"a catalogue of version {version!r}, which this "
-                                  "plugin does not know")
+        shown = str(version)
+        if len(shown) > 12:
+            shown = shown[:12] + "..."
+        InvalidCatalogue.__init__(self, f"a catalogue of version {shown}, which this plugin "
+                                  "does not know")
         self.version = version
+
+
+def _bounded_int(text):
+    if len(text.lstrip("-")) > MAX_INT_DIGITS:
+        raise ValueError(f"an integer of more than {MAX_INT_DIGITS} digits")
+    return int(text)
+
+
+def _bounded_float(text):
+    if len(text) > MAX_FLOAT_CHARACTERS:
+        raise ValueError(f"a number of more than {MAX_FLOAT_CHARACTERS} characters")
+    number = float(text)
+    if not math.isfinite(number):
+        raise ValueError("a number too large for a float")
+    return number
+
+
+def _no_constant(name):
+    raise ValueError(name + " is not a JSON value")
+
+
+def loads_bounded(text):
+    """`json.loads` with every number bounded and without NaN or the infinities.
+
+    Raises what `json.loads` raises - ValueError, RecursionError - and nothing else.
+    """
+    return json.loads(text, parse_int=_bounded_int, parse_float=_bounded_float,
+                      parse_constant=_no_constant)
 
 
 def _loads(text, what):
     try:
-        return json.loads(text)
+        return loads_bounded(text)
     except RecursionError:
         # Hundreds of thousands of brackets fit in a megabyte.
         raise InvalidCatalogue(what + " is nested too deeply") from None
@@ -168,10 +213,19 @@ def parse_catalogue(payload):
     if not isinstance(raw, dict):
         raise InvalidCatalogue("the catalogue is not a JSON object")
     version = raw.get("v")
-    if not isinstance(version, int) or isinstance(version, bool):
-        raise InvalidCatalogue("v is not a number")
-    if version != CATALOGUE_VERSION:
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        raise InvalidCatalogue("v is not a version number")
+    if version > CATALOGUE_VERSION:
         raise NewerCatalogue(version)
+    editing = raw.get("editing", True)
+    if not isinstance(editing, bool):
+        raise InvalidCatalogue("editing is not true or false")
+    encoded = payload if isinstance(payload, (bytes, bytearray)) else text.encode("utf-8")
+    if not editing:
+        # Editing from the receiver is switched off in Home Assistant: the catalogue says so
+        # and nothing else - no menu, no entity. Kept as it came, for the page to say why.
+        return {"raw": bytes(encoded), "revision": None, "entities": 0, "left_out": None,
+                "editing": False}
     revision = raw.get("revision")
     if not is_revision(revision):
         raise InvalidCatalogue("revision is not 16 lowercase hexadecimal digits")
@@ -184,12 +238,12 @@ def parse_catalogue(payload):
     left_out = raw.get("left_out")
     if isinstance(left_out, bool) or not isinstance(left_out, int) or left_out < 0:
         left_out = None
-    encoded = payload if isinstance(payload, (bytes, bytearray)) else text.encode("utf-8")
     return {
         "raw": bytes(encoded),
         "revision": revision,
         "entities": len(entities),
         "left_out": left_out,
+        "editing": True,
     }
 
 
@@ -219,7 +273,7 @@ def parse_answer(payload):
         except UnicodeDecodeError:
             return None
     try:
-        raw = json.loads(str(payload or ""))
+        raw = loads_bounded(str(payload or ""))
     except (ValueError, RecursionError, OverflowError, TypeError):
         return None
     if not isinstance(raw, dict):
@@ -249,11 +303,11 @@ def encode_edit(ident, base, menu, ts):
         raise ValueError(UNREADABLE)
     payload = {"id": ident, "base": base, "ts": int(ts), "menu": menu}
     try:
-        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True,
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, allow_nan=False,
                              separators=(",", ":")).encode("utf-8")
     except (ValueError, TypeError, RecursionError):
         # A lone surrogate from a browser's JSON (a UnicodeEncodeError, which is a ValueError),
-        # or a structure too deep to write back.
+        # a NaN or an infinity, or a structure too deep to write back.
         raise ValueError(UNREADABLE) from None
     if len(encoded) > MAX_EDIT_BYTES:
         raise ValueError(TOO_BIG)
@@ -317,7 +371,8 @@ class MenuEditor:
         try:
             catalogue = parse_catalogue(payload)
         except NewerCatalogue as error:
-            if error.version not in self._versions_logged:
+            if (error.version not in self._versions_logged
+                    and len(self._versions_logged) < MAX_VERSIONS_LOGGED):
                 self._versions_logged.add(error.version)
                 LOG.warning("ignoring the menu catalogue: %s", error)
             self.catalogue = None
@@ -336,6 +391,9 @@ class MenuEditor:
         self.catalogue = catalogue
         self.received = self.clock()
         self.reason = None
+        if not catalogue["editing"]:
+            LOG.info("editing the menu from the receiver is switched off in Home Assistant")
+            return
         LOG.debug("menu catalogue %s: %d entities, %s left out, %d bytes", catalogue["revision"],
                   catalogue["entities"], catalogue["left_out"], len(catalogue["raw"]))
 
@@ -344,10 +402,10 @@ class MenuEditor:
         catalogue = self.catalogue
         if catalogue is None:
             return {"revision": None, "received": None, "left_out": None, "entities": None,
-                    "reason": self.reason}
+                    "editing": None, "reason": self.reason}
         return {"revision": catalogue["revision"], "received": self.received,
                 "left_out": catalogue["left_out"], "entities": catalogue["entities"],
-                "reason": None}
+                "editing": catalogue["editing"], "reason": None}
 
     # ------------------------------------------------------------------ edits --
 
@@ -367,7 +425,7 @@ class MenuEditor:
         if bridge is None or not bridge.connected:
             return NOT_CONNECTED
         if len(self.pending) >= MAX_PENDING:
-            return BUSY
+            return RECEIVER_BUSY
         ident = secrets.token_hex(_EDIT_ID_BYTES)
         while ident in self.pending:
             ident = secrets.token_hex(_EDIT_ID_BYTES)

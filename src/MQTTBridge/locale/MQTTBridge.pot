@@ -200,7 +200,6 @@ msgstr ""
 msgid "MQTT"
 msgstr ""
 
-
 #: src/MQTTBridge/webif.py
 msgid "Receiver integration status"
 msgstr ""
@@ -208,7 +207,6 @@ msgstr ""
 #: src/MQTTBridge/webif.py
 msgid "Status"
 msgstr ""
-
 
 #: src/MQTTBridge/webif.py
 msgid "Sanitized log tail"
@@ -218,13 +216,9 @@ msgstr ""
 msgid "Request rejected."
 msgstr ""
 
-
-
-
 #: src/MQTTBridge/webif.py
 msgid "Logging is unavailable."
 msgstr ""
-
 
 #: src/MQTTBridge/webif.py
 msgid "The MQTT Bridge page could not be built; see the plugin log."
@@ -625,7 +619,6 @@ msgstr ""
 #: src/MQTTBridge/webif.py
 msgid "Full size"
 msgstr ""
-
 
 #: src/MQTTBridge/webif.py
 msgid "Open in a new tab"
@@ -1376,10 +1369,6 @@ msgid "Saved. Loading the menu as Home Assistant stored it..."
 msgstr ""
 
 #: src/MQTTBridge/webif.py
-msgid "The menu was changed elsewhere since this page loaded it. Reload to see it - your changes here stay on the page until you do."
-msgstr ""
-
-#: src/MQTTBridge/webif.py
 msgid "Home Assistant refused the menu."
 msgstr ""
 
@@ -1392,10 +1381,6 @@ msgid "Home Assistant does not see this receiver offering the menu creator yet. 
 msgstr ""
 
 #: src/MQTTBridge/webif.py
-msgid "Home Assistant did not answer. The menu may still have been saved: reload to see."
-msgstr ""
-
-#: src/MQTTBridge/webif.py
 msgid "The receiver has no connection to the MQTT broker. Nothing was saved."
 msgstr ""
 
@@ -1405,10 +1390,6 @@ msgstr ""
 
 #: src/MQTTBridge/webif.py
 msgid "The receiver could not read what this page sent. Reload the page."
-msgstr ""
-
-#: src/MQTTBridge/webif.py
-msgid "The menu is too large to send."
 msgstr ""
 
 #: src/MQTTBridge/webif.py
@@ -1457,4 +1438,64 @@ msgstr ""
 
 #: src/MQTTBridge/webif.py
 msgid "Back to MQTT Bridge"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "%d h"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Your unsaved changes will be lost."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Saved; Home Assistant's copy has not arrived yet."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant refused the save: the menu was changed elsewhere since this page loaded it. Reload to see it - your changes here stay on the page until you do."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver is already waiting for Home Assistant to answer other saves. Try again in a moment."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver got no answer from Home Assistant within ten seconds. The menu may still have been saved: reload to see."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver refused the menu: it is too large to send."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver refused the request. Reload the page."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver refused the save: this page is out of date - it was changed in another tab or window since it was opened. Reload the page and try again."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "The receiver could not complete the save; see the plugin log."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "%d s"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "%d min"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "editing from the receiver is switched off in Home Assistant"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Editing the menu from the receiver is switched off in Home Assistant: the companion integration's options, under the receiver menu, can switch it on."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Home Assistant refused the save: editing the menu from the receiver is switched off in its integration options."
 msgstr ""

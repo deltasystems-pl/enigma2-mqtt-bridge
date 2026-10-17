@@ -161,6 +161,18 @@ INVALID = [
                  id="version-infinite"),
     pytest.param(b'{"v": ' + b"9" * 5000 + b', "revision": "3f9c2e4a1b7d5c60", "menu": [], '
                  b'"entities": []}', id="version-of-5000-digits"),
+    pytest.param(encoded(catalogue(v=0)), id="version-0"),
+    pytest.param(encoded(catalogue(v=-3)), id="version-negative"),
+    pytest.param(b'{"v": 1, "revision": "3f9c2e4a1b7d5c60", "menu": [], "entities": [], '
+                 b'"left_out": NaN}', id="nan"),
+    pytest.param(b'{"v": 1, "revision": "3f9c2e4a1b7d5c60", "menu": [], "entities": [], '
+                 b'"left_out": Infinity}', id="infinity"),
+    pytest.param(b'{"v": 1, "revision": "3f9c2e4a1b7d5c60", "menu": [], "entities": [], '
+                 b'"left_out": -Infinity}', id="minus-infinity"),
+    pytest.param(b'{"v": 1, "revision": "3f9c2e4a1b7d5c60", "menu": [], "entities": [], '
+                 b'"left_out": 1e999}', id="float-overflow"),
+    pytest.param(b'{"v": 1, "revision": "3f9c2e4a1b7d5c60", "menu": [], "entities": [], '
+                 b'"left_out": 1.' + b"0" * 100 + b'}', id="float-of-100-characters"),
 ]
 
 
@@ -170,10 +182,92 @@ def test_a_catalogue_that_breaks_the_envelope_is_refused(raw):
         parse_catalogue(raw)
 
 
+OFF = b'{"v": 1, "editing": false}'
+
+
+def test_editing_switched_off_is_a_catalogue_that_says_so_and_nothing_else():
+    parsed = parse_catalogue(OFF)
+    assert parsed == {"raw": OFF, "revision": None, "entities": 0, "left_out": None,
+                      "editing": False}
+
+
+def test_a_full_catalogue_says_editing_is_on_with_the_key_or_without_it():
+    assert parse_catalogue(encoded(catalogue(editing=True)))["editing"] is True
+    assert parse_catalogue(encoded(catalogue()))["editing"] is True
+
+
+@pytest.mark.parametrize("value", ["false", 0, None, [], 1])
+def test_an_editing_flag_that_is_not_true_or_false_is_invalid(value):
+    with pytest.raises(InvalidCatalogue, match="editing"):
+        parse_catalogue(encoded(catalogue(editing=value)))
+
+
+def test_editing_on_still_needs_the_whole_envelope():
+    with pytest.raises(InvalidCatalogue):
+        parse_catalogue(b'{"v": 1, "editing": true}')
+
+
+def test_editing_switched_off_replaces_the_catalogue_before_it(world, plugin_log):
+    world.client.fire_message(CATALOGUE_TOPIC, encoded(catalogue()), retain=True)
+    world.client.fire_message(CATALOGUE_TOPIC, OFF, retain=True)
+    assert editor(world).catalogue["raw"] == OFF
+    assert editor(world).status()["editing"] is False
+    assert "switched off in Home Assistant" in plugin_log()
+
+
 def test_a_catalogue_of_another_version_is_a_newer_one():
     with pytest.raises(NewerCatalogue) as refused:
         parse_catalogue(encoded(catalogue(v=2)))
     assert refused.value.version == 2
+
+
+@pytest.mark.parametrize("version", [0, -1])
+def test_a_version_below_one_is_invalid_not_newer(version):
+    with pytest.raises(InvalidCatalogue) as refused:
+        parse_catalogue(encoded(catalogue(v=version)))
+    assert not isinstance(refused.value, NewerCatalogue)
+
+
+def test_a_newer_versions_number_is_cut_in_the_sentence():
+    with pytest.raises(NewerCatalogue) as refused:
+        parse_catalogue(encoded(catalogue(v=10 ** 30)))
+    assert str(refused.value) == ("a catalogue of version 100000000000..., which this plugin "
+                                  "does not know")
+
+
+def test_a_megabyte_of_digits_is_refused_before_it_is_converted():
+    """Python 3.9 before 3.9.14 converts any length, in time growing with the square of it."""
+    digits = b"9" * (menueditor.MAX_CATALOGUE_BYTES - 100)
+    with pytest.raises(InvalidCatalogue, match="not JSON"):
+        parse_catalogue(b'{"v": ' + digits + b"}")
+    assert parse_catalogue(encoded(catalogue(left_out=10 ** 31)))["left_out"] == 10 ** 31
+    with pytest.raises(InvalidCatalogue):
+        parse_catalogue(encoded(catalogue(left_out=10 ** 32)))
+
+
+@pytest.mark.parametrize("raw", ["[1e5]", "[-0.5]", "[12345678901234567890123456789012]"])
+def test_ordinary_numbers_still_parse(raw):
+    assert menueditor.loads_bounded(raw) == json.loads(raw)
+
+
+@pytest.mark.parametrize("raw", ["[NaN]", "[Infinity]", "[-Infinity]", "[1e400]",
+                                 "[" + "1" * 33 + "]"])
+def test_loads_bounded_refuses_what_json_does_not_have_or_cannot_bound(raw):
+    with pytest.raises(ValueError):
+        menueditor.loads_bounded(raw)
+
+
+def test_an_answer_with_a_nan_or_a_long_number_is_not_an_answer():
+    assert parse_answer(b'{"id": "8c1d2e3f4a5b", "result": "saved", "x": NaN}') is None
+    assert parse_answer(b'{"id": "8c1d2e3f4a5b", "result": "saved", "x": ' + b"1" * 40
+                        + b"}") is None
+
+
+def test_an_edit_with_a_nan_is_never_published():
+    with pytest.raises(ValueError, match="unreadable"):
+        encode_edit("0" * 12, REVISION, [float("nan")], 1792050000)
+    with pytest.raises(ValueError, match="unreadable"):
+        encode_edit("0" * 12, REVISION, [float("inf")], 1792050000)
 
 
 def test_a_recursion_bomb_is_a_refusal_never_an_escaping_exception():
@@ -233,6 +327,13 @@ def test_a_newer_catalogue_is_not_shown_and_says_why_once(world, plugin_log):
     assert editor(world).catalogue is None
     assert editor(world).status()["reason"] == "newer"
     assert plugin_log().count("ignoring the menu catalogue: a catalogue of version 2") == 1
+
+
+def test_the_versions_named_in_the_log_are_bounded(world, plugin_log):
+    for version in range(2, 2 + menueditor.MAX_VERSIONS_LOGGED + 5):
+        world.client.fire_message(CATALOGUE_TOPIC, encoded(catalogue(v=version)))
+    assert len(editor(world)._versions_logged) == menueditor.MAX_VERSIONS_LOGGED
+    assert plugin_log().count("ignoring the menu catalogue") == menueditor.MAX_VERSIONS_LOGGED
 
 
 # ----------------------------------------------------------------------- edits --
@@ -335,10 +436,12 @@ def test_a_save_without_a_broker_connection_publishes_nothing(world):
     assert len(world.client.published) == published
 
 
-def test_more_than_four_waiting_saves_are_busy(world):
+def test_more_than_four_waiting_saves_are_the_receivers_own_busy(world):
+    """Never Home Assistant's word: the page says the receiver is the one waiting."""
     for _index in range(menueditor.MAX_PENDING):
         assert submit(world)[0] is None
-    assert submit(world)[0] == "busy"
+    assert submit(world)[0] == "receiver_busy"
+    assert menueditor.RECEIVER_BUSY != menueditor.BUSY
     assert len(edits(world)) == menueditor.MAX_PENDING
 
 

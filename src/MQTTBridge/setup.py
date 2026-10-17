@@ -94,7 +94,7 @@ def setting_labels():
 
 def section_headings():
     """Setting name, and the heading the screen shows above it: where a section begins."""
-    return {"menu_allowed": _("Menu")}
+    return {"menu_allowed": _("Home Assistant menu")}
 
 
 def is_heading(entry):
@@ -105,6 +105,51 @@ def is_heading(entry):
     screen does the same in every loop it runs over its entries.
     """
     return not isinstance(entry, (tuple, list)) or len(entry) < 2
+
+
+# The images' ConfigListScreen methods that read the selected entry's setting, `[1]`, and are
+# reached from a key or a timer. Read in the sources of OpenViX, OpenPLi, OpenATV and OpenBH:
+# OpenATV guards none of `getCurrentItem`, `getCurrentValue` and `keyMenu`, and its list's
+# `handleKey` none either; OpenViX and OpenBH leave `keyMenu`; OpenPLi and OpenViX leave the
+# callbacks after `keyText`; every image leaves `ConfigList.toggle`. And a key's action map can
+# stay enabled from the setting before: moving onto a heading does not run `handleInputHelpers`.
+# On this screen every one of them does nothing on a heading and is the image's own anywhere
+# else; one the image does not have is nothing.
+HEADING_GUARDED = (
+    "keySelect", "keyLeft", "keyRight", "keyFirst", "keyLast", "keyNumberGlobal", "keyGotAscii",
+    "keyBackspace", "keyDelete", "keyErase", "keyToggle", "keyMenu", "keyText", "keyDefault",
+    "handleInputHelpers",
+)
+# What a getter answers on a heading, as the images that guard it do.
+HEADING_GETTERS = {"getCurrentItem": None, "getCurrentValue": ""}
+# The list widget's own methods, guarded on the instance: a timer of the image's (the one that
+# ends typing a number) calls `handleKey` too, after the selection may have moved.
+LIST_GUARDED = ("handleKey", "toggle")
+
+
+def _current(widget):
+    try:
+        return widget.getCurrent()
+    except Exception:
+        return None
+
+
+def guard_list(widget):
+    """Make the list widget's key handling do nothing while a heading is selected."""
+    for name in LIST_GUARDED:
+        original = getattr(widget, name, None)
+        if not callable(original):
+            continue
+
+        def guarded(*arguments, _original=original, **keywords):
+            if is_heading(_current(widget)):
+                return None
+            return _original(*arguments, **keywords)
+
+        try:
+            setattr(widget, name, guarded)
+        except Exception:
+            LOG.debug("the list's %s could not be guarded against a heading", name)
 
 
 def build_entries(settings):
@@ -190,6 +235,7 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
             # edited, which is cosmetic.
             LOG.debug("this image's ConfigListScreen has no on_change")
             ConfigListScreen.__init__(self, self.entries, session=session)
+        guard_list(self["config"])
 
         self["status"] = Label(status_text(self._bridge_or_running(), self.settings))
         self["key_red"] = Label(_("Cancel"))
@@ -237,21 +283,6 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
             return is_heading(self["config"].getCurrent())
         except Exception:
             return False
-
-    # OpenViX's ConfigListScreen (read in its source) guards a heading in every path but these
-    # two: MENU and TEXT read the selected entry's setting without asking whether it has one. On
-    # a heading they do nothing here; anywhere else they are the image's own.
-    def keyMenu(self, *arguments):
-        if self._on_heading():
-            return None
-        parent = getattr(ConfigListScreen, "keyMenu", None)
-        return parent(self, *arguments) if parent is not None else None
-
-    def keyText(self, *arguments):
-        if self._on_heading():
-            return None
-        parent = getattr(ConfigListScreen, "keyText", None)
-        return parent(self, *arguments) if parent is not None else None
 
     def _anything_changed(self):
         for entry in setting_entries(self.entries):
@@ -376,3 +407,25 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
             except Exception:
                 LOG.exception("could not restore a setting")
         self.close(False)
+
+
+def _heading_safe(name, answer=None):
+    """`name` of the image's ConfigListScreen, doing nothing - answering `answer` - on a heading."""
+
+    def method(self, *arguments, **keywords):
+        if self._on_heading():
+            return answer
+        parent = getattr(ConfigListScreen, name, None)
+        if parent is None:
+            return answer
+        return parent(self, *arguments, **keywords)
+
+    method.__name__ = name
+    return method
+
+
+for _name in HEADING_GUARDED:
+    setattr(MQTTBridgeSetup, _name, _heading_safe(_name))
+for _name, _answer in HEADING_GETTERS.items():
+    setattr(MQTTBridgeSetup, _name, _heading_safe(_name, _answer))
+del _name, _answer

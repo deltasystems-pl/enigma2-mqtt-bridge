@@ -93,7 +93,8 @@ def test_an_empty_object_validates_to_what_is_there(settings):
 # ------------------------------------------------------------------- the alpha --
 
 
-@pytest.mark.parametrize("percent, alpha", [(0, 0x00), (20, 0x33), (50, 0x80), (80, 0xCC)])
+@pytest.mark.parametrize("percent, alpha", [(0, 0x00), (20, 0x33), (30, 0x4D), (50, 0x80),
+                                              (70, 0xB3), (80, 0xCC), (100, 0xFF)])
 def test_the_alpha_is_the_percent_of_255_rounded(percent, alpha):
     assert styledlist.alpha(percent) == alpha
 
@@ -154,7 +155,7 @@ def test_an_open_menu_keeps_its_look(make_bridge, factory, settings):
 
 def test_the_menu_section_is_last_under_its_heading(settings):
     entries = setup_screen.build_entries(settings)
-    heading = entries.index(("Menu",))
+    heading = entries.index(("Home Assistant menu",))
     assert [entry[1] for entry in entries[heading + 1:]] == [
         settings.menu_allowed, settings.menu_hotkey, settings.menu_transparency,
     ]
@@ -228,6 +229,79 @@ def test_menu_and_text_on_a_heading_do_nothing(settings, monkeypatch):
     screen.keyMenu()
     screen.keyText()
     assert calls == ["menu", "text"]
+
+
+@pytest.mark.parametrize("name",
+                         setup_screen.HEADING_GUARDED + tuple(setup_screen.HEADING_GETTERS))
+def test_every_image_method_that_reads_the_setting_does_nothing_on_a_heading(settings,
+                                                                              monkeypatch, name):
+    calls = []
+    monkeypatch.setattr(setup_screen.ConfigListScreen, name,
+                        lambda self, *a, **k: calls.append(a) or "parent", raising=False)
+    screen = _screen(settings)
+    screen["config"] = _List(("Home Assistant menu",))
+    assert getattr(screen, name)(1) == setup_screen.HEADING_GETTERS.get(name)
+    assert calls == []
+    screen["config"] = _List(("Label", settings.menu_hotkey))
+    assert getattr(screen, name)(1) == "parent"
+    assert calls == [(1,)]
+
+
+def test_the_getters_answer_on_a_heading_what_the_images_that_guard_them_do(settings):
+    screen = _screen(settings)
+    screen["config"] = _List(("Home Assistant menu",))
+    assert screen.getCurrentValue() == ""
+    assert screen.getCurrentItem() is None
+
+
+class _Widget:
+    def __init__(self, current):
+        self.current = current
+        self.keys = []
+        self.toggled = 0
+
+    def getCurrent(self):
+        return self.current
+
+    def handleKey(self, key, callback=None):
+        self.keys.append(key)
+
+    def toggle(self):
+        self.toggled += 1
+
+
+def test_the_lists_own_key_handling_does_nothing_on_a_heading():
+    """The image's timer that ends typing a number calls `handleKey` after a move, too."""
+    widget = _Widget(("Home Assistant menu",))
+    setup_screen.guard_list(widget)
+    widget.handleKey(3)
+    widget.toggle()
+    assert widget.keys == [] and widget.toggled == 0
+    widget.current = ("Label", object())
+    widget.handleKey(3)
+    widget.toggle()
+    assert widget.keys == [3] and widget.toggled == 1
+
+
+def test_a_list_without_those_methods_is_left_as_it_is():
+    class Bare:
+        def getCurrent(self):
+            return ("x",)
+
+    bare = Bare()
+    setup_screen.guard_list(bare)
+    assert not hasattr(bare, "handleKey")
+
+
+def test_the_screen_guards_its_list_when_it_is_built(settings, monkeypatch):
+    from Components.ConfigList import ConfigList
+
+    monkeypatch.setattr(ConfigList, "handleKey", lambda self, key, callback=None: key,
+                        raising=False)
+    monkeypatch.setattr(ConfigList, "getCurrent", lambda self: ("Home Assistant menu",),
+                        raising=False)
+    screen = _screen(settings)
+    assert screen["config"].handleKey(5) is None
 
 
 def test_menu_and_text_on_an_image_without_them_do_nothing(settings):

@@ -196,10 +196,19 @@ def test_the_creator_mount_carries_its_addresses_token_icons_bounds_and_texts(wo
                                                      "text": 60}
     texts = json.loads(attributes["data-texts"])
     assert texts == webif.creator_texts()
-    for result in ("saved", "stale", "invalid", "busy", "not_claimed", "no_answer",
-                   "not_connected", "not_allowed", "unreadable", "too_big", "rejected",
-                   "out_of_date", "unknown"):
-        assert texts["result_" + result], result
+    home_assistant = ("saved", "stale", "invalid", "busy", "not_claimed", "disabled")
+    receiver = ("receiver_busy", "no_answer", "not_connected", "not_allowed", "unreadable",
+                "too_big", "rejected", "out_of_date", "failed")
+    for result in home_assistant:
+        assert texts["result_" + result].startswith(("Home Assistant", "Saved.")), result
+    for result in receiver:
+        assert texts["result_" + result].startswith("The receiver"), result
+    # Every answer has its own sentence: no two say the same.
+    sentences = [texts["result_" + result] for result in home_assistant + receiver]
+    assert len(set(sentences)) == len(sentences)
+    assert texts["result_unknown"] and texts["result_arriving"] and texts["confirm_reload"]
+    assert "integration" in texts["editing_off"]
+    assert attributes["data-iconbase"] == "/mqttbridge/menu/icon/"
 
 
 def test_the_subpage_under_a_foreign_host_is_421(world):
@@ -423,6 +432,17 @@ def test_with_the_menu_off_the_catalogue_says_so(make_bridge, factory, settings,
     assert json.loads(body) == {"catalogue": None, "reason": "menu_off"}
 
 
+def test_editing_switched_off_is_served_as_it_came_and_said_on_the_status_line(world):
+    off = b'{"v": 1, "editing": false}'
+    world.client.fire_message(CATALOGUE_TOPIC, off, retain=True)
+    _request, body = page(world, name="catalogue.json")
+    assert body == off
+    _request, body = page(world)
+    text = html.unescape(body.decode("utf-8"))
+    assert ("<dt>Catalogue</dt><dd>editing from the receiver is switched off in Home "
+            "Assistant</dd>") in text
+
+
 def test_a_newer_catalogue_says_so(world):
     world.client.fire_message(CATALOGUE_TOPIC, json.dumps(a_catalogue(v=2)).encode())
     _request, body = page(world, name="catalogue.json")
@@ -513,7 +533,9 @@ def test_a_retired_token_is_out_of_date(world):
     ("menu not JSON", 400, "unreadable"),
     ("menu an object", 400, "unreadable"),
     ("base not a revision", 400, "unreadable"),
-    ("menu over 64 KiB", 400, "unreadable"),
+    ("menu over 64 KiB", 400, "too_big"),
+    ("menu with a NaN", 400, "unreadable"),
+    ("menu with a 40-digit number", 400, "unreadable"),
 ])
 def test_a_refused_save_publishes_nothing(world, case, code, result):
     session = new_session()
@@ -543,6 +565,10 @@ def test_a_refused_save_publishes_nothing(world, case, code, result):
         fields["menu"] = "{}"
     elif case == "base not a revision":
         fields["base"] = "3F9C2E4A1B7D5C60"
+    elif case == "menu with a NaN":
+        fields["menu"] = "[NaN]"
+    elif case == "menu with a 40-digit number":
+        fields["menu"] = "[" + "7" * 40 + "]"
     elif case == "menu over 64 KiB":
         fields["menu"] = json.dumps(["x" * 70000])
     published = len(world.client.published)
@@ -604,3 +630,52 @@ def test_a_link_openwebif_refused_is_not_mounted(monkeypatch):
     toplevel.addExternalChild = lambda child: False
     _run_hook(monkeypatch, toplevel)
     assert not menueditor.mounted()
+
+
+# ------------------------------------------------------------------ the icons --
+
+
+def icon(world, name, **kwargs):
+    kwargs.setdefault("prepath", (b"mqttbridge", b"menu", b"icon"))
+    request = _Request(**kwargs)
+    request.postpath = [name.encode("ascii")] if isinstance(name, str) else name
+    return request, menu_child(world.resource, "icon").render_GET(request)
+
+
+@pytest.mark.parametrize("name", ["lamp", "neutral", "ceiling-light", "home"])
+def test_an_icon_of_the_list_is_its_shipped_png(world, name):
+    from MQTTBridge import styledlist
+
+    request, body = icon(world, name + ".png")
+    headers = request.response_headers
+    assert request.response_code == 200
+    assert body == Path(styledlist.icon_path(name)).read_bytes()
+    assert body.startswith(b"\x89PNG")
+    assert headers["content-type"] == "image/png"
+    assert headers["x-content-type-options"] == "nosniff"
+    assert headers["content-security-policy"] == "default-src 'none'; frame-ancestors 'self'"
+
+
+@pytest.mark.parametrize("postpath", [
+    [b"lamp"], [b"nothing.png"], [b"..", b"plugin.png"], [b"../plugin.png"], [b"Lamp.png"],
+    [b"lamp.png", b"x"], [b"x", b"lamp.png"], [], [b"lamp.png.png"], [b"%2e%2e.png"],
+    [b"neutral.PNG"],
+])
+def test_any_other_name_is_404(world, postpath):
+    request, body = icon(world, postpath)
+    assert request.response_code == 404
+    assert body == b""
+
+
+def test_an_icon_under_a_foreign_host_is_421(world):
+    request, _body = icon(world, "lamp.png", host="attacker.example")
+    assert request.response_code == webif.MISDIRECTED_REQUEST
+
+
+# --------------------------------------------------------- the status line's units --
+
+
+@pytest.mark.parametrize("seconds, text", [(0, "0 s"), (119, "119 s"), (120, "2 min"),
+                                           (7199, "119 min"), (7200, "2 h")])
+def test_the_catalogues_age_is_said_in_translated_units(seconds, text):
+    assert webif._age(seconds) == text

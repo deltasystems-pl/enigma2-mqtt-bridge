@@ -14,7 +14,7 @@ const HOSTILE = "<img src=x onerror=alert(1)>";
 const REVISION = "3f9c2e4a1b7d5c60";
 const NEW_REVISION = "a1b2c3d4e5f60718";
 const TAGS = new Set(["div", "p", "span", "strong", "button", "label", "input", "select",
-                      "option"]);
+                      "option", "img"]);
 
 // ------------------------------------------------------------ the fake DOM --
 
@@ -32,6 +32,9 @@ class Element {
     this.selected = false;
     this.placeholder = "";
     this.maxLength = -1;
+    this.src = "";
+    this.alt = "";
+    this.hidden = false;
     this.attributes = {};
     this.listeners = {};
     this.dataset = {};
@@ -105,12 +108,17 @@ function mount(limits) {
       result_saved: "Saved.", result_waiting: "Waiting.", result_stale: "Stale.",
       result_invalid: "Refused.", result_unknown: "Answered: %s", result_no_answer: "None.",
       limit_groups: "At most %s groups.", choose_entity: "Choose.", name_group: "Name it.",
+      limit_top: "At most %s entries.", result_arriving: "Arriving.", load_failed: "Failed.",
+      confirm_reload: "Lose it?", hidden: "hidden", config: "configuration",
+      diagnostic: "diagnostic", result_receiver_busy: "The receiver is busy.",
+      editing_off: "Off in Home Assistant.", result_disabled: "Disabled in Home Assistant.",
       missing: "Missing: %s", not_listed: "Not listed: %s", reload: "Reload",
     }),
     icons: JSON.stringify(["neutral", "lamp", "sofa", "garden"]),
     limits: JSON.stringify(limits || {groups: 8, top: 24, rows: 24, text: 60}),
     catalogue: "/mqttbridge/menu/catalogue.json",
     save: "/mqttbridge/menu/save",
+    iconbase: "/mqttbridge/menu/icon/",
     csrf: "token-of-the-page",
   };
   return node;
@@ -153,19 +161,27 @@ function network(answers) {
     },
     URLSearchParams,
     now: () => clock,
+    // Time passes at once, on the next turn of the event loop: what the page does after a wait
+    // has not happened yet when a test looks right after the call that started it.
     wait(milliseconds) {
       clock += milliseconds;
-      return Promise.resolve();
+      return new Promise((resolve) => setImmediate(resolve));
     },
     reloadPage() {
       this.reloaded = true;
     },
+    confirmations: [],
+    answer: true,
+    confirm(text) {
+      this.confirmations.push(text);
+      return this.answer;
+    },
   };
 }
 
-async function loaded(answers, limits) {
+async function loaded(answers, limits, first) {
   const node = mount(limits);
-  const net = network([catalogue()].concat(answers || []));
+  const net = network([first || catalogue()].concat(answers || []));
   const page = new creator.Creator(node, doc, net);
   await page.load();
   return {node, net, page};
@@ -323,16 +339,257 @@ test("after a save the page waits for the catalogue with the new revision", asyn
   assert.strictEqual(page.message.text, "Saved.");
 });
 
-test("the wait for the new revision ends after five seconds", async () => {
+test("a late catalogue keeps the saved menu on the page and is taken when it comes",
+     async () => {
   const answers = [{result: "saved", revision: NEW_REVISION}];
-  for (let index = 0; index < 20; index += 1) {
+  // Eleven polls in the first five seconds and three more after it: all the old revision.
+  for (let index = 0; index < 14; index += 1) {
     answers.push(catalogue());
   }
+  answers.push(catalogue({revision: NEW_REVISION, menu: [
+    {type: "group", id: "g_new0000001", label: "Garden", icon: "garden", rows: []}]}));
   const {net, page} = await loaded(answers);
+  page.addGroup();
+  const saved = JSON.stringify(creator.toPayload(page.menu));
   await page.save();
   // The first fetch, the save, and eleven catalogue fetches half a second apart.
   assert.strictEqual(net.sent.length, 13);
   assert.strictEqual(page.busy, false);
+  assert.strictEqual(page.message.text, "Arriving.");
+  assert.strictEqual(page.offerReload, true);
+  assert.strictEqual(page.catalogue.revision, REVISION, "never an older catalogue's menu");
+  assert.strictEqual(JSON.stringify(creator.toPayload(page.menu)), saved);
+  await page.following;
+  assert.strictEqual(page.catalogue.revision, NEW_REVISION);
+  assert.strictEqual(page.menu[0].id, "g_new0000001");
+  assert.strictEqual(page.message.text, "Saved.");
+});
+
+test("a late catalogue never replaces an edit made while it was awaited", async () => {
+  const answers = [{result: "saved", revision: NEW_REVISION}];
+  for (let index = 0; index < 11; index += 1) {
+    answers.push(catalogue());
+  }
+  answers.push(catalogue({revision: NEW_REVISION, menu: []}));
+  const {page} = await loaded(answers);
+  await page.save();
+  page.addGroup();
+  await page.following;
+  assert.strictEqual(page.catalogue.revision, REVISION);
+  assert.strictEqual(page.groups().length, 2);
+  assert.strictEqual(page.message.text, "Arriving.");
+});
+
+test("the late catalogue is awaited for a minute and then no longer", async () => {
+  const answers = [{result: "saved", revision: NEW_REVISION}];
+  for (let index = 0; index < 60; index += 1) {
+    answers.push(catalogue());
+  }
+  const {net, page} = await loaded(answers);
+  await page.save();
+  await page.following;
+  // 13 by the end of the first five seconds, then one every two seconds for a minute.
+  assert.strictEqual(net.sent.length, 13 + 30);
+  assert.strictEqual(page.awaited, null);
+  assert.strictEqual(page.catalogue.revision, REVISION);
+});
+
+test("a reload of a changed page asks first, and keeps the draft when the answer is no",
+     async () => {
+  const {net, page} = await loaded([{result: "stale"}, catalogue()]);
+  page.addGroup();
+  await page.save();
+  net.answer = false;
+  await page.reload();
+  assert.deepStrictEqual(net.confirmations, ["Lose it?"]);
+  assert.strictEqual(page.groups().length, 2, "the draft is still there");
+  assert.strictEqual(net.sent.length, 2);
+  net.answer = true;
+  await page.reload();
+  assert.strictEqual(net.sent.length, 3);
+  assert.strictEqual(page.groups().length, 1);
+  assert.strictEqual(page.dirty, false);
+});
+
+test("a reload of an unchanged page asks nothing", async () => {
+  const {net, page} = await loaded([catalogue()]);
+  await page.reload();
+  assert.deepStrictEqual(net.confirmations, []);
+});
+
+test("entity ids that name object properties are entity ids and nothing else", async () => {
+  const hostile = ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"];
+  const node = mount();
+  const raw = catalogue({
+    menu: hostile.map((id, index) => ({type: "row", id: "r_" + index, entity: id,
+                                       control: "toggle", label: null, icon: null}))
+      .concat([{type: "row", id: "r_x", entity: "constructor", control: "toggle",
+                label: null, icon: "constructor"}]),
+    entities: [{e: "toString", n: "Named toString", a: null, c: ["toggle"]},
+               {e: "__proto__", n: "Named proto", a: null, c: ["indicator"]}],
+  });
+  const net = network([raw]);
+  const page = new creator.Creator(node, doc, net);
+  await page.load();
+  assert.notStrictEqual(page.catalogue, null, "the page drew the catalogue");
+  assert.strictEqual(Object.getPrototypeOf(page.catalogue.byId), null);
+  assert.strictEqual(page.catalogue.entities.length, 2);
+  const texts = node.all().map((element) => element.text).join("\n");
+  assert.ok(texts.includes("Named toString"));
+  assert.ok(texts.includes("Not listed: constructor"));
+  assert.ok(texts.includes("Not listed: valueOf"));
+  const toString = page.menu[1];
+  assert.deepStrictEqual(page.controlOptions(toString).map((option) => option[0]), ["toggle"]);
+  assert.deepStrictEqual(page.controlOptions(page.menu[0]).map((option) => option[0]),
+                         ["toggle"]);
+  for (const image of node.all().filter((element) => element.tagName === "img")) {
+    assert.ok(!image.src.includes("constructor"), image.src);
+  }
+});
+
+test("a catalogue the page cannot draw says it could not be loaded", async () => {
+  const node = mount();
+  const net = network([catalogue()]);
+  const page = new creator.Creator(node, doc, net);
+  page.render = function () {
+    throw new Error("cannot draw");
+  };
+  await page.load();
+  assert.strictEqual(page.catalogue, null);
+  assert.strictEqual(node.text, "Failed.");
+});
+
+test("a key from the catalogue reads only what the map itself holds", () => {
+  const plain = {lamp: 1};
+  assert.strictEqual(creator.own(plain, "lamp"), 1);
+  for (const key of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+    assert.strictEqual(creator.own(plain, key), null, key);
+  }
+  assert.strictEqual(creator.own(plain, 7), null);
+});
+
+test("a page that cannot draw the catalogue it received says it could not be loaded",
+     async () => {
+  const node = mount();
+  const net = network([catalogue()]);
+  const page = new creator.Creator(node, doc, net);
+  const draw = page.render;
+  page.render = function () {
+    if (this.catalogue) {
+      throw new Error("cannot draw this catalogue");
+    }
+    return draw.call(this);
+  };
+  await page.load();
+  assert.strictEqual(page.catalogue, null);
+  assert.strictEqual(page.message.text, "Failed.");
+  assert.strictEqual(page.offerReload, true);
+});
+
+test("a group's icon the list does not name is drawn as the neutral one", async () => {
+  const {node} = await loaded([], undefined, catalogue({menu: [
+    {type: "group", id: "g_1", label: "G", icon: "constructor", rows: []}]}));
+  const images = node.all().filter((element) => element.tagName === "img");
+  assert.deepStrictEqual(images.map((image) => image.src), ["/mqttbridge/menu/icon/neutral.png"]);
+});
+
+test("an icon's picture comes from the page's own list and nowhere else", async () => {
+  const {node, page} = await loaded();
+  assert.strictEqual(page.iconUrl("lamp"), "/mqttbridge/menu/icon/lamp.png");
+  assert.strictEqual(page.iconUrl("../plugin"), "");
+  assert.strictEqual(page.iconUrl(HOSTILE), "");
+  const images = node.all().filter((element) => element.tagName === "img");
+  assert.ok(images.length > 0);
+  for (const image of images) {
+    assert.ok(image.src === "" || /^\/mqttbridge\/menu\/icon\/[a-z-]+\.png$/.test(image.src),
+              image.src);
+    assert.strictEqual(image.hidden, image.src === "");
+  }
+  assert.ok(images.some((image) => image.src.endsWith("/sofa.png")), "the group's icon");
+});
+
+test("the top level takes exactly 24 entries, in the page and by its bounds", async () => {
+  const row = {kind: "row", entity: "a.b", control: "toggle"};
+  const limits = {groups: 8, top: 24, rows: 24, text: 60};
+  assert.strictEqual(creator.checkDraft(Array(24).fill(row), limits), null);
+  assert.strictEqual(creator.checkDraft(Array(25).fill(row), limits), "limit_top");
+  const {page} = await loaded();
+  while (page.menu.length < 24) {
+    page.addRow(null);
+  }
+  page.addRow(null);
+  page.addGroup();
+  assert.strictEqual(page.menu.length, 24);
+  page.render();
+  const buttons = page.mount.all().filter((element) => element.tagName === "button");
+  const add = buttons.filter((button) => button.text === "add_row" || button.text === "add_group");
+  assert.ok(add.length >= 2 && add.slice(-2).every((button) => button.disabled));
+  assert.ok(page.mount.all().some((element) => element.text === "At most 24 entries."));
+});
+
+test("hidden, configuration and diagnostic entities are marked in the picker", async () => {
+  const {node, page} = await loaded();
+  const parsed = creator.parseCatalogue(catalogue({entities: [
+    {e: "a.one", n: "One", a: null, c: ["toggle"], h: true},
+    {e: "a.two", n: "Two", a: null, c: ["toggle"], k: "config"},
+    {e: "a.three", n: "Three", a: 0, c: ["toggle"], k: "diagnostic", h: true},
+    {e: "a.four", n: "Four", a: null, c: ["toggle"], k: "something"},
+  ]}));
+  assert.strictEqual(page.describe(parsed.byId["a.one"]), "a.one - hidden");
+  assert.strictEqual(page.describe(parsed.byId["a.two"]), "a.two - configuration");
+  assert.strictEqual(page.describe(parsed.byId["a.three"]),
+                     "a.three - Kitchen - hidden - diagnostic");
+  assert.strictEqual(page.describe(parsed.byId["a.four"]), "a.four");
+  const row = page.newRow();
+  page.menu.push(row);
+  page.render();
+  const inputs = node.all().filter((element) => element.type === "search");
+  const picker = inputs[inputs.length - 1];
+  picker.value = "outdoor";
+  picker.fire("input");
+  const shown = node.all().map((element) => element.text).join("\n");
+  assert.ok(shown.includes("sensor.outdoor_temperature - hidden - diagnostic"));
+});
+
+test("an entity's name and an area are cut at 60 characters", () => {
+  const long = "N".repeat(100);
+  const parsed = creator.parseCatalogue(catalogue({areas: ["A".repeat(80)],
+    entities: [{e: "a.long", n: long, a: 0, c: ["toggle"]}]}));
+  assert.strictEqual(parsed.byId["a.long"].n, "N".repeat(60));
+  assert.strictEqual(parsed.byId["a.long"].area, "A".repeat(60));
+});
+
+test("editing switched off in Home Assistant shows no editor and says where to switch it on",
+     async () => {
+  const node = mount();
+  const net = network([{v: 1, editing: false}]);
+  const page = new creator.Creator(node, doc, net);
+  await page.load();
+  assert.strictEqual(page.catalogue, null);
+  assert.strictEqual(page.message.text, "Off in Home Assistant.");
+  assert.ok(!node.all().some((element) => element.tagName === "select"));
+  assert.deepStrictEqual(creator.parseCatalogue({v: 1, editing: false}), {editing: false});
+  assert.strictEqual(creator.parseCatalogue(catalogue({editing: "no"})), null);
+  assert.strictEqual(creator.parseCatalogue(catalogue({editing: true})).editing, true);
+});
+
+test("a version below one is not a newer catalogue", async () => {
+  const node = mount();
+  const page = new creator.Creator(node, doc, network([catalogue({v: 0})]));
+  await page.load();
+  assert.strictEqual(page.message.text, "Failed.");
+});
+
+test("Home Assistant's refusal of a switched-off editor is its own sentence", async () => {
+  const {page} = await loaded([{result: "disabled"}]);
+  await page.save();
+  assert.strictEqual(page.message.text, "Disabled in Home Assistant.");
+});
+
+test("the receiver's own busy is its own sentence", async () => {
+  const {page} = await loaded([{result: "receiver_busy"}]);
+  await page.save();
+  assert.strictEqual(page.message.text, "The receiver is busy.");
 });
 
 test("a save that cannot reach the receiver is no answer and offers a reload", async () => {

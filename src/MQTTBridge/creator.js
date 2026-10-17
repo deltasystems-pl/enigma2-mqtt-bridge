@@ -38,6 +38,14 @@
 
   // -------------------------------------------------------------- catalogue --
 
+  // A value by a key that came from the catalogue: an own property or nothing. Every map such a
+  // key indexes is made with no prototype, and is read through here as well, so an entity id
+  // such as "constructor" or "__proto__" is an entity id and nothing else.
+  function own(map, key) {
+    return typeof key === "string" && Object.prototype.hasOwnProperty.call(map, key)
+      ? map[key] : null;
+  }
+
   function isRevision(value) {
     return typeof value === "string" && /^[0-9a-f]{16}$/.test(value);
   }
@@ -77,6 +85,13 @@
     if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.v !== 1) {
       return null;
     }
+    // Editing from the receiver switched off in Home Assistant: the catalogue says that alone.
+    if (raw.editing === false) {
+      return {editing: false};
+    }
+    if (raw.editing !== undefined && raw.editing !== true) {
+      return null;
+    }
     if (!isRevision(raw.revision) || !Array.isArray(raw.menu) || !Array.isArray(raw.entities)) {
       return null;
     }
@@ -84,7 +99,7 @@
       return textOf(area, 60);
     }) : [];
     var entities = [];
-    var byId = {};
+    var byId = Object.create(null);
     raw.entities.forEach(function (entry) {
       if (!entry || typeof entry !== "object" || typeof entry.e !== "string") {
         return;
@@ -92,7 +107,7 @@
       var controls = Array.isArray(entry.c) ? entry.c.filter(function (control) {
         return typeof control === "string";
       }) : [];
-      if (!controls.length || Object.prototype.hasOwnProperty.call(byId, entry.e)) {
+      if (!controls.length || own(byId, entry.e)) {
         return;
       }
       var area = Number.isInteger(entry.a) && entry.a >= 0 && entry.a < areas.length
@@ -111,6 +126,7 @@
     });
     var leftOut = Number.isInteger(raw.left_out) && raw.left_out > 0 ? raw.left_out : 0;
     return {
+      editing: true,
       revision: raw.revision,
       menu: raw.menu.map(parseItem).filter(Boolean),
       entities: entities,
@@ -218,6 +234,7 @@
     this.limits = JSON.parse(mount.dataset.limits || "{}");
     this.catalogueUrl = mount.dataset.catalogue;
     this.saveUrl = mount.dataset.save;
+    this.iconBase = mount.dataset.iconbase || "";
     this.csrf = mount.dataset.csrf;
     this.catalogue = null;
     this.menu = [];
@@ -225,8 +242,10 @@
     this.busy = false;
     this.message = null;
     this.offerReload = false;
-    this.searches = {};
+    this.searches = Object.create(null);
     this.sequence = 0;
+    // After a save whose catalogue is late: the revision still awaited, and polls left for it.
+    this.awaited = null;
   }
 
   Creator.prototype.t = function (key) {
@@ -276,13 +295,30 @@
       return item;
     });
     this.dirty = false;
-    this.searches = {};
+    this.searches = Object.create(null);
   };
 
   Creator.prototype.load = function () {
     var self = this;
-    this.say(this.t("loading"));
-    this.render();
+    // A catalogue this page cannot draw is a page that says so, never one left loading.
+    function failed() {
+      self.catalogue = null;
+      self.menu = [];
+      self.say(self.t("load_failed"), true);
+      try {
+        self.render();
+      } catch (ignored) {
+        self.mount.textContent = self.t("load_failed");
+      }
+    }
+    this.awaited = null;
+    try {
+      this.say(this.t("loading"));
+      this.render();
+    } catch (ignored) {
+      failed();
+      return Promise.resolve();
+    }
     return this.fetchCatalogue().then(function (outcome) {
       if (outcome.catalogue) {
         self.adopt(outcome.catalogue);
@@ -293,7 +329,7 @@
         self.say(self.t(outcome.reason), outcome.reason === "load_failed");
       }
       self.render();
-    });
+    }).catch(failed);
   };
 
   // `{catalogue}` or `{reason}`: a text key that says why there is none.
@@ -308,7 +344,11 @@
         }
         var catalogue = parseCatalogue(raw);
         if (!catalogue) {
-          return {reason: raw && raw.v !== 1 && raw.v !== undefined ? "newer" : "load_failed"};
+          var newer = raw && Number.isInteger(raw.v) && raw.v > 1;
+          return {reason: newer ? "newer" : "load_failed"};
+        }
+        if (!catalogue.editing) {
+          return {reason: "editing_off"};
         }
         return {catalogue: catalogue};
       })
@@ -445,6 +485,7 @@
       return Promise.resolve();
     }
     var base = this.catalogue.revision;
+    this.awaited = null;
     var body = new this.net.URLSearchParams();
     body.append("csrf", this.csrf);
     body.append("form", "menu_edit");
@@ -469,10 +510,16 @@
       var wanted = isRevision(answer.revision) ? answer.revision : null;
       return this.awaitRevision(wanted, base).then(function (outcome) {
         self.busy = false;
-        if (outcome.catalogue) {
+        if (outcome.arrived) {
           self.adopt(outcome.catalogue);
+          self.say(self.t("result_saved"));
+        } else {
+          // The page goes on showing the menu as it was saved - never an older catalogue - and
+          // takes Home Assistant's copy by itself when it comes.
+          self.dirty = false;
+          self.say(self.t("result_arriving"), true);
+          self.following = self.follow(wanted, base);
         }
-        self.say(self.t("result_saved"));
         self.render();
       });
     }
@@ -489,17 +536,21 @@
     return Promise.resolve();
   };
 
+  function carries(outcome, wanted, base) {
+    var revision = outcome.catalogue ? outcome.catalogue.revision : null;
+    return wanted ? revision === wanted : revision !== null && revision !== base;
+  }
+
   // After a save: the catalogue that carries the new revision, so the next save knows the new
-  // ids. At most five seconds; then whatever there is.
+  // ids. At most five seconds: `{catalogue, arrived}`.
   Creator.prototype.awaitRevision = function (wanted, base) {
     var self = this;
     var deadline = this.net.now() + 5000;
     function attempt() {
       return self.fetchCatalogue().then(function (outcome) {
-        var revision = outcome.catalogue ? outcome.catalogue.revision : null;
-        var arrived = wanted ? revision === wanted : revision !== null && revision !== base;
+        var arrived = carries(outcome, wanted, base);
         if (arrived || self.net.now() >= deadline) {
-          return outcome;
+          return {catalogue: outcome.catalogue || null, arrived: arrived};
         }
         return self.net.wait(500).then(attempt);
       });
@@ -507,8 +558,52 @@
     return attempt();
   };
 
+  // Then, every two seconds for another minute: the catalogue is taken when it carries the new
+  // revision, unless the page has been edited, saved or reloaded since - an edit is never thrown
+  // away for it. After that minute the page says no more than it does.
+  Creator.prototype.follow = function (wanted, base) {
+    var self = this;
+    var token = {left: 30};
+    this.awaited = token;
+    function attempt() {
+      if (self.awaited !== token) {
+        return Promise.resolve();
+      }
+      if (token.left <= 0) {
+        self.awaited = null;
+        return Promise.resolve();
+      }
+      token.left -= 1;
+      return self.net.wait(2000).then(function () {
+        if (self.awaited !== token) {
+          return null;
+        }
+        return self.fetchCatalogue();
+      }).then(function (outcome) {
+        if (!outcome || self.awaited !== token) {
+          return null;
+        }
+        if (!carries(outcome, wanted, base)) {
+          return attempt();
+        }
+        self.awaited = null;
+        if (!self.dirty && !self.busy) {
+          self.adopt(outcome.catalogue);
+          self.say(self.t("result_saved"));
+          self.render();
+        }
+        return null;
+      });
+    }
+    return attempt();
+  };
+
   Creator.prototype.reload = function () {
     if (this.busy) {
+      return Promise.resolve();
+    }
+    // The draft stays on the page until the user agrees to lose it.
+    if (this.dirty && !this.net.confirm(this.t("confirm_reload"))) {
       return Promise.resolve();
     }
     if (this.message && this.message.text === this.t("result_out_of_date")) {
@@ -557,10 +652,35 @@
     return node;
   };
 
+  // The address of an icon's picture: only for a name of the page's own list, which the
+  // receiver serves; any other name - one from the catalogue - never reaches an address.
+  Creator.prototype.iconUrl = function (name) {
+    return this.icons.indexOf(name) !== -1 ? this.iconBase + name + ".png" : "";
+  };
+
+  // The icon's picture with its name beside it, and the list of names to choose from.
   Creator.prototype.iconSelect = function (current, withDefault, onChange) {
+    var self = this;
     var options = withDefault ? [["", this.t("default")]] : [];
     this.icons.forEach(function (name) { options.push([name, name]); });
-    return this.select(options, current, onChange);
+    var wrap = this.el("span", null, "icon");
+    var picture = this.el("img");
+    picture.alt = "";
+    picture.width = 32;
+    picture.height = 32;
+    function show(name) {
+      // A group always has an icon: one the list does not name is drawn as the neutral one.
+      var address = self.iconUrl(name) || (withDefault ? "" : self.iconUrl("neutral"));
+      picture.src = address;
+      picture.hidden = !address;
+    }
+    show(current);
+    wrap.appendChild(picture);
+    wrap.appendChild(this.select(options, current, function (value) {
+      show(value);
+      onChange.call(self, value);
+    }));
+    return wrap;
   };
 
   Creator.prototype.tools = function (container, item) {
@@ -579,7 +699,7 @@
   };
 
   Creator.prototype.entityLine = function (row) {
-    var entity = this.catalogue.byId[row.entity];
+    var entity = own(this.catalogue.byId, row.entity);
     var node = this.el("div", null, "meta");
     if (!row.entity) {
       return node;
@@ -675,7 +795,7 @@
   };
 
   Creator.prototype.controlOptions = function (row) {
-    var entity = this.catalogue.byId[row.entity];
+    var entity = own(this.catalogue.byId, row.entity);
     var allowed = entity && !row.missing ? entity.c : (row.control ? [row.control] : []);
     var self = this;
     return allowed.map(function (control) {
@@ -817,7 +937,8 @@
       wait: function (milliseconds) {
         return new Promise(function (resolve) { win.setTimeout(resolve, milliseconds); });
       },
-      reloadPage: function () { win.location.reload(); }
+      reloadPage: function () { win.location.reload(); },
+      confirm: function (text) { return win.confirm(text); }
     };
     var creator = new Creator(mount, doc, net);
     win.addEventListener("beforeunload", function (event) {
@@ -834,6 +955,7 @@
     Creator: Creator,
     checkDraft: checkDraft,
     fmt: fmt,
+    own: own,
     parseCatalogue: parseCatalogue,
     resultText: resultText,
     search: search,

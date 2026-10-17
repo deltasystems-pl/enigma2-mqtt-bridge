@@ -1739,16 +1739,18 @@ def _age(seconds):
     """A duration as the status line says it: seconds, minutes or hours."""
     seconds = max(0, int(seconds))
     if seconds < 120:
-        return f"{seconds} s"
+        return _("%d s") % seconds
     if seconds < 7200:
-        return f"{seconds // 60} min"
-    return f"{seconds // 3600} h"
+        return _("%d min") % (seconds // 60)
+    return _("%d h") % (seconds // 3600)
 
 
 def _catalogue_text(publisher, now=None):
     if publisher is None:
         return "-"
     status = publisher.editor.status()
+    if status["editing"] is False:
+        return _("editing from the receiver is switched off in Home Assistant")
     if status["revision"] is None:
         if status["reason"] == menueditor.NEWER_CATALOGUE:
             return _("from a newer Home Assistant integration than this plugin understands")
@@ -1809,6 +1811,9 @@ def creator_texts():
         "newer": _("The catalogue comes from a newer Home Assistant integration than this "
                    "plugin understands. Update the plugin."),
         "menu_off": _("The menu is switched off on this receiver."),
+        "editing_off": _("Editing the menu from the receiver is switched off in Home Assistant: "
+                         "the companion integration's options, under the receiver menu, can "
+                         "switch it on."),
         "not_running": _("The plugin is not running."),
         "updating": _("The plugin is being updated."),
         "load_failed": _("The catalogue could not be loaded. Reload the page."),
@@ -1854,25 +1859,35 @@ def creator_texts():
         "control_input": _("Input field"),
         "ha_says": _("Home Assistant says:"),
         "where": _("Where:"),
+        "confirm_reload": _("Your unsaved changes will be lost."),
+        # Who answered is said first: Home Assistant's answers, then the receiver's own.
         "result_saved": _("Saved. Home Assistant stored the menu."),
         "result_waiting": _("Saved. Loading the menu as Home Assistant stored it..."),
-        "result_stale": _("The menu was changed elsewhere since this page loaded it. Reload to "
-                          "see it - your changes here stay on the page until you do."),
+        "result_arriving": _("Saved; Home Assistant's copy has not arrived yet."),
+        "result_stale": _("Home Assistant refused the save: the menu was changed elsewhere since "
+                          "this page loaded it. Reload to see it - your changes here stay on the "
+                          "page until you do."),
         "result_invalid": _("Home Assistant refused the menu."),
         "result_busy": _("Home Assistant is busy with another save. Try again in a moment."),
         "result_not_claimed": _("Home Assistant does not see this receiver offering the menu "
                                 "creator yet. Try again in a moment."),
-        "result_no_answer": _("Home Assistant did not answer. The menu may still have been "
-                              "saved: reload to see."),
+        "result_disabled": _("Home Assistant refused the save: editing the menu from the "
+                             "receiver is switched off in its integration options."),
+        "result_receiver_busy": _("The receiver is already waiting for Home Assistant to answer "
+                                  "other saves. Try again in a moment."),
+        "result_no_answer": _("The receiver got no answer from Home Assistant within ten "
+                              "seconds. The menu may still have been saved: reload to see."),
         "result_not_connected": _("The receiver has no connection to the MQTT broker. Nothing "
                                   "was saved."),
         "result_not_allowed": _("The receiver does not offer the menu creator now."),
         "result_unreadable": _("The receiver could not read what this page sent. Reload the "
                                "page."),
-        "result_too_big": _("The menu is too large to send."),
-        "result_rejected": _("Request rejected."),
-        "result_out_of_date": _("This page is out of date: it was changed in another tab or "
-                                "window since it was opened. Reload the page and try again."),
+        "result_too_big": _("The receiver refused the menu: it is too large to send."),
+        "result_rejected": _("The receiver refused the request. Reload the page."),
+        "result_out_of_date": _("The receiver refused the save: this page is out of date - it "
+                                "was changed in another tab or window since it was opened. "
+                                "Reload the page and try again."),
+        "result_failed": _("The receiver could not complete the save; see the plugin log."),
         "result_unknown": _("Home Assistant answered: %s"),
     }
 
@@ -1891,6 +1906,7 @@ def _creator_section(request, bridge, section, publisher, token):
     attributes = {
         "data-catalogue": base + "/catalogue.json",
         "data-save": base + "/save",
+        "data-iconbase": base + "/icon/",
         "data-csrf": token,
         "data-icons": _json(list(ICON_NAMES)),
         "data-limits": _json({"groups": MAX_GROUPS, "top": MAX_ITEMS, "rows": MAX_ROWS,
@@ -1921,6 +1937,8 @@ _MENU_STYLE = (
     ".creator .bar{position:sticky;bottom:0;background:#f4f5f4;padding:8px 0;"
     "display:flex;gap:8px;flex-wrap:wrap;align-items:center}"
     ".creator label{grid-template-columns:140px 1fr}"
+    ".creator .icon{display:flex;gap:8px;align-items:center}"
+    ".creator .icon img{width:32px;height:32px;background:#3a4a56;border-radius:4px}"
 )
 
 
@@ -2128,6 +2146,42 @@ class CatalogueResource(resource.Resource):
                                 http.INTERNAL_SERVER_ERROR)
 
 
+class MenuIconResource(resource.Resource):
+    """`<mount>/menu/icon/<name>.png` - one of the menu's icons, for the creator's icon picker.
+
+    Only a name of the contract's fixed list (`menu.ICON_NAMES`), as the PNG the package ships for
+    the television; anything else is a 404. The name is looked up, never used as a path.
+    """
+
+    isLeaf = True
+
+    def render_GET(self, request):
+        if not _host_allowed(request):
+            return _misdirected(request)
+        from .menu import ICON_NAMES
+        from .styledlist import icon_path
+
+        segments = [
+            part.decode("ascii", "replace") if isinstance(part, bytes) else str(part)
+            for part in (getattr(request, "postpath", None) or [])
+        ]
+        name = segments[0][:-len(".png")] if len(segments) == 1 and segments[0].endswith(
+            ".png") else None
+        image = None
+        if name in ICON_NAMES:
+            try:
+                with open(icon_path(name), "rb") as handle:
+                    image = handle.read(256 * 1024)
+            except OSError:
+                image = None
+        if image is None:
+            request.setResponseCode(404)
+            _set_headers(request, "text/plain; charset=utf-8", csp=DATA_CSP)
+            return b""
+        _set_headers(request, "image/png", csp="default-src 'none'; frame-ancestors 'self'")
+        return image
+
+
 def _held(request, editor, base, menu):
     """Publish the edit and keep the request open until its answer: `NOT_DONE_YET`, or the answer.
 
@@ -2169,9 +2223,12 @@ class MenuSaveResource(resource.Resource):
     A POST with the page's token, `form=menu_edit`, the catalogue `base` the edit started from
     and the whole `menu` as JSON - exactly these fields. The same `Host`, same-origin and token
     rules as every other form, and `Sec-Fetch-Site` when the browser sends it. The answer is
-    JSON: Home Assistant's `result`, `revision`, `path` and `detail`, or the receiver's own
-    `no_answer`, `not_connected`, `not_allowed`, `busy`, `unreadable`, `too_big`, `rejected` or
-    `out_of_date`. The token is not replaced, so the page saves again without a reload.
+    JSON: Home Assistant's `result` (`saved`, `stale`, `invalid`, `busy`, `not_claimed`,
+    `disabled`),
+    `revision`, `path` and `detail`, or the receiver's own `receiver_busy`, `no_answer`,
+    `not_connected`, `not_allowed`, `unreadable`, `too_big`, `rejected`, `out_of_date` or
+    `failed` - never a word of Home Assistant's. The token is not replaced, so the page saves
+    again without a reload.
     """
 
     isLeaf = True
@@ -2198,9 +2255,13 @@ class MenuSaveResource(resource.Resource):
             if _single_arg(request, "form") != MENU_EDIT_FORM:
                 raise ValueError("unknown form")
             base = _single_arg(request, "base")
-            text = _single_arg(request, "menu", menueditor.MAX_EDIT_BYTES)
+            # Read with the body's own bound, so that a menu over its bound is said to be too
+            # big - as an edit too big to publish is - and not unreadable.
+            text = _single_arg(request, "menu", MAX_BODY_BYTES)
+            if len(text.encode("utf-8", "surrogatepass")) > menueditor.MAX_EDIT_BYTES:
+                return _json_answer(request, {"result": menueditor.TOO_BIG}, http.BAD_REQUEST)
             try:
-                menu = json.loads(text)
+                menu = menueditor.loads_bounded(text)
             except (ValueError, RecursionError, OverflowError):
                 raise ValueError("the menu is not JSON") from None
             if not menueditor.is_revision(base) or not isinstance(menu, list):
@@ -2234,6 +2295,7 @@ class MenuPageResource(resource.Resource):
         self.putChild(b"creator.js", CreatorScriptResource())
         self.putChild(b"catalogue.json", CatalogueResource())
         self.putChild(b"save", MenuSaveResource())
+        self.putChild(b"icon", MenuIconResource())
         self.putChild(b"", self)
 
     def render_GET(self, request):

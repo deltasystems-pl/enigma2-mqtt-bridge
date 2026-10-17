@@ -134,12 +134,13 @@ def geometry(desktop_width, desktop_height, rows=VISIBLE_ROWS):
 def alpha(percent):
     """The skin alpha byte for a transparency in percent: 0 opaque, 80 % -> 0xCC.
 
+    Rounded half up - 30 % is 76.5, so 0x4D - never to the even neighbour as `round` would.
     Anything that is not a percent from 0 to 100 is opaque: a screen that cannot be read is
     worse than one that hides the picture.
     """
     if isinstance(percent, bool) or not isinstance(percent, int) or not 0 <= percent <= 100:
         return 0
-    return int(round(percent * 255 / 100.0))
+    return int(percent * 255 / 100.0 + 0.5)
 
 
 def background_colour(rgb, percent):
