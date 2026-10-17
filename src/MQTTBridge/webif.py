@@ -2179,6 +2179,8 @@ class MenuIconResource(resource.Resource):
             _set_headers(request, "text/plain; charset=utf-8", csp=DATA_CSP)
             return b""
         _set_headers(request, "image/png", csp="default-src 'none'; frame-ancestors 'self'")
+        # A file of the package that changes only with it, asked for on every redraw of the page.
+        request.setHeader("cache-control", "private, max-age=86400")
         return image
 
 

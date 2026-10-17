@@ -231,8 +231,35 @@ def test_menu_and_text_on_a_heading_do_nothing(settings, monkeypatch):
     assert calls == ["menu", "text"]
 
 
-@pytest.mark.parametrize("name",
-                         setup_screen.HEADING_GUARDED + tuple(setup_screen.HEADING_GETTERS))
+# Pinned here rather than read from the module: a name taken out of the module's tuple must fail
+# a test, not take its own test with it.
+GUARDED = (
+    "keySelect", "keyLeft", "keyRight", "keyFirst", "keyLast", "keyNumberGlobal", "keyGotAscii",
+    "keyBackspace", "keyDelete", "keyErase", "keyToggle", "keyMenu", "keyText",
+    "handleInputHelpers",
+)
+GETTERS = {"getCurrentItem": None, "getCurrentValue": ""}
+
+
+def test_the_guarded_methods_are_these_fourteen_and_the_two_getters():
+    assert setup_screen.HEADING_GUARDED == GUARDED
+    assert len(GUARDED) == 14
+    assert setup_screen.HEADING_GETTERS == GETTERS
+
+
+@pytest.mark.parametrize("current", [("Home Assistant menu",), ("Label", "a setting")])
+def test_the_default_key_never_reaches_the_image(settings, monkeypatch, current):
+    calls = []
+    monkeypatch.setattr(setup_screen.ConfigListScreen, "keyDefault",
+                        lambda self, *a, **k: calls.append(a), raising=False)
+    screen = _screen(settings)
+    screen["config"] = _List(current)
+    assert screen.keyDefault() is None
+    assert calls == []
+    assert "keyDefault" not in setup_screen.HEADING_GUARDED
+
+
+@pytest.mark.parametrize("name", GUARDED + tuple(GETTERS))
 def test_every_image_method_that_reads_the_setting_does_nothing_on_a_heading(settings,
                                                                               monkeypatch, name):
     calls = []
@@ -240,7 +267,7 @@ def test_every_image_method_that_reads_the_setting_does_nothing_on_a_heading(set
                         lambda self, *a, **k: calls.append(a) or "parent", raising=False)
     screen = _screen(settings)
     screen["config"] = _List(("Home Assistant menu",))
-    assert getattr(screen, name)(1) == setup_screen.HEADING_GETTERS.get(name)
+    assert getattr(screen, name)(1) == GETTERS.get(name)
     assert calls == []
     screen["config"] = _List(("Label", settings.menu_hotkey))
     assert getattr(screen, name)(1) == "parent"

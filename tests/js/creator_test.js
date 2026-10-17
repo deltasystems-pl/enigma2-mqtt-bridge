@@ -380,6 +380,36 @@ test("a late catalogue never replaces an edit made while it was awaited", async 
   assert.strictEqual(page.message.text, "Arriving.");
 });
 
+test("a reload while a late catalogue is being fetched ends the waiting for it", async () => {
+  const answers = [{result: "saved", revision: NEW_REVISION}];
+  // Eleven polls in the first five seconds, and one more catalogue for the reload.
+  for (let index = 0; index < 12; index += 1) {
+    answers.push(catalogue());
+  }
+  const {net, page} = await loaded(answers);
+  await page.save();
+  // The next fetch - the first poll after the five seconds - is held until the test lets go.
+  let release;
+  const fetch = net.fetch;
+  net.fetch = function (url, options) {
+    net.fetch = fetch;
+    net.sent.push({url, options});
+    return new Promise((resolve) => {
+      release = () => resolve({json: () => Promise.resolve(catalogue({revision: NEW_REVISION,
+        menu: []}))});
+    });
+  };
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(release, "the poll is in flight");
+  await page.reload();
+  const sent = net.sent.length;
+  release();
+  await page.following;
+  assert.strictEqual(page.catalogue.revision, REVISION, "the late answer is not taken");
+  assert.strictEqual(page.awaited, null);
+  assert.strictEqual(net.sent.length, sent, "and nothing more is asked for");
+});
+
 test("the late catalogue is awaited for a minute and then no longer", async () => {
   const answers = [{result: "saved", revision: NEW_REVISION}];
   for (let index = 0; index < 60; index += 1) {

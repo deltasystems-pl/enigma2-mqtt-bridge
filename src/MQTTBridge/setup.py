@@ -117,7 +117,7 @@ def is_heading(entry):
 # else; one the image does not have is nothing.
 HEADING_GUARDED = (
     "keySelect", "keyLeft", "keyRight", "keyFirst", "keyLast", "keyNumberGlobal", "keyGotAscii",
-    "keyBackspace", "keyDelete", "keyErase", "keyToggle", "keyMenu", "keyText", "keyDefault",
+    "keyBackspace", "keyDelete", "keyErase", "keyToggle", "keyMenu", "keyText",
     "handleInputHelpers",
 )
 # What a getter answers on a heading, as the images that guard it do.
@@ -283,6 +283,15 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
             return is_heading(self["config"].getCurrent())
         except Exception:
             return False
+
+    def keyDefault(self, *arguments, **keywords):
+        """Nothing, on any entry: no key on this screen puts every setting back to its default.
+
+        OpenATV binds it where a screen asks for defaults, and its own loops over every entry
+        reading the setting behind it - which a heading does not have. And one key that resets the
+        broker's address and credentials with everything else is not a key this screen offers.
+        """
+        return None
 
     def _anything_changed(self):
         for entry in setting_entries(self.entries):

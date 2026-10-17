@@ -596,6 +596,24 @@ def test_a_get_of_the_save_is_refused(world):
     assert json.loads(body) == {"result": "rejected"}
 
 
+@pytest.mark.parametrize("extra, submitted", [(0, True), (1, False)])
+def test_the_menu_field_is_too_big_from_one_byte_over_64_kib(world, monkeypatch, extra,
+                                                             submitted):
+    calls = []
+    editor = world.publisher.editor
+    monkeypatch.setattr(editor, "submit", lambda base, menu, callback: calls.append(menu) or
+                        "too_big")
+    session = new_session()
+    head = len(json.dumps([""]))
+    text = json.dumps(["x" * (menueditor.MAX_EDIT_BYTES - head + extra)])
+    assert len(text.encode("utf-8")) == menueditor.MAX_EDIT_BYTES + extra
+    fields = save_fields(session)
+    fields["menu"] = text
+    _request, body = save(world, session, fields)
+    assert json.loads(body) == {"result": "too_big"}
+    assert bool(calls) is submitted
+
+
 def test_the_menu_field_alone_may_be_64_kib(world):
     session = new_session()
     menu = [{"type": "row", "id": None, "entity": "light.x", "control": "toggle",
@@ -654,6 +672,7 @@ def test_an_icon_of_the_list_is_its_shipped_png(world, name):
     assert headers["content-type"] == "image/png"
     assert headers["x-content-type-options"] == "nosniff"
     assert headers["content-security-policy"] == "default-src 'none'; frame-ancestors 'self'"
+    assert headers["cache-control"] == "private, max-age=86400"
 
 
 @pytest.mark.parametrize("postpath", [

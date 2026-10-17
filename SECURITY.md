@@ -145,9 +145,9 @@ web interface can use it. Its checks keep **other web sites** out (the `Host` al
 same-origin requests, a session token), not people on the LAN.
 
 The receiver menu ([ADR-0020](docs/adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md))
-is on by default. **Editing it from the receiver** - the menu creator
-([ADR-0022](docs/adr/0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md))
-- **is off by default**, and switched on in Home Assistant, in the companion integration's receiver
+is on by default. **Editing it from the receiver**, with the menu creator
+([ADR-0022](docs/adr/0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md)),
+**is off by default**, and switched on in Home Assistant, in the companion integration's receiver
 menu options ("Allow editing from the receiver"). While it is off, Home Assistant publishes no
 catalogue of its entities and refuses every edit; the page says editing is switched off there.
 
