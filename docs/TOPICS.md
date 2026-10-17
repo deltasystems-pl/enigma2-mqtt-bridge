@@ -164,7 +164,7 @@ not by the checker; their types are the tables below.
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
 | 0.3.0 -> 0.4.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3); the read-only setting `update_allowed`, the capability `self_update`, the command `update`, `update.transaction` and the subscription to `enigma2mqtt/integration/<node>` (§3); the event topic `relay_request` and the command `relay`, and `cmd/update`'s refusal `no_relay`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
-| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4); a command's id - the envelope every command takes on the broker, the `last_error` member `id` and the capability `command_id` (sections 1 and 2); the `service` members `video_codec`, `interlaced`, `frame_rate` and `audio_tracks` and the capability `service_codecs`; the topics `stream` and `stream_clients`, the event topic `stream_playable`, the commands `stream_stop` and `stream_playable` and the capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable`; the `volume` member `passthrough` and the capability `volume_passthrough`; the receiver menu - the subscriptions to `enigma2mqtt/menu/<node>` and `<ha_discovery_prefix>/status` (§3), the event topic `menu_action`, the `info` member `menu`, the read-only setting `menu_allowed`, the writable setting `menu_hotkey` and the capability `menu`. **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
+| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4); a command's id - the envelope every command takes on the broker, the `last_error` member `id` and the capability `command_id` (sections 1 and 2); the `service` members `video_codec`, `interlaced`, `frame_rate` and `audio_tracks` and the capability `service_codecs`; the topics `stream` and `stream_clients`, the event topic `stream_playable`, the commands `stream_stop` and `stream_playable` and the capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable`; the `volume` member `passthrough` and the capability `volume_passthrough`; the receiver menu - the subscriptions to `enigma2mqtt/menu/<node>` and `<ha_discovery_prefix>/status` (§3), the event topic `menu_action`, the `info` member `menu`, the read-only setting `menu_allowed`, the writable setting `menu_hotkey` and the capability `menu`; the writable setting `menu_transparency`, and `cmd/config` taking any part of its keys, every key left out keeping its value; the menu creator - the subscriptions to `enigma2mqtt/menu_catalogue/<node>` and `enigma2mqtt/menu_edit_result/<node>` (§3), the event topic `menu_edit` and the capability `menu_editor`. **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
 
 ---
 
@@ -210,10 +210,12 @@ announcement retained.
                "deep_standby_allowed": false, "softcam_restart_allowed": false,
                "epg_import_allowed": false, "uninstall_allowed": false,
                "update_check": false, "update_allowed": false,
-               "menu_allowed": true, "menu_hotkey": "help_long"},
+               "menu_allowed": true, "menu_hotkey": "help_long",
+               "menu_transparency": 20},
   "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
                    "volume", "hdd", "process", "channels", "channel_topics", "bouquet_context",
-                   "epg_grid", "keys", "screenshot", "toast", "menu", "message", "command_id"],
+                   "epg_grid", "keys", "screenshot", "toast", "menu", "menu_editor", "message",
+                   "command_id"],
   "menu": {"screen": "styled", "hotkey": "help_long", "reason": null},
   "not_published": []
 }
@@ -232,7 +234,7 @@ announcement retained.
 | `uptime` | int | Seconds since boot |
 | `wol` | object | Since 0.3.0. What the **image** says about Wake-on-LAN - whether it has a switch for it and whether that is on. See below |
 | `ha_mode` | string | `discovery` \| `integration` \| `off` - the acknowledgement of `cmd/ha_mode` |
-| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5-3600), `screenshot_delay` (post-zap settling seconds, 1-30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30-600), `menu_hotkey` (`help_long` \| `red_long` \| `f3` \| `f4` \| `off`; a long HELP by default; added after 0.4.0, unreleased). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`, `uninstall_allowed`, `update_check`, `update_allowed` and `menu_allowed` (bools, off by default but `menu_allowed`, which is on). See below. |
+| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5-3600), `screenshot_delay` (post-zap settling seconds, 1-30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30-600), `menu_hotkey` (`help_long` \| `red_long` \| `f3` \| `f4` \| `off`; a long HELP by default; added after 0.4.0, unreleased), `menu_transparency` (integer percent, 0-80 in steps of ten, 20 by default: how see-through the receiver menu's background is; added after 0.4.0, unreleased). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`, `uninstall_allowed`, `update_check`, `update_allowed` and `menu_allowed` (bools, off by default but `menu_allowed`, which is on). See below. |
 | `capabilities` | list of strings | Which hooks this image actually gave the plugin |
 | `menu` | object or null | Which screen the receiver menu is drawn with on this image and which key opens it; `null` where there is no menu - `menu_allowed` off, or no screen could be built. Added after 0.4.0 (unreleased). See below |
 | `not_published` | list of objects | The topics whose payload was too big to send, so they are not on the broker. `[]` when everything fits, which is nearly always. Added after 0.4.0 (unreleased). See below |
@@ -276,7 +278,7 @@ nothing else is ever in the list: `power`, `cec_workaround`, `service`, `epg`, `
 `toast`, `message`, `hdd`, `process`, `channels`, `channel_topics`, `bouquet_context`,
 `zap_history`, `history_clear`, `epg_import`, `uninstall`, `self_update`, `command_id`,
 `service_codecs`, `stream`, `stream_clients`, `stream_stop`, `stream_playable`,
-`volume_passthrough`, `menu`. A build that
+`volume_passthrough`, `menu`, `menu_editor`. A build that
 has bound no feature area publishes that last name alone - `[]` before it existed - because the
 connection, `info` and the commands are the plugin itself and are not capabilities. `uninstall`
 (since 0.3.0) was the first name with no feature area behind it: it
@@ -313,11 +315,18 @@ permission `menu_allowed` is on and the image can open a menu screen - the plugi
 image's list as the fallback. It is what the companion integration waits for before it acts on a
 `menu_action` from this node ([§3](#the-receiver-menu---added-after-040-unreleased-capability-menu)).
 
+`menu_editor` (added after 0.4.0, unreleased) says the receiver offers the menu creator: `menu` is
+claimed and OpenWebif has mounted the plugin's page, whose Menu subpage the creator is on. It is
+what the companion integration waits for before it publishes the catalogue and before it reads a
+`menu_edit` from this node ([§3](#the-menu-creator---added-after-040-unreleased-capability-menu_editor)).
+It goes with `menu`, and it comes late on a receiver whose OpenWebif mounts its pages after the
+plugin has connected: `info` is published again then.
+
 A name is in the list because it **worked on this box**, not because this version of the plugin
 has the code for it. Three things can take one out: the image did not provide the hooks
 (`volume` on a box with no `VolumeControl`), the feature is switched off in the settings
 (`keys` with `publish_keys` off, `screenshot` set to `off`, `epg_grid` with `epg_grid_events` at
-`0`, `cec_workaround` with `cec_standby_workaround` off, `toast` with `osd_toast` off, `menu` with `menu_allowed` off), or the hook raised while it was being
+`0`, `cec_workaround` with `cec_standby_workaround` off, `toast` with `osd_toast` off, `menu` and `menu_editor` with `menu_allowed` off), or the hook raised while it was being
 attached - which is logged once, with the name that could not be bound.
 
 **A capability can also arrive late.** Some hooks can only bind once enigma2 has built the screen
@@ -1572,6 +1581,39 @@ untrusted input and acts only on a row its own current configuration holds, with
 has and a value it validates. Whoever can publish here can do exactly what the menu offers, and
 nothing else.
 
+### `<base>/<node>/menu_edit` - added after 0.4.0 (unreleased)
+
+**Not retained** - QoS 1. One message for each save on the menu creator, the OpenWebif page that
+builds the receiver menu ([§3](#the-menu-creator---added-after-040-unreleased-capability-menu_editor)),
+published while `menu_editor` is a capability: the whole menu as the page left it, and the catalogue
+revision it started from. The companion integration validates it with the rules of its own menu
+options, stores it or refuses it, and answers on `enigma2mqtt/menu_edit_result/<node>`.
+
+```json
+{"id": "8c1d2e3f4a5b", "base": "3f9c2e4a1b7d5c60", "ts": 1792050000,
+ "menu": [
+   {"type": "group", "id": "g_0a1b2c3d4e", "label": "Living room", "icon": "sofa",
+    "rows": [
+      {"type": "row", "id": "r_5f6a7b8c9d", "entity": "light.living_room", "control": "toggle",
+       "label": null, "icon": null},
+      {"type": "row", "id": null, "entity": "cover.living_room_blind", "control": "slider",
+       "label": "Blind", "icon": "blinds"}]},
+   {"type": "group", "id": null, "label": "Garden", "icon": "garden", "rows": []}]}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | string | Twelve lowercase hexadecimal digits, new for every save; the answer says it back |
+| `base` | string | The catalogue's `revision` the edit started from. Home Assistant refuses an edit whose `base` is not the menu's current revision |
+| `ts` | int | When, in epoch seconds by the receiver's clock. For the log only: a save has no time limit |
+| `menu` | list | The whole menu, in the catalogue's `menu` form: groups and rows. A group or row that exists carries its `id`; a new one carries `null`. `missing` is never sent |
+
+The receiver checks only the envelope - a revision, a list, at most 65,536 bytes encoded - and that
+the creator is offered; whether an entity may be bound, which control it takes and what a label may
+say is Home Assistant's to decide. **Never queued across a disconnect**, like `menu_action`:
+published on the open session only, and one the broker had not acknowledged when the connection
+went is taken out of the client's queue. The page's save then says so at once.
+
 ### `<base>/<node>/update` - since 0.4.0
 
 Retained. Which releases of the plugin this receiver could install, read from the signed release
@@ -1764,7 +1806,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `softcam_restart` - since 0.3.0 | any (`PRESS` by convention) | Stops **every** running instance of the cam the image selected, then starts exactly one, with the image's own command line | Refused unless `softcam_restart_allowed` is on; refused by the same recording guard as `deep_standby` - while recording, with a timer due within 10 minutes, and when the image will not say; refused for the first 60 seconds after the plugin starts, because the image's own check runs a moment after that and restarting inside that window races a copy already on its way; at most one manual restart a minute; refused while one is already running. 🔴 **The binary is resolved on the box and no part of the command line comes from the payload** |
 | `epg_grid` | any | Rebuilds and republishes **every** `epg_grid/<bouquet_slug>` topic | Refused with a note in `last_error` when `epg_grid_events` is `0` |
 | `epg_import` - since 0.3.0 | any (`PRESS` by convention) | Starts the image's EPG importer, the way its own „Manual" button does, and reports on `epg_import`; the grid is rebuilt afterwards and each bouquet is published only if it changed | Refused, in this order: unless `epg_import_allowed` is on; when the importer is not available (no capability); while an import is already running, whoever started it; by the same recording guard as `deep_standby`; within 10 minutes of the importer's own scheduled run, which the image starts without checking whether one is running, and when that time cannot be read; when the importer has no sources selected. A start that fails is `failed` on `epg_import` **and** the same sentence on `last_error`. 🔴 **The payload is ignored**: nothing from the broker reaches the importer |
-| `config` | `{"publish_keys": false, "screenshot": "interval", "screenshot_interval": 90, "screenshot_delay": 4, "cam_telemetry": false, "oscam_telemetry": false, "softcam_autoheal": false, "softcam_autoheal_seconds": 90, "menu_hotkey": "help_long"}` | Atomically replaces the remotely writable settings subset and publishes fresh `info`/discovery | The original three keys remain required; newer keys are independently optional for older clients and preserve their current values when omitted. Unknown keys and coercion are refused, and a persistence failure applies none of them |
+| `config` | `{"publish_keys": false, "screenshot": "interval", "screenshot_interval": 90, "screenshot_delay": 4, "cam_telemetry": false, "oscam_telemetry": false, "softcam_autoheal": false, "softcam_autoheal_seconds": 90, "menu_hotkey": "help_long", "menu_transparency": 20}` | Atomically replaces the remotely writable settings it names and publishes fresh `info`/discovery | Every key is optional and one left out keeps its current value - also the original three, which were required up to 0.4.0; an empty object is valid and changes nothing. Unknown keys and coercion are refused, and a persistence failure applies none of them |
 | `discovery` | any | Republishes the announcement, the channel list, and the discovery payloads in discovery mode | - |
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
 | `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
@@ -2380,12 +2422,20 @@ through `cmd/config`. `deep_standby_allowed` and `softcam_restart_allowed` are *
 refused here like any other key outside the allowlist; they are granted on the receiver - its setup
 screen, the provisioning file or the OpenWebif page - and never over MQTT, and reading a setting and
 writing it are two different permissions. Home Assistant mode has its dedicated command, and active TV bouquet
-context has `cmd/bouquet`; neither broadens this settings API. The command accepts the three original keys plus independently optional `screenshot_delay`,
-`cam_telemetry`, `oscam_telemetry`, `softcam_autoheal`, `softcam_autoheal_seconds` and - added
-after 0.4.0 (unreleased) - `menu_hotkey`, with their JSON types unchanged. `menu_hotkey` only
-chooses which key opens a menu the receiver already offers; `menu_allowed`, which decides whether
-it does, is refused here like every permission, and with it off the key opens nothing. A new key is
-bound at once, without a reconnect. An object holding any other key is refused whole, with
+context has `cmd/bouquet`; neither broadens this settings API. The command accepts `publish_keys`,
+`screenshot`, `screenshot_interval`, `screenshot_delay`, `cam_telemetry`, `oscam_telemetry`,
+`softcam_autoheal`, `softcam_autoheal_seconds` and - added after 0.4.0 (unreleased) - `menu_hotkey`
+and `menu_transparency`, with their JSON types unchanged. **Keys left out keep their value**: every
+key is optional, so a consumer sends only what it changes. Up to 0.4.0 the first three were required
+in every object; added after 0.4.0 (unreleased), they are optional like the rest, and an empty
+object is valid, changes nothing and still publishes `info` again. A consumer that writes one key
+alone checks first that `info.settings` carries that key - a plugin that publishes it accepts a
+partial object - and a consumer that also serves older plugins goes on sending the three.
+`menu_hotkey` only chooses which key opens a menu the receiver already offers; `menu_allowed`, which
+decides whether it does, is refused here like every permission, and with it off the key opens
+nothing. A new key is bound at once, without a reconnect. `menu_transparency` is an integer from 0
+to 80, a multiple of 10 - anything between two steps is refused, never rounded - and the menu takes
+it the next time it is opened; a menu on screen keeps its look. An object holding any other key is refused whole, with
 `last_error` "the config object contains unknown settings: " and the keys it refused, as in
 `the config object contains unknown settings: 'host', 'update_allowed'`. Their names only, never
 a value: each in single quotes, sorted, separated by a comma and a space; the first five, and
@@ -2553,7 +2603,7 @@ same.
 ### Topics the plugin reads
 
 Besides its own command topics, the plugin subscribes to topics it does not own: two always, and
-two more while `menu_allowed` is on.
+four more while `menu_allowed` is on.
 
 | Topic | Published by | What the plugin does with it |
 |---|---|---|
@@ -2561,6 +2611,8 @@ two more while `menu_allowed` is on.
 | `enigma2mqtt/integration/<node>` - since 0.4.0 | The companion integration, retained, QoS 1: `{"integration": "0.4.0", "contract": 1, "plugin_min": "0.2.0"}`; retracted when its entry is removed | Keeps it in memory and judges `update.available` and `cmd/update` by it: a release of another contract major than the integration's, or one whose `min_integration` is above `integration`, is `incompatible`, and `plugin_min` raises the floor. An empty payload forgets it, and an unreadable one is ignored. A forged one can only narrow or widen the choice among signed, non-withdrawn releases of one major. The plugin never publishes to it and never retracts it |
 | `enigma2mqtt/menu/<node>` - added after 0.4.0 (unreleased), capability `menu` | The companion integration, retained, QoS 1: the receiver menu (below); an empty payload when there is no menu | Validates it whole and shows it; an invalid payload is ignored with one line in the log and the menu before it stays. Subscribed only while `menu_allowed` is on. The plugin never publishes to it and never retracts it |
 | `<ha_discovery_prefix>/status` - added after 0.4.0 (unreleased), capability `menu` | Home Assistant's own birth and last will, `online` or `offline`, under the `ha_discovery_prefix` setting (`homeassistant/status` by default) | `offline` greys the receiver menu; `online`, or nothing heard since the broker connection last changed, does not. Subscribed only while `menu_allowed` is on, and read for nothing else |
+| `enigma2mqtt/menu_catalogue/<node>` - added after 0.4.0 (unreleased), capability `menu_editor` | The companion integration, retained, QoS 1, while this receiver claims `menu_editor`: what the menu creator chooses from (below), or only that editing from the receiver is switched off in Home Assistant; an empty payload when there is none | Checks the envelope and keeps the exact bytes for the menu creator's page; an invalid one is ignored with one line in the log and the one before it stays. At most 1 MiB. Subscribed only while `menu_allowed` is on. The plugin never publishes to it and never retracts it |
+| `enigma2mqtt/menu_edit_result/<node>` - added after 0.4.0 (unreleased), capability `menu_editor` | The companion integration, not retained, QoS 1: its answer to one `menu_edit` (below) | Hands it to the save waiting for that `id`; an answer for an id nothing waits for, a retained one and an unreadable one are ignored. Subscribed only while `menu_allowed` is on |
 
 ### The receiver menu - added after 0.4.0 (unreleased), capability `menu`
 
@@ -2664,6 +2716,101 @@ act on, and nothing greyed.
 stays on its row, or on the nearest one when that row has gone, and a slider being moved keeps its
 value until OK or EXIT. A list of options keeps the selection on the same option when the options
 are reordered, and OK sends nothing when the highlighted option has gone.
+
+**How it looks.** The background of the plugin's own screen and of its list can be made
+see-through with `menu_transparency` (§1) - 20 % by default, 0 is opaque, at most 80. The text, the
+icons and the bar on the selected row stay opaque. The image's own list, the fallback, is drawn as
+the image draws it.
+
+### The menu creator - added after 0.4.0 (unreleased), capability `menu_editor`
+
+A page in the receiver's OpenWebif - the Menu subpage of the plugin's page,
+[ADR-0022](adr/0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md) -
+where the receiver menu is built from a browser: groups and rows, each row an entity with a control,
+a label and an icon, as the companion integration's menu options offer them. **Home Assistant stays
+the owner of the menu and the receiver never holds a Home Assistant token**: the integration
+publishes a catalogue of what can be chosen and the menu as it stores it; the page edits a copy and
+the receiver publishes the edit on `menu_edit` (§1); the integration validates it with the rules of
+its own menu options, stores it or refuses it, and answers. **Editing from the receiver is off by
+default**, and switched on in Home Assistant, in the integration's receiver menu options. While it is
+off the catalogue says so and nothing else, and every edit is refused with `disabled`. Switched on,
+anyone who can reach the receiver's web interface, or publish `menu_edit` on the broker, can choose
+which entities the television controls and then operate them ([SECURITY.md](../SECURITY.md)).
+
+**The catalogue**, retained, QoS 1, on `enigma2mqtt/menu_catalogue/<node>`, published by the
+integration and retracted - an empty payload - when its entry is removed or the node id changes.
+While editing from the receiver is switched off in Home Assistant it is this alone, whether or not
+the receiver has claimed `menu_editor` or reported at all:
+
+```json
+{"v": 1, "editing": false}
+```
+
+and while it is on, published while this receiver claims `menu_editor` and retracted when the
+claim goes:
+
+```json
+{"v": 1,
+ "editing": true,
+ "revision": "3f9c2e4a1b7d5c60",
+ "areas": ["Kitchen", "Living room"],
+ "left_out": 0,
+ "menu": [
+   {"type": "group", "id": "g_0a1b2c3d4e", "label": "Living room", "icon": "sofa",
+    "rows": [
+      {"type": "row", "id": "r_5f6a7b8c9d", "entity": "light.living_room", "control": "slider",
+       "label": null, "icon": null}]},
+   {"type": "row", "id": "r_1a2b3c4d5e", "entity": "scene.movie_night", "control": "button",
+    "label": "Movie", "icon": "movie"},
+   {"type": "row", "id": "r_9e8d7c6b5a", "entity": "0123456789abcdef0123456789abcdef",
+    "control": "toggle", "label": null, "icon": null, "missing": true}],
+ "entities": [
+   {"e": "light.living_room", "n": "Living room lamp", "a": 1,
+    "c": ["toggle", "slider", "indicator"]},
+   {"e": "sensor.outdoor_temperature", "n": "Outdoor temperature", "a": null,
+    "c": ["indicator"], "h": true, "k": "diagnostic"}]}
+```
+
+| Field | Rule |
+|---|---|
+| `v` | `1`. A plugin that does not know the number - above 1 - ignores the catalogue, and the page says it comes from a newer integration; one below 1, or not a number, makes it invalid |
+| `editing` | `true` or `false`: whether editing from the receiver is switched on in Home Assistant. `false` comes alone, with none of the fields below, and the page shows no editor. A catalogue without it is read as `true` |
+| `revision` | 16 lowercase hexadecimal digits: the start of the sha256 of the menu as the integration stores it. It changes exactly when the stored menu does |
+| `areas` | The area names, at most 60 characters each, referred to by their place in the list |
+| `left_out` | How many entities are not in `entities` because the catalogue would have been over 1 MiB: hidden ones first, then diagnostic, then configuration entities, then the rest from the end of the name order. The page says how many |
+| `menu` | The menu as stored: groups and rows, with their ids. A row's `entity` is the entity id it is bound to now; a row whose entity cannot be found carries what it was bound to and `"missing": true`. `label` and `icon` are a row's own choices, `null` for the defaults |
+| `entities` | Every entity a row can be bound to, sorted by name: `e` the entity id, `n` the name a row shows by default (cut at 60), `a` the area's place in `areas` or `null`, `c` the controls it can take - the first is the default - and `h` (`true` when hidden) and `k` (`config` or `diagnostic`), absent otherwise |
+
+The plugin accepts at most 1 MiB (1,048,576 bytes), checks the envelope - an object of `v` 1 and
+either `"editing": false` or a `revision`, a `menu` and an `entities` list - and keeps the exact
+bytes for the page. A number of more than 32 digits, or NaN or an infinity, makes it invalid. One that breaks
+it, or cannot be parsed, is ignored with one line in the log, and the catalogue before it stays.
+**Every string in it is untrusted text** - anyone who can publish on the broker can write this
+topic - and the page puts it on screen as text, never as markup.
+
+**The answer**, not retained, QoS 1, on `enigma2mqtt/menu_edit_result/<node>`, one for each
+`menu_edit` whose `id` the integration could read:
+
+```json
+{"id": "8c1d2e3f4a5b", "result": "stale", "revision": "a1b2c3d4e5f60718",
+ "path": null, "detail": null}
+```
+
+| Field | Rule |
+|---|---|
+| `id` | The edit's `id` |
+| `result` | `saved` - stored; `stale` - the menu changed since `base`; `invalid` - a rule refused it; `busy` - another save of this receiver is being handled, or one was stored less than two seconds ago; `not_claimed` - the integration does not see this receiver claim `menu_editor`; `disabled` - editing from the receiver is switched off in its options. An open enumeration |
+| `revision` | The menu's revision after the answer: the new one after `saved`, where it is required; `null` after `disabled` and `not_claimed`, and may be `null` after any answer but `saved`. A `saved` without a revision is not an answer, and the save waits on |
+| `path` | `invalid` only: where, as in `menu[2].rows[5].control`; `null` otherwise |
+| `detail` | `invalid` only: one English sentence of at most 200 characters; `null` otherwise |
+
+**What the page does with it.** A save waits for its answer at most **10 s**; without one the page
+says Home Assistant did not answer and offers to reload - a late save may still have landed, and the
+reload shows it. After `saved` the page waits for the catalogue with the new `revision`, at most
+5 s, so the ids of new groups and rows are known before the next save. After `stale` it asks to
+reload, and keeps the unsaved edit on screen until the reload. A saved edit replaces the menu the
+integration's own options hold; a save from those options afterwards, made from a copy older than
+the edit, replaces it again.
 
 ---
 

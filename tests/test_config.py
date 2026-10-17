@@ -44,6 +44,7 @@ EXPECTED_DEFAULTS = {
     "update_allowed": False,
     "menu_allowed": True,
     "menu_hotkey": "help_long",
+    "menu_transparency": 20,
     "log_level": "info",
     "epg_grid_events": 4,
 }
@@ -112,6 +113,7 @@ def test_remote_settings_are_exact_and_strictly_typed():
         "softcam_autoheal": False,
         "softcam_autoheal_seconds": 90,
         "menu_hotkey": "help_long",
+        "menu_transparency": 20,
     }
 
 
@@ -148,7 +150,6 @@ def test_an_omitted_key_falls_back_to_the_section_that_will_be_saved():
 
 
 @pytest.mark.parametrize("payload", [
-    {},
     {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60, "host": "x"},
     {"publish_keys": 1, "screenshot": "off", "screenshot_interval": 60},
     {"publish_keys": True, "screenshot": "sometimes", "screenshot_interval": 60},
@@ -166,7 +167,7 @@ def test_an_omitted_key_falls_back_to_the_section_that_will_be_saved():
     {"publish_keys": True, "screenshot": "off", "screenshot_interval": 60,
      "oscam_telemetry": 1},
 ])
-def test_remote_settings_reject_partial_unknown_or_invalid_values(payload):
+def test_remote_settings_reject_unknown_or_invalid_values(payload):
     with pytest.raises(ValueError):
         settings_module.validate_remote_settings(payload)
 

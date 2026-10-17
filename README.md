@@ -26,8 +26,10 @@ The receiver's device page in Home Assistant, with the companion integration.
 - The receiver's zap history, a page inside OpenWebif with every setting and command, and an
   optional softcam restart and EPG import (both off until you allow them on the box).
 - A "Home Assistant" menu on the television: lights, covers, scenes and scripts you choose in
-  the companion integration, opened from the Extensions menu or by holding HELP. The receiver
-  only says which row was chosen; Home Assistant does the rest.
+  the companion integration - or build on the receiver's OpenWebif page, once you allow that in
+  Home Assistant - opened from the
+  Extensions menu or by holding HELP. The receiver only says which row was chosen; Home Assistant
+  does the rest.
 - Updates of the plugin itself, only to releases on a signed list: from the television, the
   OpenWebif page or over MQTT (off until you allow it on the box), keeping the channel you were
   watching and putting the previous version back when the new one does not start. A receiver

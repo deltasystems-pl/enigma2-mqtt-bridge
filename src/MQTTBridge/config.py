@@ -52,6 +52,8 @@ REMOTE_SETTING_NAMES = (
     "softcam_autoheal_seconds",
     # Not a permission either: which key opens a menu the receiver already allows.
     "menu_hotkey",
+    # Nor this: how see-through the menu's background is.
+    "menu_transparency",
 )
 # Published in `info.settings` and refused by `cmd/config`, like any other key
 # that is not in the allowlist above. A setting that *enables* a command is
@@ -76,12 +78,25 @@ SCREENSHOT_DELAY_LIMITS = (1, 30)
 # channel refreshes its ECM file about every ten, and the spread is nine to
 # eleven. Above ten minutes it is no longer a repair.
 SOFTCAM_AUTOHEAL_LIMITS = (30, 600)
+# How see-through the receiver menu's background is, in percent: 0 is opaque. Above 80 the text
+# would stand on the picture alone. A step of 10, so LEFT and RIGHT on the television move it by
+# one step each and every writer offers the same nine values.
+MENU_TRANSPARENCY_LIMITS = (0, 80)
+MENU_TRANSPARENCY_STEP = 10
+MENU_TRANSPARENCY_DEFAULT = 20
+MENU_TRANSPARENCY_CHOICES = tuple(
+    range(MENU_TRANSPARENCY_LIMITS[0], MENU_TRANSPARENCY_LIMITS[1] + 1, MENU_TRANSPARENCY_STEP)
+)
+# The settings that belong to the receiver menu: the television's "Menu" section and the
+# OpenWebif page's Menu subpage show these, and only these.
+MENU_SETTING_NAMES = ("menu_allowed", "menu_hotkey", "menu_transparency")
 
 DEFAULT_BASE_TOPIC = "enigma2"
 DEFAULT_DISCOVERY_PREFIX = "homeassistant"
 
 # The order is the order of the setup screen, so a reader of either sees the
-# same shape: identity, broker, topics, behaviour, diagnostics.
+# same shape: identity, broker, topics, behaviour, diagnostics - and the receiver
+# menu last, under a heading of its own on the screen.
 SETTING_NAMES = (
     "enabled",
     "host",
@@ -116,10 +131,11 @@ SETTING_NAMES = (
     "uninstall_allowed",
     "update_check",
     "update_allowed",
-    "menu_allowed",
-    "menu_hotkey",
     "log_level",
     "epg_grid_events",
+    "menu_allowed",
+    "menu_hotkey",
+    "menu_transparency",
 )
 
 # How a provisioning file's JSON is coerced onto each setting. Keyed explicitly
@@ -161,6 +177,7 @@ SETTING_KINDS = {
     "update_allowed": "bool",
     "menu_allowed": "bool",
     "menu_hotkey": "choice",
+    "menu_transparency": "int",
     "log_level": "choice",
     "epg_grid_events": "int",
 }
@@ -185,7 +202,11 @@ INTEGER_LIMITS = {
     "oscam_port": (1, 65535),
     "softcam_autoheal_seconds": SOFTCAM_AUTOHEAL_LIMITS,
     "epg_grid_events": (0, 20),
+    "menu_transparency": MENU_TRANSPARENCY_LIMITS,
 }
+# Integer settings that take only every n-th value of their range. A value between two steps is
+# refused with a sentence that says so, never rounded: a rounded value is not the one sent.
+INTEGER_STEPS = {"menu_transparency": MENU_TRANSPARENCY_STEP}
 
 # Characters, not bytes. A path and a bouquet filter are allowed to be long.
 TEXT_LIMIT = 128
@@ -305,6 +326,13 @@ def _build():
             ("off", _("off")),
         ],
     )
+    # A selection, not a ConfigInteger: on the television LEFT and RIGHT step a selection by one
+    # choice - 10 % - where an integer field moves a cursor over its digits. The keys are ints,
+    # so the value read back is the number `info.settings` publishes (`transparency`).
+    section.menu_transparency = ConfigSelection(
+        default=MENU_TRANSPARENCY_DEFAULT,
+        choices=[(percent, f"{percent} %") for percent in MENU_TRANSPARENCY_CHOICES],
+    )
     section.log_level = ConfigSelection(
         default="info", choices=[(level, level) for level in LOG_LEVELS]
     )
@@ -323,7 +351,23 @@ def element(name, section=None):
 
 def value(name, section=None):
     found = element(name, section)
+    if name == "menu_transparency":
+        return transparency(None if found is None else found.value)
     return None if found is None else found.value
+
+
+def transparency(raw):
+    """`menu_transparency` as the int it is meant to be, whatever the element holds.
+
+    The element's keys are ints and enigma2's selection hands back the key it matched, so this
+    is the identity on every image measured. It is here for the one that would hand back the
+    text from its settings file: an int, one of the choices, or the default.
+    """
+    if isinstance(raw, str) and raw.strip().isdigit():
+        raw = int(raw.strip())
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return MENU_TRANSPARENCY_DEFAULT
+    return raw if raw in MENU_TRANSPARENCY_CHOICES else MENU_TRANSPARENCY_DEFAULT
 
 
 def save(section=None):
@@ -422,6 +466,16 @@ def text_refusal(name, text):
     return None
 
 
+def step_refusal(name, number):
+    """Why `number` is not one of the integer setting `name`'s steps, or None."""
+    step = INTEGER_STEPS.get(name)
+    if step is None:
+        return None
+    if (number - INTEGER_LIMITS[name][0]) % step:
+        return name + " must be a multiple of " + str(step)
+    return None
+
+
 def validate_setting(name, raw):
     """One setting's new value, validated as every writer must: the value, or ValueError.
 
@@ -440,6 +494,9 @@ def validate_setting(name, raw):
         minimum, maximum = INTEGER_LIMITS[name]
         if not minimum <= value <= maximum:
             raise ValueError(name + " must be between " + str(minimum) + " and " + str(maximum))
+        refusal = step_refusal(name, value)
+        if refusal:
+            raise ValueError(refusal)
     elif kind == "text":
         refusal = text_refusal(name, value)
         if refusal:
@@ -506,76 +563,61 @@ def unknown_settings_refusal(unknown):
     return sentence
 
 
-def validate_remote_settings(raw, section=None):
-    """Validate the complete, deliberately small remotely writable subset.
+def _remote_bool(name, raw):
+    if not isinstance(raw, bool):
+        raise ValueError(name + " must be true or false")
+    return raw
 
-    `section` is the settings the result will be saved into, and it is where
-    an omitted optional key's current value comes from. Reading the fallback
-    from one section and writing the result into another would silently copy
-    the module-global value over whatever the target actually held.
+
+def _remote_int(name, raw):
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise ValueError(name + " must be an integer")
+    minimum, maximum = INTEGER_LIMITS[name]
+    if not minimum <= raw <= maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    refusal = step_refusal(name, raw)
+    if refusal:
+        raise ValueError(refusal)
+    return raw
+
+
+def _remote_choice(name, raw):
+    allowed = CHOICES[name]
+    if not isinstance(raw, str) or raw not in allowed:
+        raise ValueError(name + " must be one of " + ", ".join(allowed))
+    return raw
+
+
+def validate_remote_settings(raw, section=None):
+    """Validate a `cmd/config` object: any part of the remotely writable subset.
+
+    Every key is optional: one left out keeps its current value, read from `section` - the
+    settings the result will be saved into. Reading the fallback from one section and writing
+    the result into another would silently copy the module-global value over whatever the
+    target actually held. An empty object is valid and changes nothing. A key outside the
+    subset, or a value of the wrong type or out of its range, refuses the whole object.
+
+    The result is always the whole subset, what was sent and what was kept, so that
+    `save_remote_settings` writes it at once.
     """
     if not isinstance(raw, dict):
         raise ValueError("cmd/config takes a JSON object")
     unknown = sorted(set(raw) - set(REMOTE_SETTING_NAMES))
-    required = {"publish_keys", "screenshot", "screenshot_interval"}
-    missing = sorted(required - set(raw))
     if unknown:
         raise ValueError(unknown_settings_refusal(unknown))
-    if missing:
-        raise ValueError("missing setting(s): " + ", ".join(missing))
-    publish_keys = raw["publish_keys"]
-    screenshot = raw["screenshot"]
-    interval = raw["screenshot_interval"]
-    delay = raw.get("screenshot_delay", value("screenshot_delay", section))
-    cam_telemetry = raw.get("cam_telemetry", value("cam_telemetry", section))
-    oscam_telemetry = raw.get("oscam_telemetry", value("oscam_telemetry", section))
-    autoheal = raw.get("softcam_autoheal", value("softcam_autoheal", section))
-    autoheal_seconds = raw.get(
-        "softcam_autoheal_seconds", value("softcam_autoheal_seconds", section)
-    )
-    menu_hotkey = raw.get("menu_hotkey", value("menu_hotkey", section))
-    if not isinstance(publish_keys, bool):
-        raise ValueError("publish_keys must be true or false")
-    if not isinstance(screenshot, str) or screenshot not in SCREENSHOT_MODES:
-        raise ValueError("screenshot must be one of " + ", ".join(SCREENSHOT_MODES))
-    if isinstance(interval, bool) or not isinstance(interval, int):
-        raise ValueError("screenshot_interval must be an integer")
-    minimum, maximum = SCREENSHOT_INTERVAL_LIMITS
-    if not minimum <= interval <= maximum:
-        raise ValueError(
-            f"screenshot_interval must be between {minimum} and {maximum}"
-        )
-    if isinstance(delay, bool) or not isinstance(delay, int):
-        raise ValueError("screenshot_delay must be an integer")
-    minimum, maximum = SCREENSHOT_DELAY_LIMITS
-    if not minimum <= delay <= maximum:
-        raise ValueError(f"screenshot_delay must be between {minimum} and {maximum}")
-    if not isinstance(cam_telemetry, bool):
-        raise ValueError("cam_telemetry must be true or false")
-    if not isinstance(oscam_telemetry, bool):
-        raise ValueError("oscam_telemetry must be true or false")
-    if not isinstance(autoheal, bool):
-        raise ValueError("softcam_autoheal must be true or false")
-    if isinstance(autoheal_seconds, bool) or not isinstance(autoheal_seconds, int):
-        raise ValueError("softcam_autoheal_seconds must be an integer")
-    minimum, maximum = SOFTCAM_AUTOHEAL_LIMITS
-    if not minimum <= autoheal_seconds <= maximum:
-        raise ValueError(
-            f"softcam_autoheal_seconds must be between {minimum} and {maximum}"
-        )
-    if not isinstance(menu_hotkey, str) or menu_hotkey not in MENU_HOTKEYS:
-        raise ValueError("menu_hotkey must be one of " + ", ".join(MENU_HOTKEYS))
-    return {
-        "publish_keys": publish_keys,
-        "screenshot": screenshot,
-        "screenshot_interval": interval,
-        "screenshot_delay": delay,
-        "cam_telemetry": cam_telemetry,
-        "oscam_telemetry": oscam_telemetry,
-        "softcam_autoheal": autoheal,
-        "softcam_autoheal_seconds": autoheal_seconds,
-        "menu_hotkey": menu_hotkey,
-    }
+    values = {}
+    for name in REMOTE_SETTING_NAMES:
+        if name not in raw:
+            values[name] = value(name, section)
+            continue
+        kind = SETTING_KINDS[name]
+        if kind == "bool":
+            values[name] = _remote_bool(name, raw[name])
+        elif kind == "int":
+            values[name] = _remote_int(name, raw[name])
+        else:
+            values[name] = _remote_choice(name, raw[name])
+    return values
 
 
 def save_remote_settings(values, section=None):

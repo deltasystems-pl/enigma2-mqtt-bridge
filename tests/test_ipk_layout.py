@@ -179,6 +179,9 @@ def test_the_built_package_carries_the_licence_files(tmp_path):
         packaged = data_text(members, plugin + name)
         assert packaged == (REPO_ROOT / name).read_text(encoding="utf-8")
     assert plugin + "icons/LICENSE-Apache-2.0.txt" in names
+    # The menu creator's script is a file of the package, served as it is (ADR-0022).
+    assert data_text(members, plugin + "creator.js") == (
+        REPO_ROOT / "src" / "MQTTBridge" / "creator.js").read_text(encoding="utf-8")
 
 
 def data_text(data_tar_gz, member):

@@ -43,10 +43,15 @@ interface's authentication; that case has not been measured.
 """
 
 try:
-    from Plugins.Extensions.MQTTBridge.webif import create_resource
+    from Plugins.Extensions.MQTTBridge.webif import create_resource, mounted
     from Plugins.Extensions.WebInterface.WebChilds.Toplevel import addExternalChild
 
-    addExternalChild(("mqttbridge", create_resource(), "MQTT Bridge", 1, True, "_self"))
+    # Only once OpenWebif has taken the page is the menu creator on its Menu subpage offered
+    # (the capability `menu_editor`). A refusal - a link another plugin took first - is a
+    # False; any other answer is taken as taken.
+    if addExternalChild(("mqttbridge", create_resource(), "MQTT Bridge", 1, True, "_self")) \
+            is not False:
+        mounted()
 except Exception:
     # OpenWebif is optional. Its absence must never stop Enigma2 or MQTT Bridge.
     pass
