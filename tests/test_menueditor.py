@@ -396,6 +396,22 @@ def test_an_answers_texts_are_cut_and_made_one_line():
     assert len(parsed["detail"]) == menueditor.DETAIL_LIMIT
 
 
+@pytest.mark.parametrize("result", ["disabled", "not_claimed", "stale", "invalid", "busy"])
+def test_every_answer_but_saved_may_carry_no_revision(world, result):
+    _refusal, answers = submit(world)
+    answer(world, edits(world)[0]["id"], result, revision=None)
+    assert answers == [{"result": result, "revision": None, "path": None, "detail": None}]
+
+
+@pytest.mark.parametrize("revision", [None, "NOT-A-REVISION", 7])
+def test_saved_without_its_revision_is_not_an_answer(world, revision):
+    _refusal, answers = submit(world)
+    answer(world, edits(world)[0]["id"], "saved", revision=revision)
+    assert answers == []
+    assert parse_answer(json.dumps({"id": "8c1d2e3f4a5b", "result": "saved",
+                                    "revision": revision}).encode()) is None
+
+
 def test_a_result_word_this_plugin_does_not_know_is_passed_on():
     _ident, parsed = parse_answer(b'{"id": "8c1d2e3f4a5b", "result": "postponed"}')
     assert parsed["result"] == "postponed"

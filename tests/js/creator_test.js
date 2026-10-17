@@ -611,9 +611,21 @@ test("a version below one is not a newer catalogue", async () => {
 });
 
 test("Home Assistant's refusal of a switched-off editor is its own sentence", async () => {
-  const {page} = await loaded([{result: "disabled"}]);
+  const {net, page} = await loaded([{result: "disabled", revision: null}]);
   await page.save();
   assert.strictEqual(page.message.text, "Disabled in Home Assistant.");
+  assert.strictEqual(page.catalogue.revision, REVISION, "nothing adopted");
+  assert.strictEqual(page.awaited, null, "nothing awaited");
+  assert.strictEqual(net.sent.length, 2, "nothing fetched after the answer");
+});
+
+test("a refusal without a revision is never compared or waited for", async () => {
+  const {net, page} = await loaded([{result: "not_claimed", revision: null}]);
+  await page.save();
+  assert.strictEqual(page.catalogue.revision, REVISION);
+  assert.strictEqual(page.awaited, null);
+  assert.strictEqual(net.sent.length, 2);
+  assert.strictEqual(page.busy, false);
 });
 
 test("the receiver's own busy is its own sentence", async () => {

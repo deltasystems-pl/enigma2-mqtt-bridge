@@ -262,7 +262,8 @@ def parse_answer(payload):
     """`(id, answer)` from a result payload, or None when it is not one.
 
     The answer is what the page gets: `result`, `revision`, `path` and `detail`, each checked
-    for its type and the texts cut. A result word this plugin does not know is passed on - the
+    for its type and the texts cut. `revision` is required, 16 hex, on `saved` alone; on every
+    other answer it may be `null`, and is `null` when it is not a revision. A result word this plugin does not know is passed on - the
     page has a sentence for one - since a newer integration may answer in a word added later.
     """
     if isinstance(payload, (bytes, bytearray)):
@@ -285,6 +286,10 @@ def parse_answer(payload):
     if not isinstance(result, str) or not _RESULT.fullmatch(result):
         return None
     revision = raw.get("revision")
+    if result == SAVED and not is_revision(revision):
+        # A save is answered with the revision it made, which the page waits for. Every other
+        # answer may carry none - `disabled` and `not_claimed` never do.
+        return None
     path = raw.get("path")
     detail = raw.get("detail")
     return ident, {

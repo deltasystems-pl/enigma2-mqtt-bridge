@@ -2738,15 +2738,16 @@ anyone who can reach the receiver's web interface, or publish `menu_edit` on the
 which entities the television controls and then operate them ([SECURITY.md](../SECURITY.md)).
 
 **The catalogue**, retained, QoS 1, on `enigma2mqtt/menu_catalogue/<node>`, published by the
-integration while this receiver claims `menu_editor` and retracted - an empty payload - when it
-stops, when its entry is removed or the node id changes. While editing from the receiver is switched
-off in Home Assistant it is this alone:
+integration and retracted - an empty payload - when its entry is removed or the node id changes.
+While editing from the receiver is switched off in Home Assistant it is this alone, whether or not
+the receiver has claimed `menu_editor` or reported at all:
 
 ```json
 {"v": 1, "editing": false}
 ```
 
-and while it is on:
+and while it is on, published while this receiver claims `menu_editor` and retracted when the
+claim goes:
 
 ```json
 {"v": 1,
@@ -2799,7 +2800,7 @@ topic - and the page puts it on screen as text, never as markup.
 |---|---|
 | `id` | The edit's `id` |
 | `result` | `saved` - stored; `stale` - the menu changed since `base`; `invalid` - a rule refused it; `busy` - another save of this receiver is being handled, or one was stored less than two seconds ago; `not_claimed` - the integration does not see this receiver claim `menu_editor`; `disabled` - editing from the receiver is switched off in its options. An open enumeration |
-| `revision` | The menu's revision after the answer: the new one after `saved` |
+| `revision` | The menu's revision after the answer: the new one after `saved`, where it is required; `null` after `disabled` and `not_claimed`, and may be `null` after any answer but `saved`. A `saved` without a revision is not an answer, and the save waits on |
 | `path` | `invalid` only: where, as in `menu[2].rows[5].control`; `null` otherwise |
 | `detail` | `invalid` only: one English sentence of at most 200 characters; `null` otherwise |
 

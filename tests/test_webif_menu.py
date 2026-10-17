@@ -469,6 +469,14 @@ def test_a_save_is_held_until_home_assistant_answers(world):
                                 "path": "menu[0].label", "detail": "The label is empty."}
 
 
+@pytest.mark.parametrize("result", ["disabled", "not_claimed"])
+def test_a_refusal_with_no_revision_reaches_the_page_as_it_came(world, result):
+    request, _body = save(world, new_session())
+    answer(world, result, revision=None)
+    assert request.answer() == {"result": result, "revision": None, "path": None,
+                                "detail": None}
+
+
 def test_a_second_save_from_the_same_page_needs_no_reload(world):
     session = new_session()
     before = token(session)
