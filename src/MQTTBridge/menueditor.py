@@ -263,8 +263,9 @@ def parse_answer(payload):
 
     The answer is what the page gets: `result`, `revision`, `path` and `detail`, each checked
     for its type and the texts cut. `revision` is required, 16 hex, on `saved` alone; on every
-    other answer it may be `null`, and is `null` when it is not a revision. A result word this plugin does not know is passed on - the
-    page has a sentence for one - since a newer integration may answer in a word added later.
+    other answer it may be `null`, and is `null` when it is not a revision. A result word this
+    plugin does not know is passed on - the page has a sentence for one - since a newer
+    integration may answer in a word added later.
     """
     if isinstance(payload, (bytes, bytearray)):
         if len(payload) > MAX_RESULT_BYTES:
