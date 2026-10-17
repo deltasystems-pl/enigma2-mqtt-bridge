@@ -42,7 +42,9 @@ natural place for an editor. Four things are true of it:
    handler attribute, no `eval` or code built from text, no address outside this origin, no
    library. The page hands it what it needs - its addresses, the session's token, the icon names,
    the bounds and every sentence in the household's language - as `data-` attributes, escaped like
-   every attribute on the page.
+   every attribute on the page. The icon picker shows the package's own icons from
+   `<mount>/menu/icon/<name>.png`, which serves a name of the contract's fixed list and nothing
+   else; no name from the catalogue ever becomes an address.
 3. **The subpage alone has a policy that admits it.** `default-src 'none'; script-src 'self';
    connect-src 'self'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self';
    frame-ancestors 'self'; base-uri 'none'`, with the usual `X-Frame-Options: SAMEORIGIN`,
@@ -73,17 +75,21 @@ natural place for an editor. Four things are true of it:
    `Sec-Fetch-Dest: empty`, which is the main page's signal for OpenWebif's panel (ADR-0010); they
    go to resources of their own, which never answer with the fragment. `catalogue.json` and `save`
    also refuse a `Sec-Fetch-Site` other than `same-origin` where the browser sends one.
-8. **Editing is always on**, while the menu is: there is no switch for the creator. The capability
-   `menu_editor` says the receiver offers it - `menu` is claimed and OpenWebif has mounted the
-   page.
+8. **Editing from the receiver is off by default, and switched on in Home Assistant.** The
+   companion integration's receiver menu options have the switch; while it is off the catalogue is
+   `{"v": 1, "editing": false}` alone - nothing about the household's entities - every edit is
+   answered `disabled`, and the page says where editing is switched on and shows no editor. The
+   capability `menu_editor` says only that the receiver can host the creator - `menu` is claimed
+   and OpenWebif has mounted the page.
 
 ## Consequences
 
-- **Anyone who can reach the receiver's web interface, or publish `menu_edit` on the broker, can
-  choose which entities the television controls**, and anyone on the broker can read the catalogue
-  - every entity name and area Home Assistant has. Chosen knowingly by the maintainer, and said
-  plainly in SECURITY.md. The integration still acts only on a row its stored menu holds, with the
-  control it allows: an edit can put a lamp into the menu, it cannot make the menu do what Home
+- **Once editing is switched on, anyone who can reach the receiver's web interface, or publish
+  `menu_edit` on the broker, can choose which entities the television controls and then operate
+  them** - a lock, a cover, a script, an automation - and anyone on the broker can read the
+  catalogue: every entity name and area Home Assistant has. That is why it is off until somebody
+  switches it on in Home Assistant, and SECURITY.md says so plainly. The integration still binds
+  only a usable entity with a control it allows: an edit cannot make the menu do what Home
   Assistant would not let its own options flow do.
 - **One page of this plugin runs a script.** A future page that wants one gets its own record;
   the main page's rule is unchanged, and the policy that admits a script is set on the subpage's

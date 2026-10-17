@@ -150,6 +150,9 @@ interface remains responsive; only a slow-batch or event-loop warning indicates 
   OpenWebif page mounted; an integration without the menu creator never publishes one. A catalogue
   the receiver refused leaves the one before it and the log line `ignoring an invalid menu
   catalogue`.
+- **"Editing the menu from the receiver is switched off in Home Assistant"**: it is off by default.
+  The companion integration's options, under the receiver menu, switch it on - read SECURITY.md
+  first.
 - **"...a newer Home Assistant integration than this plugin understands"**: update the plugin.
 - **The page says it needs JavaScript**: the browser runs no script, or blocks it. The settings on
   the page work without it.

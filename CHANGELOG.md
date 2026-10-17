@@ -22,9 +22,11 @@ version that has no section here.
   started from; and Home Assistant validates it, stores it or refuses it, and answers on
   `enigma2mqtt/menu_edit_result/<node>`. The save waits for that answer at most ten seconds, and a
   save from a stale copy is refused and the page asks to reload, keeping the unsaved edit until it
-  does. Editing is always on while the menu is: anyone who can reach the receiver's web interface or
-  publish on the broker can choose which entities the television controls, and the catalogue shows
-  every entity's name and area to anyone on the broker ([SECURITY.md](SECURITY.md)). The page is
+  does. Editing from the receiver is off by default and switched on in the companion integration's
+  receiver menu options: while it is off the catalogue says only that, and the page shows no editor.
+  Switched on, anyone who can reach the receiver's web interface or publish on the broker can choose
+  which entities the television controls and then operate them, and the catalogue shows every
+  entity's name and area to anyone on the broker ([SECURITY.md](SECURITY.md)). The page is
   the only one with a script - a static file, `creator.js`, under a policy of its own; the main
   page keeps its policy and stays script-free
   ([ADR-0022](docs/adr/0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md)).
@@ -33,7 +35,7 @@ version that has no section here.
 - The setting `menu_transparency`: how see-through the menu's background is, 0 % to 80 % in steps of
   10, 20 % by default - the screen's background and the list's panel; the bar on the selected row,
   the text and the icons stay solid. It applies the next time the menu opens, is writable through
-  `cmd/config` and is in `info.settings`. The receiver's settings screen has a "Menu" section with
+  `cmd/config` and is in `info.settings`. The receiver's settings screen has a "Home Assistant menu" section, last, with
   the three menu settings, and the OpenWebif page has them on the Menu page; the main page shows
   them in one line with a link there.
 - `cmd/config` takes any part of its keys: each one left out keeps its value, also `publish_keys`,

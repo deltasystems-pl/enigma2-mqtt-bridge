@@ -114,6 +114,7 @@ everything else:
    topic read enigma2mqtt/menu/<node_id>
    topic read enigma2mqtt/menu_catalogue/<node_id>
    topic read enigma2mqtt/menu_edit_result/<node_id>
+   # the default discovery prefix, homeassistant; with another, use yours
    topic read homeassistant/status
    ```
 
@@ -144,24 +145,34 @@ web interface can use it. Its checks keep **other web sites** out (the `Host` al
 same-origin requests, a session token), not people on the LAN.
 
 The receiver menu ([ADR-0020](docs/adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md))
-is on by default, and since the menu creator
+is on by default. **Editing it from the receiver** - the menu creator
 ([ADR-0022](docs/adr/0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md))
-**editing it is always on**, with no switch of its own - a choice the maintainer made knowing what
-it means:
+- **is off by default**, and switched on in Home Assistant, in the companion integration's receiver
+menu options ("Allow editing from the receiver"). While it is off, Home Assistant publishes no
+catalogue of its entities and refuses every edit; the page says editing is switched off there.
+
+**What switching it on gives away**, and why it is off until you decide:
 
 - **Anyone who can reach the receiver's web interface, or publish on the broker, can choose which
-  entities the television controls.** The menu creator's page saves a new menu without any Home
-  Assistant login, and so does a client that publishes `menu_edit` on the broker - the broker's ACL
-  is no protection where the broker does not enforce one (the Mosquitto add-on, above). Home
-  Assistant still checks every edit with its own menu options' rules and acts only on what its
-  stored menu holds, so an edit can put any usable entity into the menu, with a control Home
-  Assistant allows for it, and nothing more. Put on the broker only clients you would hand the
-  remote control, and keep the receiver's web interface off networks you do not trust - or switch
-  the menu off on the receiver (`menu_allowed`), which takes the creator with it.
-- **The catalogue tells anyone on the broker every entity's name and area.** It is published,
-  retained, for the menu creator, and holds every entity a menu row can be bound to - hidden and
-  diagnostic ones included - with its name and area. Anyone who can read
-  `enigma2mqtt/menu_catalogue/<node_id>`, or open the Menu page, can read that list.
+  entities the television controls - and then operate them from the menu**: any usable entity, a
+  lock, a garage door or a cover, a script or an automation included. The menu creator's page saves
+  a new menu without any Home Assistant login, and so does a client that publishes `menu_edit` on
+  the broker - the broker's ACL is no protection where the broker does not enforce one (the
+  Mosquitto add-on, above), and anyone on the broker can then send the `menu_action` that runs the
+  row. Home Assistant still checks every edit with its own menu options' rules, so an edit can bind
+  only a usable entity with a control Home Assistant allows for it. Switch it on only where
+  everything on the broker and the LAN is something you would hand the remote control - or leave it
+  off and build the menu in Home Assistant.
+- **The catalogue tells anyone on the broker every entity's name and area, while editing is on.** It
+  is published, retained, for the menu creator, and holds every entity a menu row can be bound to -
+  hidden and diagnostic ones included - with its name and area. Anyone who can read
+  `enigma2mqtt/menu_catalogue/<node_id>`, or open the Menu page, can read that list. With editing
+  off it says only that editing is off.
+- **An answer can be forged by whoever can read the edit.** Anyone subscribed to
+  `<base>/<node_id>/menu_edit` sees a save's id, and can publish an answer to it on
+  `enigma2mqtt/menu_edit_result/<node_id>` before Home Assistant does: the page then says what
+  that client wrote. It changes nothing Home Assistant stores, and it is no more than editing,
+  once switched on, already lets such a client do.
 - **No Home Assistant token is on the receiver.** The creator goes through the broker and Home
   Assistant's own validation; a receiver taken over gains no credential to Home Assistant from it.
 - **The page's one script reads the catalogue as untrusted text**: every string goes on screen as

@@ -47,7 +47,7 @@ and settings survive a plugin upgrade.
 | `menu_transparency` | `20 %` | How see-through the Home Assistant menu's background is: 0 % (opaque) to 80 %, in steps of 10. The text, the icons and the bar on the selected row stay solid. It applies the next time the menu is opened |
 | `log_level` | `info` | `error` / `warning` / `info` / `debug` |
 
-The setup screen shows the three menu settings last, under the heading **Menu**; the OpenWebif page
+The setup screen shows the three menu settings last, under the heading **Home Assistant menu**; the OpenWebif page
 has them on its own [Menu page](#the-menu-page-and-the-menu-creator).
 
 🔴 **`deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`,
@@ -449,7 +449,7 @@ in the browser is the receiver's IP address, `localhost`, or the receiver's host
 `.local`), which is what stops a hostile web site from reaching it through a name it controls; and
 every change must come from the page itself (its `Origin`), carrying the token the page put into
 the form. That token is kept in the browser's OpenWebif session, is accepted only from the POST
-body - never from the address; the page reads every field from the body alone - and is replaced after every change that took effect, but a save of the menu creator, which the Menu page repeats without a reload; a refused
+body - never from the address; the page reads every field from the body alone - and is replaced after every change that took effect, except a save of the menu creator, which the Menu page repeats without a reload; a refused
 request leaves it as it was, so the page you are looking at still works. A confirmation step
 carries a separate token that is good for exactly one attempt at exactly that action. But while
 OpenWebif authentication is off, any web page a household member opens can already switch the
@@ -489,7 +489,7 @@ Below them is the **menu creator**: the same menu you build in the companion int
 in Home Assistant, built here. Groups - add, rename, choose an icon, move, remove - and rows: pick an
 entity by typing part of its name, its entity id or its area (hidden, configuration and diagnostic
 entities are marked), choose its control from those the entity allows, and optionally a label and
-an icon; move a row up, down or into another group, or remove it. *Save the menu* sends the whole
+an icon, shown as the picture the television draws with its name beside it; move a row up, down or into another group, or remove it. *Save the menu* sends the whole
 menu. It needs the companion integration in a version with the menu creator, the menu switched on,
 and JavaScript in the browser - the settings above work without it.
 
@@ -502,8 +502,12 @@ and JavaScript in the browser - the settings above work without it.
   another tab - the save is refused, and the page asks you to reload; your changes stay on the page
   until you do. A save in Home Assistant's own options afterwards, from an older copy, replaces what
   was saved here: Home Assistant is the owner of the menu.
-- **Who can use it**: whoever OpenWebif lets in, like the rest of the page, and editing is always
-  on while the menu is - see [SECURITY.md](../SECURITY.md).
+- **Switched on in Home Assistant.** Editing from the receiver is off by default; the companion
+  integration's receiver menu options switch it on ("Allow editing from the receiver"). While it is
+  off the page says so and shows no editor.
+- **Who can use it** once it is on: whoever OpenWebif lets in, like the rest of the page - and
+  anyone on the broker can do the same without the page. See [SECURITY.md](../SECURITY.md) before
+  you switch it on.
 
 The page is the one page of the plugin that runs a script, `creator.js`, a file in the package,
 under a policy that admits no other script and no other site
@@ -569,6 +573,7 @@ topic read enigma2mqtt/integration/<node_id>
 topic read enigma2mqtt/menu/<node_id>
 topic read enigma2mqtt/menu_catalogue/<node_id>
 topic read enigma2mqtt/menu_edit_result/<node_id>
+# the default discovery prefix, homeassistant; with another, use yours
 topic read homeassistant/status
 ```
 

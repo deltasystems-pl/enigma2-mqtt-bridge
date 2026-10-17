@@ -108,13 +108,14 @@ Three things are true of the path between them:
 
 *Decision 7 stands; this adds one setting to the styled screen.* The setting `menu_transparency` -
 0 to 80 %, in steps of 10, 20 % by default - is the alpha of the styled screen's background and of
-its list's panel: `alpha = round(percent * 255 / 100)`, so 80 % is `0xCC` in enigma2's `#AARRGGBB`.
+its list's panel: `percent * 255 / 100` rounded half up, so 30 % is `0x4D` and 80 % is `0xCC` in
+enigma2's `#AARRGGBB`.
 The bar on the selected row, the text and the icons stay opaque, so what is selected and what is
 written can always be read. The skin is built for each opening, so a change applies the next time
 the menu opens and a menu on screen keeps its look; at 0 % the screen is as before, but for a
 background that had an alpha of `0x08` and is now opaque. The image's own list, the fallback, is
 drawn as the image draws it. Like `menu_hotkey`, the setting only tunes a menu the receiver already
 offers, so it is writable by `cmd/config` and set on the receiver's settings screen - in its own
-"Menu" section with the other two - and on the OpenWebif page's Menu subpage. Whether an image's
+"Home Assistant menu" section, last, with the other two - and on the OpenWebif page's Menu subpage. Whether an image's
 frame buffer blends the alpha over live television is the hardware's to show; a skin can restyle
 the screen by its name, `MQTTBridgeList` (TROUBLESHOOTING.md).

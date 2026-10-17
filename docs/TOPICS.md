@@ -2611,7 +2611,7 @@ four more while `menu_allowed` is on.
 | `enigma2mqtt/integration/<node>` - since 0.4.0 | The companion integration, retained, QoS 1: `{"integration": "0.4.0", "contract": 1, "plugin_min": "0.2.0"}`; retracted when its entry is removed | Keeps it in memory and judges `update.available` and `cmd/update` by it: a release of another contract major than the integration's, or one whose `min_integration` is above `integration`, is `incompatible`, and `plugin_min` raises the floor. An empty payload forgets it, and an unreadable one is ignored. A forged one can only narrow or widen the choice among signed, non-withdrawn releases of one major. The plugin never publishes to it and never retracts it |
 | `enigma2mqtt/menu/<node>` - added after 0.4.0 (unreleased), capability `menu` | The companion integration, retained, QoS 1: the receiver menu (below); an empty payload when there is no menu | Validates it whole and shows it; an invalid payload is ignored with one line in the log and the menu before it stays. Subscribed only while `menu_allowed` is on. The plugin never publishes to it and never retracts it |
 | `<ha_discovery_prefix>/status` - added after 0.4.0 (unreleased), capability `menu` | Home Assistant's own birth and last will, `online` or `offline`, under the `ha_discovery_prefix` setting (`homeassistant/status` by default) | `offline` greys the receiver menu; `online`, or nothing heard since the broker connection last changed, does not. Subscribed only while `menu_allowed` is on, and read for nothing else |
-| `enigma2mqtt/menu_catalogue/<node>` - added after 0.4.0 (unreleased), capability `menu_editor` | The companion integration, retained, QoS 1, while this receiver claims `menu_editor`: what the menu creator chooses from (below); an empty payload when there is none | Checks the envelope and keeps the exact bytes for the menu creator's page; an invalid one is ignored with one line in the log and the one before it stays. At most 1 MiB. Subscribed only while `menu_allowed` is on. The plugin never publishes to it and never retracts it |
+| `enigma2mqtt/menu_catalogue/<node>` - added after 0.4.0 (unreleased), capability `menu_editor` | The companion integration, retained, QoS 1, while this receiver claims `menu_editor`: what the menu creator chooses from (below), or only that editing from the receiver is switched off in Home Assistant; an empty payload when there is none | Checks the envelope and keeps the exact bytes for the menu creator's page; an invalid one is ignored with one line in the log and the one before it stays. At most 1 MiB. Subscribed only while `menu_allowed` is on. The plugin never publishes to it and never retracts it |
 | `enigma2mqtt/menu_edit_result/<node>` - added after 0.4.0 (unreleased), capability `menu_editor` | The companion integration, not retained, QoS 1: its answer to one `menu_edit` (below) | Hands it to the save waiting for that `id`; an answer for an id nothing waits for, a retained one and an unreadable one are ignored. Subscribed only while `menu_allowed` is on |
 
 ### The receiver menu - added after 0.4.0 (unreleased), capability `menu`
@@ -2731,16 +2731,26 @@ a label and an icon, as the companion integration's menu options offer them. **H
 the owner of the menu and the receiver never holds a Home Assistant token**: the integration
 publishes a catalogue of what can be chosen and the menu as it stores it; the page edits a copy and
 the receiver publishes the edit on `menu_edit` (§1); the integration validates it with the rules of
-its own menu options, stores it or refuses it, and answers. **Editing is always on** while the menu
-is: anyone who can reach the receiver's web interface, or publish `menu_edit` on the broker, can
-choose which entities the television controls ([SECURITY.md](../SECURITY.md)).
+its own menu options, stores it or refuses it, and answers. **Editing from the receiver is off by
+default**, and switched on in Home Assistant, in the integration's receiver menu options. While it is
+off the catalogue says so and nothing else, and every edit is refused with `disabled`. Switched on,
+anyone who can reach the receiver's web interface, or publish `menu_edit` on the broker, can choose
+which entities the television controls and then operate them ([SECURITY.md](../SECURITY.md)).
 
 **The catalogue**, retained, QoS 1, on `enigma2mqtt/menu_catalogue/<node>`, published by the
 integration while this receiver claims `menu_editor` and retracted - an empty payload - when it
-stops, when its entry is removed or the node id changes:
+stops, when its entry is removed or the node id changes. While editing from the receiver is switched
+off in Home Assistant it is this alone:
+
+```json
+{"v": 1, "editing": false}
+```
+
+and while it is on:
 
 ```json
 {"v": 1,
+ "editing": true,
  "revision": "3f9c2e4a1b7d5c60",
  "areas": ["Kitchen", "Living room"],
  "left_out": 0,
@@ -2762,15 +2772,17 @@ stops, when its entry is removed or the node id changes:
 
 | Field | Rule |
 |---|---|
-| `v` | `1`. A plugin that does not know the number ignores the catalogue, and the page says it comes from a newer integration |
+| `v` | `1`. A plugin that does not know the number - above 1 - ignores the catalogue, and the page says it comes from a newer integration; one below 1, or not a number, makes it invalid |
+| `editing` | `true` or `false`: whether editing from the receiver is switched on in Home Assistant. `false` comes alone, with none of the fields below, and the page shows no editor. A catalogue without it is read as `true` |
 | `revision` | 16 lowercase hexadecimal digits: the start of the sha256 of the menu as the integration stores it. It changes exactly when the stored menu does |
 | `areas` | The area names, at most 60 characters each, referred to by their place in the list |
 | `left_out` | How many entities are not in `entities` because the catalogue would have been over 1 MiB: hidden ones first, then diagnostic, then configuration entities, then the rest from the end of the name order. The page says how many |
 | `menu` | The menu as stored: groups and rows, with their ids. A row's `entity` is the entity id it is bound to now; a row whose entity cannot be found carries what it was bound to and `"missing": true`. `label` and `icon` are a row's own choices, `null` for the defaults |
 | `entities` | Every entity a row can be bound to, sorted by name: `e` the entity id, `n` the name a row shows by default (cut at 60), `a` the area's place in `areas` or `null`, `c` the controls it can take - the first is the default - and `h` (`true` when hidden) and `k` (`config` or `diagnostic`), absent otherwise |
 
-The plugin accepts at most 1 MiB (1,048,576 bytes), checks the envelope - an object of `v` 1, a
-`revision`, a `menu` and an `entities` list - and keeps the exact bytes for the page. One that breaks
+The plugin accepts at most 1 MiB (1,048,576 bytes), checks the envelope - an object of `v` 1 and
+either `"editing": false` or a `revision`, a `menu` and an `entities` list - and keeps the exact
+bytes for the page. A number of more than 32 digits, or NaN or an infinity, makes it invalid. One that breaks
 it, or cannot be parsed, is ignored with one line in the log, and the catalogue before it stays.
 **Every string in it is untrusted text** - anyone who can publish on the broker can write this
 topic - and the page puts it on screen as text, never as markup.
@@ -2786,7 +2798,7 @@ topic - and the page puts it on screen as text, never as markup.
 | Field | Rule |
 |---|---|
 | `id` | The edit's `id` |
-| `result` | `saved` - stored; `stale` - the menu changed since `base`; `invalid` - a rule refused it; `busy` - another save of this receiver is being handled, or one was stored less than two seconds ago; `not_claimed` - the integration does not see this receiver claim `menu_editor`. An open enumeration |
+| `result` | `saved` - stored; `stale` - the menu changed since `base`; `invalid` - a rule refused it; `busy` - another save of this receiver is being handled, or one was stored less than two seconds ago; `not_claimed` - the integration does not see this receiver claim `menu_editor`; `disabled` - editing from the receiver is switched off in its options. An open enumeration |
 | `revision` | The menu's revision after the answer: the new one after `saved` |
 | `path` | `invalid` only: where, as in `menu[2].rows[5].control`; `null` otherwise |
 | `detail` | `invalid` only: one English sentence of at most 200 characters; `null` otherwise |
