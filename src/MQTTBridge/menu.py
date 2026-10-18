@@ -4,7 +4,8 @@
 retained, on `enigma2mqtt/menu/<node>` - groups and rows, each row a control bound to something in
 Home Assistant, with its current value and the text to show. The receiver draws it, and when the
 viewer acts on a row it publishes one message on `<base>/<node>/menu_action`: the row's id, what
-was done to it (`press`, `toggle`, `set`) and, for `set`, the value. Home Assistant performs the
+was done to it (`press`, `toggle`, `set`), for `set` the value and for `toggle` the state the row
+showed (`seen`). Home Assistant performs the
 action and publishes the menu again with the new state. There is no service call, no entity id and
 no domain anywhere on the receiver, so the only power a `menu_action` carries is what the user put
 into the menu (ADR-0020, docs/TOPICS.md).
@@ -1195,6 +1196,11 @@ class MenuPublisher(Publisher):
             if current["type"] == INPUT:
                 value = str(value)[: current["max_length"]]
             payload["value"] = value
+        elif action == "toggle":
+            # What the row showed when OK was pressed: the value of the last menu applied for
+            # it. Home Assistant turns the toggle into the opposite of this state, so an OK that
+            # arrives late, or twice, repeats what the viewer meant instead of inverting it.
+            payload["seen"] = current["value"]
         info = self.bridge.publish_event(ACTION_SUFFIX, payload, qos=ACTION_QOS)
         if info is None or getattr(info, "rc", 0):
             # The socket was already gone: the client keeps a QoS 1 message for the next
