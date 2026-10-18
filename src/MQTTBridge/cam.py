@@ -14,7 +14,10 @@ LOG = get_logger("cam")
 
 ECM_PATH = "/tmp/ecm.info"
 MAX_BYTES = 8 * 1024
+# How old the ECM in a file that is there may be and still count.
 FRESH_SECONDS = 15
+# How long after its ECM the last reading is held while the file is absent (`cam_state`).
+ABSENT_HOLD_SECONDS = 30
 POLL_MILLISECONDS = 2000
 
 EMPTY = {"system": None, "active": None, "encrypted": None, "ecm_ms": None}
@@ -116,12 +119,12 @@ def _parse_ecm(text):
     return system, milliseconds
 
 
-def _fresh(modified, service_since, current):
-    """Whether an ECM written at `modified` belongs to this service and is recent."""
+def _fresh(modified, service_since, current, seconds=FRESH_SECONDS):
+    """Whether an ECM written at `modified` belongs to this service and is `seconds` recent."""
     return (
         modified >= service_since
         and modified <= current + 1
-        and current - modified <= FRESH_SECONDS
+        and current - modified <= seconds
     )
 
 
@@ -135,15 +138,16 @@ def cam_state(session, path=ECM_PATH, service_since=0.0, now=None, held=None):
 
     A reading is `(system, ecm_ms, modified)` - the two parsed values and the
     file's modification time, never any of its text. `held` is the one the last
-    poll returned. It is reported again only while the file is **absent** and
-    the reading is still fresh by the rule a file is held to: the cam removes the
-    file for a few seconds while it is still decoding - measured when a
-    descrambled stream to a stream client ended - and writes it again at the
-    next ECM, so a poll that lands in that gap would otherwise say `active: null`
-    for a channel the television is decoding. Once `FRESH_SECONDS` have passed
-    since that ECM, the answer is the one an absent file always gave. A file that
-    is there but stale, malformed or not a regular file ends the reading at once,
-    and so does a poll that finds the service free-to-air or cannot tell.
+    poll returned. It is reported again only while the file is **absent**, for
+    `ABSENT_HOLD_SECONDS` after that ECM: the cam removes the file for a few
+    seconds while it is still decoding - measured when a descrambled stream to a
+    stream client ended, once for longer than the `FRESH_SECONDS` a file that is
+    there may be old - and writes it again at the next ECM, so a poll that lands
+    in that gap would otherwise say `active: null` for a channel the television
+    is decoding. Once the hold has passed, the answer is the one an absent file
+    always gave. A file that is there is held to `FRESH_SECONDS` as before: there
+    but stale, malformed or not a regular file ends the reading at once, and so
+    does a poll that finds the service free-to-air or cannot tell.
     """
     encrypted = _encrypted(session)
     payload = dict(EMPTY)
@@ -159,7 +163,11 @@ def cam_state(session, path=ECM_PATH, service_since=0.0, now=None, held=None):
     text, modified = _read_bounded(path)
     current = time.time() if now is None else now
     if text is None or modified is None:
-        if held is None or os.path.lexists(path) or not _fresh(held[2], service_since, current):
+        if (
+            held is None
+            or os.path.lexists(path)
+            or not _fresh(held[2], service_since, current, ABSENT_HOLD_SECONDS)
+        ):
             return payload, None
         payload["system"], payload["ecm_ms"] = held[0], held[1]
         payload["active"] = True
