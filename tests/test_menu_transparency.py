@@ -159,7 +159,13 @@ def test_the_menu_section_is_last_under_its_heading(settings):
     assert [entry[1] for entry in entries[heading + 1:]] == [
         settings.menu_allowed, settings.menu_hotkey, settings.menu_transparency,
     ]
-    assert all(not setup_screen.is_heading(entry) for entry in entries[:heading])
+    # The one other heading above it is the recordings', over their one setting.
+    recordings = entries.index(("Recordings",))
+    assert entries[recordings + 1][1] is settings.recording_delete_allowed
+    assert recordings + 2 == heading
+    assert all(
+        not setup_screen.is_heading(entry) for entry in entries[:recordings]
+    )
 
 
 def test_the_screen_order_still_pins_the_configuration_order():

@@ -43,6 +43,12 @@ INSTANT_RECORD_SECONDS = 2 * 60 * 60
 
 COALESCE_MILLISECONDS = 250
 
+# Claimed with `recording`: each running recording carries its details.
+DETAILS_CAPABILITY = "recording_details"
+
+# The mark `cmd/record start` leaves on the timer it sets (`instant`).
+INSTANT_MARK = "_mqttbridge_instant"
+
 STATE_NAMES = (
     ("StateWaiting", "waiting"),
     ("StatePrepared", "prepared"),
@@ -188,11 +194,99 @@ def _is_running(timer):
     return getattr(timer, "state", None) == running and not getattr(timer, "justplay", False)
 
 
-def read_recording(session):
-    """The `recording` payload - what is being written now, and what is next."""
+def _file_path(timer):
+    """The file a running recording timer writes, or None before it has one.
+
+    `Filename` is the image's path without the extension; the recording service says
+    which extension it adds - `.ts` for a DVB service, `.stream` for an IPTV one.
+    """
+    base = getattr(timer, "Filename", None)
+    if not base or not isinstance(base, str):
+        return None
+    extension = ".ts"
+    service = getattr(timer, "record_service", None)
+    getter = getattr(service, "getFilenameExtension", None) if service is not None else None
+    if callable(getter):
+        try:
+            extension = str(getter() or ".ts")
+        except Exception:
+            extension = ".ts"
+    return base + extension
+
+
+def _service_name(timer):
+    reference = getattr(timer, "service_ref", None)
+    getter = getattr(reference, "getServiceName", None) if reference is not None else None
+    if not callable(getter):
+        return None
+    try:
+        return str(getter() or "") or None
+    except Exception:
+        return None
+
+
+def instant(timer):
+    """Whether a recording was started by hand rather than by a timer somebody set.
+
+    The remote's record key marks its recording `dontSave` on OpenViX, OpenATV and
+    OpenPLi alike. `cmd/record start` sets an ordinary timer, kept in `timers.xml`, and
+    marks it here instead - a mark the image does not keep, so after an interface
+    restart that recording reads as a timer's.
+    """
+    return bool(getattr(timer, "dontSave", False) or getattr(timer, INSTANT_MARK, False))
+
+
+def _details(timer, locations, channels):
+    """The members a running recording has beyond the timer's own."""
+    from .library import locate
+
+    description = getattr(timer, "description", None)
+    description = " ".join(str(description).split())[:200] if description else None
+    location = file = recording_id = None
+    path = _file_path(timer)
+    if path is not None:
+        try:
+            location, file, recording_id = locate(path, locations)
+        except Exception:
+            LOG.debug("a running recording could not be placed in the library")
+    bouquet = None
+    if channels is not None:
+        try:
+            bouquet = channels.bouquet_for(_timer_sref(timer))
+        except Exception:
+            bouquet = None
+    return {
+        "service_name": _service_name(timer),
+        "description": description or None,
+        "location": location,
+        "file": file,
+        "id": recording_id,
+        "instant": instant(timer),
+        "bouquet": bouquet,
+    }
+
+
+def read_recording(session, bridge=None):
+    """The `recording` payload - what is being written now, and what is next.
+
+    With a bridge, each running recording carries its details as well: the channel's
+    name, the description, where it is written - its movie location, its path there
+    and the id the library gives it - whether it was started by hand, and the
+    published bouquet that holds the channel.
+    """
     active = []
     upcoming = []
     now = int(time.time())
+    details = bridge is not None
+    locations = []
+    channels = None
+    if details:
+        # The library's locations; without a library, a recording has no location of its
+        # own, and its id is still the one its path gives.
+        library = bridge.publisher("recordings")
+        if library is not None:
+            locations = library.locations
+        channels = bridge.publisher("channels")
     for timer in timer_list(session):
         payload = _timer_payload(timer)
         if payload is None:
@@ -200,7 +294,10 @@ def read_recording(session):
         if getattr(timer, "disabled", False):
             continue
         if _is_running(timer):
-            active.append({key: payload[key] for key in ("name", "sref", "begin", "end")})
+            entry = {key: payload[key] for key in ("name", "sref", "begin", "end")}
+            if details:
+                entry.update(_details(timer, locations, channels))
+            active.append(entry)
         elif payload["begin"] >= now and not getattr(timer, "justplay", False):
             upcoming.append({key: payload[key] for key in ("name", "sref", "begin", "end")})
     upcoming.sort(key=lambda entry: entry["begin"])
@@ -356,8 +453,8 @@ def add_event_timer(session, sref, event_id):
     return _record(session, entry)
 
 
-def add_manual_timer(session, sref, begin, end, name):
-    """A timer for a window somebody chose themselves."""
+def add_manual_timer(session, sref, begin, end, name, instant=False):
+    """A timer for a window somebody chose themselves; `instant` for `cmd/record start`'s."""
     entry_class = _entry_class()
     wrapper = _service_wrapper(sref)
     if entry_class is None or wrapper is None:
@@ -377,6 +474,11 @@ def add_manual_timer(session, sref, begin, end, name):
     except Exception as error:
         LOG.exception("could not build a manual timer")
         return type(error).__name__ + ": " + str(error)
+    if instant:
+        try:
+            setattr(entry, INSTANT_MARK, True)
+        except Exception:
+            LOG.debug("an instant recording could not be marked")
     return _record(session, entry)
 
 
@@ -444,7 +546,7 @@ def start_instant_recording(session, duration=INSTANT_RECORD_SECONDS):
         return "nothing is playing"
     begin = int(time.time())
     name = _current_title(session) or "instant record"
-    return add_manual_timer(session, sref, begin, begin + int(duration), name)
+    return add_manual_timer(session, sref, begin, begin + int(duration), name, instant=True)
 
 
 def stop_instant_recording(session):
@@ -600,13 +702,16 @@ class RecordingPublisher(TimerWatcher):
 
     name = "recording"
 
+    def extra_capabilities(self):
+        return [DETAILS_CAPABILITY]
+
     def refresh(self):
-        payload = read_recording(self.session)
+        payload = read_recording(self.session, self.bridge)
         self.publish("recording", payload)
         return payload
 
     def snapshot(self):
-        return {"recording": read_recording(self.session)}
+        return {"recording": read_recording(self.session, self.bridge)}
 
 
 class TimersPublisher(TimerWatcher):

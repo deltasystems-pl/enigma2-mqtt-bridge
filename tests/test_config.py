@@ -42,6 +42,7 @@ EXPECTED_DEFAULTS = {
     "uninstall_allowed": False,
     "update_check": False,
     "update_allowed": False,
+    "recording_delete_allowed": False,
     "menu_allowed": True,
     "menu_hotkey": "help_long",
     "menu_transparency": 20,

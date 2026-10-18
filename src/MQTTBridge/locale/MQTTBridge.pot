@@ -1519,3 +1519,31 @@ msgstr ""
 #: src/MQTTBridge/choicelist.py
 msgid "%(label)s in %(seconds)d s"
 msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "Allow deleting recordings (into the trash)"
+msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "Recordings"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Play a recording"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Recording id"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Move a recording to the trash"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "The recording is moved to the receiver's trash, where the receiver's own trash settings decide when it is emptied."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Read the recording library again"
+msgstr ""

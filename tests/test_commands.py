@@ -145,6 +145,7 @@ def test_config_persists_all_values_rebinds_hooks_and_publishes_info(
         "uninstall_allowed": False,
         "update_check": False,
         "update_allowed": False,
+        "recording_delete_allowed": False,
         "menu_allowed": True,
         "menu_hotkey": "help_long",
         "menu_transparency": 20,

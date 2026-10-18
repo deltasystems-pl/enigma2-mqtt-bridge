@@ -1520,3 +1520,31 @@ msgstr "OK auswählen   EXIT schließen"
 #: src/MQTTBridge/choicelist.py
 msgid "%(label)s in %(seconds)d s"
 msgstr "%(label)s in %(seconds)d s"
+
+#: src/MQTTBridge/setup.py
+msgid "Allow deleting recordings (into the trash)"
+msgstr "Löschen von Aufnahmen erlauben (in den Papierkorb)"
+
+#: src/MQTTBridge/setup.py
+msgid "Recordings"
+msgstr "Aufnahmen"
+
+#: src/MQTTBridge/webif.py
+msgid "Play a recording"
+msgstr "Aufnahme abspielen"
+
+#: src/MQTTBridge/webif.py
+msgid "Recording id"
+msgstr "Kennung der Aufnahme"
+
+#: src/MQTTBridge/webif.py
+msgid "Move a recording to the trash"
+msgstr "Aufnahme in den Papierkorb verschieben"
+
+#: src/MQTTBridge/webif.py
+msgid "The recording is moved to the receiver's trash, where the receiver's own trash settings decide when it is emptied."
+msgstr "Die Aufnahme wird in den Papierkorb des Receivers verschoben; wann er geleert wird, bestimmen die Papierkorb-Einstellungen des Receivers."
+
+#: src/MQTTBridge/webif.py
+msgid "Read the recording library again"
+msgstr "Aufnahmeliste neu einlesen"

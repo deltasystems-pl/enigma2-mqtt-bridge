@@ -237,6 +237,7 @@ SETTING_GROUPS = (
             "uninstall_allowed",
             "update_check",
             "update_allowed",
+            "recording_delete_allowed",
             "cec_standby_workaround",
             "osd_toast",
         ),
@@ -800,6 +801,26 @@ def actions(bouquets=(), node_id="", history=(), versions=()):
             build=lambda values: values["what"],
             confirm=lambda values: _("The running recording stops.")
             if values["what"] == "stop" else None,
+        ),
+        # By the id `recordings/<folder_slug>` lists, as a broker client sends it: the page
+        # names no file either.
+        Action(
+            "play_recording", "play_recording", _("Play a recording"),
+            (Field("id", "text", _("Recording id")),),
+            build=lambda values: _json({"id": values["id"].strip()}),
+        ),
+        Action(
+            "delete_recording", "delete_recording", _("Move a recording to the trash"),
+            (Field("id", "text", _("Recording id")),),
+            build=lambda values: _json({"id": values["id"].strip()}),
+            confirm=lambda _values: _(
+                "The recording is moved to the receiver's trash, where the receiver's own "
+                "trash settings decide when it is emptied."
+            ),
+        ),
+        Action(
+            "recordings_refresh", "recordings_refresh", _("Read the recording library again"),
+            build=lambda _values: "PRESS",
         ),
         Action("screenshot", "screenshot", _("Take a screenshot")),
         Action(

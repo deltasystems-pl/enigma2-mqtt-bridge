@@ -234,6 +234,9 @@ class CommandDispatcher:
             "list": self.choice_list,
             "timer": self.timer,
             "record": self.record,
+            "play_recording": self.play_recording,
+            "delete_recording": self.delete_recording,
+            "recordings_refresh": self.recordings_refresh,
             "screenshot": self.screenshot,
             "softcam_restart": self.softcam_restart,
             "epg_grid": self.epg_grid,
@@ -834,6 +837,76 @@ class CommandDispatcher:
             return error
         self._refresh("recording", "timers")
         return None
+
+    def _library(self):
+        publisher = self.publisher("recordings")
+        if publisher is None or not publisher.claimed():
+            return None
+        return publisher
+
+    def play_recording(self, text, origin=MQTT):
+        """Play one recording of the library in the image's own movie player.
+
+        By id and nothing else: the id is checked against the library before anything
+        happens, so an id the library does not list never wakes a sleeping receiver.
+        From standby the receiver is woken first, as for a zap. The image's resume rule
+        is the image's - it may ask on the television. Verified on `service`.
+        """
+        from . import library
+        from .power import in_standby
+        from .service import cancel_waiting_zap, run_after_wake
+
+        publisher = self._library()
+        if publisher is None:
+            return library.NOT_AVAILABLE
+        recording_id = library.payload_id(text)
+        if recording_id is None:
+            return library.NO_ID
+        if publisher.find(recording_id) is None:
+            return library.refusal(library.UNKNOWN)
+        command_id = self.command_id
+
+        def on_play(sref):
+            service = self.publisher("service")
+            if service is not None:
+                service.expect(sref, command_id, command="play_recording")
+
+        def awake():
+            return publisher.play(recording_id, on_play=on_play)
+
+        cancel_waiting_zap()
+        if in_standby():
+            return run_after_wake(
+                "play_recording", awake, report=self._reporter(), allowed=self._still_open,
+            )
+        return awake()
+
+    def delete_recording(self, text, origin=MQTT):
+        """Move one recording of the library into the image's trash - and never further.
+
+        Refused unless `recording_delete_allowed` is on, whatever the payload. The
+        answer is the library read again once the file has gone (`reason` `delete`).
+        """
+        from . import library
+
+        if not granted(self.bridge.value, library.PERMISSION, origin):
+            return library.refusal(library.NOT_PERMITTED)
+        publisher = self._library()
+        if publisher is None:
+            return library.NOT_AVAILABLE
+        recording_id = library.payload_id(text)
+        if recording_id is None:
+            return library.NO_ID
+        return publisher.delete(recording_id, origin=origin, command_id=self.command_id)
+
+    def recordings_refresh(self, _text, origin=MQTT):
+        """Read the library again now - the one read that may wake a disk. Payload ignored."""
+        from . import library
+
+        publisher = self.publisher("recordings")
+        if publisher is None:
+            return library.NOT_AVAILABLE
+        return publisher.refresh_command()
 
     def screenshot(self, _text, origin=MQTT):
         publisher = self.publisher("screenshot")

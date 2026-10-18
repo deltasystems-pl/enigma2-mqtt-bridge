@@ -86,6 +86,7 @@ def setting_labels():
         ("update_allowed", _("Allow plugin updates over MQTT")),
         ("log_level", _("Log level")),
         ("epg_grid_events", _("EPG grid events per channel")),
+        ("recording_delete_allowed", _("Allow deleting recordings (into the trash)")),
         ("menu_allowed", _("Allow the Home Assistant menu")),
         ("menu_hotkey", _("Key that opens the Home Assistant menu")),
         ("menu_transparency", _("Menu background transparency")),
@@ -94,7 +95,10 @@ def setting_labels():
 
 def section_headings():
     """Setting name, and the heading the screen shows above it: where a section begins."""
-    return {"menu_allowed": _("Home Assistant menu")}
+    return {
+        "recording_delete_allowed": _("Recordings"),
+        "menu_allowed": _("Home Assistant menu"),
+    }
 
 
 def is_heading(entry):

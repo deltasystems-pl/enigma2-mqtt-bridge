@@ -84,6 +84,18 @@
       "payload": "json",
       "retained": true
     },
+    "timeshift": {
+      "payload": "json",
+      "retained": true
+    },
+    "recordings": {
+      "payload": "json",
+      "retained": true
+    },
+    "recordings/<folder_slug>": {
+      "payload": "json",
+      "retained": true
+    },
     "volume": {
       "payload": "json",
       "retained": true
@@ -167,6 +179,9 @@
     "list": {},
     "timer": {},
     "record": {},
+    "play_recording": {},
+    "delete_recording": {},
+    "recordings_refresh": {},
     "screenshot": {},
     "softcam_restart": {
       "since": "0.3.0"
@@ -208,6 +223,7 @@
     "settings": "object",
     "capabilities": "list of strings",
     "menu": "object or null",
+    "recording_trash": "bool or null",
     "list": "object, optional",
     "not_published": "list of objects"
   },
@@ -306,6 +322,10 @@
     "menu_allowed": {
       "type": "bool",
       "writable": false
+    },
+    "recording_delete_allowed": {
+      "type": "bool",
+      "writable": false
     }
   },
   "capabilities": [
@@ -329,6 +349,10 @@
     "power",
     "process",
     "recording",
+    "recording_delete",
+    "recording_details",
+    "recording_play",
+    "recordings",
     "screenshot",
     "self_update",
     "service",
@@ -339,6 +363,7 @@
     "stream_playable",
     "stream_stop",
     "timers",
+    "timeshift",
     "toast",
     "tuner",
     "uninstall",

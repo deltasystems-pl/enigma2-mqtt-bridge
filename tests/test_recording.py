@@ -35,8 +35,11 @@ def test_a_running_timer_is_an_active_recording(live_bridge, factory, receiver):
     fire_coalesced(live_bridge)
     payload = factory.client.last(RECORDING).json()
     assert len(payload["active"]) == 1
+    # The timer has written no file yet, and nothing marks it as started by hand.
     assert payload["active"][0] == {
-        "name": "Wiadomości", "sref": TVP1, "begin": 1789459200, "end": 1789460700
+        "name": "Wiadomości", "sref": TVP1, "begin": 1789459200, "end": 1789460700,
+        "service_name": "TVP 1 HD", "description": None, "location": None, "file": None,
+        "id": None, "instant": False, "bouquet": "Ulubione TV",
     }
 
 
@@ -484,3 +487,91 @@ def test_the_epg_cache_finds_an_event_by_its_id(live_bridge, receiver):
     receiver.epg.events[TVP1] = [Event(4242, 1789500000, 1800, "Named")]
     assert recording.add_event_timer(receiver.session, TVP1, 4242) is None
     assert receiver.nav.RecordTimer.timer_list[0].name == "Named"
+
+
+# ------------------------------------------------- a running recording's details --
+
+
+def _details_bridge(tmp_path, monkeypatch, make_bridge, factory, settings, receiver):
+    from pvrimage import PvrImage, inline
+
+    from MQTTBridge.library import LibraryPublisher
+
+    image = PvrImage(tmp_path, monkeypatch).install()
+    monkeypatch.setattr(LibraryPublisher, "run_in_background", staticmethod(inline))
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = NODE
+    bridge = make_bridge(session=receiver.session)
+    bridge.start()
+    factory.client.fire_connect()
+    return image, bridge
+
+
+def test_a_running_recording_says_where_it_is_written_and_its_library_id(
+        tmp_path, monkeypatch, make_bridge, factory, settings, receiver):
+    from MQTTBridge.library import recording_id
+
+    image, bridge = _details_bridge(tmp_path, monkeypatch, make_bridge, factory, settings,
+                                    receiver)
+    timer = receiver.add_timer(state=RecordTimerEntry.StateRunning)
+    timer.description = "Serwis   informacyjny\n" + "x" * 300
+    timer.Filename = str(image.movie / "Series" / "20261017 2015 - TVP 1 HD - Wiadomosci")
+    timer.record_service = type("Record", (), {"getFilenameExtension": lambda self: ".ts"})()
+    fire_coalesced(bridge)
+    entry = factory.client.last(RECORDING).json()["active"][0]
+    path = timer.Filename + ".ts"
+    assert entry["location"] == str(image.movie)
+    assert entry["file"] == "Series/20261017 2015 - TVP 1 HD - Wiadomosci.ts"
+    assert entry["id"] == recording_id(path)
+    assert entry["description"].startswith("Serwis informacyjny x")
+    assert len(entry["description"]) == 200
+    assert entry["instant"] is False and entry["bouquet"] == "Ulubione TV"
+    assert entry["service_name"] == "TVP 1 HD"
+    # The id is the one the library lists the file with, once it is read.
+    image.record("20261017 2015 - TVP 1 HD - Wiadomosci.ts", folder=image.movie / "Series")
+    bridge.publisher("recordings").request("refresh")
+    listed = factory.client.last(ROOT + "/recordings/movie_series").json()["recordings"]
+    assert listed[0]["id"] == entry["id"]
+
+
+def test_a_recording_outside_every_movie_location_has_no_location_and_still_an_id(
+        tmp_path, monkeypatch, make_bridge, factory, settings, receiver):
+    image, bridge = _details_bridge(tmp_path, monkeypatch, make_bridge, factory, settings,
+                                    receiver)
+    timer = receiver.add_timer(state=RecordTimerEntry.StateRunning)
+    timer.Filename = str(tmp_path / "elsewhere" / "x")
+    fire_coalesced(bridge)
+    entry = factory.client.last(RECORDING).json()["active"][0]
+    assert entry["location"] is None and entry["file"] is None
+    assert len(entry["id"]) == 16
+
+
+def test_an_iptv_recording_has_the_stream_extension(tmp_path, monkeypatch, make_bridge,
+                                                    factory, settings, receiver):
+    image, bridge = _details_bridge(tmp_path, monkeypatch, make_bridge, factory, settings,
+                                    receiver)
+    timer = receiver.add_timer(state=RecordTimerEntry.StateRunning)
+    timer.Filename = str(image.movie / "radio")
+    timer.record_service = type("Record", (), {"getFilenameExtension": lambda self: ".stream"})()
+    fire_coalesced(bridge)
+    assert factory.client.last(RECORDING).json()["active"][0]["file"] == "radio.stream"
+
+
+def test_the_remote_record_key_and_cmd_record_start_are_instant(live_bridge, factory,
+                                                                receiver):
+    remote = receiver.add_timer(state=RecordTimerEntry.StateRunning)
+    remote.dontSave = True
+    receiver.add_timer(sref=TVN, state=RecordTimerEntry.StateRunning, begin=1789459300)
+    fire_coalesced(live_bridge)
+    active = factory.client.last(RECORDING).json()["active"]
+    assert [entry["instant"] for entry in active] == [True, False]
+    assert recording.start_instant_recording(receiver.session) is None
+    started = receiver.nav.RecordTimer.timer_list[-1]
+    # An ordinary timer, kept in the timer file, with the plugin's own mark.
+    assert started.dontSave is False
+    assert recording.instant(started) is True
+
+
+def test_recording_details_is_a_capability_of_recording(live_bridge):
+    capabilities = live_bridge.capabilities()
+    assert capabilities.index("recording_details") == capabilities.index("recording") + 1

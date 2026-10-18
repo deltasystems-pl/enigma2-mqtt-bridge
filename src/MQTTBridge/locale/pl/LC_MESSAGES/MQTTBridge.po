@@ -1519,3 +1519,31 @@ msgstr "OK wybierz   EXIT zamknij"
 #: src/MQTTBridge/choicelist.py
 msgid "%(label)s in %(seconds)d s"
 msgstr "%(label)s za %(seconds)d s"
+
+#: src/MQTTBridge/setup.py
+msgid "Allow deleting recordings (into the trash)"
+msgstr "Zezwalaj na usuwanie nagrań (do kosza)"
+
+#: src/MQTTBridge/setup.py
+msgid "Recordings"
+msgstr "Nagrania"
+
+#: src/MQTTBridge/webif.py
+msgid "Play a recording"
+msgstr "Odtwórz nagranie"
+
+#: src/MQTTBridge/webif.py
+msgid "Recording id"
+msgstr "Identyfikator nagrania"
+
+#: src/MQTTBridge/webif.py
+msgid "Move a recording to the trash"
+msgstr "Przenieś nagranie do kosza"
+
+#: src/MQTTBridge/webif.py
+msgid "The recording is moved to the receiver's trash, where the receiver's own trash settings decide when it is emptied."
+msgstr "Nagranie trafia do kosza dekodera; kiedy kosz zostanie opróżniony, decydują ustawienia kosza w dekoderze."
+
+#: src/MQTTBridge/webif.py
+msgid "Read the recording library again"
+msgstr "Wczytaj ponownie listę nagrań"
