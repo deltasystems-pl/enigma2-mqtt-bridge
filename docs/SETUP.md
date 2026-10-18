@@ -176,6 +176,31 @@ makes it opaque. The receiver's own plain list is drawn as the receiver draws it
 built from the receiver's web interface as well as in Home Assistant: see the
 [Menu page](#the-menu-page-and-the-menu-creator).
 
+### What a list of choices does
+
+Home Assistant can ask the person in front of the television a question - "Doorbell: open the gate
+/ ignore", "TV off in 1 minute: +15 minutes / cancel" - with the companion integration's action, or
+any client that publishes `cmd/list` ([TOPICS.md](TOPICS.md)). There is nothing to set up on the
+receiver:
+
+- **It appears over whatever is on the screen** - live TV, a recording, the Home Assistant menu,
+  the keyboard - which is still there when the list has gone. A line at the top says the question
+  comes from Home Assistant through this plugin.
+- **Answer it** with the arrows and OK, or with the colour or number key a row shows on its
+  right, which picks that row at once. EXIT says no answer. The time left counts down at the
+  bottom; when it runs out the list closes, with the row Home Assistant named as the default, if it
+  named one.
+- **The receiver only says which row was picked.** Home Assistant decides what that does. A newer
+  question replaces the one on the screen, and standby closes it; a question that arrives in
+  standby is refused, not kept for later. An answer is never sent late: a pick made while the
+  receiver has no connection to the broker is lost.
+
+Anybody who can publish on your broker can put a question on the television, or answer one in the
+viewer's place, so do not let an answer open a door you would not open for whoever is on your
+broker ([SECURITY.md](../SECURITY.md)). Where the receiver cannot draw the plugin's own screen, it
+uses its own plain list with the same rows and keys, and shows the time left in its title where it
+can. A skin may define a screen called `MQTTBridgeChoices` to restyle the plugin's own.
+
 ### What the softcam restart does
 
 It is not „run the init script" and not „restart the process". On the images that need it the

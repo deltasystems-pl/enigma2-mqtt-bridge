@@ -11,6 +11,26 @@ version that has no section here.
 
 ### Added
 
+- A list of choices on the television, opened by Home Assistant: the new command `cmd/list` puts
+  a question - a title, a text and 1 to 24 labelled rows, each with an optional colour or number
+  key and icon - over whatever is on screen, and the receiver answers once on the new event topic
+  `list_answer` with the id of the row picked: `picked`, `timeout` (with the `default` row or
+  none), `dismissed`, `replaced` (a newer list) or `closed` (standby, the plugin stopping). The
+  list's id is the command's envelope id, said back in the answer. Every list has a timeout, 60 s
+  unless the sender says 5 to 600, counted down on the screen. OK picks the selected row, a row's
+  key picks it at once, EXIT dismisses. The answer is QoS 1, never retained and never queued across
+  a disconnect, like `menu_action`. Refused before anything is shown, each with a `reason` on
+  `last_error`: an invalid payload (`invalid`, naming the member and the row, never the sender's
+  text), in standby (`standby`), without the capability (`no_capability`), while an update is
+  applied (the doors' sentence, `busy`), and a list no screen could show (`not_shown`). The
+  receiver menu's look - the styled screen, its icons and its see-through background - with a
+  header line saying the question comes from Home Assistant through this plugin, and the image's
+  own choice list where that cannot be built. New: the capability `list` and the `info` member
+  `list` (`{"screen": "styled" | "choicebox"}`, absent without the capability). No permission and
+  no setting; anyone on the broker can show a list or forge an answer
+  ([SECURITY.md](SECURITY.md),
+  [ADR-0023](docs/adr/0023-a-list-of-choices-is-answered-by-row-id-once.md),
+  [TOPICS.md](docs/TOPICS.md)). English, Polish and German.
 - The menu creator: the Home Assistant menu built from the receiver's OpenWebif, on a new Menu
   page (`/mqttbridge/menu`) - groups and rows, an entity picked by typing part of its name, entity
   id or area, its control, label and icon, moved and removed - as the companion integration's own

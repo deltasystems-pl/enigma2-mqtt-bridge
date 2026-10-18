@@ -121,7 +121,7 @@ everything else:
    The last four are the receiver menu's, read while `menu_allowed` is on: the menu, the menu
    creator's catalogue and its answers, and Home Assistant's own status under the discovery prefix
    (`homeassistant` by default; use yours). The node's own `menu_action` and `menu_edit` are in
-   `enigma2/<node_id>/#` already.
+   `enigma2/<node_id>/#` already, as are `cmd/list` and its answer, `list_answer`.
 
    Verify the ACL by subscribing elsewhere and trying to publish there as that user - Mosquitto
    drops an ACL-denied publish silently and the publisher sees success either way. The Mosquitto
@@ -177,6 +177,28 @@ catalogue of its entities and refuses every edit; the page says editing is switc
   Assistant's own validation; a receiver taken over gains no credential to Home Assistant from it.
 - **The page's one script reads the catalogue as untrusted text**: every string goes on screen as
   text, never as markup, under a policy that admits no other script and no other origin.
+
+## A list of choices on the television
+
+A list of choices ([ADR-0023](docs/adr/0023-a-list-of-choices-is-answered-by-row-id-once.md)) -
+Home Assistant asking the viewer "open the gate / ignore" - needs **no permission and no setting**,
+as a message needs none, and the receiver answers only with the id of the row that was picked. It
+calls no service and holds nothing a row stands for. What follows from the broker's place in it:
+
+- **Anyone who can publish on the broker can put a list on the television**, and with it any
+  title and labels. The screen always says the question comes from Home Assistant through this
+  plugin, and no text in the payload can change that or style itself as the receiver's own
+  dialog - but it cannot say who published it.
+- **Anyone who can publish on the broker can forge an answer** on `<base>/<node_id>/list_answer`,
+  and anyone who can read the node's topics sees a list's id and can answer for it before the
+  viewer does. So an automation must never treat an answer as proof of who pressed what: a list
+  whose `picked` row opens a gate or a lock opens it for whoever can publish on the broker. Put
+  such an action behind a list only where everything on the broker is something you would hand the
+  remote control - the broker's ACL is no protection where the broker does not enforce one (the
+  Mosquitto add-on, above).
+- **A late answer is never sent.** One the broker had not acknowledged when the connection went is
+  taken out of the receiver's queue, so a pick made minutes earlier never arrives as if it were
+  new.
 
 ## Supply chain
 

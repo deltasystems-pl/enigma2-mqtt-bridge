@@ -81,6 +81,7 @@ What this costs, what it rules out, and what has to change if it is ever reverse
 | [0020](0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md) | The receiver menu is drawn on the receiver and decided in Home Assistant | accepted 2026-10-15, amended 2026-10-16 (a see-through background), extended by [ADR-0022](0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md) |
 | [0021](0021-the-menu-hotkey-is-offered-the-key-after-the-image.md) | The menu hotkey is offered the key after the image, and takes it only when it opened the menu | accepted 2026-10-15 |
 | [0022](0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md) | The menu creator page runs a script; every other page stays script-free | accepted 2026-10-16 |
+| [0023](0023-a-list-of-choices-is-answered-by-row-id-once.md) | A list of choices is answered by row id, once | accepted 2026-10-18, extends [ADR-0017](0017-whether-a-service-can-be-played-is-asked-with-an-empty-second-reference.md) (a second command answered on a topic of its own) |
 
 "Superseded in part by a proposed record" means: the earlier text still describes every released
 plugin exactly, and the proposed record says where it will stop doing so. It becomes a supersession
