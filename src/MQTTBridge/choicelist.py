@@ -48,6 +48,7 @@ Everything here runs on enigma2's main loop and nothing raises into it.
 
 import json
 import math
+import os
 import re
 import time
 import unicodedata
@@ -56,7 +57,7 @@ from . import styledlist
 from .enigma2 import Ticker, enigma_attribute, missing
 from .i18n import _
 from .log import get_logger
-from .menu import ICON_NAMES, NEUTRAL_ICON, clean_text
+from .menu import DROPPED_CATEGORIES, ICON_NAMES, NEUTRAL_ICON, clean_text
 from .publisher import Publisher, Refusal
 from .toast import strip_backslashes
 
@@ -121,10 +122,12 @@ BASE = {
     "width": 640,
     "pad": 16,
     "header": 24,
-    "title": 40,
-    "text": 52,
+    "title": 64,
+    "title_line": 32,
+    "text": 120,
     "row": 46,
     "icon": 30,
+    "key": 30,
     "gap": 6,
     "countdown": 28,
     "legend": 24,
@@ -137,9 +140,16 @@ BASE = {
     "legend_font": 16,
 }
 VISIBLE_ROWS = 8
-# How much of a row the key's name takes, on its right.
-KEY_SHARE = 0.22
 TEXT_COLOUR = "#00e8eef2"
+# The widgets made as tall as their text after the layout.
+FITTED = ("title", "text", "list", "countdown", "legend")
+
+# A row's key, on its right: one 64-px PNG for each colour's button and one box for a digit,
+# drawn by `tools/render-keys.py`. The colours are those the PNGs are drawn in; a filled
+# rectangle of the same colour is the second way. The button fills this much of its square.
+KEY_DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keys")
+KEY_RGB = {"red": 0xE5534B, "green": 0x4CAF50, "yellow": 0xE8C547, "blue": 0x4C8FE0}
+BUTTON_SHARE = 0.625
 
 _screen_class = None
 
@@ -152,17 +162,28 @@ class InvalidList(ValueError):
 
 
 def clean_line(value, limit):
-    """A title or a label: one line, no backslash, no invisible format character, `limit` long."""
+    """A title or a label, by the contract's text rule, in its order.
+
+    1. every backslash removed; 3. every format character (Cf) and lone surrogate (Cs)
+    dropped; 4. every control character and line or paragraph separator (Cc, Zl, Zp) a space;
+    5. cut at `limit`; 6. leading and trailing whitespace stripped - empty is blank. Step 2 is
+    the text's alone (`clean_lines`). The menu's own text rule is steps 1, 3, 4 and 5
+    (`menu.clean_text`), so a label is drawn the same in both.
+    """
     return clean_text(value, limit).strip()
 
 
 def clean_lines(value, limit):
-    """The text under the title: as `clean_line`, but a line break stays one."""
+    """The text under the title: as `clean_line`, and 2. `
+` and `
+` become `
+`, which
+    stays a line break in step 4."""
     text = strip_backslashes(str(value)).replace("\r\n", "\n").replace("\r", "\n")
     pieces = []
     for character in text:
         category = unicodedata.category(character)
-        if category == "Cf":
+        if category in DROPPED_CATEGORIES:
             continue
         if character == "\n":
             pieces.append(character)
@@ -273,14 +294,12 @@ def parse_list(text):
 # ------------------------------------------------------------------ the words --
 
 
-def key_name(key):
-    """What a row shows on its right for its key: the colour's name, or the digit."""
-    names = {"red": _("Red"), "green": _("Green"), "yellow": _("Yellow"), "blue": _("Blue")}
-    return names.get(key, key or "")
-
-
-def countdown_text(seconds):
-    return _("Closes in %d s") % max(0, int(seconds))
+def countdown_text(seconds, default_label=None):
+    """The remaining time; with a default row, what the timeout will answer, by its label."""
+    seconds = max(0, int(seconds))
+    if default_label:
+        return _("%(label)s in %(seconds)d s") % {"label": default_label, "seconds": seconds}
+    return _("Closes in %d s") % seconds
 
 
 def header_text():
@@ -330,6 +349,15 @@ class ListController:
         left = self.deadline - self.publisher.clock()
         return max(0, int(math.ceil(left - 1e-9)))
 
+    def default_label(self):
+        for row in self.spec["rows"]:
+            if row["id"] == self.spec["default"]:
+                return row["label"]
+        return None
+
+    def countdown(self):
+        return countdown_text(self.remaining(), self.default_label())
+
     def initial(self):
         return self.spec["default"] or self.spec["rows"][0]["id"]
 
@@ -342,12 +370,10 @@ class ListController:
             "text": self.spec["text"] or "",
             "rows": [
                 {"id": row["id"], "icon": row["icon"], "icon_space": with_icons,
-                 "label": row["label"], "state": key_name(row["key"]),
-                 "colour": row["key"] if row["key"] in COLOUR_KEYS else None,
-                 "dim": False, "pending": False}
+                 "label": row["label"], "key": row["key"]}
                 for row in rows
             ],
-            "countdown": countdown_text(self.remaining()),
+            "countdown": self.countdown(),
             "legend": legend_text(any(row["key"] for row in rows)),
             "initial": self.initial(),
         }
@@ -406,17 +432,26 @@ class _Trial:
 
 
 def geometry(desktop_width, desktop_height, rows, has_text):
-    """Every number the skin and the rows need, as plain desktop pixels."""
+    """Every number the skin and the rows need, as plain desktop pixels.
+
+    The title has room for two lines - 60 characters do not fit one - and the text for five,
+    200 characters with room to spare. Both are laid out at that size and then made as tall as
+    their text once the skin is applied (`MQTTBridgeChoices._fit`), as the toast sizes itself.
+    The text's label is always there, `0` high without a text, so every list has the same
+    widgets and a skin that restyles the screen restyles all of them.
+    """
     factor = float(desktop_height) / BASE_LINES
     shape = {name: int(value * factor) for name, value in BASE.items()}
     shape["width"] = max(1, min(shape["width"], int(desktop_width) - 2 * shape["pad"]))
     shape["inner"] = max(1, shape["width"] - 2 * shape["pad"])
     visible = max(1, min(int(rows), VISIBLE_ROWS))
-    shape["visible"] = visible
     shape["header_y"] = shape["pad"]
     shape["title_y"] = shape["header_y"] + shape["header"]
     shape["text_y"] = shape["title_y"] + shape["title"]
     shape["text_height"] = shape["text"] if has_text else 0
+    # Everything scales with the desktop's height, so eight rows and the tallest title and
+    # text fit any desktop: 672 of 720 lines.
+    shape["visible"] = visible
     shape["list_y"] = shape["text_y"] + shape["text_height"] + shape["gap"]
     shape["list_height"] = visible * shape["row"]
     shape["countdown_y"] = shape["list_y"] + shape["list_height"] + shape["gap"]
@@ -424,7 +459,7 @@ def geometry(desktop_width, desktop_height, rows, has_text):
     shape["height"] = shape["legend_y"] + shape["legend"] + shape["pad"]
     shape["x"] = max(0, (int(desktop_width) - shape["width"]) // 2)
     shape["y"] = max(0, (int(desktop_height) - shape["height"]) // 2)
-    shape["state_width"] = int(shape["inner"] * KEY_SHARE)
+    shape["desktop_height"] = int(desktop_height)
     shape["factor"] = factor
     return shape
 
@@ -438,7 +473,7 @@ def desktop_shape(spec):
 
 
 def build_skin(shape):
-    """The embedded skin, every number a plain integer; the text widget only with a text."""
+    """The embedded skin, every number a plain integer."""
     percent = shape.get("transparency", 0)
     values = dict(
         shape,
@@ -452,13 +487,6 @@ def build_skin(shape):
         notice_colour=styledlist.NOTICE_COLOUR,
         legend_colour=styledlist.LEGEND_COLOUR,
     )
-    text = ""
-    if shape["text_height"]:
-        text = (
-            '<widget name="text" position="{pad},{text_y}" size="{inner},{text_height}" '
-            'font="Regular;{text_font}" valign="top" foregroundColor="{text_colour}" '
-            'backgroundColor="{background}" transparent="1" />'
-        )
     return (
         '<screen name="{name}" position="{x},{y}" size="{width},{height}" '
         'flags="wfNoBorder" backgroundColor="{background}">'
@@ -466,9 +494,11 @@ def build_skin(shape):
         'font="Regular;{header_font}" valign="center" foregroundColor="{marker_colour}" '
         'backgroundColor="{background}" transparent="1" />'
         '<widget name="title" position="{pad},{title_y}" size="{inner},{title}" '
-        'font="Regular;{title_font}" valign="center" foregroundColor="{title_colour}" '
+        'font="Regular;{title_font}" valign="top" foregroundColor="{title_colour}" '
         'backgroundColor="{background}" transparent="1" />'
-        + text +
+        '<widget name="text" position="{pad},{text_y}" size="{inner},{text_height}" '
+        'font="Regular;{text_font}" valign="top" foregroundColor="{text_colour}" '
+        'backgroundColor="{background}" transparent="1" />'
         '<widget name="list" position="{pad},{list_y}" size="{inner},{list_height}" '
         'itemHeight="{row}" scrollbarMode="showOnDemand" backgroundColor="{panel}" '
         'backgroundColorSelected="{selected}" transparent="0" />'
@@ -480,6 +510,83 @@ def build_skin(shape):
         'backgroundColor="{background}" transparent="1" />'
         "</screen>"
     ).format(**values)
+
+
+# --------------------------------------------------------------------- the rows --
+
+
+def key_path(name):
+    """The PNG of a key's button: `red`, `green`, `yellow`, `blue`, or `box` for a digit."""
+    return os.path.join(KEY_DIRECTORY, name + ".png")
+
+
+def build_row(row, shape, load, load_key, names):
+    """One list entry: `[id, icon?, label, button?, digit?]`, in the image's multi-content form.
+
+    The icon as the menu draws it (`styledlist._pixmap_entry`, scaled where the image can);
+    a row without an icon keeps the icon's room when another row has one, so the labels line
+    up. The key on the right: a filled rounded button in the key's colour, or the digit in a
+    small box - one 64-px PNG each, scaled like the icons. Where the image cannot place a
+    pixmap, a colour key is a filled rectangle of its colour (a text entry's background) and a
+    digit is the digit alone; no colour is ever written as a word.
+    """
+    multicontent = names["multicontent"]
+    text_entry = multicontent.MultiContentEntryText
+    height = shape["row"]
+    pad = shape["pad"]
+    x = pad // 2
+    entry = [row["id"]]
+    if row.get("icon"):
+        size = shape["icon"]
+        made = styledlist._pixmap_entry(multicontent, names["scale_flags"],
+                                        (x, (height - size) // 2), (size, size),
+                                        load(row["icon"]))
+        if made is not None:
+            entry.append(made)
+        x += size + pad // 2
+    elif row.get("icon_space"):
+        x += shape["icon"] + pad // 2
+    key = row.get("key")
+    side = shape["key"]
+    right = shape["inner"] - pad // 2
+    label_right = right - side - pad // 2 if key else right
+    entry.append(text_entry(
+        pos=(x, 0), size=(max(1, label_right - x), height), font=0,
+        flags=names["left"] | names["vcenter"] | names["ellipsis"],
+        text=row.get("label") or "",
+        color=styledlist.TEXT, color_sel=styledlist.TEXT_SELECTED,
+    ))
+    if not key:
+        return entry
+    position = (right - side, (height - side) // 2)
+    made = styledlist._pixmap_entry(multicontent, names["scale_flags"], position, (side, side),
+                                    load_key("box" if key in NUMBER_KEYS else key))
+    if made is not None:
+        entry.append(made)
+    elif key in COLOUR_KEYS:
+        # The second way: the button's own rectangle, filled with its colour, no corners.
+        band = int(side * BUTTON_SHARE)
+        try:
+            entry.append(text_entry(
+                pos=(position[0], position[1] + (side - band) // 2), size=(side, band), font=1,
+                flags=0, text="", color=KEY_RGB[key], color_sel=KEY_RGB[key],
+                backcolor=KEY_RGB[key], backcolor_sel=KEY_RGB[key],
+            ))
+        except Exception:
+            LOG.debug("the image draws no filled key either; the row has none")
+    if key in NUMBER_KEYS:
+        entry.append(text_entry(
+            pos=position, size=(side, side), font=1,
+            flags=names["center"] | names["vcenter"], text=key,
+            color=styledlist.TEXT, color_sel=styledlist.TEXT_SELECTED,
+        ))
+    return entry
+
+
+def _names():
+    names = styledlist._names()
+    names["center"] = styledlist._optional_flag("RT_HALIGN_CENTER")
+    return names
 
 
 # ------------------------------------------------------------------ the screen --
@@ -531,7 +638,7 @@ def screen_class():
             self.shape = shape
             self.controller = controller
             self._trial = bool(getattr(controller, "trial", False))
-            self._names = styledlist._names()
+            self._names = _names()
             self._pixmaps = {}
             self._ids = []
             if controller.suspend:
@@ -539,8 +646,7 @@ def screen_class():
                 self.ALLOW_SUSPEND = controller.suspend
             self["header"] = Label("")
             self["title"] = Label("")
-            if shape["text_height"]:
-                self["text"] = Label("")
+            self["text"] = Label("")
             self["list"] = MenuList([], True, content=eListboxPythonMultiContent)
             content = self["list"].l
             content.setFont(0, gFont("Regular", shape["row_font"]))
@@ -561,43 +667,90 @@ def screen_class():
                 controller.screen = self
             # Built here, so that the trial build draws every row once.
             self.render(controller.view())
-            # A move before the skin is applied is dropped by every image's `MenuList`.
+            # A move before the skin is applied is dropped by every image's `MenuList`, and
+            # the text can be measured only in its widget.
             self.onLayoutFinish.append(self._laid_out)
             self.onClose.append(self._closed)
 
         def _laid_out(self):
             try:
                 self.render(self.controller.view())
+                self._fit()
             except Exception:
                 LOG.exception("the list could not be drawn after its layout")
 
         # ---------------------------------------------------------- drawing --
 
-        def _pixmap(self, name):
-            path = styledlist.icon_path(name)
+        def _load(self, path):
             if path not in self._pixmaps:
                 try:
                     self._pixmaps[path] = LoadPixmap(path)
                 except Exception:
-                    LOG.debug("an icon of the list could not be loaded")
+                    LOG.debug("a picture of the list could not be loaded")
                     self._pixmaps[path] = None
             return self._pixmaps[path]
+
+        def _pixmap(self, name):
+            return self._load(styledlist.icon_path(name))
+
+        def _key_pixmap(self, name):
+            return self._load(key_path(name))
 
         def render(self, view):
             self["header"].setText(view.get("header") or "")
             self["title"].setText(view.get("title") or "")
-            if "text" in self:
-                self["text"].setText(view.get("text") or "")
+            self["text"].setText(view.get("text") or "")
             self["countdown"].setText(view.get("countdown") or "")
             self["legend"].setText(view.get("legend") or "")
             rows = view.get("rows") or []
-            entries = [styledlist.build_row(row, self.shape, self._pixmap, self._names)
+            entries = [build_row(row, self.shape, self._pixmap, self._key_pixmap, self._names)
                        for row in rows]
             self._ids = [row["id"] for row in rows]
             self["list"].setList(entries)
             wanted = view.get("initial")
             if wanted in self._ids:
                 self["list"].moveToIndex(self._ids.index(wanted))
+
+        def _fit(self):
+            """The title and the text as tall as they are, and everything under them moved up.
+
+            Measured in their own widgets, at the width the skin gave them, as the toast
+            measures its message (`calculateSize`); never taller than the room the skin gave.
+            Only on the plugin's own layout: a skin that restyles the screen keeps its own.
+            """
+            shape = self.shape
+            window = self.instance
+            size_class = enigma_attribute("eSize")
+            point_class = enigma_attribute("ePoint")
+            if window is None or size_class is None or point_class is None:
+                return
+            if window.size() != size_class(shape["width"], shape["height"]):
+                return
+            if any(self[name].instance is None for name in FITTED):
+                return
+
+            def measured(name, room, least):
+                widget = self[name]
+                widget.instance.resize(size_class(shape["inner"], max(1, room)))
+                if not widget.getText():
+                    return 0
+                return max(least, min(room, int(widget.getSize()[1])))
+
+            title = measured("title", shape["title"], shape["title_line"])
+            text = measured("text", shape["text"], 0) if shape["text_height"] else 0
+            y = shape["title_y"]
+            for name, height in (("title", title), ("text", text)):
+                self[name].instance.resize(size_class(shape["inner"], max(0, height)))
+                self[name].instance.move(point_class(shape["pad"], y))
+                y += height
+            y += shape["gap"]
+            for name, height in (("list", shape["list_height"] + shape["gap"]),
+                                 ("countdown", shape["countdown"]),
+                                 ("legend", shape["legend"] + shape["pad"])):
+                self[name].instance.move(point_class(shape["pad"], y))
+                y += height
+            window.resize(size_class(shape["width"], y))
+            window.move(point_class(shape["x"], max(0, (shape["desktop_height"] - y) // 2)))
 
         def countdown(self, text):
             self["countdown"].setText(text)
@@ -732,9 +885,19 @@ class ChoiceBoxList:
     """The image's own `ChoiceBox` in the role of the styled screen.
 
     The same rows, ids and keys: the image's list picks a row on its colour or number key, as
-    the styled one does. No icon. The question is the header line, the title and the text, so
-    the image puts it in its text and not in the window's title - which carries the countdown
-    instead, where the image lets it be set; where it does not, there is no countdown.
+    the styled one does. No icon. The question is the header line, the title and the text,
+    one under the other. What the image makes of it, read in the three images' sources:
+
+    - **OpenViX** puts a first line shorter than 55 characters into the window title and the
+      rest into its text; **OpenATV** puts the first line into the window title and the rest
+      into its text whatever its length. The window title is then the header line, and the
+      countdown is set as "<header> - <countdown>", so it never takes the header's place.
+    - **OpenPLi** puts the whole question into its text and the window title is its own
+      ("Select"): the header is in the text already, and the window title is the countdown.
+
+    The image is not asked which it is: after the list is open, its text is read, and a text
+    that begins with the header line is the OpenPLi case. An image whose list takes no title
+    shows no countdown.
     """
 
     def __init__(self, session, controller, callback):
@@ -743,6 +906,7 @@ class ChoiceBoxList:
         self.callback = callback
         self.dialog = None
         self._titled = True
+        self._prefix = ""
 
     def open(self):
         from Screens.ChoiceBox import ChoiceBox
@@ -759,7 +923,16 @@ class ChoiceBoxList:
             self._picked, ChoiceBox, title="\n".join(lines), list=choices, keys=keys,
             selection=selection,
         )
+        self._prefix = "" if self._header_in_text(view["header"]) else view["header"] + " - "
         self.countdown(view["countdown"])
+
+    def _header_in_text(self, header):
+        try:
+            label = self.dialog["text"]
+            text = label.getText() if hasattr(label, "getText") else getattr(label, "text", "")
+        except Exception:
+            return False
+        return str(text or "").startswith(header)
 
     def _picked(self, choice=None):
         controller = self.controller
@@ -783,7 +956,7 @@ class ChoiceBoxList:
         if not self._titled or self.dialog is None:
             return
         try:
-            self.dialog.setTitle(text)
+            self.dialog.setTitle(self._prefix + text)
         except Exception:
             self._titled = False
             LOG.info("the image's list takes no title; it shows no countdown")
@@ -799,14 +972,39 @@ class ChoiceBoxList:
 
 
 def open_choicebox(session, controller, callback):
-    """Open the image's own list for `controller`. None when it is open, otherwise why not."""
+    """Open the image's own list for `controller`. None when it is open, otherwise why not.
+
+    A `ChoiceBox` that raises inside `session.open` has taken the execution from the dialog
+    under it; that dialog is given it back, as after a styled screen that fails there.
+    """
     adapter = ChoiceBoxList(session, controller, callback)
     controller.screen = adapter
+    executing = getattr(session, "in_exec", None)
     try:
         adapter.open()
     except Exception as error:
         LOG.exception("the image's list could not be opened for a list of choices")
         controller.screen = None
+        styledlist._restore_executing(session, executing)
+        return f"{type(error).__name__}: {error}"
+    return None
+
+
+def choicebox_refusal(session):
+    """None when the image's `ChoiceBox` builds - once, on trial, off the dialog stack."""
+    refusal = styledlist.fallback_refusal()
+    if refusal is not None:
+        return refusal
+    try:
+        from Screens.ChoiceBox import ChoiceBox
+
+        trial = session.instantiateDialog(ChoiceBox, title=header_text(),
+                                          list=[(header_text(), "a")], keys=[""], selection=0)
+        if trial is None:
+            return "the image returned no ChoiceBox"
+        session.deleteDialog(trial)
+    except Exception as error:
+        LOG.exception("the image's choice list could not be built")
         return f"{type(error).__name__}: {error}"
     return None
 
@@ -899,7 +1097,7 @@ class ListPublisher(Publisher):
             styled = self._trial_build()
         if styled is None:
             return STYLED, None
-        fallback = styledlist.fallback_refusal()
+        fallback = choicebox_refusal(self.session)
         if fallback is None:
             LOG.warning("the styled list screen cannot be built here (%s); the image's own "
                         "choice list is used", styled)
@@ -974,8 +1172,10 @@ class ListPublisher(Publisher):
         LOG.info("list %s: %d row(s), %d s%s", controller.label(), len(spec["rows"]),
                  spec["timeout"], ", with a default" if spec["default"] else "")
         self.waiting = controller
-        refusal = self._open_waiting()
-        return refusal
+        # A list that waits counts its own turns, never those of the list it replaced.
+        self._stop_retry()
+        self._retries = 0
+        return self._open_waiting()
 
     # ----------------------------------------------------------- the screens --
 
@@ -1045,7 +1245,6 @@ class ListPublisher(Publisher):
         under = getattr(session, "current_dialog", None)
         controller.under = under
         controller.suspend = _suspend_of(under)
-        controller.deadline = self.clock() + controller.spec["timeout"]
         refusal = None
         opened = False
         callback = self._closed_callback(controller)
@@ -1067,9 +1266,8 @@ class ListPublisher(Publisher):
         if (self.screen_kind, self.screen_reason) != before and self.bridge is not None:
             self.bridge.announce_capabilities()
         if not opened:
-            controller.deadline = None
             return refusal or "no screen"
-        # Shown: the countdown starts now.
+        # Shown: the countdown starts now, and until now showed the whole timeout.
         controller.deadline = self.clock() + controller.spec["timeout"]
         self.current = controller
         if not self._arm(controller):
@@ -1124,7 +1322,7 @@ class ListPublisher(Publisher):
         screen = controller.screen
         if screen is not None:
             try:
-                screen.countdown(countdown_text(controller.remaining()))
+                screen.countdown(controller.countdown())
             except Exception:
                 LOG.exception("the list's countdown could not be drawn")
         if not self._arm(controller):

@@ -68,6 +68,9 @@ COMMAND_ID_CHARACTERS = frozenset(
 # The reason code the doors' sentence carries for a command that defines codes for its
 # refusals; every other command gets the sentence alone, exactly as before.
 DOORS_REASONS = {"list": "busy"}
+# The commands whose refusal by the doors is published even while an update has made the
+# plugin silent: a list of choices always has a caller waiting for its answer or its refusal.
+SAID_WHILE_SILENT = frozenset(("list",))
 
 # The words a keyword payload may be spelled with. Case never matters.
 TRUE_WORDS = ("on", "true", "yes", "1", "press")
@@ -361,7 +364,11 @@ class CommandDispatcher:
             if name in DOORS_REASONS:
                 # A command that defines codes says this refusal with one as well.
                 doors = Refusal(doors, DOORS_REASONS[name])
-            if self.bridge.self_update.silent:
+            if self.bridge.self_update.silent and name in SAID_WHILE_SILENT:
+                # Someone waits on this command's answer: the refusal goes out all the same,
+                # not retained, so nothing comes back that the retraction took.
+                self.bridge.say_refusal_unretained(name, doors, command_id=command_id)
+            elif self.bridge.self_update.silent:
                 LOG.info("cmd/%s refused, not published: %s", name, doors)
             else:
                 self.bridge.publish_last_error(name, doors, command_id=command_id)

@@ -445,12 +445,19 @@ def test_the_list_opens_over_live_tv_with_everything_the_contract_says(world):
     first, second = screen["list"].list
     assert first[1]["kind"] == "pixmap" and first[1]["png"].path.endswith("icons/gate.png")
     assert first[2]["text"] == "Open the gate"
-    assert first[3]["text"] == "Green" and first[3]["color"] == styledlist.STATE_COLOURS["green"]
+    # The key: a filled rounded button in its colour, scaled like the icons - no colour word.
+    assert first[3]["kind"] == "pixmap" and first[3]["png"].path.endswith("keys/green.png")
+    assert first[3]["flags"] == 128 | 256
     # No icon, and the label where the other row's label is.
-    assert [part["kind"] for part in second[1:]] == ["text", "text"]
+    assert [part["kind"] for part in second[1:]] == ["text", "pixmap"]
     assert second[1]["pos"][0] == first[2]["pos"][0]
-    assert second[2]["text"] == "Red"
-    assert screen["countdown"].getText() == "Closes in 60 s"
+    assert second[2]["png"].path.endswith("keys/red.png")
+    # The label stops before the key.
+    assert first[2]["pos"][0] + first[2]["size"][0] <= first[3]["pos"][0]
+    assert all(part.get("text") not in ("Green", "Red") for row in (first, second)
+               for part in row[1:])
+    # With a default row, the countdown says what the timeout answers.
+    assert screen["countdown"].getText() == "Ignore in 60 s"
     assert screen["legend"].getText() == "OK or the row's key choose   EXIT dismiss"
     # The selection starts on the default row.
     assert screen.selected() == "ignore"
@@ -466,8 +473,11 @@ def test_without_a_default_the_selection_starts_on_the_first_row(world):
 def test_a_list_without_text_or_keys_has_neither(world):
     screen = world.show({"title": "Bedtime", "rows": [{"id": "a", "label": "A"},
                                                       {"id": "b", "label": "B"}]})
-    assert "text" not in screen
+    # The text's label is there, empty: every list has the same widgets.
+    assert screen["text"].getText() == ""
+    assert screen.shape["text_height"] == 0
     assert screen["legend"].getText() == "OK choose   EXIT dismiss"
+    assert screen["countdown"].getText() == "Closes in 60 s"
     # The id and the label: no icon, and no key on the right.
     assert [len(entry) for entry in screen["list"].list] == [2, 2]
 
@@ -488,7 +498,7 @@ def test_the_geometry_fits_24_rows_at_720_and_1080_lines():
     small = choicelist.geometry(1280, 720, 2, False)
     assert small["visible"] == 2 and small["text_height"] == 0
     full = choicelist.geometry(1920, 1080, 2, True)
-    assert full["row"] == 69 and full["text_height"] == 78
+    assert full["row"] == 69 and full["text_height"] == 180 and full["title"] == 96
 
 
 def test_a_24_row_list_opens_on_a_720_line_desktop_with_every_row(make_bridge, factory,
@@ -558,7 +568,10 @@ def test_a_colour_key_picks_its_row_at_once(world, colour, row):
 def test_a_number_key_picks_its_row_at_once(world):
     screen = world.show(doorbell(rows=[{"id": "a", "label": "A", "key": "3"},
                                        {"id": "b", "label": "B", "key": "1"}], default=None))
-    assert screen["list"].list[0][2]["text"] == "3"
+    # The digit, in a small box.
+    box, digit = screen["list"].list[0][2:]
+    assert box["kind"] == "pixmap" and box["png"].path.endswith("keys/box.png")
+    assert digit["text"] == "3" and digit["pos"] == box["pos"] and digit["size"] == box["size"]
     screen["listNumbers"].actions["1"]("1")
     assert world.endings() == [("picked", "b")]
 
@@ -605,11 +618,11 @@ def test_the_list_hands_the_keys_back_to_the_screen_under_it(world):
 
 def test_the_countdown_counts_and_a_timeout_names_the_default_row(world):
     screen = world.show(doorbell(timeout=5))
-    assert screen["countdown"].getText() == "Closes in 5 s"
+    assert screen["countdown"].getText() == "Ignore in 5 s"
     world.elapse(1)
-    assert screen["countdown"].getText() == "Closes in 4 s"
+    assert screen["countdown"].getText() == "Ignore in 4 s"
     world.elapse(3)
-    assert screen["countdown"].getText() == "Closes in 1 s"
+    assert screen["countdown"].getText() == "Ignore in 1 s"
     assert world.answers() == []
     world.elapse(1)
     assert world.endings() == [("timeout", "ignore")]
@@ -618,8 +631,10 @@ def test_the_countdown_counts_and_a_timeout_names_the_default_row(world):
 
 
 def test_a_timeout_without_a_default_says_no_row(world):
-    world.show(doorbell(timeout=5, default=None))
-    world.elapse(5)
+    screen = world.show(doorbell(timeout=5, default=None))
+    world.elapse(1)
+    assert screen["countdown"].getText() == "Closes in 4 s"
+    world.elapse(4)
     assert world.endings() == [("timeout", None)]
 
 
@@ -627,7 +642,7 @@ def test_the_countdown_lands_on_the_whole_seconds_whatever_the_timer_does(world)
     world.show(doorbell(timeout=10))
     world.now += 3.4
     world.publisher._tick.timer.fire()
-    assert world.screen["countdown"].getText() == "Closes in 7 s"
+    assert world.screen["countdown"].getText() == "Ignore in 7 s"
     interval, single = world.publisher._tick.timer.started
     # 6.6 s are left: the next tick is when 6 are.
     assert single is True and interval == 600
@@ -746,16 +761,24 @@ def _leave_standby(world, standby):
     world.settle()
 
 
-def test_entering_standby_closes_the_list_and_it_never_shows_again(world):
+def test_entering_standby_closes_the_list_and_it_never_shows_again(world, monkeypatch):
+    from Screens.Screen import Screen
+
     screen = world.show()
     standby = _enter_standby(world)
     assert world.endings() == [("closed", None)]
     shown = []
-    screen.onShow.append(lambda: shown.append(True))
+    drawn = Screen.show
+
+    def show(self):
+        shown.append(self)
+        drawn(self)
+
+    monkeypatch.setattr(Screen, "show", show)
     _leave_standby(world, standby)
     assert world.screen is None
     assert world.session.current_dialog is InfoBar.instance
-    assert shown == [], "the ended list was drawn again on its way out"
+    assert screen not in shown, "the ended list was drawn again on its way out"
     assert world.endings() == [("closed", None)]
 
 
@@ -1063,7 +1086,25 @@ def test_the_fallback_counts_down_in_its_title_where_the_image_lets_it(fallback,
                         raising=False)
     fallback.send(doorbell(timeout=5))
     fallback.elapse(2)
-    assert titles == ["Closes in 5 s", "Closes in 4 s", "Closes in 3 s"]
+    # As on OpenViX and OpenATV: the header line is the window title, and stays in it.
+    header = "From Home Assistant, via MQTT Bridge - "
+    assert titles == [header + "Ignore in 5 s", header + "Ignore in 4 s",
+                      header + "Ignore in 3 s"]
+
+
+def test_where_the_image_keeps_the_header_in_its_text_the_title_is_the_countdown(
+        fallback, monkeypatch):
+    """As on OpenPLi: the whole question in the list's text, the window title its own."""
+    from conftest import Label
+
+    titles = []
+    monkeypatch.setattr(ChoiceBox, "setTitle", lambda self, text: titles.append(text),
+                        raising=False)
+    monkeypatch.setattr(ChoiceBox, "__getitem__",
+                        lambda self, name: Label(self.title) if name == "text" else None,
+                        raising=False)
+    fallback.send(doorbell(timeout=5, default=None))
+    assert titles == ["Closes in 5 s"]
 
 
 def test_a_fallback_that_takes_no_title_shows_no_countdown(fallback, plugin_log):
@@ -1151,3 +1192,260 @@ def test_on_the_plain_session_model_the_trial_build_reads_the_skin(make_bridge, 
     world = World(make_bridge, factory, settings, receiver=receiver)
     assert world.info()["list"] == {"screen": "styled"}
     assert isinstance(receiver.session, Session)
+
+
+# ------------------------------------------------------ the text rule, both halves --
+
+# The vectors both halves of the contract hold their text rule to: (raw, as a title, as text).
+# Each is built from code points, so the source holds nothing invisible.
+NUL, SOH, STX = chr(0), chr(1), chr(2)
+ZWSP, RLO, LRI, SHY, BOM = chr(0x200B), chr(0x202E), chr(0x2066), chr(0xAD), chr(0xFEFF)
+LONE_HIGH, LONE_LOW = chr(0xD800), chr(0xDFFF)
+TEXT_RULE = [
+    (ZWSP, None, None),
+    (RLO + LRI, None, None),
+    (SOH + STX, None, None),
+    (SHY, None, None),
+    (BOM, None, None),
+    ("  Open  ", "Open", "Open"),
+    ("a" + NUL + "b", "a b", "a b"),
+    (ZWSP * 10 + "x" * 60, "x" * 60, "x" * 60),
+    ("Line1" + chr(10) + "Line2", "Line1 Line2", "Line1" + chr(10) + "Line2"),
+    ("x" + LONE_HIGH + "y", "xy", "xy"),
+    (LONE_LOW, None, None),
+]
+
+
+@pytest.mark.parametrize("raw, title, text", TEXT_RULE)
+def test_the_text_rule_on_a_title_and_a_text(raw, title, text):
+    if title is None:
+        assert refusal(doorbell(title=raw)) == "title is empty"
+    else:
+        assert parsed(title=raw)["title"] == title
+    assert parsed(text=raw)["text"] == text
+
+
+@pytest.mark.parametrize("raw, title, _text", TEXT_RULE)
+def test_the_text_rule_on_a_label(raw, title, _text):
+    members = [{"id": "a", "label": raw}]
+    if title is None:
+        assert refusal(doorbell(rows=members, default=None)) == "rows[0].label is empty"
+    else:
+        assert parsed(rows=members, default=None)["rows"][0]["label"] == title
+
+
+def test_a_lone_surrogate_in_a_list_without_an_envelope_never_reaches_the_screen(world):
+    """JSON can spell half a surrogate pair; the renderer would be handed it unchecked."""
+    backslash = chr(92)
+    raw = ('{"title": "Door' + backslash + 'ud800bell", "text": "a' + backslash + 'udfffb", '
+           '"rows": [{"id": "a", "label": "Op' + backslash + 'udc00en"}]}')
+    world.send(raw=raw, ident=None)
+    screen = world.screen
+    assert screen["title"].getText() == "Doorbell"
+    assert screen["text"].getText() == "ab"
+    assert screen["list"].list[0][1]["text"] == "Open"
+    world.send(raw='{"title": "' + backslash + 'udfff", "rows": [{"id": "a", "label": "A"}]}',
+               ident=None)
+    assert world.error()["error"] == "title is empty"
+
+
+# ------------------------------------------------------------ the keys' pictures --
+
+
+def _render_keys():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "tools" / "render-keys.py"
+    spec = importlib.util.spec_from_file_location("render_keys", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("name", ["red", "green", "yellow", "blue", "box"])
+def test_every_key_picture_is_the_one_the_tool_draws(name):
+    tool = _render_keys()
+    with open(choicelist.key_path(name), "rb") as handle:
+        assert handle.read() == tool.render(name)
+
+
+@pytest.mark.parametrize("name", ["red", "green", "yellow", "blue"])
+def test_a_button_is_drawn_in_the_colour_the_second_way_fills(name):
+    _path, colour = _render_keys().KEYS[name]
+    assert (colour[0] << 16) | (colour[1] << 8) | colour[2] == choicelist.KEY_RGB[name]
+
+
+def test_the_button_fills_the_share_of_its_square_the_second_way_draws():
+    tool = _render_keys()
+    alpha = [[row[column] for row in _alpha(tool.render("green"))] for column in (32,)][0]
+    filled = [index for index, value in enumerate(alpha) if value > 127]
+    assert (filled[-1] - filled[0] + 1) / 64 == choicelist.BUTTON_SHARE
+
+
+def _alpha(png):
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "tools" / "render-icons.py"
+    spec = importlib.util.spec_from_file_location("render_icons", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.read_png_alpha(png)
+
+
+def test_an_image_that_places_no_pixmap_fills_a_colour_key_and_writes_a_digit(world,
+                                                                             monkeypatch):
+    import Components.MultiContent as multicontent
+
+    monkeypatch.delattr(multicontent, "MultiContentEntryPixmapAlphaBlend")
+    screen = world.show(doorbell(rows=[{"id": "a", "label": "A", "key": "green"},
+                                       {"id": "b", "label": "B", "key": "7"}], default=None))
+    green, seven = screen["list"].list
+    assert green[2]["text"] == "" and green[2]["backcolor"] == choicelist.KEY_RGB["green"]
+    assert green[2]["backcolor_sel"] == choicelist.KEY_RGB["green"]
+    assert [part["text"] for part in seven[1:]] == ["B", "7"]
+
+
+# ------------------------------------------------------- the text sized to its content --
+
+
+def _laid_out(spec, width=1920, height=1080):
+    """The styled screen as the plain session builds it: skin read, applied, laid out."""
+    DESKTOP.resize(eSize(width, height))
+    session = Session(nav=None)
+
+    class Clock:
+        clock = staticmethod(lambda: 0.0)
+
+    controller = choicelist.ListController(Clock(), spec)
+    shape = choicelist.desktop_shape(spec)
+    return session.instantiateDialog(choicelist.screen_class(), shape,
+                                     choicelist._Trial(controller))
+
+
+@pytest.mark.parametrize("width, height", [(1280, 720), (1920, 1080)])
+def test_a_60_character_title_and_a_200_character_text_are_shown_whole(width, height):
+    spec = parsed(title="T" * 60, text="x " * 99 + "y", default=None)
+    screen = _laid_out(spec, width, height)
+    for name in ("title", "text"):
+        widget = screen[name]
+        needed = widget.instance.calculateSize().height()
+        assert widget.instance.size().height() >= needed, name
+    window = screen.instance
+    assert window.position().y() + window.size().height() <= height
+    # Laid out one under the other, nothing overlapping.
+    title, text, listed = (screen[name].instance for name in ("title", "text", "list"))
+    assert title.position().y() + title.size().height() <= text.position().y()
+    assert text.position().y() + text.size().height() <= listed.position().y()
+
+
+def test_a_short_title_and_no_text_make_a_short_screen():
+    long = _laid_out(parsed(title="T" * 60, text="x" * 200, default=None))
+    short = _laid_out(parsed(title="Bell", text=None, default=None))
+    assert short["text"].instance.size().height() == 0
+    assert short["title"].instance.size().height() < long["title"].instance.size().height()
+    assert short.instance.size().height() < long.instance.size().height()
+    # Still in the middle of the desktop.
+    window = short.instance
+    assert abs(window.position().y() * 2 + window.size().height() - 1080) <= 1
+
+
+def test_a_skin_that_restyles_the_screen_keeps_its_own_layout():
+    skin_module.domScreens["MQTTBridgeChoices"] = (
+        '<screen name="MQTTBridgeChoices" position="0,0" size="800,600">'
+        '<widget name="title" position="10,10" size="700,40" />'
+        '<widget name="list" position="10,60" size="700,400" /></screen>')
+    screen = _laid_out(parsed(title="T" * 60, text="x" * 200, default=None))
+    assert screen.instance.size() == eSize(800, 600)
+    assert screen["title"].instance.size() == eSize(700, 40)
+
+
+@pytest.mark.parametrize("height", [400, 576, 720, 1080, 2160])
+def test_the_tallest_list_fits_every_desktop(height):
+    shape = choicelist.geometry(height * 16 // 9, height, 24, True)
+    assert shape["visible"] == choicelist.VISIBLE_ROWS
+    assert shape["y"] >= 0 and shape["y"] + shape["height"] <= height
+
+
+# ------------------------------------------------- a fallback that fails to open --
+
+
+def _raising(*_arguments, **_keywords):
+    raise RuntimeError("no skin")
+
+
+def test_a_choicebox_that_raises_inside_open_gives_the_session_back(world, monkeypatch):
+    class Broken:
+        def __init__(self, *arguments, **keywords):
+            raise KeyError("list")
+
+    infobar = world.session.current_dialog
+    monkeypatch.setattr(choicelist, "screen_class", lambda: Broken)
+    monkeypatch.setattr(ChoiceBox, "__init__", _raising)
+    world.send()
+    assert world.error()["reason"] == "not_shown"
+    assert world.session.current_dialog is infobar
+    assert world.session.in_exec and infobar.execing
+
+
+def test_the_menus_choicebox_that_raises_inside_open_gives_the_session_back(world,
+                                                                           monkeypatch):
+    from test_menu import example, payload
+
+    monkeypatch.setattr(ChoiceBox, "__init__", _raising)
+    infobar = world.session.current_dialog
+    world.client.fire_message(MENU_TOPIC, payload(example()), retain=True)
+    menu = world.bridge.publisher("menu")
+    menu.screen_kind = styledlist.FALLBACK
+    assert menu.open(world.session) is False
+    assert world.session.current_dialog is infobar
+    assert world.session.in_exec and infobar.execing
+
+
+def test_an_image_whose_choicebox_cannot_be_built_has_no_fallback(make_bridge, factory,
+                                                                  settings, monkeypatch):
+    _no_styled_screen(monkeypatch)
+    monkeypatch.setattr(ChoiceBox, "__init__", _raising)
+    world = World(make_bridge, factory, settings)
+    assert world.publisher is None
+    assert "list" not in world.info()["capabilities"]
+
+
+# ------------------------------------------------------ a list that waits, again --
+
+
+def test_a_list_that_replaces_a_waiting_one_waits_its_own_full_time(world, monkeypatch):
+    monkeypatch.setattr(choicelist, "_can_open", lambda session: False)
+    world.send()
+    for _ in range(choicelist.OPEN_RETRY_LIMIT - 1):
+        world.publisher._retry.timer.fire()
+    world.send(doorbell(title="Second"), ident="b2")
+    for _ in range(choicelist.OPEN_RETRY_LIMIT - 1):
+        world.publisher._retry.timer.fire()
+    assert world.error() is None, "the second list inherited the first one's turns"
+    world.publisher._retry.timer.fire()
+    assert world.error()["id"] == "b2" and world.error()["reason"] == "not_shown"
+
+
+# ----------------------------------------------- the doors while the plugin is silent --
+
+
+def test_the_doors_refuse_a_list_even_while_an_update_keeps_the_plugin_silent(world):
+    updater = world.bridge.self_update
+    updater.closed = True
+    updater.silent = True
+    try:
+        before = len(world.client.published)
+        world.send()
+        (refused,) = world.client.published[before:]
+        assert refused.topic == LAST_ERROR and refused.retain is False and refused.qos == 1
+        assert refused.json() == {"cmd": "list", "error": "an update is being applied on the "
+                                  "receiver", "reason": "busy", "id": LIST_ID,
+                                  "ts": refused.json()["ts"]}
+        # Any other command stays unsaid, as before.
+        world.client.fire_message("enigma2/" + NODE + "/cmd/screenshot", b"PRESS")
+        assert len(world.client.published) == before + 1
+    finally:
+        updater.closed = False
+        updater.silent = False

@@ -1517,17 +1517,5 @@ msgid "OK choose   EXIT dismiss"
 msgstr ""
 
 #: src/MQTTBridge/choicelist.py
-msgid "Red"
-msgstr ""
-
-#: src/MQTTBridge/choicelist.py
-msgid "Green"
-msgstr ""
-
-#: src/MQTTBridge/choicelist.py
-msgid "Yellow"
-msgstr ""
-
-#: src/MQTTBridge/choicelist.py
-msgid "Blue"
+msgid "%(label)s in %(seconds)d s"
 msgstr ""

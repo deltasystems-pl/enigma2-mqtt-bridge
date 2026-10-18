@@ -440,11 +440,9 @@ def test_the_toast_holds_only_labels_and_pixmaps(live_bridge):
     assert all(
         type(widget) in (eWindow, eLabel, ePixmap) for widget in screen.instance.widgets()
     )
-    # Nothing in the toast's window binds a key natively. The list of choices' trial screen,
-    # deleted at once, is not in it: the model keeps a deleted widget's binding, the receiver
-    # does not, as the list's own destructor lets the key go.
-    assert [entry for entry in KeyActionMap.getInstance().native
-            if entry[2] in screen.instance.widgets()] == []
+    # Nothing binds a key natively - the list of choices' trial screen, deleted at once, let
+    # its list's binding go with it.
+    assert KeyActionMap.getInstance().native == []
 
 
 def test_the_widget_rule_check_catches_a_list(receiver):

@@ -2088,6 +2088,13 @@ class Bridge:
         The sentence is made sendable first (`_sendable`): a refusal that
         cannot be encoded would be an exception here and no refusal at all.
         """
+        payload = self._last_error_payload(command, message, reason, command_id)
+        info = self.publish_json(self.topic("last_error"), payload)
+        self._last_error_published = True
+        return info
+
+    def _last_error_payload(self, command, message, reason=None, command_id=None):
+        """`last_error`'s payload, and its line in the log."""
         if reason is None:
             reason = getattr(message, "reason", None)
         if isinstance(message, str):
@@ -2105,9 +2112,21 @@ class Bridge:
             LOG.warning("cmd/%s (id %s) refused: %s", payload["cmd"], command_id, message)
         else:
             LOG.warning("cmd/%s refused: %s", payload["cmd"], message)
-        info = self.publish_json(self.topic("last_error"), payload)
-        self._last_error_published = True
-        return info
+        return payload
+
+    def say_refusal_unretained(self, command, message, command_id=None):
+        """A refusal on `last_error` while an update has made the plugin silent.
+
+        From a downgrade's retraction on nothing is published (`selfupdate.py`), and a retained
+        `last_error` now would outlive the retraction that took the topic back. A command whose
+        sender waits for its answer - a list of choices - is refused all the same: once, **not
+        retained**, at QoS 1, on the open session only, and never remembered as published.
+        """
+        payload = self._last_error_payload(command, message, command_id=command_id)
+        if self.client is None or not self.connected or self._uninstaller.closed:
+            return None
+        return self.client.publish(self.topic("last_error"), _encoded(payload), qos=COMMAND_QOS,
+                                   retain=False, transient=True)
 
     def clear_last_error(self):
         if not self._last_error_published:

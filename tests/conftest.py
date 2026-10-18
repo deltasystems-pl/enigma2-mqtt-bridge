@@ -190,7 +190,8 @@ enigma.getEnigmaVersionString = lambda: "2024-09-11-Release"
 #
 # Destruction is not modelled - a window here lives as long as the test - so
 # what a test can see is whether a window is *visible*, which is also what a
-# household sees.
+# household sees. The one exception: a deleted dialog's lists let go of their
+# native key bindings, as `eListbox`'s destructor does (`deleteDialog`).
 
 
 class eSize:
@@ -323,6 +324,24 @@ class eListbox(eWidget):
         eWidget.__init__(self, parent)
         # `allowNativeKeys(true)`: bound here, exec or no exec.
         KeyActionMap.getInstance().native.append(("ListboxActions", 0, self))
+
+
+def _window_widgets(screen):
+    """Every widget of a dialog's window, read before `doClose` sets the window to None."""
+    window = getattr(screen, "instance", None)
+    return window.widgets() if window is not None else []
+
+
+def _release_native_bindings(widgets):
+    """What a deleted dialog's widgets let go of as they are destroyed.
+
+    `eListbox`'s destructor unbinds the `ListboxActions` its constructor bound
+    (`elistbox.cpp`, `~eListbox`: `unbindAction(this, 0)`), so a list that was deleted - a
+    screen built on trial and deleted at once - leaves no binding behind. Nothing else here is
+    destroyed: a window that was never deleted lives as long as the test.
+    """
+    keys = KeyActionMap.getInstance()
+    keys.native = [entry for entry in keys.native if entry[2] not in widgets]
 
 
 class Desktop:
@@ -1553,7 +1572,8 @@ def MultiContentEntryText(pos=(0, 0), size=(0, 0), font=0, flags=0, text="", col
                           color_sel=None, backcolor=None, backcolor_sel=None, **kwargs):
     """The tuple the image builds; here a dict, so a test can read what a row draws."""
     return {"kind": "text", "pos": pos, "size": size, "font": font, "flags": flags,
-            "text": text, "color": color, "color_sel": color_sel}
+            "text": text, "color": color, "color_sel": color_sel, "backcolor": backcolor,
+            "backcolor_sel": backcolor_sel}
 
 
 def MultiContentEntryPixmapAlphaBlend(pos=(0, 0), size=(0, 0), png=None, backcolor=None,
@@ -2275,12 +2295,24 @@ class ChoiceBox(ModelScreen):
     cancels with `close(None)`.
     """
 
+    skinName = "ChoiceBox"
+    skin = None
+
     def __init__(self, session, title="", list=None, keys=None, selection=0, **kwargs):
         ModelScreen.__init__(self, session)
         self.title = title
         self.list = list or []
         self.keys = keys
         self.selection = selection
+
+    # What the plain session's `instantiateDialog` asks of a screen it builds off the stack -
+    # the list of choices builds one on trial. The image's own skin and widgets are not
+    # modelled: the list is drawn as the image draws it.
+    def setDesktop(self, desktop):
+        self.desktop = desktop
+
+    def applySkin(self):
+        pass
 
 
 choice_box_module.ChoiceBox = ChoiceBox
@@ -2345,8 +2377,10 @@ class ModalSession:
 
     def deleteDialog(self, screen):
         # StartEnigma.py: hide, then close - never the dialog stack.
+        widgets = _window_widgets(screen)
         screen.hide()
         screen.doClose()
+        _release_native_bindings(widgets)
 
     def pushCurrent(self):
         if self.current_dialog is not None:
@@ -3432,8 +3466,10 @@ class Session:
 
     def deleteDialog(self, screen):
         self.deleted.append(screen)
+        widgets = _window_widgets(screen)
         screen.hide()
         screen.doClose()
+        _release_native_bindings(widgets)
 
     def doInstantiateDialog(self, screen, arguments, kwargs, desktop):
         dialog = screen(self, *arguments, **kwargs)
