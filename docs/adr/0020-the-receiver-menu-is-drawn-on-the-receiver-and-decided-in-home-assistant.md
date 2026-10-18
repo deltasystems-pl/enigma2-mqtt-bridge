@@ -43,14 +43,14 @@ Three things are true of the path between them:
    overrides, zero-width characters), and is cut at the contract's lengths again. An icon name
    outside the contract's list is the neutral icon. A row of a type this plugin does not know is
    shown with its label and state and OK on it sends nothing, because the enumeration is open;
-   the log names the type once, not on every publish or redraw (maintainer's decision D72).
+   the log names the type once, not on every publish or redraw (the maintainer's decision).
 3. **What is not applied is discarded.** A slider moves a local value until OK (EXIT discards it),
    a selector lists its options and sends only the one chosen, an input field is the image's
    keyboard. Only OK sends: the keys 1-9 move the selection to their row and do nothing else
-   (maintainer's decision D66), so a digit pressed by mistake switches nothing. A slider moved and
+   (the maintainer's decision), so a digit pressed by mistake switches nothing. A slider moved and
    not applied is discarded when the selection leaves its row. OK on the value the row already
    has sends nothing - the option already set, a slider back at its value, the same text - and the
-   list or keyboard just closes, with no pending mark and no notice (D70); while a pending mark
+   list or keyboard just closes, with no pending mark and no notice; while a pending mark
    holds another value the viewer asked for, the row's value picked again is a change back and is
    sent. An option is identified by its value, not its place, so a menu that reorders options
    while they are listed cannot turn an OK into another option.
@@ -68,7 +68,7 @@ Three things are true of the path between them:
    receiver was away would never undo the `offline` from before, and the menu would stay greyed
    for good. A menu that arrives live (retain flag 0, so the integration published it just now)
    is proof that Home Assistant runs and sets the status `online`; a retained replay on
-   subscribing can be days old and proves nothing (D71).
+   subscribing can be days old and proves nothing.
 6. **An action is never queued.** The receiver's MQTT client keeps every unacknowledged QoS 1
    publish for the next connect; a `menu_action` is taken back out of that queue when the
    socket was already gone as it was published, when the main loop learns the connection went,
@@ -82,9 +82,9 @@ Three things are true of the path between them:
    that raises inside `session.open` leaves the session with nothing executing; should the real
    open raise all the same, the dialog it took the execution from is given it back first. Anything
    that fails is the reason the image's own `ChoiceBox` is used as it is - same rows and ids, but
-   no number keys, because the image's list acts on a digit and cannot be made only to move (D66)
-   - and `info.menu.screen` says which one the receiver uses. The module knows nothing about
-   menus, so the next list (the planned channel list) reuses it.
+   no number keys, because the image's list acts on a digit and cannot be made only to move
+   (decision 3) - and `info.menu.screen` says which one the receiver uses. The module knows
+   nothing about menus, so the next list (the planned channel list) reuses it.
 8. **On by default, set on the receiver.** `menu_allowed` is a box-only permission, on by default
    because the menu does nothing the user did not put into it in Home Assistant; off, there is no
    entry, no hotkey, no subscription and no `menu` capability. `menu_hotkey` may be written by
