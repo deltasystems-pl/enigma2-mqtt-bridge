@@ -2714,7 +2714,7 @@ under Apache-2.0 ([NOTICE](../NOTICE)).
 
 **What the viewer can do.** OK on a group opens its rows, and EXIT goes back; EXIT on the top
 list closes the menu. OK on a `button` sends `press`, on a `toggle` `toggle` with the state the row
-showed (`seen`, [§1](#basenodemenu_action---added-after-040-unreleased)). OK on a `selector`
+showed (`seen`, [section 1](#basenodemenu_action---added-after-040-unreleased)). OK on a `selector`
 lists its options: OK sends the one chosen as `set`, EXIT discards. On a `slider`, LEFT and RIGHT
 move a value on the receiver by `step` within `min` and `max`, shown and not sent; OK sends it as
 `set`, EXIT discards it. OK on an `input` opens the image's keyboard with `value` in it: OK sends
