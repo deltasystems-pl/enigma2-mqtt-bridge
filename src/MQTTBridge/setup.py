@@ -325,9 +325,9 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
         bridge = self._bridge_or_running()
         if bridge is not None and _updating(bridge):
             # Kept, not applied, for the uninstall's reason below: a reload would open a
-            # session under the update's closed doors. The update ends in a restart, which
-            # starts from them.
-            LOG.warning("settings saved during an update; not reloading the bridge")
+            # session under the update's closed doors, and a change applied live would publish
+            # behind them. The update ends in a restart, which starts from them.
+            LOG.warning("settings saved during an update; not applying them now")
             self._tell_and_close(household_doors(bridge.self_update))
             return
         if bridge is not None and _uninstalling(bridge):
@@ -338,7 +338,7 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
             # removal stops its own failure path reloads the bridge - with
             # them. So nothing is lost and nothing is applied twice; the
             # household is told why the change does not show yet.
-            LOG.warning("settings saved during an uninstall; not reloading the bridge")
+            LOG.warning("settings saved during an uninstall; not applying them now")
             self._tell_and_close(_(
                 "Settings saved. The plugin is being removed from this receiver, so they "
                 "are not applied now; they take effect if the removal stops or the plugin "
@@ -347,9 +347,11 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
             return
         if bridge is not None:
             try:
-                bridge.reload()
+                # A reconnect only when the connection changed or the plugin was switched off
+                # or on; anything else applies under the open session.
+                bridge.apply_saved_settings()
             except Exception:
-                LOG.exception("the bridge could not be restarted with the new settings")
+                LOG.exception("the bridge could not apply the new settings")
         self.close(True)
 
     def keyUpdates(self):

@@ -166,3 +166,13 @@ takes every rule of this record - the `Host` check, same-origin `Origin`, the se
 exactly the form's fields, the sealed rendered values - and the subpage is exactly as open as
 OpenWebif, like the rest of the page. The tests that held "every setting on the form" hold "every
 setting on the main form or the Menu subpage, each on exactly one".
+
+## Note, 2026-10-18 - a save reconnects only for the connection
+
+*The decision stands; the setup screen's path it reuses has changed.* That path no longer reloads
+the bridge after every save: it reconnects only when the save changed the connection - `host`,
+`port`, `tls`, `ca_file`, `username`, `password`, `node_id`, `base_topic` - or switched the plugin
+off or on, and applies every other setting under the open session, as `cmd/config` applies its
+own, publishing `info` and discovery again. So a permission changed on the page still reaches
+`info.settings` and discovery exactly as one changed on the television does, and the page says
+that the bridge is reconnecting only when it is.

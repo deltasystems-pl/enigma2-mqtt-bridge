@@ -321,3 +321,12 @@ difference between an upgrade and a removal:
 **What it still does not do.** It does not touch `/etc/enigma2/settings`, so a reinstall finds its
 configuration, and it does not retract retained topics - that is `cmd/reset`, published while the
 plugin is still connected, and a package script has no business making network calls.
+
+## Note, 2026-10-18 - most saves no longer reload
+
+The setup screen, and the OpenWebif page outside `cmd/config`'s subset, no longer call
+`reload()` after every save: a save reloads only when it changed the connection or switched the
+plugin off or on, and every other setting is applied under the open session. The finding above
+holds wherever a reload still happens - a save that changed how the box reaches the broker, or
+switched the plugin off, publishes a retained `offline` before its clean disconnect, and a rename
+publishes none - and a save applied live disconnects nothing, so it leaves `availability` alone.

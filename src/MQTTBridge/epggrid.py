@@ -289,6 +289,13 @@ class EpgGridPublisher(Publisher):
         return True
 
     def stop(self):
+        if self._active:
+            # A grid stopped by a settings save leaves a channel list that goes on running,
+            # and its next walk must not start this stopped grid building again.
+            channels = self._channels()
+            forget = getattr(channels, "not_when_changed", None)
+            if forget is not None:
+                forget(self.regenerate)
         self._active = False
         self._generation += 1
         self._queue = []

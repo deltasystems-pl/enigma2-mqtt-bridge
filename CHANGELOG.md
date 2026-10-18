@@ -49,8 +49,10 @@ version that has no section here.
   Assistant, with the state to show and its colour. The receiver checks the payload whole - an
   invalid one is ignored with a line in the log and the menu before it stays - draws it with
   icons, states and colours, and answers an OK with one `menu_action` (QoS 1, never retained): the
-  row's id, `press`, `toggle` or `set`, and the value. It never learns what a row does and never
-  sends a service call. A slider moves on the receiver until OK, a selector lists its options, an
+  row's id, `press`, `toggle` or `set`, the value of a `set`, and for a `toggle` the state the row
+  showed, `seen` - which the companion integration turns into an explicit on or off, so an OK that
+  arrives late, or twice, repeats what the viewer meant instead of inverting it. It never learns
+  what a row does and never sends a service call. A slider moves on the receiver until OK, a selector lists its options, an
   input field opens the image's keyboard, and EXIT - or, for a slider, leaving its row - discards;
   OK on the value a row already has sends nothing. After OK a row shows a pending mark
   until Home Assistant changes it, or for five seconds. Without the broker, or with Home
@@ -168,6 +170,17 @@ version that has no section here.
 
 ### Changed
 
+- A save on the receiver's setup screen or the OpenWebif page reconnects to the broker only when
+  it changed the connection - `host`, `port`, `tls`, `ca_file`, `username`, `password`,
+  `node_id`, `base_topic` - or switched the plugin off or on. Every save used to end the MQTT
+  session and open a new one, a few seconds with the Home Assistant menu greyed, also for the
+  menu's transparency or its key. Every other setting is now applied under the open session, the
+  way `cmd/config` applies its own: the publishers that read it are restarted, the menu's
+  subscriptions, hotkey and Extensions entry follow `menu_allowed`, and `info`, the announcement
+  and the discovery payloads are published again; what is no longer published is retracted as at
+  a connect. A save that changes nothing publishes nothing. The page says "Settings saved." for
+  such a save and that the bridge is reconnecting only when it is
+  ([SETUP.md](docs/SETUP.md#settings)).
 - An EPG grid too big for one packet is cut instead of withheld. When the packet of an
   `epg_grid/<bouquet_slug>` would be over the bound, the plugin publishes that bouquet's grid
   with the largest number of events per channel that fits, from `epg_grid_events` down to 1,
@@ -333,9 +346,9 @@ version that has no section here.
   that landed in the few seconds the softcam's ECM file is gone - for instance when a
   descrambled stream to a stream client ends - published `active`, `system` and `ecm_ms` as
   `null` until the next poll. While the file is absent, the last fresh result is now published
-  again until 15 seconds have passed since that ECM was written, and `null` after that, as
-  before; a zap, a free-to-air service or a file that is there but stale or unreadable ends it at
-  once. Only the parsed `system` and `ecm_ms` are kept between polls, never the file's text.
+  again until 30 seconds have passed since that ECM was written - one gap was measured longer
+  than 15 - and `null` after that, as before; a zap, a free-to-air service or a file that is
+  there but older than 15 seconds or unreadable ends it at once. Only the parsed `system` and `ecm_ms` are kept between polls, never the file's text.
   [TOPICS.md](docs/TOPICS.md) now also says that while the receiver descrambles another
   encrypted channel as well, `system` and `ecm_ms` can describe that channel rather than the one
   on the television.

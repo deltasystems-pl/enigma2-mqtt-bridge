@@ -448,6 +448,20 @@ class MqttClient:
         LOG.info("subscribed (qos %d)", qos)
         return result
 
+    def unsubscribe(self, topic):
+        """Drop one subscription of the open session: a settings save that took a topic away."""
+        client = self._client
+        if client is None:
+            LOG.debug("no session; not unsubscribing")
+            return None
+        try:
+            result = client.unsubscribe(topic)
+        except Exception:
+            LOG.exception("unsubscribing failed")
+            return None
+        LOG.info("unsubscribed")
+        return result
+
     @staticmethod
     def wait_for(info, timeout=1.0):
         """Give a publish a bounded chance to reach the socket. Shutdown only."""

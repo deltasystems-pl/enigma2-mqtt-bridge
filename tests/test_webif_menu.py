@@ -324,13 +324,18 @@ def test_a_subpage_save_keeps_the_other_settings_of_the_bridges_own_section(
     assert settings.menu_transparency.value == 20
 
 
-def test_switching_the_menu_off_on_the_subpage_reconnects(world, factory, settings):
+def test_switching_the_menu_off_on_the_subpage_needs_no_reconnect(world, factory, settings):
     clients = len(factory.clients)
-    request, _body = post_menu(world, new_session(),
-                               menu_settings(world.bridge.settings, menu_allowed=False))
+    request, body = post_menu(world, new_session(),
+                              menu_settings(world.bridge.settings, menu_allowed=False))
     assert request.response_code == 200
+    assert b"Settings saved." in body and b"reconnecting" not in body
     assert settings.menu_allowed.saved_value is False
-    assert len(factory.clients) == clients + 1
+    assert len(factory.clients) == clients
+    assert world.bridge.publisher("menu") is None
+    assert "menu" not in world.info()["capabilities"]
+    assert world.info()["menu"] is None
+    assert "enigma2mqtt/menu/vuuno4kse_005301" in world.client.unsubscriptions
 
 
 def test_the_subpage_form_replaces_the_token_like_the_main_form(world):

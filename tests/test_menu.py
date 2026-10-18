@@ -762,6 +762,52 @@ def test_a_toggle_sends_toggle_and_shows_the_pending_mark_until_the_value_change
     assert row["state"] == "off" and row["colour"] == "red"
 
 
+@pytest.mark.parametrize("shown, state", [(True, "on"), (False, "off"), (None, None)],
+                         ids=["on", "off", "no-state"])
+def test_a_toggle_says_the_state_the_row_showed(world, shown, state):
+    """`seen` is the row's `value` as the last menu applied gave it: true, false or null."""
+    world.send_menu(changed(world.menu, "r_lamp", value=shown, state=state))
+    world.open()
+    world.ok("g_salon")
+    world.ok("r_lamp")
+    (action,) = world.actions()
+    assert set(action) == {"id", "rev", "row", "action", "seen", "ts"}
+    assert action["action"] == "toggle" and action["row"] == "r_lamp"
+    assert action["seen"] is shown
+    assert action["rev"] == world.menu["rev"]
+
+
+def test_a_second_ok_while_the_mark_is_pending_says_the_same_state(world):
+    """A repeated OK repeats the intent: nothing new was drawn for the row in between."""
+    world.open()
+    world.ok("g_salon")
+    world.ok("r_lamp")
+    assert world.view()["r_lamp"]["pending"]
+    world.ok("r_lamp")
+    first, second = world.actions()
+    assert first["seen"] is True and second["seen"] is True
+    world.send_menu(changed(world.menu, "r_lamp", value=False, state="off", color="red"))
+    world.ok("r_lamp")
+    assert world.actions()[-1]["seen"] is False
+
+
+def test_the_state_seen_rides_on_a_toggle_only(world):
+    world.open()
+    world.ok("r_movie")
+    world.ok("r_note")
+    world.session.current_dialog.close("bread")
+    MainLoop.advance(0)
+    world.ok("g_salon")
+    world.ok("r_mode")
+    world.ok("oauto")
+    world.select("r_blind")
+    world.screen.key_right()
+    world.ok("r_blind")
+    actions = world.actions()
+    assert [action["action"] for action in actions] == ["press", "set", "set", "set"]
+    assert all("seen" not in action for action in actions)
+
+
 def test_a_pending_mark_ends_after_five_seconds_and_the_footer_says_so(world, monkeypatch):
     clock = [100.0]
     monkeypatch.setattr(world.publisher, "clock", lambda: clock[0])

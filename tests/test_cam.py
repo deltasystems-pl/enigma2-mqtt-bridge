@@ -3,6 +3,8 @@
 import os
 import time
 
+import pytest
+
 from MQTTBridge import cam
 from MQTTBridge.cam import MAX_BYTES, read_cam
 
@@ -179,12 +181,58 @@ def test_a_kept_reading_ends_when_it_is_no_longer_fresh(
     found._poll.timer.fire()
     assert factory.client.last(CAM).json()["active"] is True
 
-    # Ten seconds on, the ECM is twenty seconds old: the old answer.
+    # Ten seconds on, the ECM is twenty seconds old - past the freshness of a file that is
+    # there, inside the hold of one that is absent: still held.
     monkeypatch.setattr(cam, "time", SteppedClock(10))
+    found._poll.timer.fire()
+    assert factory.client.last(CAM).json()["active"] is True
+    # Twenty-one seconds on it is thirty-one seconds old: the old answer.
+    monkeypatch.setattr(cam, "time", SteppedClock(21))
     found._poll.timer.fire()
     assert factory.client.last(CAM).json() == {
         "system": None, "active": None, "encrypted": True, "ecm_ms": None,
     }
+
+
+WRITTEN_AT = 1792050000.0
+
+
+@pytest.mark.parametrize("age, active", [
+    (14.9, True), (15.0, True), (15.1, True), (29.9, True), (30.0, True), (30.1, None),
+])
+def test_an_absent_file_holds_the_reading_for_thirty_seconds_after_its_ecm(
+    receiver, tmp_path, age, active
+):
+    receiver.info.encrypted = True
+    path = str(tmp_path / "ecm.info")
+    held = ("Nagra", 123, WRITTEN_AT)
+    payload, reading = cam.cam_state(receiver.session, path, held=held, now=WRITTEN_AT + age)
+    assert payload["active"] is active
+    assert reading == (held if active else None)
+    assert payload["ecm_ms"] == (123 if active else None)
+
+
+@pytest.mark.parametrize("age, active", [
+    (14.9, True), (15.0, True), (15.1, None), (29.9, None), (30.0, None), (30.1, None),
+])
+def test_a_file_that_is_there_is_fresh_for_fifteen_seconds_held_or_not(
+    receiver, tmp_path, age, active
+):
+    receiver.info.encrypted = True
+    path = tmp_path / "ecm.info"
+    write_ecm(path)
+    os.utime(path, (WRITTEN_AT, WRITTEN_AT))
+    held = ("Nagra", 123, WRITTEN_AT)
+    for kept in (None, held):
+        payload, reading = cam.cam_state(receiver.session, str(path), held=kept,
+                                         now=WRITTEN_AT + age)
+        assert payload["active"] is active
+        assert reading == (held if active else None)
+
+
+def test_the_two_bounds_are_the_documented_ones():
+    assert cam.FRESH_SECONDS == 15
+    assert cam.ABSENT_HOLD_SECONDS == 30
 
 
 def test_a_zap_ends_a_kept_reading(

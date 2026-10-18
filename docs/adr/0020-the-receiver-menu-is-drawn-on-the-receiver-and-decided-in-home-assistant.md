@@ -119,3 +119,17 @@ offers, so it is writable by `cmd/config` and set on the receiver's settings scr
 "Home Assistant menu" section, last, with the other two - and on the OpenWebif page's Menu subpage. Whether an image's
 frame buffer blends the alpha over live television is the hardware's to show; a skin can restyle
 the screen by its name, `MQTTBridgeList` (TROUBLESHOOTING.md).
+
+## Note, 2026-10-18 - a toggle says what the viewer saw
+
+*Decisions 1 and 4 stand; this adds one member to a toggle's `menu_action`.* A silent network
+stall shorter than the MQTT keepalive keeps the session open and the menu ungreyed, and an OK
+pressed during it waits in the socket and reaches Home Assistant seconds late. A plain `toggle`
+then inverts whatever the entity is at arrival - which, after another OK in between, is the
+opposite of what the viewer meant. Refusing an older `rev` is not the answer: a state change in
+between must not make the remote dead. So the receiver says what it showed: `seen`, the row's
+`value` from the last menu it applied (`true`, `false`, or `null` for no state), on `toggle` only.
+The integration turns it into the explicit opposite and does nothing when the entity is already
+there, so a late or repeated OK repeats the intent. The receiver still compares `value`s, never
+`rev`, and the pending mark is unchanged. `seen` is optional on the wire; without it the
+integration toggles as before (TOPICS.md, `menu_action`).

@@ -50,6 +50,15 @@ and settings survive a plugin upgrade.
 The setup screen shows the three menu settings last, under the heading **Home Assistant menu**; the OpenWebif page
 has them on its own [Menu page](#the-menu-page-and-the-menu-creator).
 
+**Saving reconnects only for the connection.** A save on the setup screen or the OpenWebif page
+that changes `enabled`, `host`, `port`, `tls`, `ca_file`, `username`, `password`, `node_id` or
+`base_topic` ends the MQTT session and opens a new one, which takes a few seconds; the Home
+Assistant menu is greyed meanwhile. Every other setting is applied at once under the open
+session - as `cmd/config` applies its own - and `info`, the announcement and the discovery payloads
+are published again with it: the menu stays usable, and Home Assistant sees no reconnect. A save
+that changes nothing publishes nothing. With the broker unreachable at that moment, the change is
+applied on the receiver and published by the next connect.
+
 🔴 **`deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`,
 `uninstall_allowed`, `update_check`, `update_allowed` and `menu_allowed` are never writable over
 MQTT.** They are
@@ -407,8 +416,10 @@ password, and clearing one is done on the setup screen. Every text value refuses
 and line breaks - enigma2's settings file has no escaping, so a line break would plant a second
 setting. A change to the node id, the base topic or the discovery prefix asks for a confirmation
 first, because every retained topic moves and Home Assistant sees a new device. A change inside
-`cmd/config`'s subset applies at once; any other change saves and reconnects, which can take a few
-seconds, and `info` follows when it has. Only the fields you actually changed are saved: the form
+`cmd/config`'s subset applies at once, and so does every other change that leaves the connection
+as it was; a change to the connection - see [Saving reconnects only for the
+connection](#settings) - saves and reconnects, which can take a few seconds, and `info` follows
+when it has. Only the fields you actually changed are saved: the form
 remembers what it showed, so a page left open while a setting was changed elsewhere - over
 `cmd/config`, or a permission switched off at the television - does not write its old value back.
 Only the changed fields are checked, too, so a value stored before these rules (a longer host, say)

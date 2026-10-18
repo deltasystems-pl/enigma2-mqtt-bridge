@@ -164,7 +164,7 @@ not by the checker; their types are the tables below.
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
 | 0.3.0 -> 0.4.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3); the read-only setting `update_allowed`, the capability `self_update`, the command `update`, `update.transaction` and the subscription to `enigma2mqtt/integration/<node>` (§3); the event topic `relay_request` and the command `relay`, and `cmd/update`'s refusal `no_relay`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
-| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4); a command's id - the envelope every command takes on the broker, the `last_error` member `id` and the capability `command_id` (sections 1 and 2); the `service` members `video_codec`, `interlaced`, `frame_rate` and `audio_tracks` and the capability `service_codecs`; the topics `stream` and `stream_clients`, the event topic `stream_playable`, the commands `stream_stop` and `stream_playable` and the capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable`; the `volume` member `passthrough` and the capability `volume_passthrough`; the receiver menu - the subscriptions to `enigma2mqtt/menu/<node>` and `<ha_discovery_prefix>/status` (§3), the event topic `menu_action`, the `info` member `menu`, the read-only setting `menu_allowed`, the writable setting `menu_hotkey` and the capability `menu`; the writable setting `menu_transparency`, and `cmd/config` taking any part of its keys, every key left out keeping its value; the menu creator - the subscriptions to `enigma2mqtt/menu_catalogue/<node>` and `enigma2mqtt/menu_edit_result/<node>` (§3), the event topic `menu_edit` and the capability `menu_editor`. **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
+| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4); a command's id - the envelope every command takes on the broker, the `last_error` member `id` and the capability `command_id` (sections 1 and 2); the `service` members `video_codec`, `interlaced`, `frame_rate` and `audio_tracks` and the capability `service_codecs`; the topics `stream` and `stream_clients`, the event topic `stream_playable`, the commands `stream_stop` and `stream_playable` and the capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable`; the `volume` member `passthrough` and the capability `volume_passthrough`; the receiver menu - the subscriptions to `enigma2mqtt/menu/<node>` and `<ha_discovery_prefix>/status` (§3), the event topic `menu_action` with its member `seen` on a `toggle`, the `info` member `menu`, the read-only setting `menu_allowed`, the writable setting `menu_hotkey` and the capability `menu`; the writable setting `menu_transparency`, and `cmd/config` taking any part of its keys, every key left out keeping its value; the menu creator - the subscriptions to `enigma2mqtt/menu_catalogue/<node>` and `enigma2mqtt/menu_edit_result/<node>` (§3), the event topic `menu_edit` and the capability `menu_editor`. **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
 
 ---
 
@@ -176,11 +176,13 @@ Retained, QoS 0. **Not JSON** - the literal string `online` or `offline`.
 
 `offline` is registered as the connection's last will, so the broker publishes it when the box
 vanishes without saying goodbye. The plugin publishes `online` in `on_connect` and a clean
-`offline` on a graceful shutdown. A settings save restarts the session with a clean disconnect,
-which discards the will; when the save changed the connection - broker address or port, login,
-TLS - or switched the plugin off, the old session publishes `offline` first, so it stays retained
-until the new session connects, and for good if it never does. Any other save reconnects without
-an `offline`. A rename of the node id or the base topic publishes none either: every retained topic
+`offline` on a graceful shutdown. A settings save on the receiver restarts the session only when
+it changed the connection - broker address or port, login, TLS, the CA file, the node id or the
+base topic - or switched the plugin off or on; every other save is applied under the open session,
+with no reconnect and nothing on this topic. A restart is a clean disconnect, which discards the
+will; when the save changed how the box reaches the broker or switched the plugin off, the old
+session publishes `offline` first, so it stays retained until the new session connects, and for
+good if it never does. A rename of the node id or the base topic publishes none: every retained topic
 under the old name, `availability` included, is retracted, and the new name's `availability` is
 published only by the new session. `cmd/uninstall` ends on `offline` too, published at QoS 1 as the
 node's last message, after every other retained topic of the node has been emptied - which is what
@@ -260,9 +262,9 @@ writable over MQTT - it is set on the receiver (the setup screen, the provisioni
 OpenWebif page, which is exactly as open as the receiver's web interface; see
 [ADR-0009](adr/0009-the-openwebif-page-trusts-openwebif.md)); one that **tunes a command already
 permitted** may be remote. A member of this table exists so a consumer can **hide what the box will
-refuse** rather than offering a control that always fails. `info` is republished when it changes,
-because saving the setup screen or the OpenWebif page reconnects the bridge and a connect publishes
-the snapshot.
+refuse** rather than offering a control that always fails. `info` is republished when it changes:
+a save on the setup screen or the OpenWebif page publishes it again under the open session, or -
+when the save changed the connection - the new session's connect publishes it with the snapshot.
 
 A command run from the OpenWebif page does not need these permissions: the page runs the same
 handler with the origin `page`, and anybody OpenWebif admits could grant the permission through
@@ -799,7 +801,8 @@ its list was first found different from the walk before. A walk that finds the b
 keeps the stamp, and so does a reconnect, which sends every topic again with the stamp it had -
 unlike `channels`, whose `generated` is the time of the last walk. The stamps are kept in memory
 only. **A start of the plugin - a restart of the interface, a reboot - or a save of its settings
-begins them anew**: every bouquet is then stamped with the first walk of that run, and the connect
+that reconnects begins them anew** (a save that changes no connection setting keeps them): every
+bouquet is then stamped with the first walk of that run, and the connect
 that follows publishes that, whether or not anything was edited. So a `generated` that moves is
 not proof of an edit; one that stays is proof of none since it was set.
 
@@ -1028,8 +1031,9 @@ something the plugin can change:
   where to put the file. If that mount is a network share that has stopped answering, pressing the
   button can freeze the picture until the mount gives up - as the importer's scheduled run would.
 
-A settings save on the receiver while an import runs restarts the bridge, and the new session
-reports `started` as the moment it first saw the import.
+A settings save on the receiver that changes the connection while an import runs restarts the
+bridge, and the new session reports `started` as the moment it first saw the import; any other
+save leaves the import's `started` as it was.
 
 **The power commands wait for an import, but not for ever.** Deep standby, reboot and the
 interface restart are refused while an import runs, because a restart mid-import loses the run.
@@ -1352,8 +1356,9 @@ also descrambles another encrypted channel - a stream to a client, for example -
 
 The softcam removes the file for a few seconds now and then while it is still decoding, for example
 when a descrambled stream to a client ends. While the file is absent, the last fresh result - its
-`system` and `ecm_ms`, with `active: true` - is published until 15 seconds have passed since that
-ECM was written, and `null` after that, as before. A zap ends it at once, and so does a poll that
+`system` and `ecm_ms`, with `active: true` - is published until 30 seconds have passed since that
+ECM was written, and `null` after that, as before. A file that is there counts for 15 seconds
+after its ECM, as before. A zap ends it at once, and so does a poll that
 finds the service free-to-air or cannot tell whether it is encrypted, or finds the file there but
 stale, unreadable or replaced by a link. Changed after 0.4.0
 (unreleased): until then an absent file was `null` at once.
@@ -1556,6 +1561,10 @@ action ([ADR-0020](adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decid
 {"id": "3f9c2e4a1b7d", "rev": 42, "row": "r_blind", "action": "set", "value": 60, "ts": 1792050000}
 ```
 
+```json
+{"id": "3f9c2e4a1b7d", "rev": 42, "row": "r_lamp", "action": "toggle", "seen": false, "ts": 1792050000}
+```
+
 | Field | Type | Meaning |
 |---|---|---|
 | `id` | string | Twelve lowercase hexadecimal digits, new for every action - for logs and to tell a repeat |
@@ -1563,7 +1572,27 @@ action ([ADR-0020](adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decid
 | `row` | string | The row's `id` |
 | `action` | string | `press` for a `button`, `toggle` for a `toggle`, `set` for a `selector`, a `slider` and an `input` |
 | `value` | string or number | `set` only, absent otherwise: the option chosen, exactly as the menu listed it; the slider's value, `min` plus a whole number of `step`s, an integer when `min` and `step` are; the text typed, cut at the row's `max_length` |
+| `seen` | `true`, `false` or `null` | `toggle` only, absent otherwise: the `value` the row showed when the viewer pressed OK - the value drawn on the screen at that moment, which is the `value` of the last menu payload the receiver applied for that row. `null` when the row showed no state. Never sent with another action |
 | `ts` | int | When, in epoch seconds by the receiver's clock. The companion integration refuses an action older than 120 s |
+
+**What Home Assistant does with a `toggle`.** It finds and checks the row exactly as for any action
+- its own configuration, the row's type, availability, the 120 s age - and then acts on the state
+the viewer saw rather than on the state the entity has when the message arrives, so an OK that
+arrives late, or twice, repeats what the viewer meant and never inverts it:
+
+| `seen` | light, switch, input_boolean, fan | cover | lock |
+|---|---|---|---|
+| `false` | `turn_on` - unless the entity is already on | `open_cover` - unless already open | `lock` - unless already locked |
+| `true` | `turn_off` - unless already off | `close_cover` - unless already closed | `unlock` - unless already unlocked |
+| `null` or absent | `toggle`, unchanged | unchanged: by the state at arrival, refused `state_unknown` when it has none | unchanged |
+
+"Already" is judged by the same reading of the state that builds the row's `value` - a cover is
+"open" exactly when its row would show `true`. An action whose target is already met calls nothing,
+logs one debug line, and publishes the menu again, so the receiver redraws the row from the current
+state. A `seen` of another type, or a `seen` on another action, is refused as malformed: one line
+in the integration's log, and no action. `seen` is optional on the wire, so a development build that
+does not send it gets the behaviour of the `null` row. The receiver still compares `value`s, never
+`rev`.
 
 **Never sent** for an `indicator`, for a row with `available: false`, while the menu is greyed
 (no broker connection, or Home Assistant's status `offline`), with `menu_allowed` off, for a row
@@ -2685,7 +2714,8 @@ soft hyphen); an option is still sent back exactly as listed.
 under Apache-2.0 ([NOTICE](../NOTICE)).
 
 **What the viewer can do.** OK on a group opens its rows, and EXIT goes back; EXIT on the top
-list closes the menu. OK on a `button` sends `press`, on a `toggle` `toggle`. OK on a `selector`
+list closes the menu. OK on a `button` sends `press`, on a `toggle` `toggle` with the state the row
+showed (`seen`, [section 1](#basenodemenu_action---added-after-040-unreleased)). OK on a `selector`
 lists its options: OK sends the one chosen as `set`, EXIT discards. On a `slider`, LEFT and RIGHT
 move a value on the receiver by `step` within `min` and `max`, shown and not sent; OK sends it as
 `set`, EXIT discards it. OK on an `input` opens the image's keyboard with `value` in it: OK sends
