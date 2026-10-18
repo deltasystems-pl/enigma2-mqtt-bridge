@@ -1531,3 +1531,54 @@ def test_without_a_connection_the_silent_refusal_is_not_handed_to_the_client(wor
     finally:
         updater.closed = False
         updater.silent = False
+
+
+# ------------------------------------------------- a Save on the receiver while a list is open --
+
+
+def _live_settings():
+    from test_save_applies_live import LIVE
+
+    return LIVE
+
+
+@pytest.mark.parametrize("name", _live_settings())
+def test_a_save_that_does_not_reconnect_leaves_the_list_open(world, name):
+    """A Save is applied under the open session: the list on the screen is not touched."""
+    from test_save_applies_live import other_value
+
+    from MQTTBridge import config as settings_module
+
+    screen = world.show()
+    client = world.client
+    current = settings_module.value(name, world.bridge.settings)
+    getattr(world.bridge.settings, name).value = other_value(name, current)
+
+    assert world.bridge.apply_saved_settings() is False
+    assert world.answers() == []
+    assert world.screen is screen
+    # Answered as usual, on the same session.
+    screen.key_cancel()
+    assert world.endings() == [("dismissed", None)]
+    assert world.client is client
+
+
+def test_a_live_save_of_the_menus_transparency_leaves_the_list_open(world):
+    screen = world.show()
+    world.bridge.settings.menu_transparency.value = 60
+    assert world.bridge.apply_saved_settings() is False
+    assert world.screen is screen and world.answers() == []
+    world.select("open")
+    screen.key_ok()
+    assert world.endings() == [("picked", "open")]
+
+
+def test_a_save_that_reconnects_closes_the_list_on_the_session_that_ends(world):
+    old = world.client
+    world.show()
+    world.bridge.settings.host.value = "10.0.0.6"
+    assert world.bridge.apply_saved_settings() is True
+    assert [entry.json()["ending"] for entry in old.all_for(ANSWER)] == ["closed"]
+    # Before the old session says `offline` and lets go.
+    topics = [entry.topic for entry in old.published]
+    assert topics.index(ANSWER) < topics.index(AVAILABILITY, topics.index(ANSWER))

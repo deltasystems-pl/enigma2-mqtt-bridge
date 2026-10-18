@@ -105,7 +105,7 @@ class Publisher:
     def before_stop(self):
         """The plugin is about to stop, and its session is still up: say now what must be said.
 
-        `stop` may run when the session is already gone - a settings save stops the client
+        `stop` may run when the session is already gone - a save that reconnects stops the client
         first, the uninstall closes its doors first. An area that owes a consumer a message
         when it stops, as a list of choices owes its answer, sends it here.
         """

@@ -1680,7 +1680,7 @@ put on the television after all, one late refusal on `last_error` instead** (`no
 | Field | Type | Meaning |
 |---|---|---|
 | `id` | string, optional | The id the command carried in its envelope (section 2), exactly as it was sent. **Absent**, not `null`, when it carried none or one the plugin could not use: such a list is shown and answered all the same |
-| `ending` | string | `picked` - OK on a row, or the row's own key; `timeout` - the list's `timeout` ran out; `dismissed` - EXIT; `replaced` - a newer `cmd/list` arrived while this one was on the screen or waiting for it; `closed` - the receiver went to standby, the plugin stopped (an interface restart, a shutdown, a settings save, an update, the plugin being removed) or something else closed the screen. An open enumeration |
+| `ending` | string | `picked` - OK on a row, or the row's own key; `timeout` - the list's `timeout` ran out; `dismissed` - EXIT; `replaced` - a newer `cmd/list` arrived while this one was on the screen or waiting for it; `closed` - the receiver went to standby, the plugin stopped (an interface restart, a shutdown, a settings save that reconnects, an update, the plugin being removed) or something else closed the screen. An open enumeration |
 | `row` | string or null | `picked`: the `id` of the row picked. `timeout`: the `id` of the list's `default` row, or `null` when it has none - so a timeout is never mistaken for a press. Every other ending: `null` |
 | `ts` | int | When the list ended, in epoch seconds by the receiver's clock |
 
@@ -2560,7 +2560,7 @@ put on the television after all, one late refusal (below):
 | `timeout` | `timeout` seconds after it was shown | the `default` row's `id`, or `null` without one: a timeout is never mistaken for a press |
 | `dismissed` | EXIT | `null` |
 | `replaced` | A newer `cmd/list` arrived: the open list is answered first, and the new one is shown once the old screen has gone. A newer list that is refused leaves the open one alone | `null` |
-| `closed` | The receiver went to standby; the plugin stopped - an interface restart, a shutdown, a settings save, an update closing its doors, the plugin being removed; or something else closed the screen. Published only while the session is up at that moment, and never later | `null` |
+| `closed` | The receiver went to standby; the plugin stopped - an interface restart, a shutdown, a settings save that reconnects, an update closing its doors, the plugin being removed; or something else closed the screen. A save applied under the open session - every setting but the connection's and `enabled` - leaves the list on the screen. Published only while the session is up at that moment, and never later | `null` |
 
 The first way to end wins: a timeout and an OK in the same instant, an EXIT on a list that was just
 replaced, a pick on a list closed for standby - the later one finds the list answered and does

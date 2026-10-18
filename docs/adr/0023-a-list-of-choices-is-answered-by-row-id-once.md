@@ -50,9 +50,10 @@ Three things are true of the path between them, as they are for the receiver men
    session only, and taken out of the MQTT client's queue when the broker had not acknowledged it
    as the connection went - by the main loop when it hears of it, and by the client itself as the
    broker accepts the next connection, exactly as a `menu_action`. A pick made without a broker is
-   lost, and its sender's wait ends with no answer. `closed` is said while the session is still up
-   - before `offline` on a stop, on the old session on a settings save, before the uninstall
-   closes its doors - and never later.
+   lost, and its sender's wait ends with no answer. `closed` is said while the session is still
+   up: before `offline` on a stop, on the old session on a settings save that reconnects, before
+   the uninstall closes its doors - and never later. A save applied under the open session
+   leaves the list alone.
 5. **A list always has a timeout**: 60 seconds unless the sender says 5 to 600. A question left on
    the television until somebody happens to press EXIT would answer, much later, a question
    nobody is waiting for any more.
