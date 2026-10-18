@@ -99,9 +99,12 @@ TEXT_SELECTED = 0xFFFFFF
 DIM = 0x7A8894
 DIM_SELECTED = 0xB8C2CA
 PENDING = 0xE6B422
-STATE_COLOURS = {"green": 0x4CAF50, "red": 0xE5534B}
+STATE_COLOURS = {"green": 0x4CAF50, "red": 0xE5534B,
+                 # The two other colour keys, for a list of choices (`choicelist.py`).
+                 "yellow": 0xE8C547, "blue": 0x4C8FE0}
 # On the selection bar a plain green or red is hard to read: lighter ones.
-STATE_COLOURS_SELECTED = {"green": 0x9BE59F, "red": 0xFF9A94}
+STATE_COLOURS_SELECTED = {"green": 0x9BE59F, "red": 0xFF9A94,
+                          "yellow": 0xFFE58F, "blue": 0x9CC4FF}
 
 _screen_class = None
 
@@ -278,7 +281,8 @@ def build_row(row, shape, load, names):
     """One list entry: `[id, icon?, label, state?]`, in the image's multi-content form.
 
     `load(icon name)` gives the pixmap; `names` holds what `enigma` and `Components.MultiContent`
-    offer, looked up once per screen.
+    offer, looked up once per screen. A row with `icon_space` and no icon keeps the icon's room
+    empty, so that its label lines up with those of the rows that have one.
     """
     multicontent = names["multicontent"]
     text_entry = multicontent.MultiContentEntryText
@@ -293,6 +297,8 @@ def build_row(row, shape, load, names):
         if made is not None:
             entry.append(made)
         x += size + pad // 2
+    elif row.get("icon_space"):
+        x += shape["icon"] + pad // 2
     state = row.get("state") or ""
     state_width = shape["state_width"] if state else 0
     label_width = max(1, shape["inner"] - x - state_width - pad // 2)

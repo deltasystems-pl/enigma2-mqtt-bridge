@@ -946,6 +946,8 @@ class Bridge:
                 # starts says `online`.
                 LOG.info("not publishing offline: an update has retracted this node's topics")
             elif self.client.connected:
+                # A list of choices answers `closed` before the `offline`.
+                self.close_open_screens()
                 # A change to `not_published` that was still waiting to be
                 # said: the `info` left retained must not be the one before it.
                 # Guarded by itself, because what follows is the `offline` and
@@ -1025,6 +1027,8 @@ class Bridge:
         try:
             self._stop_timers()
             if self.connected:
+                # A list of choices answers `closed` on the session that is ending.
+                self.close_open_screens()
                 if self._will_topic == self.topic("availability"):
                     # What `stop` does, and for its reason: the new session may
                     # never connect. Not on a rename - the settings already
@@ -1339,6 +1343,7 @@ class Bridge:
         if menu is not None:
             menu.subscribe(self.client)
             menu.connection_changed()
+        self._lists_connection_changed()
         self.state.save()
         if self._pending_error is not None:
             # Said once, so only a publish the client took counts as said: a
@@ -1375,6 +1380,29 @@ class Bridge:
         menu = self.publisher("menu")
         if menu is not None:
             menu.connection_changed()
+        # A list's answer the broker had not taken is never sent after the reconnect.
+        self._lists_connection_changed()
+
+    def _lists_connection_changed(self):
+        lists = self.publisher("list")
+        if lists is not None:
+            lists.connection_changed()
+
+    def close_open_screens(self):
+        """Before the session goes: a screen that owes Home Assistant an answer gives it now.
+
+        A list of choices on the television answers `closed` when the plugin stops
+        (`choicelist.py`), and only an open session can carry that. `stop`, `reload` and the
+        uninstall ask for it while theirs is still up; every publisher stops later anyway.
+        """
+        for publisher in list(self._publishers):
+            closing = getattr(publisher, "before_stop", None)
+            if closing is None:
+                continue
+            try:
+                closing()
+            except Exception:
+                LOG.exception("the %s publisher could not close its screens", publisher.name)
 
     # ----------------------------------------------------------------- publishing --
 
@@ -1754,7 +1782,7 @@ class Bridge:
         """`info` as it stands now. It reads and records nothing (`publish_info`)."""
         build = self.build_report()
         not_published = self.not_published()
-        return {
+        info = {
             "image": boxinfo.image_version(),
             "enigma": boxinfo.enigma_version(),
             "plugin": __version__,
@@ -1776,6 +1804,21 @@ class Bridge:
             # too big for, which are therefore not on the broker (`_withhold`).
             "not_published": not_published,
         }
+        lists = self._list_info()
+        if lists is not None:
+            # Which screen a list of choices is shown with; absent, not null, without `list`.
+            info["list"] = lists
+        return info
+
+    def _list_info(self):
+        lists = self.publisher("list")
+        if lists is None or not lists.claimed():
+            return None
+        try:
+            return lists.info()
+        except Exception:
+            LOG.exception("info.list could not be read")
+            return None
 
     def _menu_info(self):
         menu = self.publisher("menu")

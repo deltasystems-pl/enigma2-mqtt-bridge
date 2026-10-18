@@ -1499,3 +1499,35 @@ msgstr "Edycja menu z odbiornika jest wyłączona w Home Assistant: można ją w
 #: src/MQTTBridge/webif.py
 msgid "Home Assistant refused the save: editing the menu from the receiver is switched off in its integration options."
 msgstr "Home Assistant odrzucił zapis: edycja menu z odbiornika jest wyłączona w opcjach integracji."
+
+#: src/MQTTBridge/choicelist.py
+msgid "From Home Assistant, via MQTT Bridge"
+msgstr "Od Home Assistant, przez MQTT Bridge"
+
+#: src/MQTTBridge/choicelist.py
+msgid "Closes in %d s"
+msgstr "Zamknie się za %d s"
+
+#: src/MQTTBridge/choicelist.py
+msgid "OK or the row's key choose   EXIT dismiss"
+msgstr "OK lub klawisz wiersza wybierz   EXIT zamknij"
+
+#: src/MQTTBridge/choicelist.py
+msgid "OK choose   EXIT dismiss"
+msgstr "OK wybierz   EXIT zamknij"
+
+#: src/MQTTBridge/choicelist.py
+msgid "Red"
+msgstr "Czerwony"
+
+#: src/MQTTBridge/choicelist.py
+msgid "Green"
+msgstr "Zielony"
+
+#: src/MQTTBridge/choicelist.py
+msgid "Yellow"
+msgstr "Żółty"
+
+#: src/MQTTBridge/choicelist.py
+msgid "Blue"
+msgstr "Niebieski"

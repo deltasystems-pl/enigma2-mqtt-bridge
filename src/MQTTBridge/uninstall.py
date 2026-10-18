@@ -408,6 +408,11 @@ class Uninstaller:
             return
         bridge = self.bridge
         self.phase = "retracting"
+        # A list of choices on the television answers `closed` while it still can: an event,
+        # never retained, so nothing for the retraction to take back.
+        closing = getattr(bridge, "close_open_screens", None)
+        if closing is not None:
+            closing()
         # 1. Close the doors, before a single retraction.
         self.closed = True
         bridge._stop_publishers()

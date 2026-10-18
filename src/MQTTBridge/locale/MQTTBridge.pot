@@ -1499,3 +1499,35 @@ msgstr ""
 #: src/MQTTBridge/webif.py
 msgid "Home Assistant refused the save: editing the menu from the receiver is switched off in its integration options."
 msgstr ""
+
+#: src/MQTTBridge/choicelist.py
+msgid "From Home Assistant, via MQTT Bridge"
+msgstr ""
+
+#: src/MQTTBridge/choicelist.py
+msgid "Closes in %d s"
+msgstr ""
+
+#: src/MQTTBridge/choicelist.py
+msgid "OK or the row's key choose   EXIT dismiss"
+msgstr ""
+
+#: src/MQTTBridge/choicelist.py
+msgid "OK choose   EXIT dismiss"
+msgstr ""
+
+#: src/MQTTBridge/choicelist.py
+msgid "Red"
+msgstr ""
+
+#: src/MQTTBridge/choicelist.py
+msgid "Green"
+msgstr ""
+
+#: src/MQTTBridge/choicelist.py
+msgid "Yellow"
+msgstr ""
+
+#: src/MQTTBridge/choicelist.py
+msgid "Blue"
+msgstr ""

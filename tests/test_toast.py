@@ -56,6 +56,12 @@ def dialog(bridge):
     return publisher(bridge)._dialog
 
 
+def toasts(dialogs):
+    """The toast's own screens among the session's. The list of choices builds its screen once
+    on trial and deletes it again, at every start (`choicelist.py`); those are not the toast's."""
+    return [item for item in dialogs if type(item).__name__ == "MQTTBridgeToast"]
+
+
 def window(bridge):
     return dialog(bridge).instance
 
@@ -434,7 +440,11 @@ def test_the_toast_holds_only_labels_and_pixmaps(live_bridge):
     assert all(
         type(widget) in (eWindow, eLabel, ePixmap) for widget in screen.instance.widgets()
     )
-    assert KeyActionMap.getInstance().native == []
+    # Nothing in the toast's window binds a key natively. The list of choices' trial screen,
+    # deleted at once, is not in it: the model keeps a deleted widget's binding, the receiver
+    # does not, as the list's own destructor lets the key go.
+    assert [entry for entry in KeyActionMap.getInstance().native
+            if entry[2] in screen.instance.widgets()] == []
 
 
 def test_the_widget_rule_check_catches_a_list(receiver):
@@ -478,8 +488,9 @@ def test_the_screen_is_only_ever_instantiated_and_deleted(start_bridge, receiver
     bridge.stop()
 
     assert receiver.session.opened == []
-    assert [type(item).__name__ for item in receiver.session.instantiated] == ["MQTTBridgeToast"]
-    assert receiver.session.deleted == [screen]
+    assert [type(item).__name__ for item in toasts(receiver.session.instantiated)] == [
+        "MQTTBridgeToast"]
+    assert toasts(receiver.session.deleted) == [screen]
     assert closed == []
 
 
@@ -532,8 +543,8 @@ def test_a_settings_save_replaces_the_toast_rather_than_adding_one(live_bridge, 
     live_bridge.reload()
     factory.client.fire_connect()
 
-    assert receiver.session.deleted == [first]
-    assert len(receiver.session.instantiated) == 2
+    assert toasts(receiver.session.deleted) == [first]
+    assert len(toasts(receiver.session.instantiated)) == 2
     assert DESKTOP.front_to_back() == []
     send(factory, {"text": "again", "style": "toast"})
     assert len(DESKTOP.front_to_back()) == 1
@@ -595,7 +606,7 @@ def test_a_skin_reload_rebuilds_the_toast_for_the_new_desktop(live_bridge, recei
     DESKTOP.resize(eSize(1280, 720))
     skin.InitSkins(booting=False)
 
-    assert receiver.session.deleted == [first]
+    assert toasts(receiver.session.deleted) == [first]
     assert dialog(live_bridge) is not first
     assert window(live_bridge).position().x() == 1280 - 420 - 12
     assert window(live_bridge).size().width() == 420
@@ -731,10 +742,13 @@ def test_the_setting_off_means_nothing_is_created(start_bridge, receiver, factor
     settings.osd_toast.value = False
     bridge = start_bridge()
 
-    assert receiver.session.instantiated == []
+    assert toasts(receiver.session.instantiated) == []
     assert "toast" not in capabilities(factory)
     assert bridge.publisher("toast") is None
-    assert skin.onLoadCallbacks == []
+    assert not any(
+        getattr(callback, "__self__", None).__class__.__name__ == "ToastPublisher"
+        for callback in skin.onLoadCallbacks
+    )
     assert not any(
         getattr(notifier, "__self__", None).__class__.__name__ == "ToastPublisher"
         for notifier in config.misc.standbyCounter.notifiers

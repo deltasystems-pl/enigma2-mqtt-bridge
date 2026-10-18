@@ -1277,8 +1277,9 @@ def test_every_command_the_dispatcher_knows_has_a_page_action():
     handlers = set(CommandDispatcher(SimpleNamespace()).handlers)
     covered = {action.command for action in webif.actions()}
     # `config` is the settings form itself. `relay` is Home Assistant's answer to the
-    # receiver's own question, nobody's action (`selfupdate.py`).
-    assert handlers == covered | {"config", "relay"}
+    # receiver's own question, nobody's action (`selfupdate.py`). `list` is Home Assistant's
+    # question to the viewer: asked from the page, nobody would be waiting for its answer.
+    assert handlers == covered | {"config", "relay", "list"}
 
 
 def test_the_page_offers_clearing_the_last_error_without_a_question(connected_bridge, factory,

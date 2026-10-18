@@ -26,7 +26,7 @@ def test_a_bridge_with_a_session_registers_every_feature_area(live_bridge):
     assert names == [
         "power", "service", "epg", "tuner", "recording", "timers", "volume", "hdd",
         "process", "channels", "bouquet_context", "zap_history", "epg_grid", "keys",
-        "screenshot", "toast", "menu",
+        "screenshot", "toast", "menu", "list",
     ]
 
 
@@ -44,7 +44,7 @@ def test_capabilities_name_the_areas_that_bound(live_bridge, factory):
         "power", "service", "service_codecs", "epg", "tuner", "recording", "timers", "volume",
         "hdd",
         "process", "channels", "channel_topics", "epg_grid", "keys", "screenshot", "toast",
-        "menu", "message", "command_id",
+        "menu", "list", "message", "command_id",
     ]
     assert live_bridge.publisher("bouquet_context") is not None
     assert live_bridge.publisher("zap_history") is not None
@@ -195,6 +195,7 @@ def test_the_default_registry_is_the_documented_order():
         "softcam",
         "recording", "timers", "volume", "hdd", "process", "channels", "bouquet_context",
         "zap_history", "epg_grid", "epg_import", "keys", "screenshot", "toast", "menu",
+        "list",
     ]
 
 

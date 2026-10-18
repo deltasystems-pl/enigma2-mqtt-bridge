@@ -15,6 +15,7 @@ from .bouquet import BouquetPublisher
 from .cam import CamPublisher
 from .cec import CecPublisher
 from .channels import ChannelsPublisher
+from .choicelist import ListPublisher
 from .epggrid import EpgGridPublisher
 from .epgimport import EpgImportPublisher
 from .hdd import HddPublisher
@@ -56,6 +57,7 @@ PUBLISHER_CLASSES = (
     ScreenPublisher,
     ToastPublisher,
     MenuPublisher,
+    ListPublisher,
 )
 
 

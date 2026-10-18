@@ -1500,3 +1500,35 @@ msgstr "Das Bearbeiten des Menüs vom Receiver aus ist in Home Assistant ausgesc
 #: src/MQTTBridge/webif.py
 msgid "Home Assistant refused the save: editing the menu from the receiver is switched off in its integration options."
 msgstr "Home Assistant hat das Speichern abgelehnt: das Bearbeiten des Menüs vom Receiver aus ist in den Optionen der Integration ausgeschaltet."
+
+#: src/MQTTBridge/choicelist.py
+msgid "From Home Assistant, via MQTT Bridge"
+msgstr "Von Home Assistant, über MQTT Bridge"
+
+#: src/MQTTBridge/choicelist.py
+msgid "Closes in %d s"
+msgstr "Schließt in %d s"
+
+#: src/MQTTBridge/choicelist.py
+msgid "OK or the row's key choose   EXIT dismiss"
+msgstr "OK oder Taste der Zeile auswählen   EXIT schließen"
+
+#: src/MQTTBridge/choicelist.py
+msgid "OK choose   EXIT dismiss"
+msgstr "OK auswählen   EXIT schließen"
+
+#: src/MQTTBridge/choicelist.py
+msgid "Red"
+msgstr "Rot"
+
+#: src/MQTTBridge/choicelist.py
+msgid "Green"
+msgstr "Grün"
+
+#: src/MQTTBridge/choicelist.py
+msgid "Yellow"
+msgstr "Gelb"
+
+#: src/MQTTBridge/choicelist.py
+msgid "Blue"
+msgstr "Blau"
