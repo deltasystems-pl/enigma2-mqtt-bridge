@@ -315,6 +315,41 @@ payloads first, so this should not happen - but it does if the mode was changed 
 the retraction did not reach the broker (see the ACL section). Check `info.ha_mode`, then
 publish to `cmd/ha_mode` with the mode you want; the switch always retracts before it announces.
 
+## A recording is missing from Home Assistant, or the library is late
+
+**It was made, moved or deleted on the receiver.** The library is read when the plugin starts,
+when a recording starts or ends, after a delete from Home Assistant, when a movie location is
+mounted, and when *Refresh recordings* is pressed - and never on a timer, so that the recording
+disk can sleep. A recording deleted, moved or renamed in the receiver's own movie list, through
+OpenWebif or over FTP raises none of those, and Home Assistant sees the change after the next one.
+Press *Refresh recordings*, or send `cmd/recordings_refresh`.
+
+**It is on a network share.** A movie location on NFS or SMB is read only while it is mounted:
+`recordings.locations[].mounted` says whether it is, from `/proc/mounts`. An automounted share is
+unmounted by the receiver when it has been idle, and the library then keeps the recordings it read
+last, with `mounted` `false`, rather than reading the share - which would mount it. The refresh
+reads it anyway. A share that stopped answering holds up only the library's own thread, never the
+picture; the read finishes when the share gives up, and `recordings.read` says when the last one
+did.
+
+**It is in a folder with thousands of recordings.** One folder is one topic, held to the packet
+bound of 1,000,000 bytes: about three thousand recordings. Beyond that the oldest are left out,
+`recordings.locations[].folders[].cut` says how many, and those recordings cannot be played or
+deleted from Home Assistant until the folder is smaller - split it into subfolders on the
+receiver, each of which is a topic of its own. Reading a large library takes a few seconds on the
+receiver; the log says how long: `recording library read: 5000 recording(s) in 1 location(s),
+4.210s (start)`.
+
+**It is a media file, not a recording.** Only `.ts` files, and `.stream` for IPTV, are listed.
+
+**Its channel is in a bouquet Home Assistant hides.** The receiver lists it; the companion
+integration leaves it out of what it shows, as it does in its channel lists.
+
+**A delete is refused.** `last_error.reason` says why: `not_permitted` - `recording_delete_allowed`
+is off; `trash_off` - the receiver's trash is switched off, and a delete is never made for good;
+`recording` or `playing`; `move_failed` - the receiver could not move it into its trash. The
+recording is untouched in every case.
+
 ## A restart lost a recording
 
 `cmd/restart_gui`, `cmd/reboot` and `cmd/deep_standby` are all refused while a recording is
