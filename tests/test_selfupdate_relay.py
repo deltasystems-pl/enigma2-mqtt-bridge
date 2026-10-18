@@ -5,8 +5,7 @@ and takes `cmd/relay` only for the id it is waiting for, within 120 s; anything 
 and dropped. The consent rule (ADR-0015 decision 4): a request that carries a relay never fetches
 from the origin; an install at the television or on the page decides on a fresh word about the
 origin (`update.origin`, ten minutes), and asks for the check's probe first when it has none -
-the explicit action is the consent - while a command over MQTT never probes (review round 1,
-MF1).
+the explicit action is the consent - while a command over MQTT never probes.
 
 The receiver is `test_selfupdate.py`'s; its fixtures and helpers are reused as they are.
 `test_relay_contract.py` feeds the plugin what the companion integration really sends.
@@ -555,7 +554,7 @@ def test_ids_are_not_predictable_from_the_clock(monkeypatch, box, factory):
     assert drawn == [6]
 
 
-# ------------------------------------------ review round 1: looking at the origin (MF1) --
+# ---------------------------------------------------------------- looking at the origin --
 
 PROBE_MS = selfupdate.PROBE_WAIT_SECONDS * 1000
 
@@ -585,7 +584,7 @@ def held_back(monkeypatch):
 @pytest.mark.parametrize("where", [SCREEN, PAGE])
 def test_a_fresh_box_looks_at_the_origin_and_then_asks_home_assistant(where, box, factory,
                                                                       origin):
-    """Scenario A of the review: defaults, no internet, an index Home Assistant relayed."""
+    """Defaults, no internet, an index Home Assistant relayed."""
     origin.answers = False
     bridge = unprobed(offline(box()))
     assert not bridge.value("update_check")
@@ -609,7 +608,7 @@ def test_a_fresh_box_looks_at_the_origin_and_then_asks_home_assistant(where, box
 @pytest.mark.parametrize("age", [None, updatecheck.ORIGIN_FRESH_SECONDS])
 def test_an_old_unreachable_is_looked_at_again_and_the_helper_fetches(age, box, factory, origin,
                                                                        still):
-    """Scenario B of the review: the internet came back since the word was written."""
+    """The internet came back since the word was written."""
     bridge = unprobed(offline(box()), UNREACHABLE, age)
     assert ask(bridge) is None
     assert len(origin.asked) == 1
@@ -678,7 +677,7 @@ def test_a_command_over_mqtt_never_looks_at_the_origin(box, factory, origin):
 @pytest.mark.parametrize("refused", ["standby", "no_space", "rate_limited"])
 def test_a_refused_install_never_looks_at_the_origin(refused, box, factory, origin, receiver,
                                                      monkeypatch):
-    """The last refusals of the table too: the probe comes after all of them (review round 2)."""
+    """The last refusals of the table too: the probe comes after all of them."""
     bridge = unprobed(offline(box()))
     if refused == "standby":
         receiver.enter_standby()
@@ -808,7 +807,7 @@ def test_a_helper_that_could_not_reach_the_origin_makes_the_next_install_ask(
         assert len(directories(bridge.root)) == 2
 
 
-# ----------------------------------------------- review round 1: S1, S2, S3, S4 --
+# ------------------------------------------ the waits, the clock and the answer --
 
 
 @pytest.mark.parametrize("look", ["busy", "relay_wait"])
@@ -943,7 +942,7 @@ def test_an_answer_that_is_not_an_object_is_dropped_by_a_decision(text, box, fac
     assert bridge.self_update.relay_wait() is not None
 
 
-# ------------------------------------------------------------------- review round 2 --
+# --------------------------------- how long the helper's and the probe's word lasts --
 
 
 def ended_as_the_helper_writes_it(bridge, uptime, reason="download", ident="0123456789ab"):
@@ -1000,7 +999,7 @@ def a_download_that_got_no_answer(bridge, factory, reason="download"):
 @pytest.mark.parametrize("reason", ["download", "unreachable"])
 def test_the_helpers_word_outlives_the_limit_its_own_end_starts(reason, box, factory, origin,
                                                                 mono, checker_clock):
-    """D-S1: the next install the limit lets through asks Home Assistant without probing."""
+    """The next install the limit lets through asks Home Assistant without probing."""
     bridge = offline(box(), REACHABLE)
     clocks = Clocks(bridge, mono, checker_clock)
     a_download_that_got_no_answer(bridge, factory, reason)
@@ -1039,7 +1038,7 @@ def test_the_helpers_word_lasts_the_limit_and_ten_minutes_more(age, looks, box, 
 
 @pytest.mark.parametrize(("age", "looks"), [(599, False), (600, True)])
 def test_a_probes_word_lasts_ten_minutes(age, looks, box, factory, origin, still):
-    """D-S4: the window is ten minutes, written out here rather than read from the code."""
+    """The window is ten minutes, written out here rather than read from the code."""
     bridge = unprobed(offline(box()), UNREACHABLE, age)
     assert ask(bridge) is None
     assert len(origin.asked) == (1 if looks else 0)
@@ -1047,7 +1046,7 @@ def test_a_probes_word_lasts_ten_minutes(age, looks, box, factory, origin, still
 
 @pytest.mark.parametrize("status", [500, 404, 301])
 def test_any_answer_at_all_from_the_origin_is_reachable(status, box, factory, origin):
-    """D-S4: only no answer is `unreachable` - an error page is an origin that answers."""
+    """Only no answer is `unreachable` - an error page is an origin that answers."""
     origin.status = status
     bridge = unprobed(offline(box()))
     assert ask(bridge) is None
@@ -1058,7 +1057,7 @@ def test_any_answer_at_all_from_the_origin_is_reachable(status, box, factory, or
 
 
 def test_the_helpers_word_is_on_the_update_topic_at_once(box, factory, origin, monkeypatch):
-    """D-S4: not only once the worker has written it to the check file."""
+    """Not only once the worker has written it to the check file."""
     bridge = offline(box(), REACHABLE)
     assert factory.client.last(test_selfupdate.UPDATE).json()["origin"] == REACHABLE
     jobs = held_back(monkeypatch)
@@ -1071,7 +1070,7 @@ def test_the_helpers_word_is_on_the_update_topic_at_once(box, factory, origin, m
 
 
 def test_the_clock_sentence_says_only_what_the_receiver_knows():
-    """D-S3: an answer with an address this clock calls expired may come from any broker client,
+    """An answer with an address this clock calls expired may come from any broker client,
     so the sentence does not say that Home Assistant answered."""
     assert selfupdate.CLOCK_SKEW == (
         "an answer arrived whose download address had already expired by the receiver's clock; "

@@ -137,7 +137,7 @@ SIGN_STEP_CHANGES = [
                       "print(os.environ[\"INDEX_SIGNING_KEY\"])'\n"),
     (ANCHOR, ANCHOR + "          cat /proc/self/environ\n"),
     (ANCHOR, ANCHOR + "          printf '%s' x > key.b64\n"),
-    # The second review's slice leaks: an indirect expansion, the emptiness test's own error, and
+    # The slice leaks too: an indirect expansion, the emptiness test's own error, and
     # free OpenSSL arguments loading a provider from the artifact directory.
     (ANCHOR, ANCHOR + "          printf -v v '%s' INDEX_SIGNING_KEY\n"
                       "          echo \"${!v:0:22}\"\n"),
@@ -188,7 +188,7 @@ SIGN_JOB_CHANGES = [
      "${{ runner.temp }}\n        env:\n          EXPECTED: ${{ needs.build.outputs.sha256 }}\n"
      "        run: printf '%s  index/releases.json\\n' \"$EXPECTED\" | /usr/bin/sha256sum --check "
      "--strict\n\n", "", "is exactly download, hash, sign, emit - in that order"),
-    # The third review's point: nothing from the repository in the job that holds the key -
+    # Nothing from the repository in the job that holds the key -
     # before the key step or after it, because the runner holds the secret for the whole job.
     _after_emit("      - uses: " + CHECKOUT.split("uses: ")[1].rstrip("\n") + "\n"),
     _after_emit("      - shell: bash\n        run: python3 tools/make-index.py check --index x\n"),
@@ -222,7 +222,7 @@ SIGN_JOB_CHANGES = [
     ("    if: github.ref == 'refs/heads/main'\n    # A fresh",
      "    if: github.ref == 'refs/heads/main' || true\n    # A fresh",
      "must be refused off `main`"),
-    # The fourth review: the job's output, checked as exactly as its steps.
+    # The job's output, checked as exactly as its steps.
     ("      signature: ${{ steps.emit.outputs.signature }}\n",
      "      signature: ${{ steps.hash.outputs.signature }}\n", "its only output is"),
     ("      signature: ${{ steps.emit.outputs.signature }}\n",
@@ -348,7 +348,7 @@ def _new(copy, name, job="", steps="      - run: echo hi\n", on=None):
                         "        run: |\n          if ! python3 tools/make-index.py check --index "
                         "index/releases.json --sha256 \"$EXPECTED\"; then echo skipped; fi\n"),
      "a guard inside a condition can never fail its step"),
-    # The fourth review: precheck's check is a fixed text - the artifact, build's sha256, the
+    # Precheck's check is a fixed text - the artifact, build's sha256, the
     # whole history - not a command that merely appears somewhere in the job.
     (lambda copy: _edit(copy, SIGN, "        run: python3 tools/make-index.py check --index "
                         "index/releases.json --sha256 \"$EXPECTED\"\n",

@@ -427,7 +427,7 @@ def test_a_withdraw_for_an_unacknowledged_retraction_says_so(tmp_path):
 
 @pytest.mark.parametrize("reason", ["standby", "recording", "epg_import"])
 def test_a_withdraw_for_a_household_change_before_the_restart_says_which(reason, tmp_path):
-    """The plugin asks the household's guards again right before the restart (review S2)."""
+    """The plugin asks the household's guards again right before the restart."""
     scene = Scene(tmp_path)
 
     def plugin_withdraws():
@@ -979,7 +979,7 @@ def test_the_forward_path_gives_up_at_its_bound(tmp_path):
     scene.run()
     assert scene.last()["reason"] == "time_limit" and not scene.locked()
     assert scene.opkg_calls() == []
-    # Nothing was changed, so nothing is said to be back (review S1).
+    # Nothing was changed, so nothing is said to be back.
     assert scene.last()["result"] == "failed"
     assert scene.last()["error"] == "the update did not finish within its time limit"
 
@@ -2583,7 +2583,7 @@ def test_an_interruption_at_any_step_of_r2_ends_as_the_unit_would(
     ((404, b""), "reachable"),
 ])
 def test_the_record_says_whether_the_origin_answered_the_download(tmp_path, answer, word):
-    """The plugin keeps "unreachable" as the origin's word (review round 1, MF1); an origin that
+    """The plugin keeps "unreachable" as the origin's word; an origin that
     answered, even with an error, was reachable."""
     scene = Scene(tmp_path)
     url = ORIGIN + scene.entries[0]["filename"]
@@ -2629,7 +2629,7 @@ def test_a_relay_that_does_not_answer_says_nothing_of_the_origin(tmp_path):
     assert scene.box.fetched == []
 
 
-# ------------------------------------ `init 3` that does not get through (review 5) --
+# ----------------------------------------------- `init 3` that does not get through --
 
 
 def init_3_fails_once(scene, monkeypatch, failure):
@@ -2839,7 +2839,7 @@ def test_a_restart_that_lands_late_is_given_only_what_is_left_of_the_forward_pat
     # release for a restart that only came late.
     assert (scene.last()["result"], scene.last()["reason"]) == ("rolled_back", "time_limit")
     # The sentence says what the household needs to know: the update was undone and the
-    # previous version runs again (review S1).
+    # previous version runs again.
     assert scene.last()["error"] == TIME_LIMIT_ROLLED_BACK
     assert scene.status()["record"]["proof"] == "none"
     # The proof window ended with the forward path, not 120 s after the restart.

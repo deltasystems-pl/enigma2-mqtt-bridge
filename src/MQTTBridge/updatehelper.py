@@ -1852,7 +1852,7 @@ class Transaction:
         self.receiver.pause("withdrawn")
         if not self.original_running():
             # A restart happened while the files went back: the new process may have read
-            # either version, so the files and the process are made to agree by R2 (A9).
+            # either version, so the files and the process are made to agree by R2.
             self.restarted_at = self.receiver.clock()
             if restored:
                 return self.rollback(Fail("not_started", previous=self.request["from"]["version"]))

@@ -29,7 +29,7 @@ looks for *any* running `/usr/bin/python3`, and finding one it answers "already 
 starts nothing. Busybox forks twice here, so the helper is in the new session and process group
 but not their leader; nothing relies on leadership, and `-m` writes the helper's own pid.
 
-**The doors (M3).** From the helper's phase `installing` on, the package manager is rewriting
+**The doors.** From the helper's phase `installing` on, the package manager is rewriting
 the files on disk under the running process, and after it they are the new release's while the
 process is still the old one. A module imported for the first time now would be half-written or
 new code in an old process, so every module this path and the closed state use is imported
@@ -116,7 +116,7 @@ receiver's clock calls expired - a clock ahead of Home Assistant's by more than 
 lives - ends the wait with `clock_skew` instead, because "Home Assistant did not answer" would
 send the household looking for the wrong fault. Its sentence says only what the receiver knows:
 an answer came whose address its clock calls expired. It does not say that Home Assistant sent
-it - any broker client may have (review round 2) - and setting a wrong clock is harmless either
+it - any broker client may have - and setting a wrong clock is harmless either
 way. A command over MQTT brings its own address or asks the receiver to fetch, so it never asks
 back.
 
@@ -249,7 +249,7 @@ UNINSTALLING = "the plugin is being removed from the receiver"
 STUCK = ("an update failed and the plugin's previous files could not be put back; install the "
          "plugin again (from Home Assistant: force plugin reinstall)")
 # The same end after a helper that stopped once the package manager had started: nothing put
-# the old files back, and an orphaned package manager may still be writing (review round 2).
+# the old files back, and an orphaned package manager may still be writing.
 STUCK_STOPPED = ("an update stopped part-way, so the plugin's files may not be the running "
                  "version's; install the plugin again (from Home Assistant: force plugin "
                  "reinstall)")
@@ -262,7 +262,7 @@ STUCK_PARTIAL = ("an update failed; the plugin's previous version is back, but n
 # The helper's own reasons for a restore that did not complete; their sentence already names
 # the reinstall, so `last_error` carries it alone.
 RESTORE_REASONS = ("restore_failed", "restore_incomplete")
-# ... and after `not_stopped` (TRANSACTION.md section 7, review round 3): R2 put the previous
+# ... and after `not_stopped` (TRANSACTION.md section 7): R2 put the previous
 # version's files back, but saw no stop and no new interface, so the process reading the end is
 # the one it could not stop - running the code it had over files that are no longer it. The files
 # and opkg's records agree, so the repair is a restart of the interface, not a reinstall.
@@ -271,7 +271,7 @@ STUCK_UNSTOPPED = ("an update was rolled back while the receiver's interface kep
                    "interface")
 UNSTOPPED = "not_stopped"
 # ... and after any end read by a process whose build is not the one on disk (TRANSACTION.md
-# section 7, the build rule, review round 5) when nothing says a rollback is why: a failed
+# section 7, the build rule) when nothing says a rollback is why: a failed
 # launch, a withdrawn update, an `installed` end. Nothing was undone there - the files changed
 # by other means - so this one says only what is true: a process and files of two builds.
 STUCK_OTHER_BUILD = ("the receiver's interface runs a different build of the plugin than the one "
@@ -368,7 +368,7 @@ def public(record):
         else None
     # The reason stays with the transaction: `last_error` carries it too, but the next command
     # that succeeds clears that, and a `rolled_back` means different things by its reason -
-    # `not_started` blames the release, `time_limit` only the clock (review S1).
+    # `not_started` blames the release, `time_limit` only the clock.
     reason = source.get("reason")
     out["reason"] = reason if out["result"] not in (None, "installed") \
         and isinstance(reason, str) and REASON_CODE.fullmatch(reason) else None
@@ -616,14 +616,14 @@ class SelfUpdater:
             self._verdict(marker, "the receiver restarted")
             return
         if self._helper_gone({"directory": directory}):
-            # The helper died with the files perhaps changed, and the interface restarted since
-            # (review S4): the same verdict, from the build that started.
+            # The helper died with the files perhaps changed, and the interface restarted since:
+            # the same verdict, from the build that started.
             self._verdict(marker, "the update helper stopped")
             return
         if marker.get("phase") in ("restarting", "proving"):
             self._confirm_start(directory, ident)
         # `began`: a process that starts while the marker says `rolling_back` was started by
-        # R2 itself, after the files went back, so it runs them (review round 6).
+        # R2 itself, after the files went back, so it runs them.
         self._current = {"id": ident, "directory": directory, "ours": False, "downgrade": False,
                          "launched": self.monotonic(), "finished_seen": None, "asked": True,
                          "deadline": marker.get("deadline"), "began": marker.get("phase")}
@@ -633,7 +633,7 @@ class SelfUpdater:
     def _verdict(self, marker, cause):
         """How a transaction nothing runs any more ended, said by the build running now.
 
-        By version and build commit: a release built again under the same number (spike S1)
+        By version and build commit: a release built again under the same number
         is another build, so the number alone would call the old one `installed`. `from`
         without a commit - the build before could not read its own - is judged by the number.
         A marker still at `installing` is `interrupted` whatever runs: the package manager may
@@ -779,7 +779,7 @@ class SelfUpdater:
     def busy(self):
         """`busy`, or None: a transaction runs, or the shared lock is held and not stale.
 
-        Asked by `cmd/update` and by `cmd/uninstall` (review M1): both end in the package
+        Asked by `cmd/update` and by `cmd/uninstall`: both end in the package
         manager and a restart, and two of them side by side end in whichever ran last. An
         install waiting for the origin probe or for Home Assistant is one of them - once a wait
         past its bound has been ended, which happens here too, timer or not.
@@ -799,7 +799,7 @@ class SelfUpdater:
         return _refusal("busy")
 
     def _minutes_left_of_a_dead_lock(self, receiver):
-        """Minutes until the lock of a provably dead self-update expires, or None (review S3).
+        """Minutes until the lock of a provably dead self-update expires, or None.
 
         Proved only for a self-update's record (it has `origin`) of this boot whose pid no longer
         runs that transaction's helper. The SSH installer's record names a process that exits
@@ -825,7 +825,7 @@ class SelfUpdater:
         return max(1, int(math.ceil(left / 60.0)))
 
     def _runs(self, pid, path):
-        """Whether process `pid` runs `path`: one whole argument of its command line (review S7).
+        """Whether process `pid` runs `path`: one whole argument of its command line.
 
         Not a substring - the integration's `installer_helper.py` and another transaction's
         `helper.py` both contain the name - and not the program: every helper is python3.
@@ -930,7 +930,7 @@ class SelfUpdater:
         record the time since the end is its uptime now minus the record's, whatever the clock
         says. A record of another boot ended before this boot, so at least this boot's uptime
         has passed - and when that is under ten minutes, the wall clock may say more, but only
-        where it can be believed both at the end and now (review round 2): otherwise every
+        where it can be believed both at the end and now: otherwise every
         update in the first ten minutes after any reboot would be refused as "less than ten
         minutes ago", days after the last one. Only a record, or a receiver, without a boot id
         falls back to the wall clock alone, which then cannot go backwards into a refusal.
@@ -1042,7 +1042,7 @@ class SelfUpdater:
         self._probed(wait)
 
     def _end_overdue_waits(self):
-        """End a wait past its bound, whether or not its timer ran (review S1)."""
+        """End a wait past its bound, whether or not its timer ran."""
         now = self.monotonic()
         if self._probe_wait is not None and now - self._probe_wait["asked"] >= PROBE_WAIT_SECONDS:
             self._probe_overdue()
@@ -1310,8 +1310,8 @@ class SelfUpdater:
         record = dict(self._transaction or {}, phase="finished", result="failed",
                       finished=int(self.clock()), error=error)
         # Through the one end every transaction takes, so doors a vanished transaction had
-        # closed open again (review S10) - unless the files are not this process's build
-        # (review round 5): nothing of this transaction changed them, but a reload would load
+        # closed open again - unless the files are not this process's build:
+        # nothing of this transaction changed them, but a reload would load
         # them all the same.
         stuck = None if self._runs_the_files_on_disk() else STUCK_OTHER_BUILD
         self._end(public(record), "internal_error", followed=False, stuck=stuck)
@@ -1364,7 +1364,7 @@ class SelfUpdater:
             elif not current["ours"] and self.closed and (
                     not os.path.isdir(directory)
                     or self._past_deadline(current, self._receiver())):
-                # Review round 6: the doors closed at `rolling_back`, and nothing of the
+                # The doors closed at `rolling_back`, and nothing of the
                 # transaction can be read any more. Let go, they would say "wait" for ever:
                 # judged as a helper that stopped in the phase it was last seen in.
                 self._helper_died(current, dict(self._transaction or {}, id=current["id"],
@@ -1377,7 +1377,7 @@ class SelfUpdater:
             return
         if record.get("phase") != "finished" and self._helper_gone(current):
             # Read once more: a helper that wrote its end and exited between the read above and
-            # the look into /proc ended the way it wrote (review S6).
+            # the look into /proc ended the way it wrote.
             again = self._record(current)
             if again is None or again.get("phase") != "finished":
                 self._helper_died(current, again or record)
@@ -1399,7 +1399,7 @@ class SelfUpdater:
                 self._poll_ticker.stop()
                 details = record.get("record") if isinstance(record.get("record"), dict) else {}
                 restore = details.get("restore")
-                # Decided by the record alone (review round 2, DS1), not by whether a poll
+                # Decided by the record alone, not by whether a poll
                 # happened to see `installing`: the helper tries to put the old files back only
                 # once the package manager has run, so a restore that did not complete means
                 # the files under this process changed - even when the whole failure fell
@@ -1410,16 +1410,16 @@ class SelfUpdater:
                 # but not all of opkg's records or the settings block).
                 unrestored = isinstance(restore, str) and restore != "done"
                 self._origin_failed(record)
-                # Review round 3: after `not_stopped` (`record.interface` `not restarted`) the
+                # After `not_stopped` (`record.interface` `not restarted`) the
                 # process R2 could not stop runs on over files that changed under it: to the
                 # previous version's, or with a restore that did not complete to a mix. A
                 # restore that did complete does not make it safe. Keyed on the reason and the
-                # record both, so neither alone reopens the doors - and, since round 4, only for
+                # record both, so neither alone reopens the doors - and only for
                 # a process that is one of those R2 left running (`_left_running`).
                 unstopped = (record.get("reason") == UNSTOPPED
                              or details.get("interface") == "not restarted") \
                     and self._left_running(current, record, details)
-                # Review round 5: the pid list and the reason are the helper's account, and its
+                # The pid list and the reason are the helper's account, and its
                 # look at /proc can be wrong. The files themselves are asked last, whatever the
                 # end says: a process whose build is not the one on disk is held.
                 other = not self._runs_the_files_on_disk()
@@ -1441,11 +1441,11 @@ class SelfUpdater:
                 self._restart()
             return
         if phase == "rolling_back" and not self.closed:
-            # Review round 5: R2 is putting the previous version's files back under this
+            # R2 is putting the previous version's files back under this
             # process too - for up to three minutes when the interface does not stop - and a
             # first import meanwhile would load them. The end reopens the doors when it may.
             self._close_doors()
-        # The marker's deadline, read when the following began: `status.json` has none (S5).
+        # The marker's deadline, read when the following began: `status.json` has none.
         if self._past_deadline(current, self._receiver()):
             if self.closed:
                 # Let go with the doors closed, they would say "wait" for ever: judged as a
@@ -1459,7 +1459,7 @@ class SelfUpdater:
             self._remove_marker(current["id"])
 
     def _left_running(self, current, record, details):
-        """Whether this process is one R2 could not stop (TRANSACTION.md 7, review round 4).
+        """Whether this process is one R2 could not stop (TRANSACTION.md 7).
 
         The helper lists them as `record.unstopped`, from its last look at /proc that answered:
         this process is held when its own pid is listed, and not otherwise - a process that
@@ -1501,7 +1501,7 @@ class SelfUpdater:
             running["commit"] == (before.get("commit") or running["commit"])
 
     def _runs_the_files_on_disk(self):
-        """Whether the build on disk is the one this process loaded at its start (review round 5).
+        """Whether the build on disk is the one this process loaded at its start.
 
         Asked before a process that ran through a transaction opens its doors again, after any
         end: the pid list, the reason and `from` are what the helper and the request say, and a
@@ -1544,16 +1544,16 @@ class SelfUpdater:
         self._poll_ticker.stop()
         touched = self._files_may_have_changed(current, record.get("phase"))
         other = not self._runs_the_files_on_disk()
-        # A follower is under the changed files only once R2 puts the previous ones back
-        # (review round 5); before that it runs the files it started on. One that R2 itself
+        # A follower is under the changed files only once R2 puts the previous ones back;
+        # before that it runs the files it started on. One that R2 itself
         # started - it began at `rolling_back` - started on the files put back: the build rule
-        # alone judges it (review round 6). And whatever the phase, a build on disk that is not
+        # alone judges it. And whatever the phase, a build on disk that is not
         # this process's holds it.
         started_by_r2 = not current["ours"] and current.get("began") == "rolling_back"
         under = current["ours"] or (record.get("phase") == "rolling_back" and not started_by_r2)
         stuck = None
         if touched and (under or other):
-            # Review round 2 (DS2): the files changed under this process, and a helper killed
+            # The files changed under this process, and a helper killed
             # outright (SIGKILL, the OOM killer) leaves its package manager running as an
             # orphan that may still be writing them. A fresh session would import whatever it
             # wrote, so the doors stay closed, as after a restore that failed.
@@ -1570,7 +1570,7 @@ class SelfUpdater:
         LOG.error("update %s: %s", current["id"], error)
         payload = public(dict(record, phase="finished", result="interrupted",
                               finished=int(self.clock()), error=error))
-        # With the files perhaps changed the marker stays (review S4): the next start - after
+        # With the files perhaps changed the marker stays: the next start - after
         # a reinstall, a restart or a reboot - judges it by the build that starts.
         self._end(payload, "interrupted", followed=not current["ours"], keep_marker=touched,
                   stuck=stuck)
@@ -1598,13 +1598,13 @@ class SelfUpdater:
         stopped once the package manager had started): they may then be the new release's, or
         a mix, and the fresh session a reopening starts would import them. The doors close if
         no poll had closed them yet, stay closed and say so, and the repair is a reinstall from
-        outside this process - Home Assistant's forced reinstall over SSH (delta review).
+        outside this process - Home Assistant's forced reinstall over SSH.
         Nor after `not_stopped`: the files are the previous version's, whole, under a process
         that holds the other one's code, so the doors stay closed the same way, and the repair
-        is the restart that ends this process (`STUCK_UNSTOPPED`, review round 3). Nor when the
+        is the restart that ends this process (`STUCK_UNSTOPPED`). Nor when the
         build on disk is not the one this process loaded, whatever the end - `installed`
         included, which only a helper that misjudged could write to such a process: the same
-        sentence, the same repair (review round 5).
+        sentence, the same repair.
         """
         if payload is not None and payload.get("reason") is None and \
                 payload.get("result") not in (None, "installed") and \
@@ -1698,7 +1698,7 @@ class SelfUpdater:
         self._begin_retraction()
 
     def _household_changed(self):
-        """The request's standby, recording and EPG-import guards, asked again (review S2).
+        """The request's standby, recording and EPG-import guards, asked again.
 
         The reason code the helper puts on `last_error`, or None. A recording due within ten
         minutes, or a receiver that will not say, counts as a recording - as at the request.
@@ -1843,7 +1843,7 @@ class SelfUpdater:
     # -------------------------------------------------------------- the end --
 
     def _schedule_collapse(self):
-        """S3: one softcam collapse after a proved install, where the box may and can."""
+        """One softcam collapse after a proved install, where the box may and can."""
         publisher = self.bridge.publisher("softcam")
         if publisher is None or not self.bridge.value("softcam_restart_allowed"):
             return

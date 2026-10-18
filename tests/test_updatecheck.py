@@ -885,7 +885,7 @@ def test_the_fetch_refuses_a_certificate_nobody_vouches_for(tmp_path):
         thread.join(timeout=5)
 
 
-# ------------------------------------------------------------- review round 1 --
+# ---------------------------- the check's state, the trust file and the probe --
 
 
 def test_a_check_whose_index_could_not_be_kept_says_so(box, factory, settings, origin, clock,
@@ -1358,7 +1358,7 @@ def test_a_real_certificate_for_another_name_is_refused(fed_box, factory, feed, 
     assert feed.hits == []
 
 
-# ------------------------------------------------------------- review round 2 --
+# ---------------------------- the trust lock, timeouts and installed packages --
 
 
 class SlowToConnect:

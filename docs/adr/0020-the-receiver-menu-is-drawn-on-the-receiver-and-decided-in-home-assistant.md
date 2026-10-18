@@ -99,7 +99,7 @@ Three things are true of the path between them:
   status. A broker client can publish a menu too; what it can make the receiver send is a
   `menu_action` for a row id, which the integration refuses unless its own configuration has it.
 - The styled screen's numbers and the fallback's look are measured on one image and one skin;
-  the other images and skins are a tester's to confirm (H10/H11).
+  the other images and skins are a tester's to confirm.
 - Taking a message out of paho's queue uses paho's own data structures, because paho offers no
   public call for it. The vendored paho is pinned and the code leaves a paho that looks different
   alone; a paho update has to keep the test that runs it against the vendored client green.
