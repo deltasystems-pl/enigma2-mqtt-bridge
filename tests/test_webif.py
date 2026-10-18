@@ -1095,18 +1095,46 @@ def test_a_remote_subset_change_applies_without_a_reload(
     assert configfile.save_calls == 1
 
 
-def test_any_other_change_writes_the_file_once_and_reloads_once(
-    connected_bridge, page, factory, settings, monkeypatch
-):
+def _counted_reloads(bridge, monkeypatch):
     reloads = []
-    real_reload = connected_bridge.reload
+    real_reload = bridge.reload
 
     def counted():
         reloads.append(1)
         return real_reload()
 
-    monkeypatch.setattr(connected_bridge, "reload", counted)
+    monkeypatch.setattr(bridge, "reload", counted)
+    return reloads
+
+
+def test_any_other_change_writes_the_file_once_and_applies_without_a_reload(
+    connected_bridge, page, factory, settings, monkeypatch
+):
+    reloads = _counted_reloads(connected_bridge, monkeypatch)
+    clients = len(factory.clients)
     fields = settings_fields(connected_bridge.settings, log_level="debug", screenshot_delay="9")
+
+    request, body = post(page(connected_bridge), new_session(), fields)
+
+    assert request.response_code == 200
+    assert b"Settings saved." in body and b"reconnecting" not in body
+    assert reloads == []
+    assert len(factory.clients) == clients
+    assert configfile.save_calls == 1
+    assert settings.log_level.saved_value == "debug"
+    assert settings.screenshot_delay.saved_value == 9
+    assert factory.client.last(INFO).json()["settings"]["screenshot_delay"] == 9
+
+
+@pytest.mark.parametrize("change", [
+    {"host": "10.0.0.6"}, {"port": "1884"}, {"tls": True}, {"ca_file": "/etc/ca.pem"},
+    {"username": "receiver"}, {"password": "a-new-secret"}, {"enabled": False},
+], ids=["host", "port", "tls", "ca_file", "username", "password", "enabled"])
+def test_a_connection_change_writes_the_file_once_and_reloads_once(
+    connected_bridge, page, factory, settings, monkeypatch, change
+):
+    reloads = _counted_reloads(connected_bridge, monkeypatch)
+    fields = settings_fields(connected_bridge.settings, **change)
 
     request, body = post(page(connected_bridge), new_session(), fields)
 
@@ -1114,8 +1142,6 @@ def test_any_other_change_writes_the_file_once_and_reloads_once(
     assert b"reconnecting" in body
     assert reloads == [1]
     assert configfile.save_calls == 1
-    assert settings.log_level.saved_value == "debug"
-    assert settings.screenshot_delay.saved_value == 9
 
 
 def test_a_permission_changed_on_the_page_reaches_info_and_discovery(
@@ -2185,6 +2211,13 @@ def test_a_page_save_after_a_failed_removal_applies_as_usual(live_bridge, page, 
 
     request, body = post(page(live_bridge), new_session(),
                          settings_fields(live_bridge.settings, log_level="debug"))
+
+    assert request.response_code == 200
+    assert b"Settings saved." in body and b"reconnecting" not in body
+    assert len(factory.clients) == clients
+
+    request, body = post(page(live_bridge), new_session(),
+                         settings_fields(live_bridge.settings, host="10.0.0.6"))
 
     assert request.response_code == 200
     assert b"reconnecting" in body

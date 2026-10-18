@@ -79,31 +79,35 @@ def test_saving_writes_enigma2s_settings_file(settings):
     assert screen.closed_with == (True,)
 
 
-def test_saving_asks_the_bridge_to_reconnect(settings):
+def test_saving_hands_the_saved_settings_to_the_bridge(settings):
     class Recorder:
         idle_reason = None
         connected = True
 
         def __init__(self):
+            self.applied = 0
             self.reloads = 0
+
+        def apply_saved_settings(self):
+            self.applied += 1
 
         def reload(self):
             self.reloads += 1
 
     bridge = Recorder()
     build(settings, bridge=bridge).keySave()
-    assert bridge.reloads == 1
+    # The bridge decides whether that needs a reconnect; the screen never reloads it itself.
+    assert (bridge.applied, bridge.reloads) == (1, 0)
 
 
 def test_saving_the_permission_republishes_info_with_it(settings, make_bridge, factory):
     """The box-only permission is granted here, and `info` has to say so.
 
     Nothing else tells Home Assistant the two power-off buttons have become
-    usable, and the screen's own save is the only moment it changes. No code
-    does this deliberately: `keySave` reloads the bridge, and a connect
-    republishes the snapshot - which is why it is asserted rather than assumed.
-    The second session is asserted *before* the connect is fired, because firing
-    it by hand would otherwise hide a `keySave` that had stopped reloading.
+    usable, and the screen's own save is the only moment it changes. The save
+    changes no connection setting, so it is applied under the open session and
+    the same client publishes `info` again - asserted on that client, so a save
+    that reconnected instead would fail here rather than pass on its snapshot.
     """
     settings.host.value = "10.0.0.5"
     settings.node_id.value = "vuuno4kse_005301"
@@ -117,13 +121,23 @@ def test_saving_the_permission_republishes_info_with_it(settings, make_bridge, f
     settings.deep_standby_allowed.value = True
     build(settings, bridge=bridge).keySave()
 
-    # The save reconnects, and that new session is what carries the snapshot.
-    assert len(factory.clients) == 2
-    fresh = factory.clients[-1]
-    fresh.fire_connect()
-
+    assert len(factory.clients) == 1
     assert settings.deep_standby_allowed.saved_value is True
-    assert fresh.last(info).json()["settings"]["deep_standby_allowed"] is True
+    assert factory.client.last(info).json()["settings"]["deep_standby_allowed"] is True
+
+
+def test_saving_a_new_broker_address_reconnects(settings, make_bridge, factory):
+    settings.host.value = "10.0.0.5"
+    settings.node_id.value = "vuuno4kse_005301"
+    bridge = make_bridge()
+    bridge.start()
+    factory.client.fire_connect()
+
+    settings.host.value = "10.0.0.6"
+    build(settings, bridge=bridge).keySave()
+
+    assert len(factory.clients) == 2
+    assert factory.client.connect_calls[0][0] == "10.0.0.6"
 
 
 def test_a_bridge_that_cannot_reload_does_not_break_the_screen(settings):
@@ -131,7 +145,7 @@ def test_a_bridge_that_cannot_reload_does_not_break_the_screen(settings):
         idle_reason = None
         connected = False
 
-        def reload(self):
+        def apply_saved_settings(self):
             raise RuntimeError("the broker moved")
 
     screen = build(settings, bridge=Broken())

@@ -160,6 +160,17 @@ CONNECTION_SETTING_NAMES = (
     "host", "port", "tls", "ca_file", "username", "password",
 ) + IDENTITY_CONNECTION_SETTING_NAMES
 
+# A save on the receiver - its setup screen or the OpenWebif page - reconnects only for one of
+# these or for the plugin's own switch, `enabled` (`apply_saved_settings`). Every other setting
+# is applied under the open session, as `cmd/config` applies its own.
+#
+# The settings `_replace_configurable_publishers` applies: `cmd/config`'s four publishers, and
+# the OSCam login the OSCam publisher reads when it starts.
+CONFIGURABLE_PUBLISHER_SETTING_NAMES = (
+    "publish_keys", "screenshot", "screenshot_interval", "screenshot_delay",
+    "cam_telemetry", "oscam_telemetry", "oscam_port", "oscam_username", "oscam_password",
+)
+
 # A command name comes off the topic, so its length is the publisher's choice.
 # The retained `last_error` is not the place to store somebody's 4 KB topic.
 LAST_ERROR_CMD_LIMIT = 64
@@ -291,6 +302,11 @@ class Bridge:
         # what `reload` compares a save against.
         self._will_topic = None
         self._session_settings = None
+        # Every setting as the open session last applied it - at its start, a `cmd/config`, an
+        # `ha_mode` command or a save applied live: what `apply_saved_settings` finds changed.
+        # And whether the last save reconnected, for the page's sentence.
+        self._applied_settings = None
+        self._last_save_reconnected = None
         # The build this process runs, and where the build on disk is read from:
         # `info.build`. Arguments only so that a test can say which build it is.
         self._build = build
@@ -357,6 +373,7 @@ class Bridge:
         if not settings_module.save_remote_settings(values, self.settings):
             return "could not persist the plugin settings"
 
+        self._mark_applied(settings_module.REMOTE_SETTING_NAMES)
         self._replace_configurable_publishers()
         # The menu's hotkey is rebound in place rather than by replacing the publisher: the
         # menu it holds, and a screen that may be open on it, belong to this session.
@@ -376,26 +393,221 @@ class Bridge:
         return None
 
     def apply_settings(self, values):
-        """Persist settings the broker cannot write, then restart the way the setup screen does.
+        """Persist settings the broker cannot write, then apply them as the setup screen does.
 
         The setup screen's path, taken for any change outside `cmd/config`'s
-        allowlist: save, write the settings file once, `reload()`. The reconnect
-        publishes `info` - and in discovery mode the buttons a permission gates -
-        so a setting changed on the OpenWebif page reaches a consumer exactly as
-        one changed on the television does, and a kill-switch rebinds its hook
-        the same way. `values` must already be validated.
+        allowlist: save, write the settings file once, `apply_saved_settings()` -
+        a reconnect when the connection changed, the change applied under the
+        open session otherwise. Either way `info` - and in discovery mode the
+        buttons a permission gates - is published again, so a setting changed on
+        the OpenWebif page reaches a consumer exactly as one changed on the
+        television does, and a kill-switch rebinds its hook the same way.
+        `values` must already be validated. `last_save_reconnected` says
+        afterwards which of the two it was, and None when it was neither.
         """
+        self._last_save_reconnected = None
         if self._uninstaller.underway:
             return self.defer_settings(values)
         if self._uninstaller.closed:
             return UNINSTALL_RUNNING
         if self._self_update.closed:
-            # A reload would open a session under the update's closed doors.
+            # Neither a reload nor a live change under the update's closed doors.
             return self._self_update.doors_refusal()
         if not settings_module.save_settings(values, self.settings):
             return "could not persist the plugin settings"
-        self.reload()
+        self.apply_saved_settings()
         return None
+
+    @property
+    def last_save_reconnected(self):
+        """Whether the last `apply_saved_settings` opened a new session, or None before one."""
+        return self._last_save_reconnected
+
+    def apply_saved_settings(self):
+        """Apply what a save on the receiver changed. True when it reconnected.
+
+        The setup screen's Save and the OpenWebif page's settings forms end
+        here, after the settings are saved. A new session is built only when it
+        has to be - the open session was built from another broker, login or
+        name than the settings now hold, the plugin was switched off, or there is
+        no session to change (the plugin was idle, or switched on just now) -
+        and `reload` does that as it always has, with its `offline` rule
+        (`_says_offline_on_reload`). Every other change is applied under the open
+        session (`_apply_live`), so the menu is not greyed and Home Assistant
+        sees no reconnect for a change that did not touch the connection.
+
+        The callers keep the doors an uninstall or an update closes: they never
+        get here while one is under way.
+        """
+        if self._reconnects_for_save():
+            self._last_save_reconnected = True
+            self.reload()
+            return True
+        self._last_save_reconnected = False
+        try:
+            self._apply_live()
+        except Exception:
+            LOG.exception("the saved settings could not all be applied; reconnecting instead")
+            self._last_save_reconnected = True
+            self.reload()
+            return True
+        return False
+
+    def _reconnects_for_save(self):
+        """Whether a save needs a new session: see `apply_saved_settings`."""
+        if self.client is None or self._session_settings is None:
+            return True
+        if self._applied_settings is None:
+            return True
+        if not self.value("enabled"):
+            return True
+        return self._connection_settings() != self._session_settings
+
+    def _settings_now(self):
+        return {name: self.value(name) for name in settings_module.SETTING_NAMES}
+
+    def _mark_applied(self, names):
+        """These settings, as they stand, are what the open session runs with."""
+        if self._applied_settings is None:
+            return
+        for name in names:
+            self._applied_settings[name] = self.value(name)
+
+    def _changed_since_applied(self):
+        """The settings that differ from what the open session last applied, sorted."""
+        applied = self._applied_settings or {}
+        return sorted(
+            name for name in settings_module.SETTING_NAMES
+            if name not in applied or applied[name] != self.value(name)
+        )
+
+    def _apply_live(self):
+        """Apply a saved change under the open session, as a reconnect would have.
+
+        Each setting is applied the way the code that reads it needs: a
+        `cmd/config` setting as `apply_remote_settings` applies it - the four
+        publishers it configures replaced, the hotkey rebound; a kill-switch
+        or a box-only choice by replacing the publisher that reads it when it
+        starts (the toast, the CEC workaround, the EPG grid, the receiver menu
+        with its subscriptions and Extensions entry), or by asking the publisher
+        that reads it at work to read it again (the channel list, the EPG grid's
+        events per channel); the log level, Wake-on-LAN and the device name as a
+        start applies them; a permission by nothing at all, since every command
+        reads it when it runs. Then, as at a connect: what this node no longer
+        publishes is retracted, and `info`, the announcement and the discovery
+        payloads go out again - which carry every setting, capability and button.
+
+        Without a broker connection only the receiver's side is changed: the
+        connect that follows retracts and publishes everything, and a
+        retraction sent now would be forgotten without having been sent.
+        """
+        # At every save, as when every save restarted the bridge: with `wol_arm` on, the image's
+        # own switch turned off in its menu is turned on again (SETUP.md). It writes nothing
+        # when the switch is already on.
+        wol.arm(self.settings)
+        changed = set(self._changed_since_applied())
+        if not changed:
+            LOG.info("settings saved; nothing the bridge runs with has changed")
+            return
+        # Names only: one of these may be a password.
+        LOG.info("settings saved; applying %s without a reconnect", ", ".join(sorted(changed)))
+        if "log_level" in changed:
+            configure_logging(self.value("log_level"), self._log_path)
+        if "friendly_name" in changed:
+            # An emptied name is derived again, as at a start.
+            self._ensure_identity()
+        if "oscam_password" in changed:
+            register_secret(self.value("oscam_password"))
+        started = []
+        if changed & set(CONFIGURABLE_PUBLISHER_SETTING_NAMES):
+            self._replace_configurable_publishers()
+        if "osd_toast" in changed:
+            from .toast import ToastPublisher
+
+            started += self._replace_publishers((ToastPublisher,), with_session_only=True)
+        if "cec_standby_workaround" in changed:
+            started += self._replace_publishers((CecPublisher,), with_session_only=True)
+            if self.publisher(CecPublisher.name) is None and self.connected:
+                # What a connect without the workaround does (`on_connect`).
+                self.retract(self.topic(CEC_TOPIC))
+        if "bouquets_for_select" in changed:
+            channels = self.publisher("channels")
+            if channels is not None:
+                # Walks the selection again: the lists, the index and the slugs, and the EPG
+                # grid follows (`when_changed`). The select's options go with discovery below.
+                channels.refresh()
+        if "epg_grid_events" in changed:
+            started += self._apply_grid_events()
+        if "menu_allowed" in changed:
+            started += self._switch_menu()
+        else:
+            menu = self.publisher("menu")
+            if menu is not None:
+                if "menu_hotkey" in changed:
+                    menu.rebind_hotkey()
+                if "ha_discovery_prefix" in changed and self.connected:
+                    menu.resubscribe(self.client)
+        self._applied_settings = self._settings_now()
+        if not self.connected:
+            LOG.info("no broker connection; the next connect publishes the change")
+            return
+        for publisher in started:
+            self._publish_own_snapshot(publisher)
+        if "ha_mode" in changed and self.value("ha_mode") != "discovery":
+            self.retract_discovery()
+        # Before the republish, so the node retracts before it announces - as at a connect,
+        # and as `apply_remote_settings` does.
+        self.retract_stale()
+        info = self.build_info()
+        self.publish_info(info)
+        self.publish_announcement(info)
+        self.publish_discovery(info)
+        if "ha_mode" in changed:
+            # Which releases are compatible depends on whether an integration is in use.
+            self._updates.publish()
+        self.state.save()
+
+    def _apply_grid_events(self):
+        """`epg_grid_events` changed: build the grids to the new count, or start or stop them."""
+        from .epggrid import EpgGridPublisher
+
+        grid = self.publisher(EpgGridPublisher.name)
+        if grid is not None and grid.events_per_channel > 0:
+            grid.regenerate()
+            return []
+        started = self._replace_publishers((EpgGridPublisher,), with_session_only=True)
+        if self.publisher(EpgGridPublisher.name) is None and self.connected:
+            # Turned down to 0: every grid goes, as at a connect without the publisher.
+            self.sync_grid_slugs()
+        return started
+
+    def _switch_menu(self):
+        """`menu_allowed` changed: offer the receiver menu now, or take it away.
+
+        The menu's subscriptions go and come with its publisher, and the
+        Extensions entry follows the setting whatever the publisher managed to
+        build - as at a start (`_start`).
+        """
+        from .menu import MenuPublisher
+
+        old = self.publisher(MenuPublisher.name)
+        if old is not None and self.connected:
+            old.unsubscribe(self.client)
+        started = self._replace_publishers((MenuPublisher,), with_session_only=True)
+        menu = self.publisher(MenuPublisher.name)
+        if menu is not None and self.connected:
+            menu.subscribe(self.client)
+            menu.connection_changed()
+        self._sync_menu_entry()
+        return started
+
+    def _publish_own_snapshot(self, publisher):
+        """What a publisher started under the open session holds, as its connect would send it."""
+        try:
+            for suffix, payload in publisher.snapshot().items():
+                publisher.publish(suffix, payload)
+        except Exception:
+            LOG.exception("the %s publisher's state could not be published", publisher.name)
 
     def defer_settings(self, values):
         """Save settings while the plugin removes itself, and apply nothing now.
@@ -499,32 +711,10 @@ class Bridge:
         """Rebind only hooks controlled by cmd/config; preserve all other work."""
         from .cam import CamPublisher
         from .oscam import OscamPublisher
-        from .publishers import PUBLISHER_CLASSES
         from .remote import KeyPublisher
         from .screen import ScreenPublisher
 
-        replacements = (CamPublisher, OscamPublisher, KeyPublisher, ScreenPublisher)
-        for publisher_class in replacements:
-            name = publisher_class.name
-            old = self.publisher(name)
-            if old is not None:
-                old.stop()
-                self._publishers.remove(old)
-
-            replacement = publisher_class(self)
-            try:
-                started = replacement.start()
-            except Exception:
-                LOG.exception("the %s publisher could not restart", name)
-                started = False
-            if started:
-                order = PUBLISHER_CLASSES.index(publisher_class)
-                index = sum(
-                    PUBLISHER_CLASSES.index(type(item)) < order
-                    for item in self._publishers
-                    if type(item) in PUBLISHER_CLASSES
-                )
-                self._publishers.insert(index, replacement)
+        self._replace_publishers((CamPublisher, OscamPublisher, KeyPublisher, ScreenPublisher))
 
         if self.value("screenshot") == "off":
             # A disabled private image must not remain readable from broker retention.
@@ -533,6 +723,48 @@ class Bridge:
             self.retract(self.topic("cam"))
         if not self.value("oscam_telemetry"):
             self.retract(self.topic("oscam"))
+
+    def _replace_publishers(self, classes, with_session_only=False):
+        """Stop each of these publishers and start a new one under the open session.
+
+        What a reload does for every publisher, done for these alone: the old one
+        lets go of its hooks before the new one binds them, and a new one that
+        does not start - switched off, or not possible here - is left out of the
+        registry, as at a start. `with_session_only`: nothing at all without an
+        enigma2 session, where a start registers no publisher either
+        (`register_default_publishers`). The new ones that started, in order.
+        """
+        from .publishers import PUBLISHER_CLASSES
+
+        if with_session_only and self.session is None:
+            return []
+        started = []
+        for publisher_class in classes:
+            name = publisher_class.name
+            old = self.publisher(name)
+            if old is not None:
+                try:
+                    old.stop()
+                except Exception:
+                    LOG.exception("stopping the %s publisher raised", name)
+                self._publishers.remove(old)
+
+            replacement = publisher_class(self)
+            try:
+                ready = replacement.start()
+            except Exception:
+                LOG.exception("the %s publisher could not restart", name)
+                ready = False
+            if ready:
+                order = PUBLISHER_CLASSES.index(publisher_class)
+                index = sum(
+                    PUBLISHER_CLASSES.index(type(item)) < order
+                    for item in self._publishers
+                    if type(item) in PUBLISHER_CLASSES
+                )
+                self._publishers.insert(index, replacement)
+                started.append(replacement)
+        return started
 
     @property
     def state(self):
@@ -619,8 +851,8 @@ class Bridge:
             return
         # A setting of the receiver's, not of the connection: honoured before
         # the broker is asked about, so a box with no broker yet still does what
-        # its own setup screen says. Every start, because the setup screen and
-        # the OpenWebif page both apply a change by restarting the bridge.
+        # its own setup screen says. Every start, and at a save that changes it
+        # under an open session (`_apply_live`).
         wol.arm(self.settings)
         host = (self.value("host") or "").strip()
         if not host:
@@ -660,6 +892,7 @@ class Bridge:
         self._updates.start()
         self._will_topic = self.topic("availability")
         self._session_settings = self._connection_settings()
+        self._applied_settings = self._settings_now()
         self.client.set_will(self._will_topic, OFFLINE, qos=WILL_QOS, retain=True)
 
         self._last_error_published = self.state.knows(self.topic("last_error"))
@@ -756,7 +989,12 @@ class Bridge:
         self._not_published_since = None
 
     def reload(self):
-        """Apply changed settings. Called by the setup screen after a save.
+        """End the session and start a new one with the settings as they are now.
+
+        A save on the receiver comes here only when it needs a new session - the
+        connection changed, the plugin was switched off or on, or none was open
+        (`apply_saved_settings`); an update's failure path and a removal that
+        stopped come here too.
 
         🔴 The old session ends with a clean disconnect, and a clean disconnect
         is exactly what tells the broker to throw the will away. When the save
@@ -768,11 +1006,11 @@ class Bridge:
         receiver that is online with nothing connected, for as long as nobody
         looks. The new session's own `online` replaces it the moment it connects.
 
-        Every other save stays silent. The setup screen reloads on every save
-        and the OpenWebif page on every setting outside `cmd/config`'s
-        allowlist; an `offline` there would make the receiver unavailable for
-        the seconds a reconnect takes, and re-fire every automation that
-        watches it, for a change that did not touch the connection at all.
+        Every other reload stays silent - a rename, or a reload asked for with
+        nothing of the connection changed; an `offline` there would make the
+        receiver unavailable for the seconds a reconnect takes, and re-fire every
+        automation that watches it, for a change that did not touch the
+        connection at all.
 
         Unlike `stop`, this does not wait for the publish to leave: the process
         goes on running, paho's network thread writes its queue in order and
@@ -801,6 +1039,7 @@ class Bridge:
                 self.client = None
             self._will_topic = None
             self._session_settings = None
+            self._applied_settings = None
             self._stop_publishers()
             # The save may have renamed the node or narrowed what is published,
             # and the new session measures everything again.
@@ -1032,8 +1271,9 @@ class Bridge:
         if not self.value("oscam_telemetry"):
             self.retract(self.topic("oscam"))
         # The standby workaround's count outlives the workaround on the broker.
-        # Switching it off on the setup screen reconnects without it, and a
-        # retained `cec` left behind would tell a consumer it is still at work.
+        # A process that starts without it - or a save that switched it off
+        # while there was no connection - comes here, and a retained `cec` left
+        # behind would tell a consumer it is still at work.
         # Keyed on the publisher rather than the setting, because the capability
         # also goes when HDMI-CEC does.
         if self.publisher(CecPublisher.name) is None:
@@ -1922,6 +2162,7 @@ class Bridge:
             self.set_value("ha_mode", mode)
             self.save_settings()
             LOG.info("ha_mode %s -> %s", previous, mode)
+        self._mark_applied(("ha_mode",))
         if mode != "discovery":
             self.retract_discovery()
         info = self.build_info()

@@ -1166,7 +1166,7 @@ def test_a_second_start_during_the_removal_opens_no_session(box, factory):
     assert bridge.client is None
 
 
-def test_a_save_after_a_failed_removal_reloads_as_usual(box, factory, settings):
+def test_a_save_after_a_failed_removal_applies_as_usual(box, factory, settings):
     bridge = box()
     old = run_to_opkg(bridge, factory)
     opkg().finish(1)
@@ -1175,6 +1175,14 @@ def test_a_save_after_a_failed_removal_reloads_as_usual(box, factory, settings):
 
     screen = _save_on_the_screen(bridge, settings)
 
+    # A setting that is not the connection: applied under the session the failure path opened.
+    assert len(factory.clients) == clients
+    info = factory.client.last("enigma2/" + NODE + "/info").json()
+    assert info["settings"]["screenshot_delay"] == 9
+    assert screen.closed_with == (True,)
+
+    settings.host.value = "10.0.0.6"
+    screen = _save_on_the_screen(bridge, settings)
     assert len(factory.clients) == clients + 1
     assert screen.closed_with == (True,)
 

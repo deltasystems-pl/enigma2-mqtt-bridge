@@ -3225,6 +3225,7 @@ class FakeMQTTClient:
         self.reconnect_delay = None
         self.connect_calls = []
         self.subscriptions = []
+        self.unsubscriptions = []
         self.published = []
         self.infos = []
         self.loop_started = False
@@ -3277,6 +3278,10 @@ class FakeMQTTClient:
 
     def subscribe(self, topic, qos=0):
         self.subscriptions.append((topic, qos))
+        return (0, 1)
+
+    def unsubscribe(self, topic):
+        self.unsubscriptions.append(topic)
         return (0, 1)
 
     def publish(self, topic, payload=None, qos=0, retain=False):
@@ -3336,6 +3341,7 @@ class FakeMQTTClient:
     def clear(self):
         self.published = []
         self.subscriptions = []
+        self.unsubscriptions = []
 
 
 class ClientFactory:

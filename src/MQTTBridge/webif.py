@@ -26,10 +26,11 @@ it cannot be the strongest.
 
 What the page changes, it changes through what exists. A setting goes through
 `config.validate_setting`, then the path the rest of the plugin uses for it -
-`apply_remote_settings` for `cmd/config`'s subset, the setup screen's
-save-and-reload for everything else. A command goes through the dispatcher's
-own handler with the origin `page` (`origin.py`), which answers the box-side
-permission and nothing else: every household-safety guard still applies.
+`apply_remote_settings` for `cmd/config`'s subset, the setup screen's save for
+everything else, which reconnects only for the connection. A command goes
+through the dispatcher's own handler with the origin `page` (`origin.py`), which
+answers the box-side permission and nothing else: every household-safety guard
+still applies.
 
 The page is script-free (`default-src 'none'`), so every confirmation is a
 second page rendered by the server, never a dialog. It is bound to the session,
@@ -1068,11 +1069,14 @@ def _apply(request, bridge, changes, answer=None):
         error = bridge.apply_remote_settings(values)
         done = _("Settings saved.")
     else:
-        # The setup screen's path. The reconnect is what republishes `info`,
-        # and on a slow broker it takes seconds: say so instead of implying the
-        # change has already arrived.
+        # The setup screen's path: a reconnect only for the connection or the plugin's own
+        # switch. A reconnect is what republishes `info` then, and on a slow broker it takes
+        # seconds: say so instead of implying the change has already arrived.
         error = bridge.apply_settings(changes)
-        done = _("Settings saved; the bridge is reconnecting, which can take a few seconds.")
+        if bridge.last_save_reconnected is False:
+            done = _("Settings saved.")
+        else:
+            done = _("Settings saved; the bridge is reconnecting, which can take a few seconds.")
     if error:
         raise RuntimeError(error)
     _rotate(request)

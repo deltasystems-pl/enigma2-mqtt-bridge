@@ -351,6 +351,11 @@ class ChannelsPublisher(Publisher):
         """Tell somebody - the EPG grid - that the bouquets moved."""
         self._on_change.append(callback)
 
+    def not_when_changed(self, callback):
+        """Stop telling `callback`: a listener that stopped while this list goes on running."""
+        while callback in self._on_change:
+            self._on_change.remove(callback)
+
     def extra_capabilities(self):
         """`channel_topics`: the index, and each bouquet's list on a topic of its own."""
         return [LISTS_CAPABILITY]

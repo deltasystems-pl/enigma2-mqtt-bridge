@@ -917,6 +917,8 @@ class MenuPublisher(Publisher):
         self._hotkey = None
         # The `menu_action`s handed to the client and not acknowledged yet.
         self._unacknowledged = []
+        # The topics the open session subscribed for the menu, so a save can take them back.
+        self._subscribed = []
         # The menu creator's catalogue and the saves waiting for their answers.
         self.editor = menueditor.MenuEditor(self)
 
@@ -1002,8 +1004,34 @@ class MenuPublisher(Publisher):
         return own + self.editor.topics()
 
     def subscribe(self, client):
-        for topic in self.topics():
+        self._subscribed = self.topics()
+        for topic in self._subscribed:
             client.subscribe(topic, qos=SUBSCRIBE_QOS)
+
+    def unsubscribe(self, client):
+        """`menu_allowed` was switched off under an open session: the menu's topics go too."""
+        for topic in self._subscribed:
+            client.unsubscribe(topic)
+        self._subscribed = []
+
+    def resubscribe(self, client):
+        """The discovery prefix changed under an open session: follow Home Assistant's status.
+
+        What the old prefix's status said is not what the new one says, so it is forgotten, as
+        at a reconnect: "never heard", which does not grey the menu.
+        """
+        wanted = self.topics()
+        for topic in self._subscribed:
+            if topic not in wanted:
+                client.unsubscribe(topic)
+        for topic in wanted:
+            if topic not in self._subscribed:
+                client.subscribe(topic, qos=SUBSCRIBE_QOS)
+        self._subscribed = wanted
+        if self.ha_status is not None:
+            LOG.info("Home Assistant's status topic moved; its status is unknown again")
+            self.ha_status = None
+        self.refresh_screens()
 
     def handles(self, topic):
         return topic in self.topics()
