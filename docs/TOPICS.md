@@ -1669,9 +1669,9 @@ went is taken out of the client's queue. The page's save then says so at once.
 **Not retained** - QoS 1. The answer to one `cmd/list` (section 2): how the list of choices on the
 television ended, and which row was picked. Present when `list` is a capability
 ([ADR-0023](adr/0023-a-list-of-choices-is-answered-by-row-id-once.md)). **Every list the plugin
-accepted - shown, or waiting for the screen - has exactly one answer here, or, when it could not
-be put on the television after all, one late refusal on `last_error` instead** (`not_shown`, section 2).
-A list refused when it arrived has neither: its refusal is on `last_error` at once.
+accepted - shown, or waiting for the screen - has exactly one answer here, or, when it could not be
+put on the television after all, one late refusal on `last_error` instead** (`not_shown`, section
+2). A list refused when it arrived has neither: its refusal is on `last_error` at once.
 
 ```json
 {"id": "a1b2c3d4e5f60718", "ending": "picked", "row": "open", "ts": 1792050000}
@@ -1822,6 +1822,14 @@ next connect clears instead. The same holds for `cmd/clear_error` and for the cl
 command that succeeds.
 
 **`cmd/clear_error` clears it on request** - also added after 0.4.0 (unreleased), section 2.
+
+**One refusal is not retained.** While an update keeps the plugin silent - from a downgrade's
+retraction of the node's topics until the update ends - nothing is published, retained or not, with
+one exception: the doors' refusal of a `cmd/list` (`reason` `busy`, with the list's `id`), because
+its sender is waiting for an answer. It goes out once on this topic **not retained**, at QoS 1 and
+never queued across a disconnect, so it does not outlive the retraction: a consumer subscribed to
+`last_error` receives it, and one that subscribes later does not find it retained. Added after 0.4.0
+(unreleased).
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -2483,7 +2491,8 @@ yes/no question is a list of two rows
 
 ```json
 {"id": "a1b2c3d4e5f60718",
- "payload": {"title": "Doorbell", "text": "Someone is at the gate.", "timeout": 60, "default": "ignore",
+ "payload": {"title": "Doorbell", "text": "Someone is at the gate.", "timeout": 60,
+             "default": "ignore",
              "rows": [{"id": "open", "label": "Open the gate", "key": "green", "icon": "gate"},
                       {"id": "ignore", "label": "Ignore", "key": "red"}]}}
 ```
@@ -2521,8 +2530,8 @@ accepts is never refused here as blank, and the label it reports is the one on t
 3. every character of Unicode category **Cf** - bidirectional overrides and isolates, the zero-width
    space and joiners, the soft hyphen, the byte order mark - and **Cs** - a lone surrogate, which
    JSON can spell and no UTF-8 holds - is dropped;
-4. every character of category **Cc**, **Zl** or **Zp** becomes a space - except `\n` in `text`, which
-   stays a line break;
+4. every character of category **Cc**, **Zl** or **Zp** becomes a space - except `\n` in `text`,
+   which stays a line break;
 5. it is cut at its limit: 60 for `title` and `label`, 200 for `text`;
 6. leading and trailing whitespace is stripped; what is empty then is blank - refused for `title`
    and `label`, no text for `text`.
@@ -2533,17 +2542,17 @@ stays open underneath and gets the keys back when the list has gone. A header li
 question comes from Home Assistant through this plugin, so a list cannot pose as the receiver's own
 dialog; under it the title, the text, the rows - each with its icon, its label and, on its right,
 its key: a filled rounded button in the key's colour, or the digit in a small box - the remaining
-time, counting down, and the keys' legend. With a `default` row the countdown names it - "Ignore
-in 45 s" - so the viewer sees what waiting answers; without one it reads "Closes in 45 s". UP and DOWN, and the page keys, move
-the selection, which starts on the `default` row or else on the first. **OK picks** the selected
-row; a row's colour or number key picks that row at once; **EXIT** dismisses. Every other key does
-nothing - a colour or number that no row has as well - except the receiver's own global keys, such
-as the volume. The power key does on the list what it does on the screen under it: over live
-television it puts the receiver in standby, which closes the list. The plugin's own screen has the
-look of the receiver menu, see-through as `menu_transparency` says (section 1).
+time, counting down, and the keys' legend. With a `default` row the countdown names it - "Ignore in
+45 s" - so the viewer sees what waiting answers; without one it reads "Closes in 45 s". UP and DOWN,
+and the page keys, move the selection, which starts on the `default` row or else on the first. **OK
+picks** the selected row; a row's colour or number key picks that row at once; **EXIT** dismisses.
+Every other key does nothing - a colour or number that no row has as well - except the receiver's
+own global keys, such as the volume. The power key does on the list what it does on the screen under
+it: over live television it puts the receiver in standby, which closes the list. The plugin's own
+screen has the look of the receiver menu, see-through as `menu_transparency` says (section 1).
 
-**How it ends.** Exactly one answer for every list the plugin accepted - or, for one it could not put
-on the television after all, one late refusal (below):
+**How it ends.** Exactly one answer for every list the plugin accepted - or, for one it could not
+put on the television after all, one late refusal (below):
 
 | `ending` | When | `row` |
 |---|---|---|
@@ -2562,12 +2571,12 @@ replaces that one too.
 
 **Which screen.** The plugin's own screen where it can be built, and otherwise the image's own
 choice list, with the same rows, ids and keys, and the header line, the title and the text as its
-question. Where the image puts the question's first line in the list's window title - OpenViX
-and OpenATV, from their sources - the window title reads "<header> - <countdown>", so the
-header stays; where it puts the whole question in its text - OpenPLi - the window title is the
-countdown. Where the image does not let the title be set, there is no countdown. `info.list.screen` (section 1) says which. A skin may define a screen called
-`MQTTBridgeChoices` and restyle the plugin's own; one that cannot be built with the plugin's
-widgets makes the image's list the one used.
+question. Where the image puts the question's first line in the list's window title - OpenViX and
+OpenATV, from their sources - the window title reads "<header> - <countdown>", so the header stays;
+where it puts the whole question in its text - OpenPLi - the window title is the countdown. Where
+the image does not let the title be set, there is no countdown. `info.list.screen` (section 1) says
+which. A skin may define a screen called `MQTTBridgeChoices` and restyle the plugin's own; one that
+cannot be built with the plugin's widgets makes the image's list the one used.
 
 **No permission and no setting**, as a message has none. Anyone who can publish on the broker can
 put a list on the television, or publish an answer for one - so an automation never takes an answer

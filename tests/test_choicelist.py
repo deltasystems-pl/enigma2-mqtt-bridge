@@ -1107,6 +1107,22 @@ def test_where_the_image_keeps_the_header_in_its_text_the_title_is_the_countdown
     assert titles == ["Closes in 5 s"]
 
 
+def test_where_the_image_splits_off_the_header_the_title_keeps_it(fallback, monkeypatch):
+    """As on OpenViX and OpenATV: the first line - the header - in the window title, the rest
+    of the question in the list's text."""
+    from conftest import Label
+
+    titles = []
+    monkeypatch.setattr(ChoiceBox, "setTitle", lambda self, text: titles.append(text),
+                        raising=False)
+    monkeypatch.setattr(
+        ChoiceBox, "__getitem__",
+        lambda self, name: Label(self.title.split(chr(10), 1)[1]) if name == "text" else None,
+        raising=False)
+    fallback.send(doorbell(timeout=5, default=None))
+    assert titles == ["From Home Assistant, via MQTT Bridge - Closes in 5 s"]
+
+
 def test_a_fallback_that_takes_no_title_shows_no_countdown(fallback, plugin_log):
     fallback.send(doorbell(timeout=5))
     fallback.elapse(1)
@@ -1310,6 +1326,19 @@ def test_an_image_that_places_no_pixmap_fills_a_colour_key_and_writes_a_digit(wo
 # ------------------------------------------------------- the text sized to its content --
 
 
+@pytest.fixture
+def sizes_without_equality(monkeypatch):
+    """The image's `eSize` as Python sees it: SWIG exposes no `==`, so two equal sizes are two
+    objects that compare by identity. A layout that compared sizes would never shrink here."""
+    monkeypatch.setattr(eSize, "__eq__", object.__eq__)
+    monkeypatch.setattr(eSize, "__ne__", object.__ne__)
+    monkeypatch.setattr(eSize, "__hash__", object.__hash__)
+
+
+def _number(size):
+    return size.width(), size.height()
+
+
 def _laid_out(spec, width=1920, height=1080):
     """The styled screen as the plain session builds it: skin read, applied, laid out."""
     DESKTOP.resize(eSize(width, height))
@@ -1325,7 +1354,8 @@ def _laid_out(spec, width=1920, height=1080):
 
 
 @pytest.mark.parametrize("width, height", [(1280, 720), (1920, 1080)])
-def test_a_60_character_title_and_a_200_character_text_are_shown_whole(width, height):
+def test_a_60_character_title_and_a_200_character_text_are_shown_whole(
+        width, height, sizes_without_equality):
     spec = parsed(title="T" * 60, text="x " * 99 + "y", default=None)
     screen = _laid_out(spec, width, height)
     for name in ("title", "text"):
@@ -1340,7 +1370,7 @@ def test_a_60_character_title_and_a_200_character_text_are_shown_whole(width, he
     assert text.position().y() + text.size().height() <= listed.position().y()
 
 
-def test_a_short_title_and_no_text_make_a_short_screen():
+def test_a_short_title_and_no_text_make_a_short_screen(sizes_without_equality):
     long = _laid_out(parsed(title="T" * 60, text="x" * 200, default=None))
     short = _laid_out(parsed(title="Bell", text=None, default=None))
     assert short["text"].instance.size().height() == 0
@@ -1357,8 +1387,41 @@ def test_a_skin_that_restyles_the_screen_keeps_its_own_layout():
         '<widget name="title" position="10,10" size="700,40" />'
         '<widget name="list" position="10,60" size="700,400" /></screen>')
     screen = _laid_out(parsed(title="T" * 60, text="x" * 200, default=None))
-    assert screen.instance.size() == eSize(800, 600)
-    assert screen["title"].instance.size() == eSize(700, 40)
+    assert _number(screen.instance.size()) == (800, 600)
+    assert _number(screen["title"].instance.size()) == (700, 40)
+
+
+NINE_LINES = chr(10).join(f"Line {number}" for number in range(1, 10))
+
+
+@pytest.mark.parametrize("width, height", [(1280, 720), (1920, 1080)])
+def test_a_text_of_nine_short_lines_is_shown_whole(width, height, sizes_without_equality):
+    """Nine lines need more than the five the skin gives the text: it grows."""
+    screen = _laid_out(parsed(text=NINE_LINES, default=None), width, height)
+    text = screen["text"].instance
+    assert text.size().height() >= text.calculateSize().height()
+    assert text.calculateSize().height() > screen.shape["text"]
+    listed = screen["list"].instance
+    assert text.position().y() + text.size().height() <= listed.position().y()
+    window = screen.instance
+    assert window.position().y() >= 0
+    assert window.position().y() + window.size().height() <= height
+
+
+@pytest.mark.parametrize("width, height", [(1280, 720), (1920, 1080)])
+def test_a_long_text_takes_rows_from_the_list_which_scrolls(width, height,
+                                                           sizes_without_equality):
+    # Eighteen lines: more than the five the skin gives, less than the desktop leaves.
+    text = chr(10).join(f"Line {number}" for number in range(1, 19))
+    screen = _laid_out(parsed(text=text, rows=rows(24), default=None), width, height)
+    widget = screen["text"].instance
+    assert widget.size().height() >= widget.calculateSize().height()
+    listed = screen["list"].instance
+    shown = listed.size().height() // screen.shape["row"]
+    assert 1 <= shown < choicelist.VISIBLE_ROWS
+    assert listed.size().height() == shown * screen.shape["row"]
+    window = screen.instance
+    assert window.position().y() + window.size().height() <= height
 
 
 @pytest.mark.parametrize("height", [400, 576, 720, 1080, 2160])
@@ -1446,6 +1509,25 @@ def test_the_doors_refuse_a_list_even_while_an_update_keeps_the_plugin_silent(wo
         # Any other command stays unsaid, as before.
         world.client.fire_message("enigma2/" + NODE + "/cmd/screenshot", b"PRESS")
         assert len(world.client.published) == before + 1
+        # Never queued: one the broker had not acknowledged is gone at the next connect.
+        assert world.client.queued_for_reconnect() == [LAST_ERROR]
+        world.client.fire_connect()
+        assert world.client.queued_for_reconnect() == []
+    finally:
+        updater.closed = False
+        updater.silent = False
+
+
+def test_without_a_connection_the_silent_refusal_is_not_handed_to_the_client(world):
+    updater = world.bridge.self_update
+    updater.closed = True
+    updater.silent = True
+    try:
+        world.client.fire_disconnect()
+        before = len(world.client.published)
+        assert world.bridge.say_refusal_unretained("list", "x", command_id=LIST_ID) is None
+        world.send()
+        assert len(world.client.published) == before
     finally:
         updater.closed = False
         updater.silent = False

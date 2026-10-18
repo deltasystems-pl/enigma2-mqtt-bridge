@@ -174,11 +174,8 @@ def clean_line(value, limit):
 
 
 def clean_lines(value, limit):
-    """The text under the title: as `clean_line`, and 2. `
-` and `
-` become `
-`, which
-    stays a line break in step 4."""
+    """The text under the title: as `clean_line`, and step 2 - `\\r\\n` and `\\r` become
+    `\\n`, which stays a line break in step 4."""
     text = strip_backslashes(str(value)).replace("\r\n", "\n").replace("\r", "\n")
     pieces = []
     for character in text:
@@ -712,11 +709,16 @@ def screen_class():
                 self["list"].moveToIndex(self._ids.index(wanted))
 
         def _fit(self):
-            """The title and the text as tall as they are, and everything under them moved up.
+            """The title and the text as tall as they are, and everything under them moved.
 
             Measured in their own widgets, at the width the skin gave them, as the toast
-            measures its message (`calculateSize`); never taller than the room the skin gave.
-            Only on the plugin's own layout: a skin that restyles the screen keeps its own.
+            measures its message (`calculateSize`). The title has its two lines; the text may
+            grow past the five the skin gave it, up to what the desktop leaves with one row of
+            the list - so a text of 200 characters is shown whole, however many lines it
+            breaks into - and the list shows fewer rows at once, and scrolls, when the text
+            needs their room. Only on the plugin's own layout: a skin that restyles the screen
+            keeps its own. Sizes are compared by their numbers: the image's `eSize` has no
+            Python equality, so two equal sizes are two different objects.
             """
             shape = self.shape
             window = self.instance
@@ -724,7 +726,8 @@ def screen_class():
             point_class = enigma_attribute("ePoint")
             if window is None or size_class is None or point_class is None:
                 return
-            if window.size() != size_class(shape["width"], shape["height"]):
+            size = window.size()
+            if (size.width(), size.height()) != (shape["width"], shape["height"]):
                 return
             if any(self[name].instance is None for name in FITTED):
                 return
@@ -737,14 +740,22 @@ def screen_class():
                 return max(least, min(room, int(widget.getSize()[1])))
 
             title = measured("title", shape["title"], shape["title_line"])
-            text = measured("text", shape["text"], 0) if shape["text_height"] else 0
+            # Everything but the text and the list's rows, top margin to bottom margin.
+            fixed = (shape["title_y"] + title + 2 * shape["gap"] + shape["countdown"]
+                     + shape["legend"] + shape["pad"])
+            tallest = shape["desktop_height"] - 2 * shape["pad"]
+            room = max(shape["text"], tallest - fixed - shape["row"])
+            text = measured("text", room, 0) if shape["text_height"] else 0
+            rows = max(1, min(shape["visible"], (tallest - fixed - text) // shape["row"]))
+            list_height = rows * shape["row"]
             y = shape["title_y"]
             for name, height in (("title", title), ("text", text)):
                 self[name].instance.resize(size_class(shape["inner"], max(0, height)))
                 self[name].instance.move(point_class(shape["pad"], y))
                 y += height
             y += shape["gap"]
-            for name, height in (("list", shape["list_height"] + shape["gap"]),
+            self["list"].instance.resize(size_class(shape["inner"], list_height))
+            for name, height in (("list", list_height + shape["gap"]),
                                  ("countdown", shape["countdown"]),
                                  ("legend", shape["legend"] + shape["pad"])):
                 self[name].instance.move(point_class(shape["pad"], y))
