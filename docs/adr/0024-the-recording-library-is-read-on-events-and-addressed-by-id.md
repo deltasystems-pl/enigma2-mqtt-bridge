@@ -12,8 +12,8 @@ recorded, could not play a recording on the receiver, and could not delete one. 
 wants all three, from the media browser and from an automation. Five things are true of the
 receivers this plugin runs on:
 
-- **The recordings are files** in the receiver's movie locations - its movie list's locations, its
-  default recording location, and its timer and instant-record locations - with subfolders, a
+- **The recordings are files** in the receiver's movie locations - its default movie location and its
+  movie list's locations - with subfolders, a
   trash (`.Trash`) and, beside each recording, the files the image writes for it: `.meta` (the
   service, the title, the description, the time, the length), `.ap` (access points), `.cuts`,
   `.eit` and `.sc`. The image's movie list reads them through `eServiceCenter`, which opens the

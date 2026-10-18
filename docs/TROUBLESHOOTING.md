@@ -347,8 +347,10 @@ integration leaves it out of what it shows, as it does in its channel lists.
 
 **A delete is refused.** `last_error.reason` says why: `not_permitted` - `recording_delete_allowed`
 is off; `trash_off` - the receiver's trash is switched off, and a delete is never made for good;
-`recording` or `playing`; `move_failed` - the receiver could not move it into its trash. The
-recording is untouched in every case.
+`in_use` - it is being recorded or played; `not_in_library` - the library does not list it, so
+press *Refresh recordings*; `file_gone`; `busy` - an update is being applied, or another delete is
+still waiting for its move. A refusal without a code - the receiver has no trash, or could not move
+the recording into it - says why in its sentence. The recording is untouched in every case.
 
 ## A restart lost a recording
 

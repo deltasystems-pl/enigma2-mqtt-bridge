@@ -266,9 +266,8 @@ location, with its subfolders, the trash left out - and lets Home Assistant play
 receiver and, with `recording_delete_allowed` on, move one into the receiver's trash. The topics
 and commands are in [TOPICS.md](TOPICS.md#basenoderecordings---added-after-040-unreleased).
 
-- **Which locations.** The receiver's own: the movie list's locations ("Movie locations" in its
-  recording settings), its default recording location, and its timer and instant-recording
-  locations where they name a folder of their own. A location on a network share is read like any
+- **Which locations.** The receiver's own: its default movie location first, then the movie
+  list's locations ("Movie locations" in its recording settings) in the receiver's order. A location on a network share is read like any
   other.
 - **Which files.** Recordings - `.ts`, and `.stream` for an IPTV recording. Other media files the
   movie list shows are not listed. Names starting with a dot, the trash `.Trash` among them, are

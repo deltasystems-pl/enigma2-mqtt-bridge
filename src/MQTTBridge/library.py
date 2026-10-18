@@ -32,6 +32,7 @@ bouquets - is Home Assistant's to decide, from `sref` and `bouquet` on each entr
 """
 
 import hashlib
+import importlib
 import json
 import os
 import stat
@@ -101,24 +102,29 @@ DELETE_WAIT_SECONDS = 60
 
 MOUNTS_PATH = "/proc/mounts"
 
-# Refusals, each with its reason code on `last_error`.
+# Refusals. A pair carries its reason code on `last_error`; a plain sentence has none. The
+# codes are the contract's: `not_in_library`, `file_gone`, `not_permitted`, `trash_off`,
+# `in_use` and `busy` - which the doors' sentence carries as well (`commands.py`).
 NOT_AVAILABLE = "the recording library is not available on this image"
 NO_ID = "the command takes the id of one recording: {\"id\": \"<16 hex digits>\"}"
-UNKNOWN = ("that recording is not in the receiver's library", "unknown")
-GONE = ("that recording's file is gone from the receiver", "gone")
+UNKNOWN = ("that recording is not in the receiver's library", "not_in_library")
+GONE = ("that recording's file is gone from the receiver", "file_gone")
 NOT_PERMITTED = (
     "deleting recordings is switched off in the plugin's settings", "not_permitted")
 TRASH_OFF = (
     "the receiver's trash is switched off; nothing is deleted for good", "trash_off")
-NO_TRASH = ("this image has no trash for recordings; nothing is deleted for good", "no_trash")
-RECORDED = ("that recording is being recorded", "recording")
-PLAYED = ("that recording is being played", "playing")
-MOVE_FAILED = ("the receiver could not move that recording to its trash", "move_failed")
-NOT_MOVED = ("the receiver did not move that recording to its trash", "not_moved")
-NO_PLAYER = ("this image's movie player cannot be opened", "no_player")
+NO_TRASH = "this image has no trash for recordings; nothing is deleted for good"
+RECORDED = ("that recording is being recorded", "in_use")
+PLAYED = ("that recording is being played", "in_use")
+MOVE_FAILED = "the receiver could not move that recording to its trash"
+NOT_MOVED = "the receiver did not move that recording to its trash"
+NO_PLAYER = "this image's movie player cannot be opened"
 
 
 def refusal(pair):
+    """A refusal as a handler returns it: with its reason code when it has one."""
+    if isinstance(pair, str):
+        return pair
     sentence, reason = pair
     return Refusal(sentence, reason)
 
@@ -178,7 +184,8 @@ def _videodirs():
     element = _element("movielist", "videodirs")
     if element is None:
         try:
-            import Screens.MovieSelection  # noqa: F401 - defines config.movielist.videodirs
+            # Imported for what importing it does: it defines config.movielist.videodirs.
+            importlib.import_module("Screens.MovieSelection")
         except Exception as error:
             missing("Screens.MovieSelection", error)
             return None
@@ -191,28 +198,24 @@ def _videodirs():
 def movie_locations():
     """The receiver's movie locations, as it is configured now, or None when it has none.
 
-    The movie list's own locations, then the default recording location and the
-    timer and instant-record locations where they are folders of their own rather
-    than `<default>`. Spelled the way the settings hold them, normalised and without
-    repeats - nothing here touches a disk.
+    The default movie location first (`config.usage.default_path`), then the movie
+    list's own locations in the image's order. Spelled the way the settings hold
+    them, normalised and without repeats - nothing here touches a disk.
     """
     videodirs = _videodirs()
     if videodirs is None:
         return None
     candidates = []
+    element = _element("usage", "default_path")
+    try:
+        candidates.append(str(element.value or "") if element is not None else "")
+    except Exception:
+        LOG.debug("config.usage.default_path could not be read")
     try:
         candidates.extend(list(videodirs.value or []))
     except Exception:
         LOG.exception("config.movielist.videodirs could not be read")
         return None
-    for name in ("default_path", "timer_path", "instantrec_path"):
-        element = _element("usage", name)
-        try:
-            value = str(element.value or "") if element is not None else ""
-        except Exception:
-            value = ""
-        if value.startswith("/"):
-            candidates.append(value)
     locations = []
     for candidate in candidates:
         if not isinstance(candidate, str) or not candidate.startswith("/"):
@@ -1401,8 +1404,7 @@ class LibraryPublisher(Publisher):
                 return refusal(NO_PLAYER)
         except Exception as error:
             LOG.exception("the image's movie player could not be opened")
-            return Refusal("the receiver could not play that recording: " + type(error).__name__,
-                           "no_player")
+            return "the receiver could not play that recording: " + type(error).__name__
         if on_play is not None:
             on_play("1:0:0:0:0:0:0:0:0:0:" + path if not path.lower().endswith(".stream")
                     else "4097:0:0:0:0:0:0:0:0:0:" + path)

@@ -67,7 +67,12 @@ COMMAND_ID_CHARACTERS = frozenset(
 
 # The reason code the doors' sentence carries for a command that defines codes for its
 # refusals; every other command gets the sentence alone, exactly as before.
-DOORS_REASONS = {"list": "busy"}
+DOORS_REASONS = {
+    "list": "busy",
+    "play_recording": "busy",
+    "delete_recording": "busy",
+    "recordings_refresh": "busy",
+}
 # The commands whose refusal by the doors is published even while an update has made the
 # plugin silent: a list of choices always has a caller waiting for its answer or its refusal.
 SAID_WHILE_SILENT = frozenset(("list",))

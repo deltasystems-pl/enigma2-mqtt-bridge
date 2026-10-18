@@ -675,7 +675,7 @@ def test_play_that_does_not_start_is_reported(image, start, factory, receiver):
     infobar = __import__("conftest").InfoBar.instance
     infobar.openMoviePlayer = lambda ref, LastService=None: None
     send(factory, "play_recording", {"id": "deadbeefdeadbeef"})
-    assert error(factory)["reason"] == "unknown"
+    assert error(factory)["reason"] == "not_in_library"
     send(factory, "play_recording", {"id": an_id(path), })
     bridge.publisher("service")._verify.timer.fire()
     refusal = error(factory)
@@ -691,7 +691,7 @@ def test_an_unknown_id_is_refused_before_a_sleeping_receiver_is_woken(image, sta
     send(factory, "play_recording", {"id": "0123456789abcdef"})
     assert error(factory) == {"cmd": "play_recording", "error":
                               "that recording is not in the receiver's library",
-                              "reason": "unknown", "ts": error(factory)["ts"]}
+                              "reason": "not_in_library", "ts": error(factory)["ts"]}
     from conftest import standby_module
 
     assert standby_module.inStandby is screen
@@ -721,7 +721,7 @@ def test_play_of_a_file_that_is_gone_is_refused(image, start, factory):
     start()
     os.remove(path)
     send(factory, "play_recording", {"id": an_id(path)})
-    assert error(factory)["reason"] == "gone"
+    assert error(factory)["reason"] == "file_gone"
     assert image.player_opened == []
 
 
@@ -782,7 +782,8 @@ def test_a_move_that_never_happens_is_reported(image, start, factory, allowed):
     MainLoop.advance(library.DELETE_WAIT_SECONDS * 1000 + library.DELETE_POLL_MILLISECONDS,
                      limit=1000)
     refusal = error(factory)
-    assert refusal["reason"] == "not_moved" and refusal["id"] == "c1"
+    assert refusal["error"] == library.NOT_MOVED and refusal["id"] == "c1"
+    assert "reason" not in refusal
     assert os.path.exists(path)
 
 
@@ -835,7 +836,7 @@ def test_an_image_without_a_trash_deletes_nothing(tmp_path, monkeypatch, make_br
     bridge.start()
     factory.client.fire_connect()
     send(factory, "delete_recording", {"id": an_id(path)})
-    assert error(factory)["reason"] == "no_trash"
+    assert error(factory)["error"] == library.NO_TRASH and "reason" not in error(factory)
     assert os.path.exists(path)
     assert bridge.build_info()["recording_trash"] is None
     assert "recording_delete" not in bridge.capabilities()
@@ -845,7 +846,7 @@ def test_delete_of_an_unknown_id_or_a_path_is_refused(image, start, factory, all
     path = image.record("a.ts")
     start()
     send(factory, "delete_recording", {"id": "0123456789abcdef"})
-    assert error(factory)["reason"] == "unknown"
+    assert error(factory)["reason"] == "not_in_library"
     send(factory, "delete_recording", {"path": path})
     assert error(factory)["error"] == library.NO_ID
     assert image.moves == []
@@ -857,7 +858,7 @@ def test_a_recording_being_recorded_is_not_deleted(image, start, factory, allowe
     timer = receiver.add_timer(state=RecordTimerEntry.StateRunning)
     timer.Filename = path[:-3]
     send(factory, "delete_recording", {"id": an_id(path)})
-    assert error(factory)["reason"] == "recording"
+    assert error(factory)["reason"] == "in_use"
     assert os.path.exists(path)
 
 
@@ -866,7 +867,7 @@ def test_a_recording_being_played_is_not_deleted(image, start, factory, allowed,
     start()
     receiver.nav.sref = "1:0:0:0:0:0:0:0:0:0:" + path
     send(factory, "delete_recording", {"id": an_id(path)})
-    assert error(factory)["reason"] == "playing"
+    assert error(factory)["reason"] == "in_use"
     assert os.path.exists(path)
 
 
@@ -876,12 +877,12 @@ def test_a_move_the_image_refuses_is_a_refusal_and_never_a_delete_for_good(
     start()
     image.move_raises = OSError("cross-device")
     send(factory, "delete_recording", {"id": an_id(path)})
-    assert error(factory)["reason"] == "move_failed"
+    assert error(factory)["error"] == library.MOVE_FAILED
     assert os.path.exists(path)
     image.move_raises = None
     image.trash_makes = False
     send(factory, "delete_recording", {"id": an_id(path)})
-    assert error(factory)["reason"] == "move_failed"
+    assert error(factory)["error"] == library.MOVE_FAILED
     assert os.path.exists(path)
     # Without a trash folder the move is never asked for.
     assert image.moves == []
@@ -892,7 +893,7 @@ def test_delete_of_a_file_that_is_gone_is_refused(image, start, factory, allowed
     start()
     os.remove(path)
     send(factory, "delete_recording", {"id": an_id(path)})
-    assert error(factory)["reason"] == "gone"
+    assert error(factory)["reason"] == "file_gone"
 
 
 def test_delete_is_claimed_while_the_permission_is_on_and_the_trash_is_on(image, start,
@@ -937,9 +938,10 @@ def test_the_commands_refuse_during_an_update(image, start, factory, monkeypatch
     bridge = start()
     monkeypatch.setattr(bridge.self_update, "doors_refusal",
                         lambda name=None: "an update is being applied")
-    for command in ("play_recording", "delete_recording"):
+    for command in ("play_recording", "delete_recording", "recordings_refresh"):
         send(factory, command, {"id": an_id(path)})
         assert error(factory)["error"] == "an update is being applied"
+        assert error(factory)["reason"] == "busy"
     assert os.path.exists(path) and image.player_opened == []
 
 
@@ -963,7 +965,7 @@ def test_a_recording_played_through_a_link_on_the_flash_is_not_deleted(image, st
     start()
     receiver.nav.sref = "1:0:0:0:0:0:0:0:0:0:" + str(image.tmp / "hdd" / "movie" / "a.ts")
     send(factory, "delete_recording", {"id": an_id(path)})
-    assert error(factory)["reason"] == "playing"
+    assert error(factory)["reason"] == "in_use"
     assert os.path.exists(path)
 
 
@@ -975,7 +977,7 @@ def test_a_recording_written_through_a_link_on_the_flash_is_not_deleted(image, s
     timer = receiver.add_timer(state=RecordTimerEntry.StateRunning)
     timer.Filename = str(image.tmp / "hdd" / "movie" / "a")
     send(factory, "delete_recording", {"id": an_id(path)})
-    assert error(factory)["reason"] == "recording"
+    assert error(factory)["reason"] == "in_use"
 
 
 def test_a_justplay_timer_on_the_same_file_does_not_block_a_delete(image, start, factory,
@@ -1034,3 +1036,34 @@ def test_the_main_loops_share_is_spread_over_turns(image, start, factory, monkey
             break
     assert len(folder(factory, "movie")["recordings"]) == 30
     assert all(entry["sref"] for entry in folder(factory, "movie")["recordings"])
+
+
+def test_the_default_movie_location_comes_first_then_the_images_order(image, start, factory,
+                                                                       tmp_path):
+    usb = tmp_path / "media" / "usb" / "movie"
+    usb.mkdir(parents=True)
+    image.mount_lines.append("/dev/sdb1 " + str(usb.parent) + " vfat rw 0 0")
+    image.write_mounts()
+    image.movielist.videodirs.value = [str(usb) + "/", str(image.movie) + "/"]
+    image.usage.default_path.value = str(image.movie) + "/"
+    image.record("a.ts")
+    image.record("b.ts", folder=usb)
+    start()
+    assert [location["path"] for location in last(factory, INDEX)["locations"]] == [
+        str(image.movie), str(usb)]
+
+
+def test_the_codes_a_refusal_carries_are_the_contracts(image, start, factory, allowed,
+                                                       receiver):
+    path = image.record("a.ts")
+    start()
+    codes = set()
+    for command, payload in (("play_recording", {"id": "0123456789abcdef"}),
+                             ("delete_recording", {"id": "0123456789abcdef"})):
+        send(factory, command, payload)
+        codes.add((command, error(factory)["reason"]))
+    receiver.nav.sref = "1:0:0:0:0:0:0:0:0:0:" + path
+    send(factory, "delete_recording", {"id": an_id(path)})
+    codes.add(("delete_recording", error(factory)["reason"]))
+    assert codes == {("play_recording", "not_in_library"), ("delete_recording", "not_in_library"),
+                     ("delete_recording", "in_use")}
