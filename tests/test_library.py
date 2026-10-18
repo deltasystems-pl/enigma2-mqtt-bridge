@@ -84,7 +84,7 @@ def test_the_id_is_over_the_file_systems_bytes_and_a_name_is_shown_with_replacem
     raw = b"/media/hdd/movie/Kana\xb3.ts"
     path = os.fsdecode(raw)
     assert library.recording_id(path) == hashlib.sha256(raw).hexdigest()[:16]
-    assert library.shown(path) == "/media/hdd/movie/Kana�.ts"
+    assert library.shown(path) == "/media/hdd/movie/Kana" + chr(0xFFFD) + ".ts"
 
 
 @pytest.mark.parametrize("value", ["", "3f9c2e4a1b7d5c6", "3F9C2E4A1B7D5C60", "3f9c2e4a1b7d5c60a",

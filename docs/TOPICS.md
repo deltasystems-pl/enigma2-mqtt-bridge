@@ -1250,7 +1250,7 @@ either.
 `recording_details`, claimed with `recording`. `next` keeps the four members above.
 
 ```json
-{"name": "Wiadomości", "sref": "1:0:19:283D:3FB:1:C00000:0:0:0:", "begin": 1789459200,
+{"name": "Title", "sref": "1:0:19:283D:3FB:1:C00000:0:0:0:", "begin": 1789459200,
  "end": 1789460700, "service_name": "Channel", "description": "Short text",
  "location": "/media/hdd/movie", "file": "Series/20261017 2015 - Channel - Title.ts",
  "id": "3f9c2e4a1b7d5c60", "instant": false, "bouquet": "Favourites"}
