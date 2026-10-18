@@ -285,7 +285,7 @@ def read_recording(session, bridge=None):
         # own, and its id is still the one its path gives.
         library = bridge.publisher("recordings")
         if library is not None:
-            locations = library.locations
+            locations = library.listed_locations()
         channels = bridge.publisher("channels")
     for timer in timer_list(session):
         payload = _timer_payload(timer)

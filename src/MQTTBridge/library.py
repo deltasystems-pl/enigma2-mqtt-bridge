@@ -324,24 +324,39 @@ def _forget_resume_point(reference):
         LOG.debug("the image's resume point could not be removed")
 
 
-def encode_path(path):
-    """A path as the image's `eServiceReference::toString()` writes it.
+def _strtoul16(pair):
+    """`strtoul(pair, 0, 16)` of two characters, as the image's `urlDecode` calls it, as a byte.
 
-    `:`, `%` and every character below a space become `%` and two lower-case hex digits;
-    everything else is left as it is.
+    Leading white space is skipped, a sign is taken - a minus negates in unsigned
+    arithmetic - then a `0x` prefix where a hex digit follows it, then hex digits up to
+    the first that is none.
     """
-    out = []
-    for character in path:
-        code = ord(character)
-        if character in ":%" or code < 32:
-            out.append("%" + format(code, "02x"))
-        else:
-            out.append(character)
-    return "".join(out)
+    index = 0
+    while index < len(pair) and pair[index] in " \t\n\v\f\r":
+        index += 1
+    negative = False
+    if index < len(pair) and pair[index] in "+-":
+        negative = pair[index] == "-"
+        index += 1
+    digits = "0123456789abcdefABCDEF"
+    if (pair[index:index + 2] in ("0x", "0X") and index + 2 < len(pair)
+            and pair[index + 2] in digits):
+        index += 2
+    value = 0
+    while index < len(pair) and pair[index] in digits:
+        value = value * 16 + int(pair[index], 16)
+        index += 1
+    if negative:
+        value = -value
+    return value & 0xFF
 
 
 def decode_path(text):
-    """The image's `urlDecode`: `%` and the two characters after it are one byte."""
+    """The image's `urlDecode`: `%` and the two characters after it are one byte.
+
+    The two are read by `strtoul` (`_strtoul16`), and a byte of zero is dropped, as the
+    image drops it.
+    """
     raw = text.encode("utf-8", "surrogateescape")
     out = bytearray()
     index = 0
@@ -353,15 +368,9 @@ def decode_path(text):
             index += 2
             if index >= len(raw):
                 break
-            pair = raw[index - 1:index + 1].decode("latin-1")
-            value = 0
-            for character in pair:
-                if character in "0123456789abcdefABCDEF":
-                    value = value * 16 + int(character, 16)
-                else:
-                    break
+            value = _strtoul16(raw[index - 1:index + 1].decode("latin-1"))
             if value:
-                out.append(value & 0xFF)
+                out.append(value)
         index += 1
     return out.decode("utf-8", "surrogateescape")
 
@@ -876,6 +885,7 @@ class LibraryPublisher(Publisher):
         self._running_reason = None
         self._again = None
         self._walk_in_flight = False
+        self._bouquets_moved = False
         self._read_reason = None
         self._read_at = None
         self._locations = []
@@ -1030,7 +1040,7 @@ class LibraryPublisher(Publisher):
         found = set()
         mounts = read_mounts(self.mounts_path)
         for base in self._recorded_paths():
-            location, _file, _id = locate(base + ".ts", self._locations, mounts)
+            location, _file, _id = locate(base + ".ts", self.listed_locations(), mounts)
             if location is not None:
                 found.add(location)
         return found
@@ -1046,8 +1056,11 @@ class LibraryPublisher(Publisher):
         if self._index is None or self._stopped:
             return
         if self._reading:
-            # The running read asks the channel list when it gets there.
+            # Asked again once the running read is done: it may have asked the channel list
+            # already.
+            self._bouquets_moved = True
             return
+        self._bouquets_moved = False
         self._serial += 1
         self._reading = True
         self._running_reason = None
@@ -1140,6 +1153,8 @@ class LibraryPublisher(Publisher):
         LOG.warning("the recording library read has not finished within %d s and is given up; "
                     "a movie location may not be answering", READ_WATCHDOG_SECONDS)
         self._serial += 1
+        # The hung read is not this publisher's any more: a restart starts a read of its own.
+        self._walk_in_flight = False
         self._slices.stop()
         self._slice_job = None
         self._finish(self._serial)
@@ -1404,8 +1419,14 @@ class LibraryPublisher(Publisher):
         self._reading = False
         self._running_reason = None
         again, self._again = self._again, None
-        if again is not None and not self._stopped:
+        if self._stopped:
+            return
+        if again is not None:
+            # The next read asks the channel list itself.
+            self._bouquets_moved = False
             self.request(again[0], only=again[1])
+        elif self._bouquets_moved:
+            self._bouquets_changed()
 
     # --------------------------------------------------------- the published --
 
@@ -1456,7 +1477,19 @@ class LibraryPublisher(Publisher):
 
     @property
     def locations(self):
+        """The configured movie locations, as the settings name them."""
         return list(self._locations)
+
+    def listed_locations(self):
+        """The resolved locations the last read listed, in its order.
+
+        What `locate` places a recording in, so that a running recording's location and
+        file are the ones the index and its folder topic give it - a timer or an
+        instant-record location that another location holds is not one of them. Before
+        the first read, the configured ones.
+        """
+        listed = [one.get("real") for one in self._walked.values() if one.get("real")]
+        return listed or list(self._locations)
 
     def check_space(self):
         """The recording disk's minute: mounts and free space, in a thread of their own.

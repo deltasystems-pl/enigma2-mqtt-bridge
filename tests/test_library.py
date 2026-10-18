@@ -1178,7 +1178,13 @@ def test_the_file_of_a_reference_in_its_string_form_is_decoded_as_the_image_does
     assert library.file_of("1:0:0:0:0:0:0:0:0:0:/m/Film%3a Teil 2.ts:Name") == "/m/Film: Teil 2.ts"
     assert library.file_of("1:0:19:283D:3FB:1:C00000:0:0:0:") == ""
     assert library.decode_path("a%41") == "aA"
-    assert library.encode_path("a:%\x01") == "a%3a%25%01"
+    # strtoul's white space, sign and prefix, and the zero byte the image drops.
+    assert library.decode_path("a%00b") == "ab"
+    assert library.decode_path("a% 9b") == "a\tb"
+    assert library.decode_path("a%+9b") == "a\tb"
+    assert library.decode_path("a%-1b") == "a" + chr(0xDCFF) + "b"
+    assert library.decode_path("a%0xb") == "ab"
+    assert library.decode_path("a%4") == "a"
 
 
 def test_the_delete_moves_as_the_image_does(image, start, factory, allowed, monkeypatch):
@@ -1487,3 +1493,111 @@ def test_two_reads_in_one_second_carry_two_reads(image, start, factory, monkeypa
     # Free space alone republishes the index with the `read` it had.
     publisher.on_space({str(image.movie): (True, 1)})
     assert last(factory, INDEX)["read"] == third
+
+
+def test_an_instant_record_location_inside_the_default_is_placed_as_the_library_lists_it(
+        image, start, factory, receiver):
+    from conftest import ConfigText, iRecordableService
+
+    instant = image.movie / "Instant"
+    image.usage.instantrec_path = ConfigText(default=str(instant) + "/")
+    image.record("old.ts", folder=instant)
+    start()
+    index = last(factory, INDEX)
+    assert [one["path"] for one in index["locations"]] == [str(image.movie)]
+    path = image.record("new.ts", folder=instant)
+    timer = receiver.add_timer(state=RecordTimerEntry.StateRunning)
+    timer.Filename = path[:-3]
+    receiver.nav.fire_record(None, iRecordableService.evStart)
+    # `recording` follows after its quarter of a second, the library after its three.
+    MainLoop.advance(300)
+    entry = factory.client.last(ROOT + "recording").json()["active"][0]
+    assert entry["location"] == str(image.movie)
+    assert entry["file"] == "Instant/new.ts"
+    MainLoop.advance(library.RECORD_SETTLE_MILLISECONDS)
+    listed = {one["file"]: one for one in folder(factory, "movie_instant")["recordings"]}
+    assert "Instant/new.ts" in listed
+    assert listed["Instant/new.ts"]["id"] == entry["id"]
+
+
+def test_a_refresh_and_an_event_queued_during_a_read_are_one_refresh(image, start, factory,
+                                                                      monkeypatch):
+    image.record("a.ts")
+    background = Background()
+    monkeypatch.setattr(LibraryPublisher, "run_in_background", staticmethod(background))
+    walks = []
+    real = LibraryPublisher._walk
+    monkeypatch.setattr(LibraryPublisher, "_walk", staticmethod(
+        lambda *arguments: walks.append((arguments[3], arguments[5])) or real(*arguments)))
+    bridge = start()
+    publisher = bridge.publisher("recordings")
+    publisher.request(library.REFRESH)
+    publisher.request(library.RECORDING, only={str(image.movie)})
+    background.run()
+    assert walks == [("start", None), ("refresh", None)]
+
+
+def test_a_late_answer_after_the_watchdog_with_nothing_asked_is_dropped(image, start, factory,
+                                                                        monkeypatch):
+    image.record("a.ts")
+    background = Background()
+    monkeypatch.setattr(LibraryPublisher, "run_in_background", staticmethod(background))
+    bridge = start()
+    publisher = bridge.publisher("recordings")
+    hung = background.jobs.pop()
+    publisher._watchdog.timer.fire()
+    assert publisher._reading is False and publisher._walk_in_flight is False
+    hung()
+    background.run()
+    assert last(factory, INDEX) is None
+    assert publisher._reading is False
+
+
+def test_a_restart_after_the_watchdog_reads_again(image, start, factory, monkeypatch):
+    image.record("a.ts")
+    background = Background()
+    monkeypatch.setattr(LibraryPublisher, "run_in_background", staticmethod(background))
+    bridge = start()
+    publisher = bridge.publisher("recordings")
+    background.jobs.pop()
+    publisher._watchdog.timer.fire()
+    publisher.stop()
+    publisher.start()
+    assert len(background.jobs) == 1
+    background.run()
+    assert last(factory, INDEX)["reason"] == "start"
+
+
+def test_the_in_flight_mark_goes_with_the_read(image, start, factory, monkeypatch):
+    image.record("a.ts")
+    background = Background()
+    monkeypatch.setattr(LibraryPublisher, "run_in_background", staticmethod(background))
+    bridge = start()
+    publisher = bridge.publisher("recordings")
+    background.run()
+    assert publisher._walk_in_flight is False
+    publisher.stop()
+    publisher.start()
+    # A new start, with nothing out: a read of its own.
+    assert len(background.jobs) == 1
+
+
+def test_a_bouquet_change_during_a_read_is_asked_after_it_not_beside_it(
+        image, start, factory, settings, monkeypatch):
+    image.record("a.ts", meta=meta_text(sref=POLSAT, created=2))
+    settings.bouquets_for_select.value = "Ulubione TV"
+    background = Background()
+    monkeypatch.setattr(LibraryPublisher, "run_in_background", staticmethod(background))
+    bridge = start()
+    background.run()
+    publisher = bridge.publisher("recordings")
+    assert folder(factory, "movie")["recordings"][0]["bouquet"] is None
+    publisher.request(library.REFRESH)
+    serial = publisher._serial
+    # The read has asked the channel list already when the list moves.
+    background.jobs.pop(0)()
+    settings.bouquets_for_select.value = ""
+    bridge.publisher("channels").refresh()
+    assert publisher._serial == serial
+    background.run()
+    assert folder(factory, "movie")["recordings"][0]["bouquet"] == "Sport (HD)"
