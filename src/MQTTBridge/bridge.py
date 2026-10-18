@@ -457,8 +457,6 @@ class Bridge:
         """Whether a save needs a new session: see `apply_saved_settings`."""
         if self.client is None or self._session_settings is None:
             return True
-        if self._applied_settings is None:
-            return True
         if not self.value("enabled"):
             return True
         return self._connection_settings() != self._session_settings

@@ -161,6 +161,15 @@ def test_an_idle_bridge_starts_on_any_save(make_bridge, factory, settings):
     assert bridge.last_save_reconnected is True
 
 
+def test_a_stopped_bridge_starts_again_on_a_save(live_bridge, factory):
+    """`stop` drops the client and keeps what the session was built from: still no session."""
+    live_bridge.stop()
+    assert live_bridge.client is None
+    save_on_the_screen(live_bridge, menu_transparency=60)
+    assert live_bridge.running and len(factory.clients) == 2
+    assert live_bridge.last_save_reconnected is True
+
+
 def test_a_save_that_changed_nothing_publishes_nothing(live_bridge, factory, plugin_log):
     client = factory.client
     client.clear()
