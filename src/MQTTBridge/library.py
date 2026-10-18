@@ -1265,7 +1265,11 @@ class LibraryPublisher(Publisher):
         from .enigma2 import current_service_reference
 
         playing = reference_path(current_service_reference(self.session))
-        return bool(playing) and os.path.normpath(playing) == os.path.normpath(path)
+        if not playing or not playing.startswith("/"):
+            return False
+        mounts = read_mounts(self.mounts_path)
+        return resolve(os.path.normpath(playing), mounts) == resolve(os.path.normpath(path),
+                                                                     mounts)
 
     # ------------------------------------------------------------- commands --
 

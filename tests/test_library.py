@@ -488,10 +488,15 @@ def test_a_recording_that_starts_or_ends_reads_the_library_once_the_burst_is_ove
     MainLoop.advance(library.RECORD_SETTLE_MILLISECONDS)
     assert last(factory, INDEX)["reason"] == "recording"
     assert len(folder(factory, "movie")["recordings"]) == 1
+    publisher = bridge.publisher("recordings")
+    asked = []
+    publisher.request = asked.append
     receiver.nav.fire_record(None, iRecordableService.evRecordWriteError)
     MainLoop.advance(library.RECORD_SETTLE_MILLISECONDS)
-    assert last(factory, INDEX)["reason"] == "recording"
-    assert bridge.publisher("recordings") is not None
+    assert asked == []
+    receiver.nav.fire_record(None, iRecordableService.evEnd)
+    MainLoop.advance(library.RECORD_SETTLE_MILLISECONDS)
+    assert asked == ["recording"]
 
 
 def test_a_location_that_is_mounted_is_read_and_one_that_goes_keeps_its_list(
@@ -539,6 +544,8 @@ def test_an_unmounted_location_is_not_walked_but_by_a_refresh(image, start, fact
     bridge = start()
     assert walked == []
     assert last(factory, INDEX)["locations"][0]["folders"] == []
+    # Nothing is asked of a location that is not mounted - not its free space either.
+    assert last(factory, INDEX)["locations"][0]["free_mb"] is None
     send(factory, "recordings_refresh", "PRESS")
     assert walked == [str(image.movie)]
     assert last(factory, INDEX)["reason"] == "refresh"
@@ -564,9 +571,14 @@ def test_one_read_at_a_time_a_refresh_during_a_read_is_answered_by_it(image, sta
     image.record("a.ts")
     background = Background()
     monkeypatch.setattr(LibraryPublisher, "run_in_background", staticmethod(background))
+    walks = []
+    real = LibraryPublisher._walk
+    monkeypatch.setattr(LibraryPublisher, "_walk", staticmethod(
+        lambda *arguments: walks.append(arguments[2]) or real(*arguments)))
     bridge = start()
     background.run()
     publisher = bridge.publisher("recordings")
+    assert walks == ["start"]
     assert publisher.request(library.REFRESH) is True
     assert publisher.request(library.REFRESH) is False
     send(factory, "recordings_refresh", "PRESS")
@@ -575,6 +587,8 @@ def test_one_read_at_a_time_a_refresh_during_a_read_is_answered_by_it(image, sta
     background.run()
     assert last(factory, INDEX)["reason"] == "refresh"
     assert background.jobs == []
+    # One read answered all three refreshes.
+    assert walks == ["start", "refresh"]
 
 
 def test_an_event_during_a_read_is_read_again_after_it(image, start, factory, monkeypatch):
@@ -869,6 +883,8 @@ def test_a_move_the_image_refuses_is_a_refusal_and_never_a_delete_for_good(
     send(factory, "delete_recording", {"id": an_id(path)})
     assert error(factory)["reason"] == "move_failed"
     assert os.path.exists(path)
+    # Without a trash folder the move is never asked for.
+    assert image.moves == []
 
 
 def test_delete_of_a_file_that_is_gone_is_refused(image, start, factory, allowed):
@@ -934,6 +950,87 @@ def test_a_stopped_library_drops_a_result_from_before(image, start, factory, mon
     bridge = start()
     publisher = bridge.publisher("recordings")
     publisher.stop()
-    background.run()
+    # The walk that was running comes back, and nothing more is started from it.
+    assert background.run() == 1
     assert publisher.snapshot() == {}
     assert last(factory, INDEX) is None
+
+
+def test_a_recording_played_through_a_link_on_the_flash_is_not_deleted(image, start, factory,
+                                                                       allowed, receiver):
+    os.symlink(str(image.disk), str(image.tmp / "hdd"))
+    path = image.record("a.ts")
+    start()
+    receiver.nav.sref = "1:0:0:0:0:0:0:0:0:0:" + str(image.tmp / "hdd" / "movie" / "a.ts")
+    send(factory, "delete_recording", {"id": an_id(path)})
+    assert error(factory)["reason"] == "playing"
+    assert os.path.exists(path)
+
+
+def test_a_recording_written_through_a_link_on_the_flash_is_not_deleted(image, start, factory,
+                                                                        allowed, receiver):
+    os.symlink(str(image.disk), str(image.tmp / "hdd"))
+    path = image.record("a.ts")
+    start()
+    timer = receiver.add_timer(state=RecordTimerEntry.StateRunning)
+    timer.Filename = str(image.tmp / "hdd" / "movie" / "a")
+    send(factory, "delete_recording", {"id": an_id(path)})
+    assert error(factory)["reason"] == "recording"
+
+
+def test_a_justplay_timer_on_the_same_file_does_not_block_a_delete(image, start, factory,
+                                                                   allowed, receiver):
+    path = image.record("a.ts")
+    start()
+    timer = receiver.add_timer(state=RecordTimerEntry.StateRunning, justplay=True)
+    timer.Filename = path[:-3]
+    send(factory, "delete_recording", {"id": an_id(path)})
+    assert error(factory) is None
+    assert not os.path.exists(path)
+
+
+def test_a_second_delete_while_the_first_waits_for_its_move_is_refused(image, start, factory,
+                                                                       allowed):
+    first = image.record("a.ts")
+    second = image.record("b.ts")
+    start()
+    image.deferred = True
+    send(factory, "delete_recording", {"id": an_id(first)})
+    send(factory, "delete_recording", {"id": an_id(second)})
+    assert error(factory)["reason"] == "busy"
+    assert os.path.exists(second)
+
+
+def test_the_permission_is_asked_first_and_by_the_library_itself(image, start, factory):
+    path = image.record("a.ts")
+    bridge = start()
+    send(factory, "delete_recording", "not an id")
+    assert error(factory)["reason"] == "not_permitted"
+    publisher = bridge.publisher("recordings")
+    assert publisher.delete(an_id(path)).reason == "not_permitted"
+    assert os.path.exists(path)
+
+
+def test_the_main_loops_share_is_spread_over_turns(image, start, factory, monkeypatch):
+    for index in range(30):
+        image.record(f"{index:02d}.ts", meta=meta_text(sref=f"1:0:19:{index + 1:X}:1:1:0:0:0:0:",
+                                                      created=1790000000 + index))
+    monkeypatch.setattr(library, "SLICE_SECONDS", 0)
+    monkeypatch.setattr(library, "NAMES_PER_SLICE", 5)
+    background = Background()
+    monkeypatch.setattr(LibraryPublisher, "run_in_background", staticmethod(background))
+    bridge = start()
+    publisher = bridge.publisher("recordings")
+    background.jobs.pop(0)()
+    # Five names on this turn; the rest wait for the next turns of the main loop.
+    assert background.jobs == []
+    assert publisher._slices.timer is not None and publisher._slices.timer.running
+    assert last(factory, INDEX) is None
+    for _ in range(100):
+        MainLoop.advance(0)
+        background.run()
+        MainLoop.advance(0)
+        if last(factory, INDEX) is not None:
+            break
+    assert len(folder(factory, "movie")["recordings"]) == 30
+    assert all(entry["sref"] for entry in folder(factory, "movie")["recordings"])
