@@ -1083,26 +1083,26 @@ def test_the_codes_a_refusal_carries_are_the_contracts(image, start, factory, al
                      ("delete_recording", "in_use")}
 
 
-# ------------------------------------------------------------ the review round --
+# ------------------------------------------ names, references and locations --
 
 
 def test_names_that_leave_no_slug_are_folder_before_they_are_made_unique():
     folders = [("/media/hdd/movie", ""), ("/media/hdd/movie/x", ""),
-               ("/media/hdd/Сериалы", ""),
-               ("/media/hdd/Ταινίες", ""),
-               ("/media/hdd/أفلام", "")]
+               ("/media/hdd/\u0421\u0435\u0440\u0438\u0430\u043b\u044b", ""),
+               ("/media/hdd/\u03a4\u03b1\u03b9\u03bd\u03af\u03b5\u03c2", ""),
+               ("/media/hdd/\u0623\u0641\u0644\u0627\u0645", "")]
     assert library.folder_slugs(folders) == ["movie", "x", "folder", "folder_2", "folder_3"]
 
 
 def test_three_folders_with_names_that_leave_no_slug_are_three_topics(image, start, factory):
-    for name in ("Сериалы",
-                 "Ταινίες", "أفلام"):
+    for name in ("\u0421\u0435\u0440\u0438\u0430\u043b\u044b",
+                 "\u03a4\u03b1\u03b9\u03bd\u03af\u03b5\u03c2", "\u0623\u0641\u0644\u0627\u0645"):
         image.record("a.ts", folder=image.tmp / "media" / "hdd" / name)
     image.movielist.videodirs.value = [
         str(image.tmp / "media" / "hdd" / name) + "/"
-        for name in ("Сериалы",
-                     "Ταινίες",
-                     "أفلام")]
+        for name in ("\u0421\u0435\u0440\u0438\u0430\u043b\u044b",
+                     "\u03a4\u03b1\u03b9\u03bd\u03af\u03b5\u03c2",
+                     "\u0623\u0641\u0644\u0627\u0645")]
     image.usage.default_path.value = str(image.movie) + "/"
     start()
     slugs = [one["slug"] for location in last(factory, INDEX)["locations"]
