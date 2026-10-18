@@ -50,7 +50,7 @@ version that has no section here.
   `recording_delete_allowed` (off by default; a **Recordings** section on the settings screen and the
   OpenWebif page), and is refused while the receiver's trash is off - which `info.recording_trash`
   says. New capabilities `recordings`, `recording_play` and `recording_delete`; the OpenWebif page
-  has the three commands. Applied without a reconnect when the permission is saved ([ADR-0023](docs/adr/0024-the-recording-library-is-read-on-events-and-addressed-by-id.md)).
+  has the three commands. Applied without a reconnect when the permission is saved ([ADR-0024](docs/adr/0024-the-recording-library-is-read-on-events-and-addressed-by-id.md)).
 - `timeshift`: whether a timeshift buffer runs, whether the picture is paused or behind live, and
   since when - from the image's events and the info bar's own calls, never polled. Capability
   `timeshift`.

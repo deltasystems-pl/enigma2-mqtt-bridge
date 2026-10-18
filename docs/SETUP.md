@@ -266,8 +266,10 @@ location, with its subfolders, the trash left out - and lets Home Assistant play
 receiver and, with `recording_delete_allowed` on, move one into the receiver's trash. The topics
 and commands are in [TOPICS.md](TOPICS.md#basenoderecordings---added-after-040-unreleased).
 
-- **Which locations.** The receiver's own: its default movie location first, then the movie
-  list's locations ("Movie locations" in its recording settings) in the receiver's order. A location on a network share is read like any
+- **Which locations.** The receiver's own: its default movie location first - also when it is
+  a folder of another location - then the movie list's locations ("Movie locations" in its
+  recording settings) in the receiver's order, then its timer and instant-recording locations
+  where no location before them holds them. A location on a network share is read like any
   other.
 - **Which files.** Recordings - `.ts`, and `.stream` for an IPTV recording. Other media files the
   movie list shows are not listed. Names starting with a dot, the trash `.Trash` among them, are
@@ -281,8 +283,10 @@ and commands are in [TOPICS.md](TOPICS.md#basenoderecordings---added-after-040-u
   through OpenWebif, over FTP - raises no event, so Home Assistant sees it after the next of those
   events or after the button.
 - **Playing.** A recording starts in the receiver's own movie player, exactly as if it had been
-  chosen in its movie list, and the receiver's own setting for resuming applies - "Behaviour when
-  a movie is started" in its movie-list settings: resume, ask, or start from the beginning. When it
+  chosen in its movie list - with timeshift running, the receiver first asks on the television
+  whether to leave it, and a "no" there plays nothing. The receiver's own setting for resuming
+  applies - "Behaviour when a movie is started" in its movie-list settings: resume, ask, or start
+  from the beginning. When it
   is set to ask, the question is on the television. A receiver in standby is woken first.
 - **Deleting.** Only with `recording_delete_allowed` on (off by default, never writable over MQTT),
   and only ever **into the receiver's trash** - the receiver's own move, with the files beside the

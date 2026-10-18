@@ -272,3 +272,27 @@ def test_no_unwanted_timer_is_left_running_after_a_bind(start):
              if any(getattr(function, "__self__", None) is publisher._bind
                     for function in timer.callback)]
     assert all(not timer.running for timer in owned)
+
+
+def test_a_buffer_a_key_starts_or_stops_is_seen_after_the_key(start, factory, receiver, buffer):
+    """The info bar's key map calls its own methods, never the wrappers."""
+    start()
+    buffer.enabled = True
+    receiver.actions.keyPressed("dreambox remote control (native)", 119, 0)
+    receiver.actions.keyPressed("dreambox remote control (native)", 119, 1)
+    assert state(factory)["active"] is False
+    MainLoop.advance(timeshift_module.KEY_SETTLE_MILLISECONDS)
+    assert state(factory)["active"] is True
+    buffer.enabled = False
+    receiver.actions.keyPressed("dreambox remote control (native)", 128, 1)
+    MainLoop.advance(timeshift_module.KEY_SETTLE_MILLISECONDS)
+    assert state(factory)["active"] is False
+
+
+def test_the_key_listener_never_takes_a_key_and_goes_with_the_publisher(start, receiver):
+    bridge = start()
+    publisher = bridge.publisher("timeshift")
+    assert publisher._on_key(119, 1) == 0
+    assert any(entry[2] is publisher._key_handler for entry in receiver.actions.bound)
+    bridge.stop()
+    assert not any(entry[2] is publisher._key_handler for entry in receiver.actions.bound)

@@ -39,8 +39,14 @@ import stat
 import threading
 import time
 
-from .channels import topic_slugs
-from .enigma2 import Ticker, enigma_attribute, missing, service_name
+from .channels import slugify, topic_slugs
+from .enigma2 import (
+    Ticker,
+    enigma_attribute,
+    missing,
+    reference_string,
+    service_name,
+)
 from .log import get_logger
 from .origin import MQTT, granted
 from .publisher import Publisher, Refusal
@@ -95,6 +101,10 @@ RECORD_SETTLE_MILLISECONDS = 3000
 SLICE_SECONDS = 0.03
 NAMES_PER_SLICE = 200
 
+# How long a read may take before it is given up - a movie location on a share that stopped
+# answering holds its worker for as long as the share does.
+READ_WATCHDOG_SECONDS = 600
+
 # How long a delete waits for the image's move to have taken the recording away. The
 # image moves a large file in a background job, behind any job queued before it.
 DELETE_POLL_MILLISECONDS = 500
@@ -104,7 +114,8 @@ MOUNTS_PATH = "/proc/mounts"
 
 # Refusals. A pair carries its reason code on `last_error`; a plain sentence has none. The
 # codes are the contract's: `not_in_library`, `file_gone`, `not_permitted`, `trash_off`,
-# `in_use` and `busy` - which the doors' sentence carries as well (`commands.py`).
+# `in_use`, `in_progress` and `timeshift_kept` - and `busy`, which only the doors' sentence
+# carries (`commands.py`).
 NOT_AVAILABLE = "the recording library is not available on this image"
 NO_ID = "the command takes the id of one recording: {\"id\": \"<16 hex digits>\"}"
 UNKNOWN = ("that recording is not in the receiver's library", "not_in_library")
@@ -119,6 +130,9 @@ PLAYED = ("that recording is being played", "in_use")
 MOVE_FAILED = "the receiver could not move that recording to its trash"
 NOT_MOVED = "the receiver did not move that recording to its trash"
 NO_PLAYER = "this image's movie player cannot be opened"
+IN_PROGRESS = ("another recording is being moved to the trash; try again", "in_progress")
+TIMESHIFT_KEPT = (
+    "the viewer kept timeshift on the receiver; the recording was not played", "timeshift_kept")
 
 
 def refusal(pair):
@@ -195,35 +209,51 @@ def _videodirs():
     return element
 
 
-def movie_locations():
-    """The receiver's movie locations, as it is configured now, or None when it has none.
+def configured_locations():
+    """`[(location, extra), ...]` as the receiver is configured now, or None without a movie list.
 
-    The default movie location first (`config.usage.default_path`), then the movie
-    list's own locations in the image's order. Spelled the way the settings hold
-    them, normalised and without repeats - nothing here touches a disk.
+    The default movie location first (`config.usage.default_path`), then the movie list's
+    own locations in the image's order, then the timer and the instant-record locations
+    where they name a folder of their own - `extra`, for they are listed only where no
+    location before them holds them already. Spelled the way the settings hold them,
+    normalised and without repeats - nothing here touches a disk.
     """
     videodirs = _videodirs()
     if videodirs is None:
         return None
     candidates = []
-    element = _element("usage", "default_path")
+
+    def setting(name):
+        element = _element("usage", name)
+        try:
+            return str(element.value or "") if element is not None else ""
+        except Exception:
+            return ""
+
+    candidates.append((setting("default_path"), False))
     try:
-        candidates.append(str(element.value or "") if element is not None else "")
-    except Exception:
-        LOG.debug("config.usage.default_path could not be read")
-    try:
-        candidates.extend(list(videodirs.value or []))
+        candidates.extend((value, False) for value in list(videodirs.value or []))
     except Exception:
         LOG.exception("config.movielist.videodirs could not be read")
         return None
+    for name in ("timer_path", "instantrec_path"):
+        candidates.append((setting(name), True))
     locations = []
-    for candidate in candidates:
+    seen = set()
+    for candidate, extra in candidates:
         if not isinstance(candidate, str) or not candidate.startswith("/"):
             continue
         location = os.path.normpath(candidate)
-        if location not in locations:
-            locations.append(location)
+        if location not in seen:
+            seen.add(location)
+            locations.append((location, extra))
     return locations
+
+
+def movie_locations():
+    """The configured movie locations in their order (`configured_locations`), or None."""
+    configured = configured_locations()
+    return None if configured is None else [location for location, _extra in configured]
 
 
 def _trash_module():
@@ -294,14 +324,80 @@ def _forget_resume_point(reference):
         LOG.debug("the image's resume point could not be removed")
 
 
+def encode_path(path):
+    """A path as the image's `eServiceReference::toString()` writes it.
+
+    `:`, `%` and every character below a space become `%` and two lower-case hex digits;
+    everything else is left as it is.
+    """
+    out = []
+    for character in path:
+        code = ord(character)
+        if character in ":%" or code < 32:
+            out.append("%" + format(code, "02x"))
+        else:
+            out.append(character)
+    return "".join(out)
+
+
+def decode_path(text):
+    """The image's `urlDecode`: `%` and the two characters after it are one byte."""
+    raw = text.encode("utf-8", "surrogateescape")
+    out = bytearray()
+    index = 0
+    while index < len(raw):
+        byte = raw[index]
+        if byte != 0x25:
+            out.append(byte)
+        else:
+            index += 2
+            if index >= len(raw):
+                break
+            pair = raw[index - 1:index + 1].decode("latin-1")
+            value = 0
+            for character in pair:
+                if character in "0123456789abcdefABCDEF":
+                    value = value * 16 + int(character, 16)
+                else:
+                    break
+            if value:
+                out.append(value & 0xFF)
+        index += 1
+    return out.decode("utf-8", "surrogateescape")
+
+
+def file_of(reference):
+    """The file a reference plays - its path, decoded as the image decodes it - or "".
+
+    Asked of the reference itself where it can say (`getPath()`); a reference in its
+    string form is read as the image reads one: the ten numbers, then the path up to the
+    next colon, then its `%` escapes.
+    """
+    getter = getattr(reference, "getPath", None)
+    if callable(getter):
+        try:
+            return str(getter() or "")
+        except Exception:
+            return ""
+    parts = reference_string(reference).split(":", 10)
+    if len(parts) <= 10:
+        return ""
+    return decode_path(parts[10].split(":", 1)[0])
+
+
 def playable_reference(path):
-    """The reference the image's movie list plays a recording file with."""
+    """The reference the image's movie list plays a recording file with.
+
+    Built with the image's own constructor - kind, flags and the path - so the path is the
+    file's whatever it holds: a `:`, a `%` or a space. A string put together by hand would
+    be read up to its first colon, and with its `%` escapes undone.
+    """
     factory = enigma_attribute("eServiceReference")
     if factory is None:
         return None
     kind = 4097 if path.lower().endswith(".stream") else 1
     try:
-        return factory(str(kind) + ":0:0:0:0:0:0:0:0:0:" + path)
+        return factory(kind, 0, path)
     except Exception:
         LOG.exception("could not build a reference for a recording")
         return None
@@ -591,17 +687,24 @@ def _is_recording(name):
     return any(lowered.endswith(extension) for extension in RECORDING_EXTENSIONS)
 
 
-def walk(location):
+def walk(location, skip=()):
     """`[(folder relative to the location, [recording, ...]), ...]` of one movie location.
 
     Every folder under it, the trash and every other hidden folder left out, and a
     folder that is a link left out as well - followed, a link back up the tree would
     walk for ever, and a link to another location would list its recordings twice.
+    Left out too: a folder in `skip` - another movie location, walked by itself - and
+    a folder on another file system, a disk or a share mounted inside this one.
     Folders without a recording are not listed.
     """
     folders = []
     pending = [location]
     seen = set()
+    skip = set(skip)
+    try:
+        device = os.stat(location).st_dev
+    except OSError:
+        device = None
     while pending:
         folder = pending.pop(0)
         try:
@@ -625,6 +728,10 @@ def walk(location):
                 continue
             try:
                 if entry.is_dir(follow_symlinks=False):
+                    if entry.path in skip:
+                        continue
+                    if device is not None and entry.stat(follow_symlinks=False).st_dev != device:
+                        continue
                     subfolders.append(entry.path)
                     continue
                 if entry.is_symlink() or not _is_recording(name):
@@ -655,14 +762,18 @@ def newest_first(recordings):
     return sorted(recordings, key=lambda record: (-(record.get("begin") or 0), record["file"]))
 
 
-def folder_slugs(locations, folders):
-    """A slug for each `(location, relative path)` - unique in the node, in a fixed order."""
+def folder_slugs(folders):
+    """A slug for each `(location, relative path)` - unique in the node, in a fixed order.
+
+    A name that leaves no slug - Cyrillic, Greek, Arabic - is `folder` before the slugs
+    are made unique, so three such folders are `folder`, `folder_2` and `folder_3` and
+    never one topic.
+    """
     names = []
     for location, relative in folders:
         base = os.path.basename(location.rstrip("/")) or "recordings"
-        names.append(base + ("_" + relative if relative else ""))
-    slugs = topic_slugs(names)
-    return [slug or "folder" for slug in slugs]
+        names.append(slugify(base + ("_" + relative if relative else "")) or "folder")
+    return topic_slugs(names)
 
 
 def fit(entries, encode, allowed):
@@ -684,18 +795,14 @@ def fit(entries, encode, allowed):
     return encoded, len(parts) - kept
 
 
-def reference_path(sref):
-    """The path of a file reference - what follows the tenth colon - or ""."""
-    parts = str(sref or "").split(":", 10)
-    return parts[10] if len(parts) > 10 else ""
-
-
 def locate(path, locations, mounts=None):
     """`(location, file, id)` of a recording file, as the library will list it - or Nones.
 
     The path is resolved as the library resolves a location, so a recording a timer
-    writes under `/hdd/movie` has the id it has under `/media/hdd/movie`. The location
-    is the outermost one that holds it; outside every location there is none.
+    writes under `/hdd/movie` has the id it has under `/media/hdd/movie`. The location is
+    the resolved path of the innermost one that holds it - the one whose walk lists it,
+    since an outer location leaves an inner one's folder out; outside every location
+    there is none.
     """
     if not path:
         return None, None, None
@@ -704,11 +811,11 @@ def locate(path, locations, mounts=None):
     best = None
     for location in locations or ():
         root = resolve(location, mounts)
-        if _under(real, root) and real != root and (best is None or len(root) < len(best[1])):
-            best = (location, root)
+        if _under(real, root) and real != root and (best is None or len(root) > len(best)):
+            best = root
     if best is None:
         return None, None, recording_id(real)
-    return best[0], shown(os.path.relpath(real, best[1])), recording_id(real)
+    return best, shown(os.path.relpath(real, best)), recording_id(real)
 
 
 # --------------------------------------------------------------- publisher --
@@ -717,6 +824,39 @@ def locate(path, locations, mounts=None):
 def _run_thread(job, name):
     thread = threading.Thread(target=job, name=name, daemon=True)
     thread.start()
+
+
+def _present(path):
+    """Whether a file is there - asked in a worker: on a share that hangs, so does this."""
+    try:
+        return os.path.lexists(path)
+    except OSError:
+        return False
+
+
+def _allow_copy():
+    """`allowCopy` as each image's own move into the trash passes it.
+
+    OpenViX and OpenATV allow a copy, OpenPLi does not: its trash move refuses to cross
+    a file system, and the trash is on the recording's own anyway.
+    """
+    try:
+        from .boxinfo import image_version
+
+        return "openpli" not in str(image_version() or "").lower()
+    except Exception:
+        return True
+
+
+def _merge(queued, reason, only):
+    """What is read after the running read: the queued reasons and locations, joined."""
+    if queued is None:
+        return (reason, only)
+    if queued[0] == REFRESH or reason == REFRESH:
+        return (REFRESH, None)
+    if queued[1] is None or only is None:
+        return (reason, None)
+    return (reason, set(queued[1]) | set(only))
 
 
 class LibraryPublisher(Publisher):
@@ -730,14 +870,17 @@ class LibraryPublisher(Publisher):
 
     def __init__(self, bridge=None):
         Publisher.__init__(self, bridge)
-        self._generation = 0
+        self._serial = 0
         self._stopped = True
         self._reading = False
+        self._running_reason = None
         self._again = None
+        self._walk_in_flight = False
         self._read_reason = None
         self._read_at = None
         self._locations = []
-        # location -> {"mounted", "free_mb", "folders": [(relative, [records])]}
+        self._extras = set()
+        # location -> {"mounted", "free_mb", "folders": [(relative, [records])], "real"}
         self._walked = {}
         # The published shape: the index, and suffix -> (payload, encoded) of each folder.
         self._index = None
@@ -747,44 +890,63 @@ class LibraryPublisher(Publisher):
         self._slice_job = None
         self._settle = Ticker(self._settled, "recordings settle")
         self._settle_reason = None
+        self._settle_only = None
+        self._recording_in = set()
+        self._watchdog = Ticker(self._read_stuck, "recordings watchdog")
         self._nav = None
         self._play_claimed = None
         self._delete_claimed = None
         self._deleting = None
         self._delete_poll = Ticker(self._check_deleted, "recording delete")
+        self._space_running = False
+        self._space_skipped = False
+        self._late = []
+        self._late_ticker = Ticker(self._say_late, "recordings refusals")
         self._channels = None
 
     # ------------------------------------------------------------ lifecycle --
 
     def start(self):
-        locations = movie_locations()
-        if locations is None:
+        configured = configured_locations()
+        if configured is None:
             return False
-        self._generation += 1
         self._stopped = False
-        self._locations = locations
+        self._set_locations(configured)
         self._bind_record_event()
         channels = self.bridge.publisher("channels") if self.bridge is not None else None
         if channels is not None:
             channels.when_changed(self._bouquets_changed)
             self._channels = channels
-        self.request(START)
+        if self._walk_in_flight:
+            # Stopped and started again with a read still out: that read is this start's.
+            self._reading = True
+            self._running_reason = START
+            self._watchdog.start(READ_WATCHDOG_SECONDS * 1000, True)
+        else:
+            self.request(START)
         return True
 
     def stop(self):
-        self._generation += 1
         self._stopped = True
         self._reading = False
+        self._running_reason = None
         self._again = None
         self._slices.stop()
         self._slice_job = None
         self._settle.stop()
+        self._watchdog.stop()
         self._delete_poll.stop()
         self._deleting = None
+        self._late_ticker.stop()
+        self._late = []
         self._unbind_record_event()
         channels, self._channels = self._channels, None
         if channels is not None:
             channels.not_when_changed(self._bouquets_changed)
+
+    def _set_locations(self, configured):
+        self._locations = [location for location, _extra in configured]
+        self._extras = {location for location, extra in configured if extra}
 
     def claimed(self):
         return self._index is not None
@@ -835,7 +997,12 @@ class LibraryPublisher(Publisher):
             LOG.debug("could not detach from session.nav.record_event")
 
     def _on_record_event(self, _service=None, event=None):
-        """A recording started or ended - or failed to write: read once the burst is over."""
+        """A recording started or ended: read the locations it writes into, once it settles.
+
+        The locations of every recording running now, and of those that ran at the
+        last event - an ended recording is no longer in the timer list. When none can
+        be placed, every location is read.
+        """
         wanted = set()
         owner = enigma_attribute("iRecordableService")
         for name in ("evStart", "evEnd"):
@@ -844,52 +1011,92 @@ class LibraryPublisher(Publisher):
                 wanted.add(value)
         if wanted and event not in wanted:
             return
+        now = self._recording_locations()
+        touched = now | self._recording_in
+        self._recording_in = now
+        if self._settle_reason is None:
+            pending = touched or None
+        elif self._settle_only is None or not touched:
+            pending = None
+        else:
+            pending = self._settle_only | touched
+        self._settle_only = pending
         self._settle_reason = RECORDING
         if not self._settle.start(RECORD_SETTLE_MILLISECONDS, True):
             self._settled()
 
+    def _recording_locations(self):
+        """The resolved locations the running recordings write into."""
+        found = set()
+        mounts = read_mounts(self.mounts_path)
+        for base in self._recorded_paths():
+            location, _file, _id = locate(base + ".ts", self._locations, mounts)
+            if location is not None:
+                found.add(location)
+        return found
+
     def _settled(self):
         reason, self._settle_reason = self._settle_reason, None
+        only, self._settle_only = self._settle_only, None
         if reason is not None:
-            self.request(reason)
+            self.request(reason, only=only)
 
     def _bouquets_changed(self):
         """The channel list moved: `bouquet` on every entry is asked again - no disk is read."""
-        if self._index is None or self._reading or self._stopped:
+        if self._index is None or self._stopped:
             return
+        if self._reading:
+            # The running read asks the channel list when it gets there.
+            return
+        self._serial += 1
         self._reading = True
-        self._annotate(self._walked, self._read_reason, self._read_at)
+        self._running_reason = None
+        self._watchdog.start(READ_WATCHDOG_SECONDS * 1000, True)
+        self._annotate(self._serial, self._walked, self._read_reason, self._read_at)
 
-    def request(self, reason):
-        """Read the library, for `reason`. False when a read is running and answers this one."""
+    def request(self, reason, only=None):
+        """Read the library, for `reason`. False when a read is running and answers this one.
+
+        `only` is the resolved locations to read, the others keeping what they held; None
+        reads every one. A refresh is never dropped: during a read that is not one it is
+        read after it.
+        """
         if self._stopped:
             return False
         if self._reading:
-            if reason != REFRESH and self._again is None:
-                self._again = reason
+            if reason == REFRESH and self._running_reason == REFRESH:
+                return False
+            self._again = _merge(self._again, reason, only)
             return False
-        self._reading = True
-        locations = movie_locations()
-        if locations is not None:
-            self._locations = locations
+        configured = configured_locations()
+        if configured is not None:
+            self._set_locations(configured)
         locations = list(self._locations)
+        extras = set(self._extras)
         previous = dict(self._walked)
-        generation = self._generation
+        self._serial += 1
+        serial = self._serial
+        self._reading = True
+        self._running_reason = reason
+        self._walk_in_flight = True
+        self._watchdog.start(READ_WATCHDOG_SECONDS * 1000, True)
         mounts_path = self.mounts_path
+        selected = None if only is None else set(only)
 
         def job():
             try:
-                walked = self._walk(locations, previous, reason, mounts_path)
+                walked = self._walk(locations, extras, previous, reason, mounts_path, selected)
             except Exception:
                 LOG.exception("the recording library could not be read")
                 walked = None
-            self._to_main(self._walked_done, generation, reason, walked, time.time())
+            self._to_main(self._walked_done, serial, reason, walked, time.time())
 
         try:
             self.run_in_background(job, "mqttbridge-recordings")
         except Exception:
             LOG.exception("could not start reading the recording library")
-            self._reading = False
+            self._walk_in_flight = False
+            self._finish(serial)
             return False
         return True
 
@@ -904,68 +1111,103 @@ class LibraryPublisher(Publisher):
         except Exception:
             LOG.exception("could not return to the main loop")
 
+    def _in_worker(self, question, answer):
+        """Ask `question()` in a worker, and hand its answer to `answer` on the main loop."""
+
+        def job():
+            try:
+                result = question()
+            except Exception:
+                LOG.exception("a file check raised")
+                result = None
+            self._to_main(answer, result)
+
+        try:
+            self.run_in_background(job, "mqttbridge-recordings-check")
+        except Exception:
+            LOG.exception("could not start a file check")
+            answer(None)
+
+    def _read_stuck(self):
+        """The watchdog: a read that never came back - a share that hangs - is given up.
+
+        Its answer, should it come after all, is dropped, and what was asked for during it
+        is read now.
+        """
+        if not self._reading or self._stopped:
+            return
+        LOG.warning("the recording library read has not finished within %d s and is given up; "
+                    "a movie location may not be answering", READ_WATCHDOG_SECONDS)
+        self._serial += 1
+        self._slices.stop()
+        self._slice_job = None
+        self._finish(self._serial)
+
     @staticmethod
-    def _walk(locations, previous, reason, mounts_path):
+    def _walk(locations, extras, previous, reason, mounts_path, only=None):
         """The worker: each location walked when it is mounted - or on a refresh, whatever.
 
         A location that is not mounted keeps what it held when it was last read: an
         automounted share is unmounted when it has been idle, and its recordings are
-        not gone. Only a refresh walks it - which mounts it.
+        not gone. Only a refresh walks it - which mounts it. A location inside another
+        is walked by itself, and the outer one leaves its folder out. The timer and the
+        instant-record locations are left out where a location listed before holds them.
         """
         started = time.monotonic()
         mounts = read_mounts(mounts_path)
-        walked = {}
+        kept = []
         for location in locations:
             real = resolve(location, mounts)
+            if any(real == other for _, other in kept):
+                continue
+            if location in extras and any(_under(real, other) for _, other in kept):
+                continue
+            kept.append((location, real))
+        walked = {}
+        woke = False
+        for location, real in kept:
             mounted = is_mounted(real, mounts)
+            earlier = previous.get(location) or {}
+            if only is not None and real not in only and earlier:
+                walked[location] = dict(earlier, real=real)
+                continue
             if mounted or reason == REFRESH:
-                folders = walk(real) if os.path.isdir(real) else []
+                inner = {other for _, other in kept if other != real and _under(other, real)}
+                folders = walk(real, inner) if os.path.isdir(real) else []
+                woke = woke or not mounted
             else:
-                folders = (previous.get(location) or {}).get("folders") or []
-            walked[location] = {
-                "mounted": mounted,
-                "free_mb": free_megabytes(real) if mounted else None,
-                "folders": folders,
-                "real": real,
-            }
+                folders = earlier.get("folders") or []
+            walked[location] = {"mounted": mounted, "folders": folders, "real": real}
+        if woke:
+            # A refresh that walked into an automounted share mounted it: say so now, and
+            # not as a mount the minute timer would read the library again for.
+            mounts = read_mounts(mounts_path)
+        for location, real in kept:
+            one = walked[location]
+            one["mounted"] = is_mounted(real, mounts)
+            one["free_mb"] = free_megabytes(real) if one["mounted"] else None
         count = sum(len(records) for one in walked.values() for _, records in one["folders"])
         LOG.info("recording library read: %d recording(s) in %d location(s), %.3fs (%s)",
-                 count, len(locations), time.monotonic() - started, reason)
+                 count, len(kept), time.monotonic() - started, reason)
         return walked
 
-    def _walked_done(self, generation, reason, walked, read_at):
-        if generation != self._generation or self._stopped:
+    def _walked_done(self, serial, reason, walked, read_at):
+        self._walk_in_flight = False
+        if serial != self._serial or self._stopped:
             return
         if walked is None:
-            self._finish()
+            self._finish(serial)
             return
-        self._annotate(walked, reason, read_at)
+        self._annotate(serial, walked, reason, read_at)
 
     # ------------------------------------------------------ the main loop's half --
 
-    def _annotate(self, walked, reason, read_at):
+    def _annotate(self, serial, walked, reason, read_at):
         """Names and bouquets from the image, in slices; then the payloads, in the worker."""
         locations = list(walked)
-        # Nested locations: a location inside another one is listed once, under the outer.
-        reals = {location: walked[location].get("real", location) for location in locations}
-        kept = [
-            location for location in locations
-            if not any(
-                other != location and reals[location] != reals[other]
-                and _under(reals[location], reals[other])
-                for other in locations
-            )
-        ]
-        seen_real = set()
-        unique = []
-        for location in kept:
-            if reals[location] in seen_real:
-                continue
-            seen_real.add(reals[location])
-            unique.append(location)
         srefs = []
         known = set()
-        for location in unique:
+        for location in locations:
             for _relative, records in walked[location]["folders"]:
                 for record in records:
                     sref = record.get("sref")
@@ -975,13 +1217,16 @@ class LibraryPublisher(Publisher):
         names = {}
         bouquets = {}
         channels = self.bridge.publisher("channels") if self.bridge is not None else None
-        generation = self._generation
         pending = list(srefs)
 
         def names_slice():
+            if serial != self._serial or self._stopped:
+                return None
             deadline = time.monotonic() + SLICE_SECONDS
             done = 0
-            while pending and (done < NAMES_PER_SLICE or time.monotonic() < deadline):
+            while pending:
+                if done >= NAMES_PER_SLICE or (done and time.monotonic() >= deadline):
+                    break
                 sref = pending.pop(0)
                 done += 1
                 names[sref] = service_name(sref) or None
@@ -992,11 +1237,9 @@ class LibraryPublisher(Publisher):
                     except Exception:
                         bouquet = None
                 bouquets[sref] = bouquet
-                if done >= NAMES_PER_SLICE and time.monotonic() >= deadline:
-                    break
             if pending:
                 return names_slice
-            self._build(generation, walked, unique, names, bouquets, reason, read_at)
+            self._build(serial, walked, locations, names, bouquets, reason, read_at)
             return None
 
         self._run_slices(names_slice)
@@ -1017,17 +1260,17 @@ class LibraryPublisher(Publisher):
         if job is not None and not self._stopped:
             self._run_slices(job)
 
-    def _build(self, generation, walked, locations, names, bouquets, reason, read_at):
+    def _build(self, serial, walked, locations, names, bouquets, reason, read_at):
         if self.bridge is None:
-            self._finish()
+            self._finish(serial)
             return
         folder_keys = []
         for location in locations:
             for relative, _records in walked[location]["folders"]:
-                folder_keys.append((location, relative))
+                folder_keys.append((walked[location]["real"], relative))
         from .bridge import MAX_PACKET_BYTES, PACKET_OVERHEAD_BYTES
 
-        slugs = folder_slugs(locations, folder_keys)
+        slugs = folder_slugs(folder_keys)
         allowed = {
             slug: MAX_PACKET_BYTES - PACKET_OVERHEAD_BYTES
             - len(self.bridge.topic(FOLDER_PREFIX + slug).encode("utf-8"))
@@ -1042,13 +1285,13 @@ class LibraryPublisher(Publisher):
             except Exception:
                 LOG.exception("the recording library could not be built")
                 built = None
-            self._to_main(self._publish_built, generation, walked, reason, read_at, built)
+            self._to_main(self._publish_built, serial, walked, reason, read_at, built)
 
         try:
             self.run_in_background(job, "mqttbridge-recordings")
         except Exception:
             LOG.exception("could not start building the recording library")
-            self._finish()
+            self._finish(serial)
 
     @staticmethod
     def _payloads(walked, locations, slugs, allowed, names, bouquets, encode):
@@ -1082,8 +1325,9 @@ class LibraryPublisher(Publisher):
                     entries.append(entry)
                     by_id[record["id"]] = {
                         "path": record["_path"],
-                        "location": location,
+                        "location": one["real"],
                         "file": record["file"],
+                        "name": record["name"],
                     }
                 encoded, cut = fit(entries, encode, allowed[slug])
                 kept = entries[: len(entries) - cut]
@@ -1098,18 +1342,18 @@ class LibraryPublisher(Publisher):
                     "cut": cut,
                 })
             index_locations.append({
-                "path": location,
+                "path": one["real"],
                 "mounted": bool(one["mounted"]),
                 "free_mb": one["free_mb"],
                 "folders": folder_rows,
             })
         return index_locations, folders, by_id
 
-    def _publish_built(self, generation, walked, reason, read_at, built):
-        if generation != self._generation or self._stopped:
+    def _publish_built(self, serial, walked, reason, read_at, built):
+        if serial != self._serial or self._stopped:
             return
         if built is None:
-            self._finish()
+            self._finish(serial)
             return
         index_locations, folders, by_id = built
         first = self._index is None
@@ -1124,6 +1368,8 @@ class LibraryPublisher(Publisher):
         pending = sorted(folders)
 
         def publish_slice():
+            if serial != self._serial or self._stopped:
+                return None
             deadline = time.monotonic() + SLICE_SECONDS
             while pending:
                 suffix = pending.pop(0)
@@ -1141,16 +1387,20 @@ class LibraryPublisher(Publisher):
                 LOG.info("the recording library is read; recordings is available")
             if (first or changed) and self.bridge is not None:
                 self.bridge.announce_capabilities()
-            self._finish()
+            self._finish(serial)
             return None
 
         self._run_slices(publish_slice)
 
-    def _finish(self):
+    def _finish(self, serial):
+        if serial != self._serial:
+            return
+        self._watchdog.stop()
         self._reading = False
+        self._running_reason = None
         again, self._again = self._again, None
         if again is not None and not self._stopped:
-            self.request(again)
+            self.request(again[0], only=again[1])
 
     # --------------------------------------------------------- the published --
 
@@ -1203,41 +1453,82 @@ class LibraryPublisher(Publisher):
     def locations(self):
         return list(self._locations)
 
+    def check_space(self):
+        """The recording disk's minute: mounts and free space, in a thread of their own.
+
+        Never in the recording disk's own thread, so a share that hangs in `statvfs`
+        cannot hold up the `hdd` topic; and never two at once, so it cannot pile up
+        threads either - while one hangs, the minute is skipped.
+        """
+        if self._stopped or self._index is None:
+            return False
+        if self._space_running:
+            if not self._space_skipped:
+                self._space_skipped = True
+                LOG.warning("the movie locations' free space is still being read; a movie "
+                            "location may not be answering")
+            return False
+        self._space_running = True
+        locations = list(self._locations)
+        mounts_path = self.mounts_path
+
+        def job():
+            try:
+                result = space(locations, mounts_path)
+            except Exception:
+                LOG.exception("the movie locations could not be measured")
+                result = None
+            self._to_main(self._space_done, result)
+
+        try:
+            self.run_in_background(job, "mqttbridge-recordings-space")
+        except Exception:
+            self._space_running = False
+            LOG.exception("could not start measuring the movie locations")
+            return False
+        return True
+
+    def _space_done(self, result):
+        self._space_running = False
+        self._space_skipped = False
+        if result:
+            self.on_space(result)
+
     def on_space(self, result):
         """The minute's `/proc/mounts` and `statvfs`, back on the main loop.
 
         A location that is mounted now and was not is read again (`mount`). One that
         went keeps its recordings, with `mounted` false. A change of free space goes
-        out on the index alone.
+        out on the index alone, `read` and `reason` as they were.
         """
         if self._stopped or self._index is None or not result:
             return
-        newly = False
+        newly = set()
         changed = False
-        for row in self._index["locations"]:
-            known = result.get(row["path"])
-            if known is None:
+        rows = {row["path"]: row for row in self._index["locations"]}
+        for location, one in self._walked.items():
+            known = result.get(location)
+            row = rows.get(one.get("real"))
+            if known is None or row is None:
                 continue
             mounted, free = known
             if mounted and not row["mounted"]:
-                newly = True
+                newly.add(one.get("real"))
             if (bool(mounted), free) != (row["mounted"], row["free_mb"]):
                 row["mounted"] = bool(mounted)
                 row["free_mb"] = free
-                one = self._walked.get(row["path"])
-                if one is not None:
-                    one["mounted"] = bool(mounted)
-                    one["free_mb"] = free
+                one["mounted"] = bool(mounted)
+                one["free_mb"] = free
                 changed = True
         if changed:
             self.publish(INDEX, self._index)
         if newly:
-            self.request(MOUNT)
+            self.request(MOUNT, only=newly)
 
     # -------------------------------------------------------------- lookups --
 
     def find(self, recording_id):
-        """`{"path", "location", "file"}` of a recording the current library lists, or None."""
+        """`{"path", "location", "file", "name"}` of a recording the library lists, or None."""
         return self._by_id.get(recording_id)
 
     def _recorded_paths(self):
@@ -1265,19 +1556,43 @@ class LibraryPublisher(Publisher):
         return any(resolve(one, mounts) == wanted for one in self._recorded_paths())
 
     def _being_played(self, path):
-        from .enigma2 import current_service_reference
+        """Whether the file playing is this one - by the reference's decoded path."""
+        from .enigma2 import navigation
 
-        playing = reference_path(current_service_reference(self.session))
+        nav = navigation(self.session)
+        getter = getattr(nav, "getCurrentlyPlayingServiceReference", None) if nav else None
+        try:
+            playing = file_of(getter()) if callable(getter) else ""
+        except Exception:
+            playing = ""
         if not playing or not playing.startswith("/"):
             return False
         mounts = read_mounts(self.mounts_path)
         return resolve(os.path.normpath(playing), mounts) == resolve(os.path.normpath(path),
                                                                      mounts)
 
+    # ------------------------------------------------------------- refusals --
+
+    def _report_later(self, command, message, command_id):
+        """A refusal of work a command left for later: on the next turn, after the command.
+
+        The dispatcher clears `last_error` when the command it ran returned, so a refusal
+        found while it ran would be taken back at once; and found in a worker it is late
+        anyway.
+        """
+        self._late.append((command, message, command_id))
+        if not self._late_ticker.start(0, True):
+            self._say_late()
+
+    def _say_late(self):
+        late, self._late = self._late, []
+        for command, message, command_id in late:
+            self.report(command, message, command_id)
+
     # ------------------------------------------------------------- commands --
 
     def refresh_command(self):
-        """`cmd/recordings_refresh`: read now. A read already running answers it."""
+        """`cmd/recordings_refresh`: read now. A refresh already running answers it."""
         self.request(REFRESH)
         return None
 
@@ -1299,44 +1614,61 @@ class LibraryPublisher(Publisher):
         if self._being_played(path):
             return refusal(PLAYED)
         if self._deleting is not None:
-            return Refusal("another recording is being moved to the trash; try again", "busy")
-        try:
-            present = os.path.lexists(path)
-        except OSError:
-            present = False
-        if not present:
-            return refusal(GONE)
+            return refusal(IN_PROGRESS)
+        if _create_trash() is None or _move_service_files() is None:
+            return refusal(NO_TRASH)
+        self._deleting = {"path": path, "found": found, "polls": 0, "id": command_id,
+                          "checking": True}
+        self._in_worker(lambda: _present(path), self._delete_checked)
+        return None
+
+    def _delete_checked(self, present):
+        """The file is there - asked off the main loop: the image's own move into its trash."""
+        deleting = self._deleting
+        if deleting is None or self._stopped:
+            return
+        deleting["checking"] = False
+        command_id = deleting["id"]
+        if present is not True:
+            self._deleting = None
+            self._report_later("delete_recording", refusal(GONE), command_id)
+            return
+        path = deleting["path"]
+        reference = playable_reference(path)
         create = _create_trash()
         move = _move_service_files()
-        reference = playable_reference(path)
-        if create is None or move is None or reference is None:
-            return refusal(NO_TRASH)
+        if reference is None or create is None or move is None:
+            self._deleting = None
+            self._report_later("delete_recording", refusal(NO_TRASH), command_id)
+            return
         try:
             folder = create(path)
         except Exception:
             LOG.exception("the image's trash folder could not be made")
             folder = None
         if not folder:
-            return refusal(MOVE_FAILED)
+            self._deleting = None
+            self._report_later("delete_recording", refusal(MOVE_FAILED), command_id)
+            return
         try:
-            move(reference, folder)
+            move(reference, folder, deleting["found"].get("name"), allowCopy=_allow_copy())
         except Exception as error:
             LOG.warning("the image did not move a recording to its trash: %s",
                         type(error).__name__)
-            return refusal(MOVE_FAILED)
+            self._deleting = None
+            self._report_later("delete_recording", refusal(MOVE_FAILED), command_id)
+            return
         _forget_resume_point(reference)
         LOG.info("a recording is being moved to the receiver's trash")
-        self._deleting = [path, 0, command_id]
         if not self._delete_poll.start(DELETE_POLL_MILLISECONDS):
             # No timer to watch the move with: what the library finds is the answer.
             self._deleting = None
-            self.request(DELETE)
-            return None
-        self._check_deleted(first=True)
-        return None
+            self.request(DELETE, only={deleting["found"]["location"]})
+            return
+        self._check_deleted()
 
-    def _check_deleted(self, first=False):
-        """Verified by effect: the recording's file is gone from where it was.
+    def _check_deleted(self):
+        """Verified by effect: the recording's file is gone from where it was - asked in a worker.
 
         Counted in turns of the poll rather than by the clock, so a receiver whose
         clock is set while it waits neither gives up early nor waits for ever.
@@ -1345,40 +1677,81 @@ class LibraryPublisher(Publisher):
         if deleting is None:
             self._delete_poll.stop()
             return
-        path, polls, command_id = deleting
-        try:
-            present = os.path.lexists(path)
-        except OSError:
-            present = True
-        if not present:
-            self._deleting = None
-            self._delete_poll.stop()
-            self.request(DELETE)
+        if deleting["checking"]:
             return
-        if first:
-            return
-        deleting[1] = polls = polls + 1
-        if polls * DELETE_POLL_MILLISECONDS >= DELETE_WAIT_SECONDS * 1000:
-            self._deleting = None
-            self._delete_poll.stop()
-            self.report("delete_recording", refusal(NOT_MOVED), command_id)
-            self.request(DELETE)
+        deleting["checking"] = True
+        path = deleting["path"]
+        self._in_worker(lambda: _present(path), self._delete_polled)
 
-    def play(self, recording_id, on_play=None):
-        """`cmd/play_recording`, once the receiver is awake: the image's own movie player."""
+    def _delete_polled(self, present):
+        deleting = self._deleting
+        if deleting is None or self._stopped:
+            return
+        deleting["checking"] = False
+        location = deleting["found"]["location"]
+        if present is False:
+            self._deleting = None
+            self._delete_poll.stop()
+            self.request(DELETE, only={location})
+            return
+        deleting["polls"] += 1
+        if deleting["polls"] * DELETE_POLL_MILLISECONDS >= DELETE_WAIT_SECONDS * 1000:
+            self._deleting = None
+            self._delete_poll.stop()
+            self._report_later("delete_recording", refusal(NOT_MOVED), deleting["id"])
+            self.request(DELETE, only={location})
+
+    def play(self, recording_id, on_play=None, command_id=None):
+        """`cmd/play_recording`, once the receiver is awake: the image's own movie player.
+
+        The file is looked for in a worker; then, as the image's movie list does, the
+        image's own timeshift question is asked when a buffer runs, and the player opens
+        when the viewer leaves timeshift. What goes wrong after the command returned is
+        said on `last_error` then.
+        """
         found = self.find(recording_id)
         if found is None:
             return refusal(UNKNOWN)
         path = found["path"]
-        try:
-            present = os.path.lexists(path)
-        except OSError:
-            present = False
-        if not present:
-            return refusal(GONE)
         reference = playable_reference(path)
+        if reference is None or _infobar() is None:
+            return refusal(NO_PLAYER)
+
+        def checked(present):
+            if self._stopped:
+                return
+            if not present:
+                self._report_later("play_recording", refusal(GONE), command_id)
+                return
+            self._ask_timeshift(reference, on_play, command_id)
+
+        self._in_worker(lambda: _present(path), checked)
+        return None
+
+    def _ask_timeshift(self, reference, on_play, command_id):
         infobar = _infobar()
-        if reference is None or infobar is None:
+        check = getattr(infobar, "checkTimeshiftRunning", None) if infobar is not None else None
+
+        def answered(answer=True, *_rest):
+            if not answer:
+                self._report_later("play_recording", refusal(TIMESHIFT_KEPT), command_id)
+                return
+            error = self._open_player(reference, on_play)
+            if error:
+                self._report_later("play_recording", error, command_id)
+
+        if not callable(check):
+            answered(True)
+            return
+        try:
+            check(answered)
+        except Exception:
+            LOG.exception("the image's timeshift question could not be asked")
+            answered(True)
+
+    def _open_player(self, reference, on_play):
+        infobar = _infobar()
+        if infobar is None:
             return refusal(NO_PLAYER)
         player_class = _movie_player_class()
         dialog = getattr(self.session, "current_dialog", None)
@@ -1406,8 +1779,7 @@ class LibraryPublisher(Publisher):
             LOG.exception("the image's movie player could not be opened")
             return "the receiver could not play that recording: " + type(error).__name__
         if on_play is not None:
-            on_play("1:0:0:0:0:0:0:0:0:0:" + path if not path.lower().endswith(".stream")
-                    else "4097:0:0:0:0:0:0:0:0:0:" + path)
+            on_play(reference_string(reference))
         return None
 
     @staticmethod

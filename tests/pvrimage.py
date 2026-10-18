@@ -56,6 +56,7 @@ class PvrImage:
         self.resume_points = []
         self.trash_makes = True
         self.player_opened = []
+        self.move_options = []
 
     # --------------------------------------------------------------- the image --
 
@@ -112,8 +113,10 @@ class PvrImage:
     def _move_service_files(self, serviceref, dest, name=None, allowCopy=True):
         if self.move_raises is not None:
             raise self.move_raises
-        source = serviceref.reference.split(":", 10)[10]
+        # `createMoveList`: the file is the reference's own path, never its string.
+        source = os.path.normpath(serviceref.getPath())
         self.moves.append((source, dest))
+        self.move_options.append((name, allowCopy))
         listed = [(source, os.path.join(dest, os.path.basename(source)))]
         stem = source[: source.rfind(".")]
         if os.path.exists(stem + ".eit"):
@@ -134,7 +137,7 @@ class PvrImage:
         infobar = conftest.InfoBar.instance
 
         def open_movie_player(ref, LastService=None):
-            self.player_opened.append(ref.reference)
+            self.player_opened.append(ref.getPath())
             receiver.session.current_dialog = conftest.MoviePlayer(receiver.session)
             receiver.nav.playService(ref)
 

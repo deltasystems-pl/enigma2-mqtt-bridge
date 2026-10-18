@@ -50,8 +50,11 @@ receivers this plugin runs on:
    `.meta`, otherwise from the first and last entry of `.ap` - two reads of sixteen bytes, where
    the image's own reading opens the recording. One read runs at a time; an event during a read is
    read again after it, and a refresh during a read is answered by that read.
-3. **One retained topic for each folder, and an index.** `recordings` lists each location - its
-   free space, whether it is mounted, its folders - and `recordings/<folder_slug>` each folder's
+3. **One retained topic for each folder, and an index.** `recordings` lists each location - at
+   its resolved path, the default movie location first, then the movie list's locations, then
+   the timer and instant-record locations no earlier one holds; a location inside another is its
+   own, and the outer walk leaves it out - with its free space, whether it is mounted, its
+   folders - and `recordings/<folder_slug>` each folder's
    recordings, newest first. A folder over the packet bound is cut, its oldest left out, and the
    index says how many - the EPG grid's pattern. The topic set follows the index: a folder that
    goes is retracted, also one that went while the plugin was not running, found in the state
@@ -62,8 +65,11 @@ receivers this plugin runs on:
    point the plugin at one the library did not find - a path outside the movie locations, the
    trash, a file of the image.
 5. **Play is the receiver's.** `cmd/play_recording` hands the recording to the image's own movie
-   player, as its movie list does, with the image's own resume rule; a receiver in standby is
-   woken first, as for a zap.
+   player, as its movie list does: the image's own question whether to leave timeshift first,
+   when a buffer runs, then the image's own resume rule; a receiver in standby is woken first, as
+   for a zap. The reference is built with the image's own constructor from the path, because the
+   image reads a reference's string up to its next `:` and undoes its `%` escapes; every
+   comparison of the file playing is made by the reference's decoded path.
 6. **Delete only ever moves into the image's trash.** `cmd/delete_recording` is behind the
    box-only permission `recording_delete_allowed`, off by default and never writable over MQTT. It
    is the image's own move with the image's own companion files, verified when the file has gone

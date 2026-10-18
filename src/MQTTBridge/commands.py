@@ -877,7 +877,7 @@ class CommandDispatcher:
                 service.expect(sref, command_id, command="play_recording")
 
         def awake():
-            return publisher.play(recording_id, on_play=on_play)
+            return publisher.play(recording_id, on_play=on_play, command_id=command_id)
 
         cancel_waiting_zap()
         if in_standby():

@@ -328,9 +328,24 @@ Press *Refresh recordings*, or send `cmd/recordings_refresh`.
 `recordings.locations[].mounted` says whether it is, from `/proc/mounts`. An automounted share is
 unmounted by the receiver when it has been idle, and the library then keeps the recordings it read
 last, with `mounted` `false`, rather than reading the share - which would mount it. The refresh
-reads it anyway. A share that stopped answering holds up only the library's own thread, never the
-picture; the read finishes when the share gives up, and `recordings.read` says when the last one
-did.
+reads it anyway.
+
+A share that stops answering holds up only the library's own threads, never the picture and never
+the `hdd` topic; what happens then depends on how it is mounted:
+
+- **A hard mount** (NFS's default) waits for the server for ever. A read that walks into it never
+  comes back: after ten minutes the library gives it up, says so in the log ("the recording
+  library read has not finished within 600 s"), publishes nothing from it and reads what was asked
+  for meanwhile - which may walk into the same share again. The minute's free-space check that
+  waits on it is skipped until it returns ("still being read" in the log). The thread stays stuck
+  in the kernel until the share answers or the receiver restarts.
+- **A soft mount** gives up after its own timeout (`timeo` and `retrans`, a minute or two by
+  default): the read finishes with what it could read, the files on the share missing until it
+  answers again.
+
+The image's own move into the trash runs on the main loop, as it does from the movie list, so a
+delete from Home Assistant of a recording on a hung share freezes the picture as the movie list's
+own delete would.
 
 **It is in a folder with thousands of recordings.** One folder is one topic, held to the packet
 bound of 1,000,000 bytes: about three thousand recordings. Beyond that the oldest are left out,
@@ -348,8 +363,8 @@ integration leaves it out of what it shows, as it does in its channel lists.
 **A delete is refused.** `last_error.reason` says why: `not_permitted` - `recording_delete_allowed`
 is off; `trash_off` - the receiver's trash is switched off, and a delete is never made for good;
 `in_use` - it is being recorded or played; `not_in_library` - the library does not list it, so
-press *Refresh recordings*; `file_gone`; `busy` - an update is being applied, or another delete is
-still waiting for its move. A refusal without a code - the receiver has no trash, or could not move
+press *Refresh recordings*; `file_gone`; `in_progress` - another delete is still waiting for its
+move; `busy` - an update is being applied. A refusal without a code - the receiver has no trash, or could not move
 the recording into it - says why in its sentence. The recording is untouched in every case.
 
 ## A restart lost a recording

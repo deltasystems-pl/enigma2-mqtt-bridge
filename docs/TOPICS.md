@@ -1260,7 +1260,7 @@ either.
 |---|---|---|
 | `service_name` | string or `null` | The channel's name, as the receiver resolves the reference |
 | `description` | string or `null` | The timer's short description, its whitespace collapsed and cut at 200 characters |
-| `location` | string or `null` | The movie location the recording is written into - one of `recordings.locations[].path` (below), the outermost that holds it. `null` before the receiver has named the file, and for a file outside every movie location |
+| `location` | string or `null` | The movie location the recording is written into - one of `recordings.locations[].path` (below), resolved as it is, and the one whose walk lists the file: the innermost that holds it. `null` before the receiver has named the file, and for a file outside every movie location |
 | `file` | string or `null` | The file's path relative to that location, the subfolder included; `null` with no location |
 | `id` | string or `null` | The id the recording library gives the file (`recordings/<folder_slug>`, below) - the same id once the library lists it. Also for a file outside every location; `null` only before the receiver has named the file |
 | `instant` | bool | `true` for a recording started by hand - the remote's record key, or `cmd/record start` - and `false` for one a timer started. The record key's recording is marked by the image itself. `cmd/record start` sets an ordinary timer, which the receiver keeps in its timer file, and the plugin marks it - a mark the image does not keep, so after an interface restart that recording reads `false` |
@@ -1359,9 +1359,13 @@ or stops: its info bar starts one from a key, from the permanent-timeshift setti
 and stops it the same way. So the state is read again on the image's own events - a service
 starting or ending, playback moving into or out of the buffer, the buffer moving on to its next
 file (OpenViX and OpenATV) and the info bar's pause and play - and on the info bar's own calls that
-start and stop a buffer, which the plugin wraps on the one info bar there is. A buffer the service
-starts in some other way is seen at the next of those events. The only timer looks for the info
-bar, on an image that builds it after the plugin has started, and stops when it has found it.
+start and stop a buffer, which the plugin wraps on the one info bar there is. **A key released on
+the remote is one of those events too**: the info bar's key map holds the methods it was built
+with, so a key that starts or stops a buffer never reaches the wrappers, and stopping a buffer
+that plays live sends no service event at all - half a second after a key is released the state
+is read again, from memory. A buffer the service starts in some other way is seen at the next of
+those events. The only repeating timer looks for the info bar, on an image that builds it after
+the plugin has started, and stops when it has found it.
 
 ### `<base>/<node>/recordings` - added after 0.4.0 (unreleased)
 
@@ -1381,8 +1385,8 @@ folder, `recordings/<folder_slug>` (below).
 |---|---|---|
 | `read` | int | When the library was last read |
 | `reason` | string | Why it was read: `start` - the plugin started; `recording` - a recording started or ended; `delete` - `cmd/delete_recording` moved one into the trash; `mount` - a movie location was mounted; `refresh` - `cmd/recordings_refresh`. An open enumeration |
-| `locations` | list of objects | Each movie location: first the image's default movie location (`config.usage.default_path`), then the movie list's locations in the image's order |
-| `locations[].path` | string | The location as the receiver's settings name it, without a trailing slash |
+| `locations` | list of objects | Each movie location: first the image's default movie location (`config.usage.default_path`) - also when it lies inside another - then the movie list's locations in the image's order, then the timer and the instant-record locations where they name a folder no location before them holds |
+| `locations[].path` | string | The location's resolved path - links on the receiver's flash followed, as the ids and the references follow them - without a trailing slash: `path + "/" + file` is exactly the file a reference to the recording plays. The spelling in the receiver's settings is not published |
 | `locations[].mounted` | bool | Whether it is on a mounted file system of its own, read from `/proc/mounts`: not the root file system, and not an automounter's entry waiting to mount a share |
 | `locations[].free_mb` | int or `null` | Free space, in MiB; `null` when it is not mounted |
 | `locations[].folders` | list of objects | The location's folders that hold at least one recording - the location itself and every subfolder, flattened |
@@ -1394,27 +1398,36 @@ folder, `recordings/<folder_slug>` (below).
 
 **What a recording is.** A `.ts` or a `.stream` file in a movie location or under it. Other media
 files the image's movie list shows are not recordings. The movie locations are the image's default
-movie location, then its movie list locations in the image's order. The image's trash (`.Trash`) and every other name starting
-with a dot are left out; a folder that is a link is not followed; a location inside another is
-listed once, under the outer one; and a location reached through a link on the receiver's flash -
-`/hdd/movie` for `/media/hdd/movie` - is read at the path the link leads to, which is the path the
-ids are made from.
+movie location, then its movie list locations in the image's order, then its timer and
+instant-record locations where no location before them holds them. The image's trash (`.Trash`)
+and every other name starting with a dot are left out; a folder that is a link is not followed; a
+folder on another file system - a disk or a share mounted inside a location - is not walked into;
+a location inside another is a location of its own, and the outer one's walk leaves its folder
+out, so no recording is listed twice; and a location reached through a link on the receiver's
+flash - `/hdd/movie` for `/media/hdd/movie` - is read and published at the path the link leads to,
+which is the path the ids are made from.
 
 **When it is read - never on a timer.** A recording disk spins down when nobody uses it, and
 reading the library is the one thing that reads its folders and the files beside each recording.
 So the library is read once when the plugin starts, and then only when something changed it: a
-recording started or ended (read once three seconds have passed without another such event), a
-delete this plugin made, and a movie location that was mounted - and when `cmd/recordings_refresh`
+recording started or ended (read once three seconds have passed without another such event, and
+only the locations the recordings write into), a delete this plugin made (its location), and a
+movie location that was mounted (that location) - and when `cmd/recordings_refresh`
 asks, which is the only read that may wake a disk on purpose. Whether each location is mounted is
 read from `/proc/mounts`, which touches no disk, and its free space with `statvfs`, which a disk
 answers without spinning up and which is asked only of a location that is mounted - both on the
-minute timer of the `hdd` topic, in its thread. A change of free space alone republishes the index
-and nothing else. One read runs at a time: an event during a read is read again after it, and a
-refresh during a read is answered by that read.
+minute timer of the `hdd` topic, in a thread of their own: a share that stops answering holds up
+neither that topic nor the minute after. A change of free space alone republishes the index, with
+`read` and `reason` as they were - a new read is told by `read`, not by a new message. One read
+runs at a time: what is asked for during a read is read after it, a refresh included - a refresh
+is never dropped, and only a refresh already running answers one. A read that has not come back
+after ten minutes - a share that hangs - is given up, its answer dropped should it still come,
+and what was asked for meanwhile is read then.
 
 A location that is **not mounted** is not read: it keeps the recordings it had when it was last
 read, with `mounted` `false` - an automounted network share is unmounted when it has been idle,
-and its recordings are not gone. A refresh reads it anyway, which mounts such a share. **Changes
+and its recordings are not gone. A refresh reads it anyway, which mounts such a share, and the index then says it is mounted -
+so the minute after reads nothing again. **Changes
 made on the receiver itself** - a recording deleted, moved or renamed in its movie list, through
 OpenWebif or over FTP - raise no event, and show after the next of the events above or a refresh.
 
@@ -2048,8 +2061,8 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `list` - added after 0.4.0 (unreleased), capability `list` | `{"title": "...", "text": "...", "rows": [{"id": "...", "label": "...", "key": "green", "icon": "gate"}], "timeout": 60, "default": "..."}`, in the envelope with an id (below) | Shows a list of choices on the television, over whatever is on screen, and answers once on `list_answer` (section 1) with the row the viewer picked or how the list ended - the other command answered on a topic of its own. A newer list replaces the one on screen. See below | Refused before anything is shown, each with a `reason` on `last_error`, in this order: while an update is being applied - the doors' sentence, here with `reason` `busy`, asked by the dispatcher before the command's own checks, and published even while the update keeps the plugin silent, then **not retained**; a payload that breaks a rule below - a sentence that names the member and the row's index, never the sender's text (`invalid`); without the capability - "lists cannot be shown on this receiver" (`no_capability`); in standby, or while the receiver's own "really shut down / restart?" question is on screen - the toast's "the receiver is in standby" (`standby`). A list that neither screen could put on the television - "the receiver could not show the list" (`not_shown`), also later, with the command's id, and then no answer. **No permission and no setting**, as a message has none |
 | `timer` | see below | Adds or deletes a recording timer | An add that overlaps an existing timer, or refers to an unknown event, is refused - and so is one the receiver quietly dropped as a duplicate of a timer it already had |
 | `record` | `start` \| `stop` | Starts or stops an instant recording of the current service | `start` records the current service for two hours; `stop` with nothing recording is a no-op with a note in `last_error` |
-| `play_recording` - added after 0.4.0 (unreleased), capability `recording_play` | `{"id": "<16 hex digits>"}`, exactly | Plays one recording of the library in the image's own movie player, as if it had been chosen in the image's movie list - with the image's own rule for resuming, so the television may ask whether to resume. Wakes the receiver from standby first, as `zap` does. A recording playing already is replaced in the same player. Verified on `service` within 5 s | Refused, before anything happens: without the capability; for a payload that is not exactly one id - "the command takes the id of one recording: ..."; for an id the current library does not list - "that recording is not in the receiver's library" (`reason` `not_in_library`), checked first, so a refused id never wakes the receiver; while an update is being applied (the doors' sentence, `busy`); when the file is gone - "that recording's file is gone from the receiver" (`file_gone`); without an info bar to open the player from, with no code. "the receiver did not start playing the recording within 5 s" when `service` does not show it. A recording that parental control protects asks for the PIN on the television, and is not verified. **No permission**, as `zap` has none. The codes are `not_in_library`, `file_gone` and `busy`; every other refusal is a sentence without one |
-| `delete_recording` - added after 0.4.0 (unreleased), capability `recording_delete` | `{"id": "<16 hex digits>"}`, exactly | Moves one recording of the library, and the files the image moves with it (`.eit`, `.ap`, `.cuts`, `.meta`, `.sc`), into the image's trash, with the image's own move; the image's trash settings decide when it is emptied. The answer is `recordings` read again (`reason` `delete`) once the file is gone. 🔴 **Never a delete for good** | Refused, before anything happens, in this order, each with a `reason`: unless `recording_delete_allowed` is on - "deleting recordings is switched off in the plugin's settings" (`not_permitted`); without the library; for a payload that is not exactly one id; on an image with no trash for recordings, with no code; with the image's trash switched off - "the receiver's trash is switched off; nothing is deleted for good" (`trash_off`); for an id the library does not list (`not_in_library`); while the recording is being recorded or played (`in_use`); while another delete still waits for its move (`busy`); when the file is gone (`file_gone`); when the image cannot make its trash folder or refuses the move - "the receiver could not move that recording to its trash", with no code, the image's own offer to delete it for good instead never being taken; while an update is being applied (the doors' sentence, `busy`). A move that has not taken the file away within 60 s is reported - "the receiver did not move that recording to its trash", with no code. The codes are `not_permitted`, `trash_off`, `not_in_library`, `in_use`, `file_gone` and `busy` |
+| `play_recording` - added after 0.4.0 (unreleased), capability `recording_play` | `{"id": "<16 hex digits>"}`, exactly | Plays one recording of the library in the image's own movie player, as if it had been chosen in the image's movie list: when a timeshift buffer runs, the image's own question whether to leave timeshift is asked first, on the television; then the image's own rule for resuming applies, so the television may ask whether to resume. Wakes the receiver from standby first, as `zap` does. A recording playing already is replaced in the same player. Verified on `service` within 5 s, whose `sref` then carries the reference as the image writes it - the path with `:` as `%3a` and `%` as `%25` | Refused, in this order, each with its `reason` where it has one: while an update is being applied - the doors' sentence (`busy`), asked by the dispatcher first; without the capability; for a payload that is not exactly one id - "the command takes the id of one recording: ..."; for an id the current library does not list - "that recording is not in the receiver's library" (`not_in_library`), checked before a sleeping receiver is woken; without an info bar to open the player from, with no code. Then, on `last_error` once found - the file is looked for off the main loop, and the command has returned by then - "that recording's file is gone from the receiver" (`file_gone`); "the viewer kept timeshift on the receiver; the recording was not played" (`timeshift_kept`) when the viewer answers the timeshift question with no; and "the receiver did not start playing the recording within 5 s" when `service` does not show it. Parental control: on OpenViX a protected recording asks for the PIN and is not verified; on OpenATV and OpenPLi the player asks for it itself, and while the PIN waits the command is reported as not started after 5 s - the recording still starts once the PIN is entered. **No permission**, as `zap` has none. The codes are `busy`, `not_in_library`, `file_gone` and `timeshift_kept`; every other refusal is a sentence without one |
+| `delete_recording` - added after 0.4.0 (unreleased), capability `recording_delete` | `{"id": "<16 hex digits>"}`, exactly | Moves one recording of the library, and the files the image moves with it (`.eit`, `.ap`, `.cuts`, `.meta`, `.sc`), into the image's trash, with the image's own move as its own movie list makes it; the image's trash settings decide when it is emptied. The answer is `recordings` read again (`reason` `delete`) once the file is gone. 🔴 **Never a delete for good** | Refused, in this order, each with its `reason` where it has one: while an update is being applied - the doors' sentence (`busy`), asked by the dispatcher first; unless `recording_delete_allowed` is on - "deleting recordings is switched off in the plugin's settings" (`not_permitted`); without the library; for a payload that is not exactly one id; on an image with no trash for recordings, with no code; with the image's trash switched off - "the receiver's trash is switched off; nothing is deleted for good" (`trash_off`); for an id the library does not list (`not_in_library`); while the recording is being recorded or played (`in_use`) - the file played compared by its decoded path; while another delete still waits for its move - "another recording is being moved to the trash; try again" (`in_progress`). Then, on `last_error` once found - the file is looked for off the main loop - when the file is gone (`file_gone`); when the image cannot make its trash folder or refuses the move - "the receiver could not move that recording to its trash", with no code, the image's own offer to delete it for good instead never being taken; and when the move has not taken the file away within 60 s - "the receiver did not move that recording to its trash", with no code. The codes are `busy`, `not_permitted`, `trash_off`, `not_in_library`, `in_use`, `in_progress` and `file_gone` |
 | `recordings_refresh` - added after 0.4.0 (unreleased), capability `recordings` | any (`PRESS` by convention) | Reads the library again now (`reason` `refresh`) - the one read that may wake a disk, and that reads a movie location which is not mounted, which mounts an automounted share | At most one read at a time: a refresh during a read is answered by that read. **The payload is ignored**. No permission. Refused only while an update is being applied (the doors' sentence, `busy`) |
 | `screenshot` | any | Captures `screen` now, in standby as well | Rate-limited to one per five seconds |
 | `softcam_restart` - since 0.3.0 | any (`PRESS` by convention) | Stops **every** running instance of the cam the image selected, then starts exactly one, with the image's own command line | Refused unless `softcam_restart_allowed` is on; refused by the same recording guard as `deep_standby` - while recording, with a timer due within 10 minutes, and when the image will not say; refused for the first 60 seconds after the plugin starts, because the image's own check runs a moment after that and restarting inside that window races a copy already on its way; at most one manual restart a minute; refused while one is already running. 🔴 **The binary is resolved on the box and no part of the command line comes from the payload** |
@@ -2474,8 +2487,17 @@ library does not list - a recording made since the last read, or one left out of
 packet bound - is refused until the library lists it; `cmd/recordings_refresh` reads it again.
 
 `cmd/play_recording` behaves as the receiver does when the recording is chosen in its movie list:
-the image's movie player, with the image's resume setting - resume, ask, or start from the
-beginning, whatever the receiver is set to. When it asks, the question is on the television.
+first the image's own question whether to leave timeshift, when a buffer runs; then the image's
+movie player, with the image's resume setting - resume, ask, or start from the beginning, whatever
+the receiver is set to. When it asks, the question is on the television.
+
+**References carry the image's encoding.** The plugin builds the reference to a recording with the
+image's own constructor - kind, flags and the path - and never as a string, because the image reads
+a reference's path only up to the next `:` and undoes its `%` escapes: a recording called
+`100% Leben.ts` or `Film: Teil 2.ts` would be another file, or none. What the image writes back -
+`service.sref` while a recording plays - carries the path with `:` as `%3a`, `%` as `%25` and
+control characters escaped the same way; a consumer that compares it with `location + "/" + file`
+decodes the path part first. The plugin itself compares the file playing by that decoded path.
 
 `cmd/delete_recording` only ever moves a recording into the image's trash, and is refused when the
 image's trash is switched off - nothing Home Assistant asks for is deleted for good. The image
@@ -3285,6 +3307,11 @@ sensor. A plugin-only install reads them from the broker as they are documented 
 core MQTT select carries its options inside this discovery payload, so a list that changes on every
 zap would mean republishing discovery on every zap. The companion integration builds that select
 from the topic; discovery mode offers the clear button only.
+
+`recordings`, `recordings/<folder_slug>` and `timeshift` (added after 0.4.0, unreleased) have **no
+discovery components** either, nor have their three commands: a library of folders, a media
+browser and a delete behind a confirmation are the companion integration's to build from the
+topics. A plugin-only install reads them from the broker.
 
 `stream`, `stream_clients` and `stream_playable` (added after 0.4.0, unreleased) have **no
 discovery components**: a list of clients that changes shape, a command that needs the row it is

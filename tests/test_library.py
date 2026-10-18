@@ -291,7 +291,7 @@ def test_a_change_of_the_bouquets_says_the_bouquets_again_without_reading_a_disk
     bridge = start()
     assert folder(factory, "movie")["recordings"][0]["bouquet"] is None
     read = last(factory, INDEX)["read"]
-    monkeypatch.setattr(library, "walk", lambda location: pytest.fail("the disk was read"))
+    monkeypatch.setattr(library, "walk", lambda location, skip=(): pytest.fail("the disk was read"))
     settings.bouquets_for_select.value = ""
     bridge.publisher("channels").refresh()
     assert folder(factory, "movie")["recordings"][0]["bouquet"] == "Sport (HD)"
@@ -313,13 +313,21 @@ def test_two_locations_with_the_same_name_get_two_slugs(image, start, factory, t
     assert folder(factory, "movie_2")["recordings"][0]["file"] == "b.ts"
 
 
-def test_a_location_inside_another_is_listed_once(image, start, factory):
+def test_a_location_inside_another_is_its_own_and_the_outer_walk_leaves_it_out(
+        image, start, factory):
     image.movielist.videodirs.value = [str(image.movie) + "/", str(image.movie / "Series")]
     image.record("a.ts", folder=image.movie / "Series")
+    image.record("b.ts")
     start()
     locations = last(factory, INDEX)["locations"]
-    assert [location["path"] for location in locations] == [str(image.movie)]
-    assert locations[0]["folders"][0]["path"] == "Series"
+    assert [location["path"] for location in locations] == [
+        str(image.movie), str(image.movie / "Series")]
+    assert [one["path"] for one in locations[0]["folders"]] == [""]
+    assert [one["path"] for one in locations[1]["folders"]] == [""]
+    files = [entry["file"] for slug in ("movie", "series")
+             for entry in folder(factory, slug)["recordings"]]
+    # Listed once each, relative to the location that lists it.
+    assert sorted(files) == ["a.ts", "b.ts"]
 
 
 def test_a_location_reached_through_a_link_has_the_ids_of_its_real_path(image, start, factory):
@@ -490,7 +498,7 @@ def test_a_recording_that_starts_or_ends_reads_the_library_once_the_burst_is_ove
     assert len(folder(factory, "movie")["recordings"]) == 1
     publisher = bridge.publisher("recordings")
     asked = []
-    publisher.request = asked.append
+    publisher.request = lambda reason, only=None: asked.append(reason)
     receiver.nav.fire_record(None, iRecordableService.evRecordWriteError)
     MainLoop.advance(library.RECORD_SETTLE_MILLISECONDS)
     assert asked == []
@@ -539,8 +547,8 @@ def test_an_unmounted_location_is_not_walked_but_by_a_refresh(image, start, fact
     image.record("a.ts")
     walked = []
     real = library.walk
-    monkeypatch.setattr(library, "walk", lambda location: walked.append(location) or real(
-        location))
+    monkeypatch.setattr(library, "walk", lambda location, skip=(): walked.append(location) or real(
+        location, skip))
     bridge = start()
     assert walked == []
     assert last(factory, INDEX)["locations"][0]["folders"] == []
@@ -574,7 +582,7 @@ def test_one_read_at_a_time_a_refresh_during_a_read_is_answered_by_it(image, sta
     walks = []
     real = LibraryPublisher._walk
     monkeypatch.setattr(LibraryPublisher, "_walk", staticmethod(
-        lambda *arguments: walks.append(arguments[2]) or real(*arguments)))
+        lambda *arguments: walks.append(arguments[3]) or real(*arguments)))
     bridge = start()
     background.run()
     publisher = bridge.publisher("recordings")
@@ -630,7 +638,7 @@ def test_play_opens_the_images_movie_player_and_is_verified_on_service(
     path = image.record("a.ts")
     start()
     send(factory, "play_recording", {"id": an_id(path)})
-    assert image.player_opened == ["1:0:0:0:0:0:0:0:0:0:" + path]
+    assert image.player_opened == [path]
     assert receiver.nav.sref == "1:0:0:0:0:0:0:0:0:0:" + path
     assert error(factory) is None
 
@@ -643,11 +651,11 @@ def test_play_hands_a_second_recording_to_the_player_already_open(image, start, 
     send(factory, "play_recording", {"id": an_id(first)})
     player = receiver.session.current_dialog
     chosen = []
-    player.movieSelected = lambda ref: chosen.append(ref.reference) or receiver.nav.playService(
+    player.movieSelected = lambda ref: chosen.append(ref.getPath()) or receiver.nav.playService(
         ref)
     send(factory, "play_recording", {"id": an_id(second)})
-    assert chosen == ["1:0:0:0:0:0:0:0:0:0:" + second]
-    assert image.player_opened == ["1:0:0:0:0:0:0:0:0:0:" + first]
+    assert chosen == [second]
+    assert image.player_opened == [first]
 
 
 def test_an_image_without_open_movie_player_goes_through_movie_selected(image, start, factory,
@@ -661,12 +669,12 @@ def test_an_image_without_open_movie_player_goes_through_movie_selected(image, s
     selected = []
 
     def movie_selected(service):
-        selected.append((service.reference, infobar.lastservice))
+        selected.append((service.getPath(), infobar.lastservice))
         receiver.nav.playService(service)
 
     infobar.movieSelected = movie_selected
     send(factory, "play_recording", {"id": an_id(path)})
-    assert selected[0][0] == "1:0:0:0:0:0:0:0:0:0:" + path
+    assert selected[0][0] == path
 
 
 def test_play_that_does_not_start_is_reported(image, start, factory, receiver):
@@ -704,7 +712,7 @@ def test_play_from_standby_wakes_the_receiver_first(image, start, factory, recei
     send(factory, "play_recording", {"id": an_id(path)})
     assert image.player_opened == []
     MainLoop.advance(1000)
-    assert image.player_opened == ["1:0:0:0:0:0:0:0:0:0:" + path]
+    assert image.player_opened == [path]
 
 
 @pytest.mark.parametrize("payload", ['{"path": "/etc/passwd"}', "a.ts", '{"id": 5}', ""])
@@ -721,6 +729,9 @@ def test_play_of_a_file_that_is_gone_is_refused(image, start, factory):
     start()
     os.remove(path)
     send(factory, "play_recording", {"id": an_id(path)})
+    # Found in a worker, so said on the turn after the command.
+    assert error(factory) is None
+    MainLoop.advance(0)
     assert error(factory)["reason"] == "file_gone"
     assert image.player_opened == []
 
@@ -751,7 +762,7 @@ def test_delete_moves_the_recording_and_its_files_into_the_trash(image, start, f
     assert sorted(os.listdir(str(trash))) == ["a.eit", "a.ts", "a.ts.ap", "a.ts.cuts",
                                               "a.ts.meta"]
     assert not os.path.exists(path)
-    assert image.resume_points[0].reference == "1:0:0:0:0:0:0:0:0:0:" + path
+    assert image.resume_points[0].getPath() == path
     index = last(factory, INDEX)
     assert index["reason"] == "delete"
     assert [entry["file"] for entry in folder(factory, "movie")["recordings"]] == ["b.ts"]
@@ -877,11 +888,13 @@ def test_a_move_the_image_refuses_is_a_refusal_and_never_a_delete_for_good(
     start()
     image.move_raises = OSError("cross-device")
     send(factory, "delete_recording", {"id": an_id(path)})
+    MainLoop.advance(0)
     assert error(factory)["error"] == library.MOVE_FAILED
     assert os.path.exists(path)
     image.move_raises = None
     image.trash_makes = False
     send(factory, "delete_recording", {"id": an_id(path)})
+    MainLoop.advance(0)
     assert error(factory)["error"] == library.MOVE_FAILED
     assert os.path.exists(path)
     # Without a trash folder the move is never asked for.
@@ -893,6 +906,7 @@ def test_delete_of_a_file_that_is_gone_is_refused(image, start, factory, allowed
     start()
     os.remove(path)
     send(factory, "delete_recording", {"id": an_id(path)})
+    MainLoop.advance(0)
     assert error(factory)["reason"] == "file_gone"
 
 
@@ -999,7 +1013,7 @@ def test_a_second_delete_while_the_first_waits_for_its_move_is_refused(image, st
     image.deferred = True
     send(factory, "delete_recording", {"id": an_id(first)})
     send(factory, "delete_recording", {"id": an_id(second)})
-    assert error(factory)["reason"] == "busy"
+    assert error(factory)["reason"] == "in_progress"
     assert os.path.exists(second)
 
 
@@ -1067,3 +1081,391 @@ def test_the_codes_a_refusal_carries_are_the_contracts(image, start, factory, al
     codes.add(("delete_recording", error(factory)["reason"]))
     assert codes == {("play_recording", "not_in_library"), ("delete_recording", "not_in_library"),
                      ("delete_recording", "in_use")}
+
+
+# ------------------------------------------------------------ the review round --
+
+
+def test_names_that_leave_no_slug_are_folder_before_they_are_made_unique():
+    folders = [("/media/hdd/movie", ""), ("/media/hdd/movie/x", ""),
+               ("/media/hdd/Сериалы", ""),
+               ("/media/hdd/Ταινίες", ""),
+               ("/media/hdd/أفلام", "")]
+    assert library.folder_slugs(folders) == ["movie", "x", "folder", "folder_2", "folder_3"]
+
+
+def test_three_folders_with_names_that_leave_no_slug_are_three_topics(image, start, factory):
+    for name in ("Сериалы",
+                 "Ταινίες", "أفلام"):
+        image.record("a.ts", folder=image.tmp / "media" / "hdd" / name)
+    image.movielist.videodirs.value = [
+        str(image.tmp / "media" / "hdd" / name) + "/"
+        for name in ("Сериалы",
+                     "Ταινίες",
+                     "أفلام")]
+    image.usage.default_path.value = str(image.movie) + "/"
+    start()
+    slugs = [one["slug"] for location in last(factory, INDEX)["locations"]
+             for one in location["folders"]]
+    assert slugs == ["folder", "folder_2", "folder_3"]
+    for slug in slugs:
+        assert len(folder(factory, slug)["recordings"]) == 1
+
+
+AWKWARD = ("20261017 2015 - Kanal - 100% Leben.ts", "a%41.ts", "Film: Teil 2.ts")
+
+
+def test_a_reference_built_by_hand_reaches_the_image_as_another_file(image):
+    """The stub reads a reference as the image does: the old string form would miss."""
+    from conftest import eServiceReference
+
+    for name in AWKWARD:
+        path = str(image.movie / name)
+        assert eServiceReference("1:0:0:0:0:0:0:0:0:0:" + path).getPath() != path
+        made = library.playable_reference(path)
+        assert made.getPath() == path
+        assert eServiceReference(made.toString()).getPath() == path
+    assert "%25" in library.playable_reference("/m/100% Leben.ts").toString()
+    assert "%3a" in library.playable_reference("/m/Film: Teil 2.ts").toString()
+
+
+@pytest.mark.parametrize("name", AWKWARD)
+def test_a_recording_with_a_percent_or_a_colon_plays_and_is_verified(image, start, factory,
+                                                                      receiver, name):
+    image.record("aA.ts")
+    path = image.record(name)
+    bridge = start()
+    send(factory, "play_recording", {"id": an_id(path)})
+    assert image.player_opened == [path]
+    assert receiver.nav.sref == library.playable_reference(path).toString()
+    # The image says the service started; `service` then carries the encoded reference.
+    from conftest import iPlayableService
+
+    receiver.nav.fire(iPlayableService.evStart)
+    assert factory.client.last(ROOT + "service").json()["sref"] == receiver.nav.sref
+    # The play is proven: the wait for it is over.
+    assert bridge.publisher("service")._waiting_for is None
+    MainLoop.advance(0)
+    assert error(factory) is None
+
+
+@pytest.mark.parametrize("name", AWKWARD)
+def test_a_recording_with_a_percent_or_a_colon_is_the_one_deleted(image, start, factory,
+                                                                    allowed, name):
+    other = image.record("aA.ts")
+    path = image.record(name)
+    start()
+    send(factory, "delete_recording", {"id": an_id(path)})
+    assert not os.path.exists(path) and os.path.exists(other)
+    assert image.moves == [(path, str(image.movie / ".Trash"))]
+
+
+@pytest.mark.parametrize("name", AWKWARD)
+def test_a_playing_recording_with_a_percent_or_a_colon_is_not_deleted(image, start, factory,
+                                                                       allowed, receiver,
+                                                                       name):
+    image.record("aA.ts")
+    path = image.record(name)
+    start()
+    receiver.nav.playService(library.playable_reference(path))
+    send(factory, "delete_recording", {"id": an_id(path)})
+    assert error(factory)["reason"] == "in_use"
+    assert os.path.exists(path)
+
+
+def test_the_file_of_a_reference_in_its_string_form_is_decoded_as_the_image_does():
+    assert library.file_of("1:0:0:0:0:0:0:0:0:0:/m/100%25 Leben.ts") == "/m/100% Leben.ts"
+    assert library.file_of("1:0:0:0:0:0:0:0:0:0:/m/Film%3a Teil 2.ts:Name") == "/m/Film: Teil 2.ts"
+    assert library.file_of("1:0:19:283D:3FB:1:C00000:0:0:0:") == ""
+    assert library.decode_path("a%41") == "aA"
+    assert library.encode_path("a:%\x01") == "a%3a%25%01"
+
+
+def test_the_delete_moves_as_the_image_does(image, start, factory, allowed, monkeypatch):
+    path = image.record("20261017 2015 - Kanal - Titel.ts", meta=meta_text(name="Titel"))
+    start()
+    send(factory, "delete_recording", {"id": an_id(path)})
+    assert image.move_options == [("Titel", True)]
+    from MQTTBridge import boxinfo
+
+    monkeypatch.setattr(boxinfo, "image_version", lambda: "openpli 9.1")
+    assert library._allow_copy() is False
+
+
+def test_the_default_location_comes_first_even_inside_another(image, start, factory):
+    inner = image.movie / "Default"
+    image.usage.default_path.value = str(inner) + "/"
+    image.movielist.videodirs.value = [str(image.movie) + "/"]
+    image.record("in.ts", folder=inner)
+    image.record("out.ts")
+    start()
+    locations = last(factory, INDEX)["locations"]
+    assert [one["path"] for one in locations] == [str(inner), str(image.movie)]
+    listed = {location["path"]: [entry["file"] for row in location["folders"]
+                                 for entry in folder(factory, row["slug"])["recordings"]]
+              for location in locations}
+    assert listed == {str(inner): ["in.ts"], str(image.movie): ["out.ts"]}
+
+
+def test_the_timer_and_instant_record_locations_come_last_where_nothing_holds_them(
+        image, start, factory, tmp_path):
+    from conftest import ConfigText
+
+    elsewhere = tmp_path / "media" / "hdd" / "timer"
+    image.record("t.ts", folder=elsewhere)
+    image.usage.timer_path = ConfigText(default=str(elsewhere) + "/")
+    image.usage.instantrec_path = ConfigText(default=str(image.movie / "Instant") + "/")
+    image.record("i.ts", folder=image.movie / "Instant")
+    start()
+    locations = last(factory, INDEX)["locations"]
+    # The instant-record location is inside the movie location, which lists it.
+    assert [one["path"] for one in locations] == [str(image.movie), str(elsewhere)]
+    assert [one["path"] for one in locations[0]["folders"]] == ["Instant"]
+
+
+def test_a_location_is_published_at_its_resolved_path(image, start, factory):
+    os.symlink(str(image.disk), str(image.tmp / "hdd"))
+    image.movielist.videodirs.value = [str(image.tmp / "hdd" / "movie") + "/"]
+    image.usage.default_path.value = str(image.tmp / "hdd" / "movie") + "/"
+    path = image.record("Film: Teil 2.ts")
+    start()
+    location = last(factory, INDEX)["locations"][0]
+    entry = folder(factory, "movie")["recordings"][0]
+    assert location["path"] == str(image.movie)
+    assert location["path"] + "/" + entry["file"] == path
+
+
+def test_play_asks_the_images_timeshift_question_first(image, start, factory, receiver):
+    from conftest import InfoBar
+
+    path = image.record("a.ts")
+    start()
+    infobar = InfoBar.instance
+    infobar.seekable = infobar.timeshift = True
+    factory.client.fire_message(CMD + "play_recording",
+                                json.dumps({"id": "c7", "payload": {"id": an_id(path)}}))
+    assert image.player_opened == [] and len(infobar.questions) == 1
+    infobar.questions.pop()(False)
+    MainLoop.advance(0)
+    refusal = error(factory)
+    assert refusal["reason"] == "timeshift_kept" and refusal["id"] == "c7"
+    assert image.player_opened == []
+    send(factory, "play_recording", {"id": an_id(path)})
+    infobar.questions.pop()(True)
+    assert image.player_opened == [path]
+
+
+def test_a_refresh_during_a_rereading_of_the_bouquets_is_read_after_it(image, start, factory,
+                                                                       monkeypatch):
+    image.record("a.ts")
+    background = Background()
+    monkeypatch.setattr(LibraryPublisher, "run_in_background", staticmethod(background))
+    walks = []
+    real = LibraryPublisher._walk
+    monkeypatch.setattr(LibraryPublisher, "_walk", staticmethod(
+        lambda *arguments: walks.append(arguments[3]) or real(*arguments)))
+    bridge = start()
+    background.run()
+    publisher = bridge.publisher("recordings")
+    publisher._bouquets_changed()
+    assert publisher._reading
+    send(factory, "recordings_refresh", "PRESS")
+    for _ in range(5):
+        background.run()
+    assert walks == ["start", "refresh"]
+
+
+def test_a_refresh_during_the_start_walks_an_unmounted_location(image, start, factory,
+                                                                monkeypatch):
+    image.record("a.ts")
+    image.mount_lines = ["rootfs / rootfs rw 0 0"]
+    image.write_mounts()
+    background = Background()
+    monkeypatch.setattr(LibraryPublisher, "run_in_background", staticmethod(background))
+    start()
+    send(factory, "recordings_refresh", "PRESS")
+    for _ in range(5):
+        background.run()
+    assert last(factory, INDEX)["reason"] == "refresh"
+    assert len(folder(factory, "movie")["recordings"]) == 1
+
+
+def test_a_read_that_never_comes_back_is_given_up(image, start, factory, monkeypatch,
+                                                  plugin_log):
+    image.record("a.ts")
+    background = Background()
+    monkeypatch.setattr(LibraryPublisher, "run_in_background", staticmethod(background))
+    bridge = start()
+    publisher = bridge.publisher("recordings")
+    hung = background.jobs.pop(0)
+    send(factory, "recordings_refresh", "PRESS")
+    MainLoop.advance(library.READ_WATCHDOG_SECONDS * 1000, limit=100000)
+    assert "is given up" in plugin_log()
+    # What was asked for during it is read now; the hung read's answer is dropped.
+    background.run()
+    assert last(factory, INDEX)["reason"] == "refresh"
+    hung()
+    assert last(factory, INDEX)["reason"] == "refresh"
+    assert publisher._reading is False
+
+
+def test_a_share_that_hangs_holds_up_neither_the_disk_topic_nor_the_next_minute(
+        image, start, factory, monkeypatch, plugin_log):
+    from MQTTBridge import hdd
+
+    image.record("a.ts")
+    bridge = start()
+    background = Background()
+    monkeypatch.setattr(LibraryPublisher, "run_in_background", staticmethod(background))
+    monkeypatch.setattr(hdd, "read", lambda path=None: {"mounted": True, "path": "/media/hdd",
+                                                        "free_mb": 1})
+    publisher = bridge.publisher("recordings")
+    assert publisher.check_space() is True
+    assert publisher.check_space() is False
+    assert "still being read" in plugin_log()
+    background.run()
+    assert publisher.check_space() is True
+
+
+def test_play_and_delete_look_for_the_file_off_the_main_loop(image, start, factory, allowed,
+                                                             monkeypatch):
+    path = image.record("a.ts")
+    start()
+    background = Background()
+    monkeypatch.setattr(LibraryPublisher, "run_in_background", staticmethod(background))
+    asked = []
+    real = os.path.lexists
+    in_worker = []
+
+    def lexists(one):
+        asked.append(bool(in_worker))
+        return real(one)
+
+    monkeypatch.setattr(os.path, "lexists", lexists)
+    send(factory, "play_recording", {"id": an_id(path)})
+    send(factory, "delete_recording", {"id": an_id(path)})
+    assert asked == []
+    in_worker.append(1)
+    background.run()
+    assert asked and all(asked)
+
+
+def test_a_stop_and_a_start_with_a_read_out_run_one_read(image, start, factory, monkeypatch):
+    image.record("a.ts")
+    background = Background()
+    monkeypatch.setattr(LibraryPublisher, "run_in_background", staticmethod(background))
+    bridge = start()
+    publisher = bridge.publisher("recordings")
+    assert len(background.jobs) == 1
+    publisher.stop()
+    publisher.start()
+    assert len(background.jobs) == 1
+    background.run()
+    assert last(factory, INDEX)["reason"] == "start"
+
+
+def test_the_walk_does_not_cross_into_another_file_system(image, monkeypatch):
+    image.record("a.ts")
+    image.record("b.ts", folder=image.movie / "nas")
+    real = os.scandir
+
+    class Entry:
+        def __init__(self, entry):
+            self._entry = entry
+            self.name = entry.name
+            self.path = entry.path
+
+        def is_dir(self, follow_symlinks=True):
+            return self._entry.is_dir(follow_symlinks=follow_symlinks)
+
+        def is_symlink(self):
+            return self._entry.is_symlink()
+
+        def stat(self, follow_symlinks=True):
+            status = self._entry.stat(follow_symlinks=follow_symlinks)
+            if self.name == "nas":
+                return os.stat_result((status.st_mode, status.st_ino, status.st_dev + 1)
+                                      + tuple(status)[3:])
+            return status
+
+    monkeypatch.setattr(os, "scandir", lambda folder: [Entry(one) for one in real(folder)])
+    assert [relative for relative, _records in library.walk(str(image.movie))] == [""]
+
+
+def test_a_recording_event_reads_only_the_location_it_records_into(image, start, factory,
+                                                                   receiver, tmp_path,
+                                                                   monkeypatch):
+    from conftest import iRecordableService
+
+    usb = tmp_path / "media" / "usb" / "movie"
+    usb.mkdir(parents=True)
+    image.mount_lines.append("/dev/sdb1 " + str(usb.parent) + " vfat rw 0 0")
+    image.write_mounts()
+    image.movielist.videodirs.value = [str(image.movie) + "/", str(usb) + "/"]
+    image.record("a.ts")
+    image.record("b.ts", folder=usb)
+    start()
+    walked = []
+    real = library.walk
+    monkeypatch.setattr(library, "walk", lambda location, skip=(): walked.append(location)
+                        or real(location, skip))
+    timer = receiver.add_timer(state=RecordTimerEntry.StateRunning)
+    timer.Filename = str(usb / "20261017 2015 - TVP 1 HD - Wiadomosci")
+    receiver.nav.fire_record(None, iRecordableService.evStart)
+    MainLoop.advance(library.RECORD_SETTLE_MILLISECONDS)
+    assert walked == [str(usb)]
+    timer.state = RecordTimerEntry.StateEnded
+    receiver.nav.fire_record(None, iRecordableService.evEnd)
+    MainLoop.advance(library.RECORD_SETTLE_MILLISECONDS)
+    # The ended recording is no longer in the timer list; its location is read all the same.
+    assert walked == [str(usb), str(usb)]
+    assert len(folder(factory, "movie")["recordings"]) == 1
+
+
+def test_a_share_a_refresh_mounted_is_not_read_again_on_the_next_minute(image, start, factory,
+                                                                         monkeypatch):
+    image.record("a.ts")
+    lines = list(image.mount_lines)
+    image.mount_lines = ["rootfs / rootfs rw 0 0"]
+    image.write_mounts()
+    real = library.walk
+
+    def walk_and_mount(location, skip=()):
+        image.mount_lines = lines
+        image.write_mounts()
+        return real(location, skip)
+
+    monkeypatch.setattr(library, "walk", walk_and_mount)
+    bridge = start()
+    send(factory, "recordings_refresh", "PRESS")
+    index = last(factory, INDEX)
+    assert index["locations"][0]["mounted"] is True
+    publisher = bridge.publisher("recordings")
+    reads = []
+    publisher.request = lambda reason, only=None: reads.append(reason)
+    publisher.on_space({str(image.movie): (True, index["locations"][0]["free_mb"])})
+    assert reads == []
+
+
+def test_the_bound_is_exact():
+    entries = [{"n": "x" * 10}, {"n": "y" * 10}]
+    encoded, cut = library.fit(entries, lambda entry: json.dumps(entry, separators=(",", ":")),
+                               10 ** 6)
+    assert cut == 0
+    size = len(encoded.encode())
+    assert library.fit(entries, lambda e: json.dumps(e, separators=(",", ":")), size) == (
+        encoded, 0)
+    smaller, cut = library.fit(entries, lambda e: json.dumps(e, separators=(",", ":")),
+                               size - 1)
+    assert cut == 1 and smaller == '{"recordings":[' + json.dumps(
+        entries[0], separators=(",", ":")) + "]}"
+
+
+def test_locate_names_the_location_whose_walk_lists_the_file(tmp_path):
+    mounts = [("/", "rootfs")]
+    outer = str(tmp_path / "movie")
+    inner = str(tmp_path / "movie" / "Series")
+    path = inner + "/a.ts"
+    assert library.locate(path, [outer, inner], mounts)[:2] == (inner, "a.ts")
+    assert library.locate(outer + "/b.ts", [outer, inner], mounts)[:2] == (outer, "b.ts")
+    assert library.locate("/elsewhere/c.ts", [outer, inner], mounts)[:2] == (None, None)

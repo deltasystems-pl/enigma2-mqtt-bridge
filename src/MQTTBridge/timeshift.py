@@ -9,8 +9,17 @@ send is `evSeekableStatusChanged` when playback moves into or out of the buffer,
 `onPlayStateChanged` list for pause and play. So the state is read again on each
 of those, and on the info bar's own `activatePermanentTimeshift`,
 `startTimeshift` and `stopTimeshift`, which are wrapped on the one info bar there
-is. Nothing here is read on a timer: the only timer looks for the info bar, which
-some images build after the plugin has started, and stops once it has it.
+is - for the calls that look them up when they run, such as the permanent
+timeshift's own timer.
+
+**A key press is one more event.** The info bar's key map is built with the info
+bar, and holds the methods it was built with: a key that starts or stops a buffer
+calls the original, never the wrapper, and stopping a buffer that plays live sends
+no service event at all. So a key released on the remote reads the state again a
+moment later, once the info bar has acted on it - a read of memory, the same one
+every event makes. Nothing here is read on a timer: the only repeating timer looks
+for the info bar, which some images build after the plugin has started, and stops
+once it has it.
 
 `since` is the image's own start of the buffer where it keeps one
 (`pts_starttime`, OpenViX and OpenATV), and otherwise when this plugin first saw
@@ -35,6 +44,10 @@ BIND_ATTEMPTS = 30
 
 # The info bar's methods that start and stop a buffer without any event of the service's.
 WRAPPED = ("activatePermanentTimeshift", "startTimeshift", "stopTimeshift")
+
+# How long after a key is released the state is read again: the info bar acts on the key in
+# the same turn, and the service starts or stops its buffer a moment after.
+KEY_SETTLE_MILLISECONDS = 500
 MARKER = "_mqttbridge_timeshift"
 
 INACTIVE = {"active": False, "paused": None, "behind": None, "since": None}
@@ -140,6 +153,11 @@ class TimeshiftPublisher(Publisher):
         self._bind = Ticker(self._try_bind, "timeshift bind")
         self._first_seen = None
         self._payload = None
+        # One object for the life of the publisher, as the remote's listener is: the action
+        # map unbinds by identity.
+        self._key_handler = self._on_key
+        self._keys_bound = False
+        self._after_key = Ticker(self._changed, "timeshift key")
 
     def start(self):
         if not infobar_class_present():
@@ -173,6 +191,8 @@ class TimeshiftPublisher(Publisher):
         except Exception:
             LOG.debug("could not detach from session.nav.event")
         self._unwrap()
+        self._unbind_keys()
+        self._after_key.stop()
 
     def claimed(self):
         return self._infobar is not None
@@ -190,6 +210,7 @@ class TimeshiftPublisher(Publisher):
         self._infobar = infobar
         self._bind.stop()
         self._wrap(infobar)
+        self._bind_keys()
         listeners = getattr(infobar, "onPlayStateChanged", None)
         if isinstance(listeners, list):
             listeners.append(self._on_play_state)
@@ -253,6 +274,49 @@ class TimeshiftPublisher(Publisher):
                 listeners.remove(self._on_play_state)
         except Exception:
             LOG.debug("could not detach from onPlayStateChanged")
+
+    def _bind_keys(self):
+        from .remote import BIND_PRIORITY, action_map
+
+        actions = action_map()
+        binder = getattr(actions, "bindAction", None) if actions is not None else None
+        if binder is None:
+            return
+        try:
+            binder("", BIND_PRIORITY, self._key_handler)
+            self._keys_bound = True
+        except Exception as error:
+            missing("eActionMap.bindAction", error)
+
+    def _unbind_keys(self):
+        if not self._keys_bound:
+            return
+        self._keys_bound = False
+        from .remote import action_map
+
+        actions = action_map()
+        unbinder = getattr(actions, "unbindAction", None) if actions is not None else None
+        if unbinder is None:
+            return
+        try:
+            unbinder("", self._key_handler)
+        except Exception:
+            LOG.debug("could not unbind the timeshift key listener")
+
+    def _on_key(self, key, flag):
+        """A key released: read the state again once the info bar has acted on it.
+
+        Returns 0 always - the key is the image's, and this only listens.
+        """
+        try:
+            from .remote import FLAG_BREAK
+
+            if int(flag) == FLAG_BREAK and self._infobar is not None:
+                if not self._after_key.start(KEY_SETTLE_MILLISECONDS, True):
+                    self._changed()
+        except Exception:
+            LOG.exception("the timeshift key listener raised")
+        return 0
 
     # ------------------------------------------------------------- events --
 

@@ -89,6 +89,15 @@ class HddPublisher(Publisher):
 
     def _poll(self):
         self._start_probe()
+        # The recording library's movie locations on the same minute - whether each is
+        # mounted, from `/proc/mounts`, and its free space - in a thread of the library's
+        # own, so that a share which hangs holds up neither this topic nor this timer.
+        library = self._library()
+        if library is not None:
+            try:
+                library.check_space()
+            except Exception:
+                LOG.exception("the movie locations could not be measured")
 
     def _start_probe(self):
         if self._stopped:
@@ -102,15 +111,10 @@ class HddPublisher(Publisher):
             self._latest_probe_serial = serial
         generation = self._generation
         self._latest_started_generation = generation
-        # The recording library's movie locations ride along: whether each is mounted,
-        # from `/proc/mounts`, and its free space - one minute timer for every disk.
-        library = self._library()
-        locations = library.locations if library is not None else None
-        mounts_path = getattr(library, "mounts_path", None)
         try:
             threading.Thread(
                 target=self._probe,
-                args=(generation, serial, locations, mounts_path),
+                args=(generation, serial),
                 name="mqttbridge-hdd",
                 daemon=True,
             ).start()
@@ -121,22 +125,13 @@ class HddPublisher(Publisher):
             return False
         return True
 
-    def _probe(self, generation, serial, locations=None, mounts_path=None):
+    def _probe(self, generation, serial):
         started = time.monotonic()
         try:
             payload = read(self.path)
         except Exception:
             LOG.exception("the recording disk probe raised")
             payload = {"mounted": False, "path": self.path, "free_mb": None}
-        space = None
-        if locations:
-            from .library import MOUNTS_PATH
-            from .library import space as library_space
-
-            try:
-                space = library_space(locations, mounts_path or MOUNTS_PATH)
-            except Exception:
-                LOG.exception("the movie locations could not be measured")
         read_seconds = max(0.0, time.monotonic() - started)
         with self._worker_lock:
             self._worker_running = False
@@ -153,13 +148,11 @@ class HddPublisher(Publisher):
                 payload,
                 read_seconds,
                 time.monotonic(),
-                space,
             )
         except Exception:
             LOG.exception("could not return the recording disk probe to the main loop")
 
-    def _finish_probe(self, generation, serial, payload, read_seconds=0.0, dispatched_at=None,
-                      space=None):
+    def _finish_probe(self, generation, serial, payload, read_seconds=0.0, dispatched_at=None):
         dispatch_seconds = (
             0.0 if dispatched_at is None else max(0.0, time.monotonic() - dispatched_at)
         )
@@ -186,13 +179,6 @@ class HddPublisher(Publisher):
         if payload["mounted"] is False:
             LOG.debug("%s is not mounted", self.path)
         self.publish("hdd", payload)
-        if space is not None:
-            library = self._library()
-            if library is not None:
-                try:
-                    library.on_space(space)
-                except Exception:
-                    LOG.exception("the movie locations' space could not be applied")
 
     def snapshot(self):
         return {"hdd": self._cached} if self._cached is not None else {}
