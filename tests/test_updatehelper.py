@@ -2484,7 +2484,7 @@ def test_r2_waits_for_a_stop_that_takes_a_few_seconds(tmp_path):
 R2_STEPS = ["init_4", "stop_wait", "rollback_stopped", "opkg_lock", "opkg_records",
             "settings_block", "restore_returned", "rollback_restored", "lastservice", "init_3",
             "r3"]
-# Where an `Exception` is the restore's own, handled failure (D2): recorded, not retried.
+# Where an `Exception` is the restore's own, handled failure: recorded, not retried.
 RESTORE_HANDLES = ("opkg_lock", "opkg_records", "settings_block")
 
 

@@ -1972,7 +1972,7 @@ def test_the_drill_from_installing_to_rolling_back_keeps_the_doors_closed(
 @pytest.mark.parametrize("phase", ["installing", "restarting"])
 def test_a_failed_restore_keeps_the_doors_closed_and_says_to_reinstall(phase, box, factory,
                                                                       receiver):
-    """Delta review D2: the old files could not be put back - a reload would import new code."""
+    """Delta review: the old files could not be put back - a reload would import new code."""
     bridge = box()
     directory = accepted(bridge, factory)
     helper_process(bridge, directory)

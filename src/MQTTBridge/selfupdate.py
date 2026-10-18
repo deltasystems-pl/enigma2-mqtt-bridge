@@ -1598,7 +1598,7 @@ class SelfUpdater:
         stopped once the package manager had started): they may then be the new release's, or
         a mix, and the fresh session a reopening starts would import them. The doors close if
         no poll had closed them yet, stay closed and say so, and the repair is a reinstall from
-        outside this process - Home Assistant's forced reinstall over SSH (delta review D2).
+        outside this process - Home Assistant's forced reinstall over SSH (delta review).
         Nor after `not_stopped`: the files are the previous version's, whole, under a process
         that holds the other one's code, so the doors stay closed the same way, and the repair
         is the restart that ends this process (`STUCK_UNSTOPPED`, review round 3). Nor when the

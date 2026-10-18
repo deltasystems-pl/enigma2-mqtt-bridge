@@ -30,7 +30,7 @@ the exact horizontal coverage of each span, and written as an 8-bit RGBA PNG wit
 time-dependent chunk. `--check` renders into memory and compares with the files instead of
 writing them; a test does the same.
 
-**The licence rule** (D57 in the project's plan): only icons under Apache-2.0, and no brand icon.
+**The licence rule** (README.md, "License"; NOTICE): only icons under Apache-2.0, no brand icon.
 The package declares `"license": "Apache-2.0"`, and its LICENSE file says that the icons are
 under Apache 2.0 - those Pictogrammers redistribute from Google's Material Icons and those they
 distribute themselves - except icons "redistributed under their respective licenses", which in

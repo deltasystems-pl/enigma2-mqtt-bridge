@@ -311,10 +311,10 @@ def _build():
     # the commands, so it is granted on the receiver and never over MQTT. The television
     # and the OpenWebif page need it for nothing - whoever stands there could set it.
     section.update_allowed = ConfigYesNo(default=False)
-    # On by default (D53), and never writable over MQTT: the receiver menu shows what Home
-    # Assistant sends and sends back only a row's id and a value (`menu.py`), so what it can do
-    # is what the user put into the menu in Home Assistant. Off, there is no menu, no Extensions
-    # entry, no hotkey and no subscription to the menu topic.
+    # On by default (ADR-0020 decision 8), and never writable over MQTT: the receiver menu shows
+    # what Home Assistant sends and sends back only a row's id and a value (`menu.py`), so what
+    # it can do is what the user put into the menu in Home Assistant. Off, there is no menu, no
+    # Extensions entry, no hotkey and no subscription to the menu topic.
     section.menu_allowed = ConfigYesNo(default=True)
     section.menu_hotkey = ConfigSelection(
         default="help_long",

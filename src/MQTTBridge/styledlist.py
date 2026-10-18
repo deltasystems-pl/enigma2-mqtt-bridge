@@ -6,11 +6,11 @@ every key back with the id of the selected row (`MenuController` is the one in u
 dict: `id`, `icon` (a name, or None for none), `label`, `state` (text on the right), `colour`
 (`green`, `red` or None), `dim` and `pending`.
 
-**One code path, computed geometry (D20).** As the toast does (`toast.py`): `f = desktop height /
-720`, every number formatted into the embedded skin before `Screen.__init__`, and the rows built in
-Python with `eListboxPythonMultiContent`, their pixel positions computed the same way. No skin
-template and no skin expression, which not every image has. The spike on OpenViX 6.6 read the
-widgets back at exactly the computed numbers.
+**One code path, computed geometry (ADR-0020 decision 7).** As the toast does (`toast.py`):
+`f = desktop height / 720`, every number formatted into the embedded skin before
+`Screen.__init__`, and the rows built in Python with `eListboxPythonMultiContent`, their pixel
+positions computed the same way. No skin template and no skin expression, which not every image
+has. The spike on OpenViX 6.6 read the widgets back at exactly the computed numbers.
 
 **Every optional drawing call has a second way.** A name being importable proves nothing - on
 OpenViX 6.6 `MultiContentEntryRectangle` imports and raises when called - so nothing here draws a
@@ -19,10 +19,10 @@ every desktop), then without `flags`, then not at all. `RT_ELLIPSIS` is added wh
 it.
 
 **The number keys** move the selection to the row of that number and do nothing else; OK acts
-(D66). The image's `ChoiceBox` cannot be told that: a digit there either picks its row - and acts
-- or does nothing. So the fallback is given no number keys at all.
+(ADR-0020 decision 3). The image's `ChoiceBox` cannot be told that: a digit there either picks
+its row - and acts - or does nothing. So the fallback is given no number keys at all.
 
-**Decided once per opening (D21).** The styled screen is first built with
+**Decided once per opening (ADR-0020 decision 7).** The styled screen is first built with
 `session.instantiateDialog`, which constructs, skins and lays it out without touching the dialog
 stack, and deleted again: only when that worked is it opened with `session.open`. A screen whose
 constructor raises inside `session.open` would leave the session with the info bar's execution
@@ -632,11 +632,11 @@ class _TrialController:
 
 
 class ChoiceBoxAdapter:
-    """The image's own `ChoiceBox`, as it is, in the role of the styled screen (D21).
+    """The image's own `ChoiceBox`, as it is, in the role of the styled screen.
 
     The same rows and ids; no icon, no state, no colour. No number keys: the image's list acts
     on a digit - `goKey` runs its entry - and has no way to only move the selection, which is
-    all a digit does in the menu (D66). An empty key is the one every image reads as "none"
+    all a digit does in the menu. An empty key is the one every image reads as "none"
     (OpenViX and OpenATV skip it, OpenPLi maps it to the key named "", which no button sends).
     A pick is the controller's OK and EXIT its EXIT, and the list is opened again after
     each until the controller closes - so the menu stays on screen as the styled one does. The

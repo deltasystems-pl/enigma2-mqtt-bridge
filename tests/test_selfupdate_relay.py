@@ -1039,7 +1039,7 @@ def test_the_helpers_word_lasts_the_limit_and_ten_minutes_more(age, looks, box, 
 
 @pytest.mark.parametrize(("age", "looks"), [(599, False), (600, True)])
 def test_a_probes_word_lasts_ten_minutes(age, looks, box, factory, origin, still):
-    """D-S4 (D7): the window is ten minutes, written out here rather than read from the code."""
+    """D-S4: the window is ten minutes, written out here rather than read from the code."""
     bridge = unprobed(offline(box()), UNREACHABLE, age)
     assert ask(bridge) is None
     assert len(origin.asked) == (1 if looks else 0)
@@ -1047,7 +1047,7 @@ def test_a_probes_word_lasts_ten_minutes(age, looks, box, factory, origin, still
 
 @pytest.mark.parametrize("status", [500, 404, 301])
 def test_any_answer_at_all_from_the_origin_is_reachable(status, box, factory, origin):
-    """D-S4 (D8): only no answer is `unreachable` - an error page is an origin that answers."""
+    """D-S4: only no answer is `unreachable` - an error page is an origin that answers."""
     origin.status = status
     bridge = unprobed(offline(box()))
     assert ask(bridge) is None
@@ -1058,7 +1058,7 @@ def test_any_answer_at_all_from_the_origin_is_reachable(status, box, factory, or
 
 
 def test_the_helpers_word_is_on_the_update_topic_at_once(box, factory, origin, monkeypatch):
-    """D-S4 (D5): not only once the worker has written it to the check file."""
+    """D-S4: not only once the worker has written it to the check file."""
     bridge = offline(box(), REACHABLE)
     assert factory.client.last(test_selfupdate.UPDATE).json()["origin"] == REACHABLE
     jobs = held_back(monkeypatch)
