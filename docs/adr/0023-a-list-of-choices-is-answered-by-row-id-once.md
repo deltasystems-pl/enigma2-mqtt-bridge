@@ -31,14 +31,16 @@ Three things are true of the path between them, as they are for the receiver men
    entity id, domain or service, and calls nothing. A yes/no question is a list of two rows.
    Whoever sent the list decides what the id means - so a list can do exactly what its sender
    does with the answer, and the receiver adds no power of its own to it.
-2. **Exactly one answer for every list accepted.** It ends `picked` (with the row), `timeout`
+2. **Exactly one answer for every list accepted, or one late refusal.** It ends `picked` (with the row), `timeout`
    (with the `default` row, or `null`), `dismissed` (EXIT), `replaced` (a newer list) or
    `closed` (standby, the plugin stopping, the screen closed by something else). Every way out
    goes through one function that answers once; the first way out wins, and a key, a timer or a
    callback that comes after it finds the list answered. A timeout names the default row but
    says `timeout`, so a sender can always tell a press from silence. A refused list - invalid, in
-   standby, without the capability, while an update holds the receiver, or one that could not be
-   put on the screen - has a refusal on `last_error` and no answer.
+   standby, without the capability, while an update holds the receiver - has a refusal on
+   `last_error` and no answer; so does an accepted one that could not be put on the screen after
+   all, whose refusal comes later, with its id. While an update keeps the plugin silent the
+   doors' refusal of a list is published all the same, not retained: its caller is waiting.
 3. **The list's id is the command's.** It comes in the envelope every command takes
    ([ADR-0016](0016-a-commands-id-comes-in-an-envelope-and-only-a-refusal-says-it-back.md)), and
    the answer says it back, as `stream_playable` does. A list without an id is shown and answered
@@ -60,15 +62,21 @@ Three things are true of the path between them, as they are for the receiver men
    screen opened over the dialog that is executing - the info bar, a player, the receiver menu, the
    image's keyboard - which keeps its place and gets the keys back. The screen always carries a
    header line saying the question comes from Home Assistant through this plugin, and no text in
-   the payload can change it: every backslash is removed (the toast's rule), with the invisible
-   format characters, and a title and a label are one line. The power key does on the list what it
+   the payload can change it. One text rule, which the companion integration applies too: every
+   backslash removed (the toast's rule), the invisible format characters and any lone surrogate
+   dropped - JSON can spell one, and the image's renderer would be handed it unchecked - control
+   characters made spaces, cut at the limit, trimmed; a title and a label are one line. The title
+   and the text are shown whole: the screen is as tall as they need. With a default row the
+   countdown names it, so the viewer sees what waiting answers. The power key does on the list what it
    does on the screen under it. In standby, or while the receiver asks whether to shut down, a
    list is refused, not kept for later: a late question is a wrong question.
 8. **The receiver menu's look, and the image's list where it cannot be had.** The styled screen
    reuses the menu's machinery - computed geometry, the icon set, the see-through background of
    `menu_transparency`, a second way for every optional drawing call, a trial build off the dialog
-   stack before the real open. Where it cannot be built the image's own `ChoiceBox` shows the same
-   rows, ids and keys, and the countdown in its window title where the image lets that be set.
+   stack before the real open. A row's key is drawn, never written: a filled rounded button in the
+   key's colour, or the digit in a small box. Where the styled screen cannot be built the image's own
+   `ChoiceBox` shows the same rows, ids and keys, and keeps the header line where the image puts
+   the question's first line in its window title, with the countdown after it.
    `info.list.screen` says which; the capability `list` is claimed only once one of them has been
    built, and taken back when a skin reload can build neither, as the toast's is.
 9. **No permission and no setting**, as a message has none. A list changes nothing on the

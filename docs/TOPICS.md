@@ -478,7 +478,7 @@ where `list` is not a capability: no session, or neither screen could be built. 
 
 | Field | Type | Meaning |
 |---|---|---|
-| `screen` | string | `styled` - the plugin's own screen, with the icons, the countdown and the keys' names - or `choicebox` - the image's own choice list, with the same rows, ids and keys, no icon, and the countdown in its window title where the image lets the title be set. Decided when the plugin starts and after every skin reload, and again for every list: a styled screen that cannot be built for a list is replaced by the image's list for that list and every later one, and `info` is published again |
+| `screen` | string | `styled` - the plugin's own screen, with the icons, the countdown and the keys drawn as buttons - or `choicebox` - the image's own choice list, with the same rows, ids and keys, no icon, and the header line and the countdown in its window title where the image lets the title be set. Decided when the plugin starts and after every skin reload, and again for every list: a styled screen that cannot be built for a list is replaced by the image's list for that list and every later one, and `info` is published again |
 
 ### `<base>/<node>/power`
 
@@ -1668,8 +1668,10 @@ went is taken out of the client's queue. The page's save then says so at once.
 
 **Not retained** - QoS 1. The answer to one `cmd/list` (section 2): how the list of choices on the
 television ended, and which row was picked. Present when `list` is a capability
-([ADR-0023](adr/0023-a-list-of-choices-is-answered-by-row-id-once.md)). **Exactly one message for
-each list the plugin accepted** - shown, or waiting for the screen - and none for a list it refused.
+([ADR-0023](adr/0023-a-list-of-choices-is-answered-by-row-id-once.md)). **Every list the plugin
+accepted - shown, or waiting for the screen - has exactly one answer here, or, when it could not
+be put on the television after all, one late refusal on `last_error` instead** (`not_shown`, section 2).
+A list refused when it arrived has neither: its refusal is on `last_error` at once.
 
 ```json
 {"id": "a1b2c3d4e5f60718", "ending": "picked", "row": "open", "ts": 1792050000}
@@ -1878,7 +1880,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `mute` | `ON` \| `OFF` | Sets mute | Never a blind toggle: the state is read first, and read back afterwards. A receiver refuses to mute at volume 0, and that refusal is reported |
 | `key` | `KEY_OK` \| `{"key": "KEY_OK", "long": true}` | Injects a remote key | Unknown key names are refused with the name in `last_error`; at most 20 a second |
 | `message` | `{"text": "...", "type": "info", "timeout": 10}` - or a bare string; `"style": "toast"` since 0.3.0 | Shows an on-screen popup, or a discreet toast | `text` is required; since 0.3.0 **every backslash is removed** and nothing else, as for a toast, and what is left is truncated to 500 characters; `type` is `info`, `warning` or `error` (default `info`); `timeout` is seconds (default 10, `0` until dismissed). A new message replaces the previous one rather than queueing behind it. The toast's rules differ - see below |
-| `list` - added after 0.4.0 (unreleased), capability `list` | `{"title": "...", "text": "...", "rows": [{"id": "...", "label": "...", "key": "green", "icon": "gate"}], "timeout": 60, "default": "..."}`, in the envelope with an id (below) | Shows a list of choices on the television, over whatever is on screen, and answers once on `list_answer` (section 1) with the row the viewer picked or how the list ended - the other command answered on a topic of its own. A newer list replaces the one on screen. See below | Refused before anything is shown, each with a `reason` on `last_error`, in this order: a payload that breaks a rule below - a sentence that names the member and the row's index, never the sender's text (`invalid`); without the capability - "lists cannot be shown on this receiver" (`no_capability`); in standby, or while the receiver's own "really shut down / restart?" question is on screen - the toast's "the receiver is in standby" (`standby`); while an update is being applied - the doors' sentence, here with `reason` `busy`. A list that neither screen could put on the television - "the receiver could not show the list" (`not_shown`), also later, with the command's id, and then no answer. **No permission and no setting**, as a message has none |
+| `list` - added after 0.4.0 (unreleased), capability `list` | `{"title": "...", "text": "...", "rows": [{"id": "...", "label": "...", "key": "green", "icon": "gate"}], "timeout": 60, "default": "..."}`, in the envelope with an id (below) | Shows a list of choices on the television, over whatever is on screen, and answers once on `list_answer` (section 1) with the row the viewer picked or how the list ended - the other command answered on a topic of its own. A newer list replaces the one on screen. See below | Refused before anything is shown, each with a `reason` on `last_error`, in this order: while an update is being applied - the doors' sentence, here with `reason` `busy`, asked by the dispatcher before the command's own checks, and published even while the update keeps the plugin silent, then **not retained**; a payload that breaks a rule below - a sentence that names the member and the row's index, never the sender's text (`invalid`); without the capability - "lists cannot be shown on this receiver" (`no_capability`); in standby, or while the receiver's own "really shut down / restart?" question is on screen - the toast's "the receiver is in standby" (`standby`). A list that neither screen could put on the television - "the receiver could not show the list" (`not_shown`), also later, with the command's id, and then no answer. **No permission and no setting**, as a message has none |
 | `timer` | see below | Adds or deletes a recording timer | An add that overlaps an existing timer, or refers to an unknown event, is refused - and so is one the receiver quietly dropped as a duplicate of a timer it already had |
 | `record` | `start` \| `stop` | Starts or stops an instant recording of the current service | `start` records the current service for two hours; `stop` with nothing recording is a no-op with a note in `last_error` |
 | `screenshot` | any | Captures `screen` now, in standby as well | Rate-limited to one per five seconds |
@@ -2492,11 +2494,11 @@ has no `id`.
 
 | Member | Type | Rule |
 |---|---|---|
-| `title` | string | Required. Every backslash is removed (the toast's rule), then it is cut at **60** characters; empty or blank after that is refused |
-| `text` | string or `null` | Optional: one or two lines under the title. The same backslash rule, cut at **200**; absent, `null` or blank is no text. A line break stays one |
+| `title` | string | Required. Cleaned by the text rule below and cut at **60** characters; blank after that is refused. Shown whole, on two lines where it needs them |
+| `text` | string or `null` | Optional: lines under the title. Cleaned by the text rule, cut at **200**; absent, `null` or blank is no text. A line break stays one. Shown whole: the screen is as tall as the text needs |
 | `rows` | list | **1 to 24** row objects, shown in this order |
 | `rows[].id` | string | **1 to 32** characters out of `A`-`Z`, `a`-`z`, `0`-`9`, `.`, `_`, `:` and `-`; unique within the list - case matters, so `a` and `A` are two ids |
-| `rows[].label` | string | Required; the backslash rule; cut at **60**; blank is refused |
+| `rows[].label` | string | Required; cleaned by the text rule and cut at **60**; blank is refused |
 | `rows[].key` | string or `null` | Optional: a key that picks the row at once - `red`, `green`, `yellow`, `blue`, or one of `"1"` to `"9"` (a string, not a number); unique within the list |
 | `rows[].icon` | string or `null` | Optional: one of the icon names of the receiver menu (section 3). Any other name is drawn with `neutral` and is **not** refused; absent or `null` is no icon |
 | `timeout` | integer | Optional, seconds, **5 to 600**, **60** when absent. A JSON integer - not a boolean, not a fraction such as `60.0`, not a string, not `null`; anything outside the range is refused. **There is no list without a timeout** |
@@ -2506,17 +2508,33 @@ Members of the payload or of a row that the plugin does not know are **ignored**
 so once a run with their count, so a newer sender can add some. Everything the table names is held
 to its rule strictly: a refusal names the member and the row's index, counted from 0 as in JSON -
 "rows[1].key is the key of an earlier row" - and never the sender's text, which is not in the
-plugin's log either. Besides its backslashes a title, a text and a label lose their invisible format
-characters (Unicode category Cf), as every text of the receiver menu does, and a title and a label
-are one line: any other line break or control character is a space. The command's 4096-byte limit
-applies as for every command; 24 rows of 60 characters fit.
+plugin's log either. The command's 4096-byte limit applies as for every command; 24 rows of 60
+characters fit.
+
+**The text rule.** `title`, `text` and every `rows[].label` are cleaned in this order, and only
+then judged blank - the companion integration applies the same rule before it sends, so a list it
+accepts is never refused here as blank, and the label it reports is the one on the screen:
+
+1. every backslash is removed (the toast's rule: enigma2's renderer reads what follows one as an
+   escape);
+2. `text` only: `\r\n` and `\r` become `\n`;
+3. every character of Unicode category **Cf** - bidirectional overrides and isolates, the zero-width
+   space and joiners, the soft hyphen, the byte order mark - and **Cs** - a lone surrogate, which
+   JSON can spell and no UTF-8 holds - is dropped;
+4. every character of category **Cc**, **Zl** or **Zp** becomes a space - except `\n` in `text`, which
+   stays a line break;
+5. it is cut at its limit: 60 for `title` and `label`, 200 for `text`;
+6. leading and trailing whitespace is stripped; what is empty then is blank - refused for `title`
+   and `label`, no text for `text`.
 
 **What the viewer sees and can do.** The list is shown **over whatever is on screen** - live
 television, a playing recording, the receiver menu, the image's keyboard, any other screen - which
 stays open underneath and gets the keys back when the list has gone. A header line says that the
 question comes from Home Assistant through this plugin, so a list cannot pose as the receiver's own
-dialog; under it the title, the text, the rows - each with its icon, its label and the name of its
-key - the remaining time, counting down, and the keys' legend. UP and DOWN, and the page keys, move
+dialog; under it the title, the text, the rows - each with its icon, its label and, on its right,
+its key: a filled rounded button in the key's colour, or the digit in a small box - the remaining
+time, counting down, and the keys' legend. With a `default` row the countdown names it - "Ignore
+in 45 s" - so the viewer sees what waiting answers; without one it reads "Closes in 45 s". UP and DOWN, and the page keys, move
 the selection, which starts on the `default` row or else on the first. **OK picks** the selected
 row; a row's colour or number key picks that row at once; **EXIT** dismisses. Every other key does
 nothing - a colour or number that no row has as well - except the receiver's own global keys, such
@@ -2524,7 +2542,8 @@ as the volume. The power key does on the list what it does on the screen under i
 television it puts the receiver in standby, which closes the list. The plugin's own screen has the
 look of the receiver menu, see-through as `menu_transparency` says (section 1).
 
-**How it ends.** Exactly one answer for every list the plugin accepted:
+**How it ends.** Exactly one answer for every list the plugin accepted - or, for one it could not put
+on the television after all, one late refusal (below):
 
 | `ending` | When | `row` |
 |---|---|---|
@@ -2542,9 +2561,11 @@ two seconds; a list that cannot be put on the television after all is refused on
 replaces that one too.
 
 **Which screen.** The plugin's own screen where it can be built, and otherwise the image's own
-choice list, with the same rows, ids and keys and the title and text as its question; there the
-remaining time is in the list's window title where the image lets it be set, and nowhere where it
-does not. `info.list.screen` (section 1) says which. A skin may define a screen called
+choice list, with the same rows, ids and keys, and the header line, the title and the text as its
+question. Where the image puts the question's first line in the list's window title - OpenViX
+and OpenATV, from their sources - the window title reads "<header> - <countdown>", so the
+header stays; where it puts the whole question in its text - OpenPLi - the window title is the
+countdown. Where the image does not let the title be set, there is no countdown. `info.list.screen` (section 1) says which. A skin may define a screen called
 `MQTTBridgeChoices` and restyle the plugin's own; one that cannot be built with the plugin's
 widgets makes the image's list the one used.
 
@@ -2839,9 +2860,10 @@ bound, a type that is wrong, an id that repeats, a `value` that is not one of th
 payload over 64 KiB or one that is not a JSON object - makes the whole payload invalid: it is
 ignored with one line in the log, and the menu shown is the one before it. So is a payload nested
 too deeply to parse, or a slider number too large for a float. Every text loses its backslashes
-and line breaks before it is shown, as a toast's does (section 2), and its invisible format
+and line breaks before it is shown, as a toast's does (section 2), its invisible format
 characters (Unicode category Cf - bidirectional overrides and isolates, zero-width characters, the
-soft hyphen); an option is still sent back exactly as listed.
+soft hyphen) and any lone surrogate (category Cs), which JSON can spell and no UTF-8 holds; an
+option is still sent back exactly as listed.
 
 **The icon names** are part of the contract; the integration offers exactly these: `neutral`,
 `lamp`, `ceiling-light`, `blinds`, `scene`, `script`, `power`, `fan`, `lock`, `radiator`,

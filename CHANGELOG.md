@@ -17,15 +17,20 @@ version that has no section here.
   `list_answer` with the id of the row picked: `picked`, `timeout` (with the `default` row or
   none), `dismissed`, `replaced` (a newer list) or `closed` (standby, the plugin stopping). The
   list's id is the command's envelope id, said back in the answer. Every list has a timeout, 60 s
-  unless the sender says 5 to 600, counted down on the screen. OK picks the selected row, a row's
-  key picks it at once, EXIT dismisses. The answer is QoS 1, never retained and never queued across
+  unless the sender says 5 to 600, counted down on the screen - naming the default row when there
+  is one ("Ignore in 45 s"). OK picks the selected row, a row's key - drawn as a filled rounded
+  button in its colour, or the digit in a small box - picks it at once, EXIT dismisses. The title
+  and the text are shown whole. Every text follows one rule, the companion integration's too: no
+  backslash, no format character and no lone surrogate, control characters as spaces, cut, trimmed;
+  the receiver menu now drops lone surrogates as well. The answer is QoS 1, never retained and never queued across
   a disconnect, like `menu_action`. Refused before anything is shown, each with a `reason` on
   `last_error`: an invalid payload (`invalid`, naming the member and the row, never the sender's
   text), in standby (`standby`), without the capability (`no_capability`), while an update is
-  applied (the doors' sentence, `busy`), and a list no screen could show (`not_shown`). The
+  applied (the doors' sentence, `busy` - published, not retained, even while an update keeps the
+  plugin silent), and a list no screen could show (`not_shown`). The
   receiver menu's look - the styled screen, its icons and its see-through background - with a
   header line saying the question comes from Home Assistant through this plugin, and the image's
-  own choice list where that cannot be built. New: the capability `list` and the `info` member
+  own choice list where that cannot be built, keeping the header line in its window title. New: the capability `list` and the `info` member
   `list` (`{"screen": "styled" | "choicebox"}`, absent without the capability). No permission and
   no setting; anyone on the broker can show a list or forge an answer
   ([SECURITY.md](SECURITY.md),

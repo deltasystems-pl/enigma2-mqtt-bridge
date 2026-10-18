@@ -187,9 +187,9 @@ receiver:
   the keyboard - which is still there when the list has gone. A line at the top says the question
   comes from Home Assistant through this plugin.
 - **Answer it** with the arrows and OK, or with the colour or number key a row shows on its
-  right, which picks that row at once. EXIT says no answer. The time left counts down at the
-  bottom; when it runs out the list closes, with the row Home Assistant named as the default, if it
-  named one.
+  right - a coloured button, or a digit in a box - which picks that row at once. EXIT says no
+  answer. The time left counts down at the bottom, naming the row Home Assistant set as the
+  default, if it set one; when it runs out the list closes with that row.
 - **The receiver only says which row was picked.** Home Assistant decides what that does. A newer
   question replaces the one on the screen, and standby closes it; a question that arrives in
   standby is refused, not kept for later. An answer is never sent late: a pick made while the
