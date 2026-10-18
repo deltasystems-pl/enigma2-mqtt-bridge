@@ -1601,3 +1601,24 @@ def test_a_bouquet_change_during_a_read_is_asked_after_it_not_beside_it(
     assert publisher._serial == serial
     background.run()
     assert folder(factory, "movie")["recordings"][0]["bouquet"] == "Sport (HD)"
+
+
+def test_before_the_first_read_a_running_recording_is_placed_as_the_read_will_list_it(
+        image, start, factory, receiver, monkeypatch):
+    from conftest import ConfigText
+
+    instant = image.movie / "Instant"
+    image.usage.instantrec_path = ConfigText(default=str(instant) + "/")
+    path = image.record("new.ts", folder=instant)
+    background = Background()
+    monkeypatch.setattr(LibraryPublisher, "run_in_background", staticmethod(background))
+    timer = receiver.add_timer(state=RecordTimerEntry.StateRunning)
+    timer.Filename = path[:-3]
+    bridge = start()
+    publisher = bridge.publisher("recordings")
+    assert last(factory, INDEX) is None
+    assert publisher.listed_locations() == [str(image.movie)]
+    entry = factory.client.last(ROOT + "recording").json()["active"][0]
+    assert (entry["location"], entry["file"]) == (str(image.movie), "Instant/new.ts")
+    background.run()
+    assert publisher.listed_locations() == [str(image.movie)]

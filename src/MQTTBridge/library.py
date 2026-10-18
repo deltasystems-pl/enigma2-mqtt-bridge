@@ -554,6 +554,24 @@ def space(locations, mounts_path=MOUNTS_PATH):
     return result
 
 
+def kept_locations(locations, extras, mounts):
+    """`[(location, resolved), ...]` of the locations a read lists, in their order.
+
+    A location whose resolved path repeats an earlier one is left out, and so is one of
+    `extras` - the timer and instant-record locations - that an earlier location holds.
+    Resolving reads only links on the flash (`resolve`), never a disk.
+    """
+    kept = []
+    for location in locations:
+        real = resolve(location, mounts)
+        if any(real == other for _, other in kept):
+            continue
+        if location in extras and any(_under(real, other) for _, other in kept):
+            continue
+        kept.append((location, real))
+    return kept
+
+
 # --------------------------------------------------------- one recording --
 
 
@@ -1171,14 +1189,7 @@ class LibraryPublisher(Publisher):
         """
         started = time.monotonic()
         mounts = read_mounts(mounts_path)
-        kept = []
-        for location in locations:
-            real = resolve(location, mounts)
-            if any(real == other for _, other in kept):
-                continue
-            if location in extras and any(_under(real, other) for _, other in kept):
-                continue
-            kept.append((location, real))
+        kept = kept_locations(locations, extras, mounts)
         walked = {}
         woke = False
         for location, real in kept:
@@ -1486,10 +1497,15 @@ class LibraryPublisher(Publisher):
         What `locate` places a recording in, so that a running recording's location and
         file are the ones the index and its folder topic give it - a timer or an
         instant-record location that another location holds is not one of them. Before
-        the first read, the configured ones.
+        the first read, the configured ones as a read would keep them: resolved, without
+        repeats, and without a timer or instant-record location another one holds - from
+        `/proc/mounts` and the links on the flash, without a disk access.
         """
         listed = [one.get("real") for one in self._walked.values() if one.get("real")]
-        return listed or list(self._locations)
+        if listed:
+            return listed
+        mounts = read_mounts(self.mounts_path)
+        return [real for _location, real in kept_locations(self._locations, self._extras, mounts)]
 
     def check_space(self):
         """The recording disk's minute: mounts and free space, in a thread of their own.
