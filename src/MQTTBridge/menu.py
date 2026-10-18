@@ -149,6 +149,10 @@ class UnknownVersion(InvalidMenu):
 # ------------------------------------------------------------------- the text --
 
 
+# What every text loses before it is shown: format characters and lone surrogates.
+DROPPED_CATEGORIES = ("Cf", "Cs")
+
+
 def clean_text(value, limit):
     """Text as a row may show it: no backslash, no line break or control, at most `limit`.
 
@@ -157,13 +161,15 @@ def clean_text(value, limit):
     A row is one line, so every control character and line separator becomes a space. The
     invisible format characters (Unicode category Cf: the bidirectional overrides and isolates,
     the zero-width space and joiners, the soft hyphen, the byte order mark) are dropped: they
-    draw nothing and can make a row read as something it is not.
+    draw nothing and can make a row read as something it is not. So is a lone surrogate
+    (category Cs), which JSON can spell and no UTF-8 holds: the image's renderer converts the
+    text to UTF-8 without checking that it could, and must never be handed one.
     """
     text = strip_backslashes(str(value))
     pieces = []
     for character in text:
         category = unicodedata.category(character)
-        if category == "Cf":
+        if category in DROPPED_CATEGORIES:
             continue
         pieces.append(" " if category in ("Cc", "Zl", "Zp") else character)
     return "".join(pieces)[:limit]

@@ -99,12 +99,9 @@ TEXT_SELECTED = 0xFFFFFF
 DIM = 0x7A8894
 DIM_SELECTED = 0xB8C2CA
 PENDING = 0xE6B422
-STATE_COLOURS = {"green": 0x4CAF50, "red": 0xE5534B,
-                 # The two other colour keys, for a list of choices (`choicelist.py`).
-                 "yellow": 0xE8C547, "blue": 0x4C8FE0}
+STATE_COLOURS = {"green": 0x4CAF50, "red": 0xE5534B}
 # On the selection bar a plain green or red is hard to read: lighter ones.
-STATE_COLOURS_SELECTED = {"green": 0x9BE59F, "red": 0xFF9A94,
-                          "yellow": 0xFFE58F, "blue": 0x9CC4FF}
+STATE_COLOURS_SELECTED = {"green": 0x9BE59F, "red": 0xFF9A94}
 
 _screen_class = None
 
@@ -281,8 +278,7 @@ def build_row(row, shape, load, names):
     """One list entry: `[id, icon?, label, state?]`, in the image's multi-content form.
 
     `load(icon name)` gives the pixmap; `names` holds what `enigma` and `Components.MultiContent`
-    offer, looked up once per screen. A row with `icon_space` and no icon keeps the icon's room
-    empty, so that its label lines up with those of the rows that have one.
+    offer, looked up once per screen.
     """
     multicontent = names["multicontent"]
     text_entry = multicontent.MultiContentEntryText
@@ -297,8 +293,6 @@ def build_row(row, shape, load, names):
         if made is not None:
             entry.append(made)
         x += size + pad // 2
-    elif row.get("icon_space"):
-        x += shape["icon"] + pad // 2
     state = row.get("state") or ""
     state_width = shape["state_width"] if state else 0
     label_width = max(1, shape["inner"] - x - state_width - pad // 2)
@@ -722,13 +716,19 @@ class ChoiceBoxAdapter:
 
 
 def open_fallback(session, controller):
-    """Open the image's own list for `controller`. None when it is open, otherwise why not."""
+    """Open the image's own list for `controller`. None when it is open, otherwise why not.
+
+    A `ChoiceBox` that raises inside `session.open` has taken the execution from the dialog
+    under it, as a styled screen that raises there has: it is given back the same way.
+    """
     adapter = ChoiceBoxAdapter(session, controller)
     controller.attach(adapter)
+    executing = getattr(session, "in_exec", None)
     try:
         adapter.open()
     except Exception as error:
         LOG.exception("the image's list could not be opened for the menu")
         controller.attach(None)
+        _restore_executing(session, executing)
         return f"{type(error).__name__}: {error}"
     return None
