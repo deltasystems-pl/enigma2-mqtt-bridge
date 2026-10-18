@@ -1469,3 +1469,21 @@ def test_locate_names_the_location_whose_walk_lists_the_file(tmp_path):
     assert library.locate(path, [outer, inner], mounts)[:2] == (inner, "a.ts")
     assert library.locate(outer + "/b.ts", [outer, inner], mounts)[:2] == (outer, "b.ts")
     assert library.locate("/elsewhere/c.ts", [outer, inner], mounts)[:2] == (None, None)
+
+
+def test_two_reads_in_one_second_carry_two_reads(image, start, factory, monkeypatch):
+    """`read` increases with every read of a run: a refresh is told by `read` alone."""
+    image.record("a.ts")
+    monkeypatch.setattr(library.time, "time", lambda: 1792050000.4)
+    bridge = start()
+    first = last(factory, INDEX)["read"]
+    assert first == 1792050000
+    publisher = bridge.publisher("recordings")
+    publisher.request(library.REFRESH)
+    second = last(factory, INDEX)["read"]
+    publisher.request(library.REFRESH)
+    third = last(factory, INDEX)["read"]
+    assert first < second < third
+    # Free space alone republishes the index with the `read` it had.
+    publisher.on_space({str(image.movie): (True, 1)})
+    assert last(factory, INDEX)["read"] == third

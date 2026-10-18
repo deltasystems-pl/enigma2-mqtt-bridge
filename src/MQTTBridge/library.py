@@ -1052,7 +1052,8 @@ class LibraryPublisher(Publisher):
         self._reading = True
         self._running_reason = None
         self._watchdog.start(READ_WATCHDOG_SECONDS * 1000, True)
-        self._annotate(self._serial, self._walked, self._read_reason, self._read_at)
+        # No reason: not a read of the library, so `read` and `reason` stay as they are.
+        self._annotate(self._serial, self._walked, None, None)
 
     def request(self, reason, only=None):
         """Read the library, for `reason`. False when a read is running and answers this one.
@@ -1360,7 +1361,11 @@ class LibraryPublisher(Publisher):
         self._walked = walked
         if reason is not None:
             self._read_reason = reason
-            self._read_at = int(read_at)
+            # Strictly later than the read before, also within one second: a consumer
+            # tells a new read from a republished index by `read` alone.
+            previous = self._read_at
+            self._read_at = int(read_at) if previous is None else max(int(read_at),
+                                                                     previous + 1)
         self._index = {"read": self._read_at, "reason": self._read_reason,
                        "locations": index_locations}
         self._folders = folders

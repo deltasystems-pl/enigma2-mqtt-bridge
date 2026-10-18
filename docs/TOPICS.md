@@ -1383,7 +1383,7 @@ folder, `recordings/<folder_slug>` (below).
 
 | Field | Type | Meaning |
 |---|---|---|
-| `read` | int | When the library was last read |
+| `read` | int | When the library was last read. Strictly greater with every read within a run of the plugin - one second later than the read before when two fall in the same second - so a new read is told from a republished index by `read` alone; a new run starts from the clock again. A new reading of the bouquets alone keeps it |
 | `reason` | string | Why it was read: `start` - the plugin started; `recording` - a recording started or ended; `delete` - `cmd/delete_recording` moved one into the trash; `mount` - a movie location was mounted; `refresh` - `cmd/recordings_refresh`. An open enumeration |
 | `locations` | list of objects | Each movie location: first the image's default movie location (`config.usage.default_path`) - also when it lies inside another - then the movie list's locations in the image's order, then the timer and the instant-record locations where they name a folder no location before them holds |
 | `locations[].path` | string | The location's resolved path - links on the receiver's flash followed, as the ids and the references follow them - without a trailing slash: `path + "/" + file` is exactly the file a reference to the recording plays. The spelling in the receiver's settings is not published |
