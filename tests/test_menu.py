@@ -531,7 +531,7 @@ def test_a_short_help_is_left_to_the_image(world):
 
 
 def test_the_hotkey_opens_the_menu_over_the_movie_player(world):
-    """D67: in a recording, too - the menu opens over the playing video."""
+    """ADR-0021, the players: in a recording, too - the menu opens over the playing video."""
     from conftest import MoviePlayer
 
     world.send_menu()
@@ -894,7 +894,7 @@ def test_an_unavailable_row_is_greyed_and_cannot_be_acted_on(world):
 
 
 def test_a_number_key_moves_the_selection_and_ok_acts(world):
-    """D66: a digit only jumps to its row; nothing is sent until OK."""
+    """ADR-0020 decision 3: a digit only jumps to its row; nothing is sent until OK."""
     world.open()
     world.screen.key_number(2)
     assert world.screen.selected() == "r_movie"
@@ -920,7 +920,7 @@ def test_a_number_key_on_a_group_does_not_open_it(world):
 
 
 def test_a_row_of_an_unknown_type_is_shown_inert_and_logged_once(world, plugin_log):
-    """D72: label and state as sent, nothing on OK, one log line - not one per redraw."""
+    """Label and state as sent, nothing on OK, one log line - not one per redraw."""
     menu = example()
     menu["items"].append({"type": "dial", "id": "r_dial", "label": "Dial", "state": "3",
                           "available": True})
@@ -955,7 +955,7 @@ def test_unknown_row_types_are_each_named_once_and_only_so_many(world, plugin_lo
 
 
 def test_ok_on_the_option_already_set_sends_nothing(world):
-    """D70: the list closes - no action, no pending mark, no notice."""
+    """ADR-0020 decision 3: the list closes - no action, no pending mark, no notice."""
     world.open()
     world.ok("r_movie")
     world.ok("g_salon")
@@ -1069,7 +1069,7 @@ def test_an_option_gone_while_the_fallback_list_shows_it_sends_nothing(world, mo
 
 
 def test_up_or_down_discards_a_moved_slider(world):
-    """D23: only OK applies; moving off the row is not OK."""
+    """ADR-0020 decision 3: only OK applies; moving off the row is not OK."""
     world.open()
     world.ok("g_salon")
     world.select("r_blind")
@@ -1218,7 +1218,7 @@ def test_an_unknown_status_changes_nothing(world):
 
 
 def test_home_assistant_offline_is_forgotten_when_the_broker_connection_goes(world):
-    """D71: Home Assistant came back while the receiver was away; its birth is not retained."""
+    """Home Assistant came back while the receiver was away; its birth is not retained."""
     world.open()
     world.status("offline")
     world.client.fire_disconnect()
@@ -1251,7 +1251,7 @@ def test_an_offline_after_the_reconnect_greys_again(world):
 
 
 def test_a_live_menu_says_home_assistant_is_online(world, plugin_log):
-    """D71: only a running integration publishes a menu now, so Home Assistant is up."""
+    """Only a running integration publishes a menu now, so Home Assistant is up."""
     world.open()
     world.status("offline")
     assert world.publisher.greyed() == "home_assistant"
@@ -1422,7 +1422,7 @@ def test_nothing_is_sent_without_a_menu(world):
 
 
 def test_an_action_the_broker_has_not_taken_is_dropped_when_the_connection_goes(world):
-    """Never queued across a disconnect (D64): paho would send it again after the reconnect."""
+    """Never queued across a disconnect: paho would send it again after the reconnect."""
     world.open()
     world.ok("r_movie")
     assert world.client.queued_for_reconnect() == [ACTION_TOPIC]
@@ -1433,7 +1433,7 @@ def test_an_action_the_broker_has_not_taken_is_dropped_when_the_connection_goes(
 
 
 def test_an_action_is_dropped_at_the_reconnect_the_main_loop_has_not_seen_go(world):
-    """paho reconnected on its own thread before the main loop handled the disconnect (D64)."""
+    """paho reconnected on its own thread before the main loop handled the disconnect."""
     world.open()
     world.ok("r_movie")
     assert world.client.queued_for_reconnect() == [ACTION_TOPIC]
@@ -1718,7 +1718,7 @@ def test_the_fallback_is_the_images_list_with_the_same_rows_ids_and_keys(world, 
     box = world.session.current_dialog
     assert box.list == [("Salon", "g_salon"), ("Movie night", "r_movie"),
                         ("Front door", "r_door"), ("Note", "r_note")]
-    # No number keys: the image's list would act on a digit (D66).
+    # No number keys: the image's list would act on a digit (ADR-0020 decision 7).
     assert box.keys == ["", "", "", ""]
     assert box.title == "Home Assistant"
     box.close(("Movie night", "r_movie"))
@@ -1754,7 +1754,7 @@ def test_the_fallback_with_no_menu_yet_says_so_and_has_no_number_key(world, monk
     box = world.session.current_dialog
     assert isinstance(box, ChoiceBox)
     assert box.list == [("There is no menu from Home Assistant yet.", None)]
-    # One key for the one entry, and an empty one: the image reads it as none (D66).
+    # One key for the one entry, and an empty one: the image reads it as none.
     assert box.keys == [""]
 
 

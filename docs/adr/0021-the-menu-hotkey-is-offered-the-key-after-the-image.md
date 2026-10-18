@@ -70,11 +70,11 @@ the image's help. A long press on the physical remote was not measured.
   without the info bar losing focus (`longkeyPressed`); a long HELP right after such a press may
   need pressing again. That is the image's behaviour and is left alone.
 - Whether a physical long press arrives with the long flag on a given remote and image is a
-  hardware question (H11), as is any keymap translation an image applies to a remote's keys.
+  hardware question, as is any keymap translation an image applies to a remote's keys.
 
 ## Amendment 2026-10-15 - the players
 
-The maintainer asked for the hotkey in the movie player as well (D67), under the same rule: only
+The maintainer asked for the hotkey in the movie player as well, under the same rule: only
 on a key the image leaves unassigned there. The players were read in the same three trees:
 `Screens/InfoBar.py`'s `MoviePlayer` and the `Plugins/Extensions/MediaPlayer` plugin, every
 context their classes and mixins bind, and every map of `data/keymap.xml` that holds a long HELP,

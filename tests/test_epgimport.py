@@ -743,7 +743,7 @@ def test_the_cache_stub_starts_without_either_import_method():
     assert not hasattr(cache, "importEvent")
 
 
-# -------------------------------------------- the power block lapses (✅ review) --
+# ------------------------------------------------------- the power block lapses --
 
 
 def _start_that_raises_part_way(importer):
@@ -810,7 +810,7 @@ def test_the_power_block_lapses_once_the_watchdog_fired(importer, epg_bridge, fa
     assert error(factory) == epgimport.ALREADY_RUNNING
 
 
-# ------------------------------------------------------ pinned by review (#27) --
+# --------------------------- unreadable states, the watchdog and failed starts --
 
 
 def test_an_unreadable_schedule_setting_is_not_read_as_off(
@@ -905,7 +905,7 @@ def test_a_start_that_raised_before_running_does_not_lapse_the_next_import(
     assert bridge.run_command("restart_gui", "", PAGE) == "an EPG import is running"
 
 
-# ------------------------------------------------------ review round 2 (#27) --
+# --------------------------- refused presses, the follow, the block re-armed --
 
 
 def test_an_early_start_failure_does_not_lapse_a_foreign_import_that_follows(

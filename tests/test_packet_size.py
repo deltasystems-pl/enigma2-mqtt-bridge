@@ -1173,7 +1173,7 @@ def test_reset_without_a_session_says_it_retracted_nothing(make_bridge, factory,
     assert "reset: retracting 0 retained topic(s)" in plugin_log()
 
 
-# ----------------------------------------------------------------- the delta review --
+# --------------------------------- a reload while info raises, the payload recorded --
 
 
 def test_a_reload_goes_through_although_the_waiting_info_raises(make_bridge, factory, settings,

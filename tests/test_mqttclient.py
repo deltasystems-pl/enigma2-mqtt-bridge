@@ -531,7 +531,8 @@ def _publish_topic(body):
 
 
 def test_a_transient_publish_is_never_sent_again_after_a_reconnect():
-    """D64, against the vendored paho with its own network thread and a broker on a socket.
+    """ADR-0020 decision 6, against the vendored paho with its own network thread and a broker
+    on a socket.
 
     The main loop never runs here, as if it were busy: the drop has to happen on paho's thread,
     in on_connect, before `_handle_connack` sends the queue again. A state publish beside it is

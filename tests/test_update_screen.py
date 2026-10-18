@@ -168,7 +168,7 @@ def test_a_version_that_cannot_be_installed_says_why_and_is_not_offered(box):
     # What opkg says is installed; the test's receiver has no opkg database of its own.
     bridge.updates._installed = frozenset({"python3-core"})
     screen = screen_of(bridge)
-    # A row is one line on the television, so it says only that; OK says why (review round 2).
+    # A row is one line on the television, so it says only that; OK says why.
     assert labels(screen) == [
         "0.5.0 - cannot be installed",
         "0.4.0 - cannot be installed",
@@ -497,7 +497,7 @@ def test_a_withdrawn_update_shows_the_list_again_and_how_it_ended(box, factory, 
 
 
 def test_a_rollback_the_deadline_forced_is_not_said_as_a_failed_start(box, factory, receiver):
-    """Review S1: `rolled_back` with `time_limit` - the update ran out of time, and was undone."""
+    """`rolled_back` with `time_limit` - the update ran out of time, and was undone."""
     bridge = box()
     screen = screen_of(bridge)
     choose(screen, "0.4.0")
@@ -561,7 +561,7 @@ ISOLATED = "MQTTBRIDGE_TEST_ISOLATED_SCREEN"
 
 
 def test_the_screen_left_open_behind_closed_doors_imports_nothing_new():
-    """The whole transaction with the screen open, alone in a fresh interpreter (review S9)."""
+    """The whole transaction with the screen open, alone in a fresh interpreter."""
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-rA", "-p", "no:cacheprovider",
          __file__ + "::test_the_screen_left_open_alone"],
@@ -816,7 +816,7 @@ def test_the_polish_screen_uses_the_agreed_words():
         "zmieniono.")
 
 
-# ------------------------------------------------------------ review round 1 --
+# ------------------------- closed doors, check errors and the screen's words --
 
 
 @pytest.mark.parametrize("form", ["install", "downgrade", "restart_gui", "confirm", "identity"])
@@ -897,7 +897,7 @@ CHECK_ERRORS = sorted(set(trust.REASONS) | {
 
 @pytest.mark.parametrize("code", CHECK_ERRORS)
 def test_every_check_error_is_a_household_sentence(code, box):
-    """The television says what went wrong, never the code (review S4)."""
+    """The television says what went wrong, never the code."""
     bridge = box()
     bridge.updates._check_error = code
     said = updateview.header(bridge)[-1]
@@ -956,7 +956,7 @@ def test_a_development_build_is_never_shown_as_the_installed_release(box):
 
 
 def test_one_rule_says_what_is_older():
-    """The question and the dispatcher judge a downgrade by the same function (review N4)."""
+    """The question and the dispatcher judge a downgrade by the same function."""
     assert updateview.older is selfupdate.older
     assert selfupdate.older("0.2.5") and not selfupdate.older("0.3.0")
     assert not selfupdate.older("not a version")
@@ -968,7 +968,7 @@ def test_the_list_source_has_its_own_words(box):
     assert "List of versions no. 1 of 2026-09-2" in info and "via Home Assistant" in info
 
 
-# The skins' text boxes, judged by a character budget (review S3): a character is taken as 0.55 of
+# The skins' text boxes, judged by a character budget: a character is taken as 0.55 of
 # the font size wide - the stub's `eLabel` model uses 0.5, and the margin is for capitals and
 # German compounds - a line as 1.2 of it tall, and text wraps at spaces. A model, not the image's
 # font renderer (the spike looks at the real screen), but enough to stop a sentence that cannot
@@ -1039,7 +1039,7 @@ def transaction_lines():
                for who in STARTERS for phase in PHASES]
     records += [{"target": LONG, "started_by": who, "phase": "finished", "result": result}
                 for who in STARTERS for result in RESULTS]
-    # A rollback's reason picks its own sentence (review S1).
+    # A rollback's reason picks its own sentence.
     records += [{"target": LONG, "started_by": who, "phase": "finished",
                  "result": "rolled_back", "reason": reason}
                 for who in STARTERS for reason in ("time_limit", "interrupted", "drill")]
@@ -1051,10 +1051,10 @@ def transaction_lines():
 def said_lines(translate):
     said = [updateview.household_refusal(Refusal("contract sentence", reason), LONG)
             for reason in REFUSALS]
-    # OK on a version that cannot be installed says the whole reason here (review round 2).
+    # OK on a version that cannot be installed says the whole reason here.
     said += [updateview.row_detail((LONG, updateview.NEWER, reason))
              for reason in ("incompatible", "depends")]
-    # The relay handshake's two waits, at their longest count (review round 2).
+    # The relay handshake's two waits, at their longest count.
     said += [relay_line_of({"version": LONG, "seconds_left": seconds, "phase": phase})
              for phase, seconds in (("probe", 60), ("relay", 120))]
     said += [translate("The update to version %s has started.") % LONG,
@@ -1091,7 +1091,7 @@ def test_the_words_fit_the_screen(language, box, settings, monkeypatch):
     per_line, info_lines = room["info"]
     for lines in header_lines(translate):
         assert wrapped("\n".join(lines), per_line) <= info_lines, (language, lines)
-    # A list row is one line and never wraps (review round 2, S-d2): the list is as wide as the
+    # A list row is one line and never wraps: the list is as wide as the
     # text boxes, and a MenuList row is drawn in the skin's list font, taken at the same 22 px.
     per_row = list_width() // int(22 * GLYPH)
     for row in list_rows():
@@ -1128,7 +1128,7 @@ def list_rows():
     return rows
 
 
-# ------------------------------------------------------------ review round 2 --
+# ---------------------------- the relay handshake on the screen and the page --
 
 PROBE_LINE = "Checking whether the receiver can reach the internet to download version 0.4.0."
 NO_RELAY_SAID = ("The receiver has no access to the internet, and Home Assistant did not "
@@ -1263,7 +1263,7 @@ def test_the_polish_relay_sentences():
 
 def test_a_cross_site_post_behind_closed_doors_is_refused_and_keeps_the_confirmation(
         box, page, factory):
-    """S-d1 (E1): the same-origin check comes first, so another site cannot drop a pending
+    """The same-origin check comes first, so another site cannot drop a pending
     confirmation by posting while the doors are closed."""
     bridge = box()
     resource = page(bridge)
@@ -1282,7 +1282,7 @@ def test_a_cross_site_post_behind_closed_doors_is_refused_and_keeps_the_confirma
 
 @pytest.mark.parametrize(("age", "expired"), [(599, False), (601, True)])
 def test_a_page_confirmation_lasts_ten_minutes(age, expired, box, page):
-    """S-d1 (E3): ten minutes, written out rather than read from the code."""
+    """Ten minutes, written out rather than read from the code."""
     bridge = box()
     resource = page(bridge)
     session = new_session()
@@ -1315,7 +1315,7 @@ CHECK_SENTENCES = {
 @pytest.mark.parametrize(("sentence", "code"), [
     (sentence, code) for sentence, codes in CHECK_SENTENCES.items() for code in codes])
 def test_each_check_error_says_what_its_group_means(sentence, code, box):
-    """S-d1 (E7): not only no raw code - the sentence of the code's own group."""
+    """Not only no raw code - the sentence of the code's own group."""
     bridge = box()
     bridge.updates._check_error = code
     assert updateview.header(bridge)[-1] == sentence
@@ -1343,7 +1343,7 @@ def test_a_wait_that_ends_in_a_refusal_names_its_version_on_the_page(box, page, 
             "and try again.") in text
 
 
-# ------------------------------------------------------------ review round 3 --
+# ------------------------------ how a wait ended, on the screen and the page --
 
 
 def updates_section(body):

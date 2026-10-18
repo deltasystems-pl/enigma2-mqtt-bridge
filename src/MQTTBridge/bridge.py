@@ -1127,7 +1127,7 @@ class Bridge:
         self._commands.handle(topic, payload, retain)
 
     def on_disconnect(self, reason_code):
-        # The menu greys itself without a broker (D14), and an open one says so at once.
+        # The menu greys itself without a broker, and an open one says so at once.
         menu = self.publisher("menu")
         if menu is not None:
             menu.connection_changed()
@@ -1181,7 +1181,7 @@ class Bridge:
         if size:
             return self._withhold(topic, size, retain=False)
         # Transient: one the broker has not acknowledged when the connection goes is dropped at
-        # the next connect, before the client would send it again (D64).
+        # the next connect, before the client would send it again.
         return self.client.publish(topic, encoded, qos=qos, retain=False, transient=True)
 
     def withdraw_event(self, info):

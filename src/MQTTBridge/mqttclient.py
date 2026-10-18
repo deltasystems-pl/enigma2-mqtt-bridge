@@ -422,10 +422,10 @@ class MqttClient:
         paho 2.1 calls `on_connect` from `_handle_connack` and only then sends everything in
         `_out_messages` again, on the same thread - so a `menu_action` from before the
         disconnect is taken out here whether or not the main loop has heard of the disconnect
-        yet (D64). Locks: this thread holds paho's `_in_callback_mutex`, then takes ours, then
-        paho's `_out_message_mutex`; the main thread takes ours, then `_out_message_mutex`, and
-        with paho's loop thread running its publish never waits for `_in_callback_mutex`
-        (`_packet_queue`), so there is no cycle.
+        yet (ADR-0020 decision 6). Locks: this thread holds paho's `_in_callback_mutex`, then
+        takes ours, then paho's `_out_message_mutex`; the main thread takes ours, then
+        `_out_message_mutex`, and with paho's loop thread running its publish never waits for
+        `_in_callback_mutex` (`_packet_queue`), so there is no cycle.
         """
         with self._transient_lock:
             pending, self._transient = self._transient, {}

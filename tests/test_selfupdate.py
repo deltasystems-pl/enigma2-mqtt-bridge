@@ -549,7 +549,7 @@ def test_the_helpers_phases_reach_the_update_topic(box, factory):
         helper_says(directory, phase=phase)
         tick()
         assert transaction(factory.client)["phase"] == phase
-        # Review S1: the doors close when the package manager starts, not after it.
+        # The doors close when the package manager starts, not after it.
         assert bridge.self_update.closed is (phase == "installing")
 
 
@@ -646,7 +646,7 @@ def test_a_launch_whose_helper_died_before_writing_fails_at_once(box, factory):
 
 @pytest.mark.skipif(shutil.which("busybox") is None, reason="busybox is not installed")
 def test_busybox_starts_the_helper_while_another_python3_runs(tmp_path):
-    """Review H1: `-x /usr/bin/python3` alone matches any running python3 and starts nothing."""
+    """`-x /usr/bin/python3` alone matches any running python3 and starts nothing."""
     import subprocess
     import time
 
@@ -1242,7 +1242,7 @@ def test_an_update_that_installed_leaves_no_earlier_runs_error_behind(starting, 
     assert [entry.text for entry in factory.client.all_for(LAST_ERROR)] == [""]
 
 
-# `update.transaction.reason` (review S1): `last_error` is cleared by the next command that
+# `update.transaction.reason`: `last_error` is cleared by the next command that
 # succeeds, so the reason that says why a rollback happened has to stay with the transaction.
 
 @pytest.mark.parametrize("reason", ["time_limit", "not_started"])
@@ -1390,7 +1390,7 @@ ISOLATED = "MQTTBRIDGE_TEST_ISOLATED"
 def test_the_closed_path_imports_nothing_new():
     """Steps 3-9 with every module the start did not import refused - in a fresh interpreter.
 
-    Review S9: in this process the tests before have imported nearly every module of the plugin,
+    In this process the tests before have imported nearly every module of the plugin,
     and a module already in `sys.modules` is never refused, so a first import on the closed
     path passed here while it failed alone. The scenario therefore runs alone, where
     `sys.modules` holds what the test harness and the bridge's start imported and nothing else.
@@ -1480,7 +1480,7 @@ def removals(since):
 ])
 def test_an_uninstall_is_refused_while_an_update_runs(phase, polled, box, factory, settings,
                                                       monkeypatch):
-    """Review M1: two package-manager transactions never run side by side."""
+    """Two package-manager transactions never run side by side."""
     bridge = box()
     uninstall_ready(bridge, settings, monkeypatch)
     directory = accepted(bridge, factory)
@@ -1520,7 +1520,7 @@ def test_an_uninstall_is_refused_while_an_ssh_install_holds_the_lock(box, factor
 @pytest.mark.parametrize("origin", [MQTT, PAGE, SCREEN])
 def test_an_update_is_refused_while_an_uninstall_runs(origin, box, factory, settings,
                                                       monkeypatch):
-    """Review M1, the other way: the uninstall's closed doors are not the only guard."""
+    """The other way round: the uninstall's closed doors are not the only guard."""
     bridge = box()
     uninstall_ready(bridge, settings, monkeypatch)
     assert bridge.uninstaller.request(NODE) is None
@@ -1534,7 +1534,7 @@ def test_an_update_is_refused_while_an_uninstall_runs(origin, box, factory, sett
 
 
 def test_the_doors_close_while_the_package_manager_runs(box, factory, receiver):
-    """Review S1: opkg rewrites the files during `installing`; nothing runs from them then."""
+    """`opkg` rewrites the files during `installing`; nothing runs from them then."""
     bridge = box()
     directory = accepted(bridge, factory)
     helper_process(bridge, directory)
@@ -1580,7 +1580,7 @@ def test_a_package_manager_failure_behind_closed_doors_reopens_them(box, factory
 @pytest.mark.parametrize("change", ["standby", "recording", "epg_import"])
 def test_a_household_change_before_the_restart_withdraws_instead_of_asking(
         change, box, factory, receiver, monkeypatch):
-    """Review S2: the guards that refused the request are asked again right before the quit."""
+    """The guards that refused the request are asked again right before the quit."""
     bridge = box()
     directory = accepted(bridge, factory)
     helper_process(bridge, directory)
@@ -1617,7 +1617,7 @@ def test_a_downgrade_withdrawn_for_standby_retracts_nothing(box, factory, receiv
 
 
 def test_after_a_dead_helper_the_next_update_is_told_why_it_must_wait(box, factory):
-    """Review S3: not "already running" - the lock of a helper that is gone, and for how long."""
+    """Not "already running" - the lock of a helper that is gone, and for how long."""
     bridge = box()
     directory = accepted(bridge, factory)
     ident = directory.name[len("update-"):]
@@ -1650,7 +1650,7 @@ def test_a_lock_that_may_be_alive_is_still_already_running(owner, box):
     (("0.4.0", "ab" * 20), ("0.3.0", COMMIT), "rolled_back"),
 ])
 def test_the_start_after_a_dead_helper_says_how_it_ended(to, frm, result, starting, factory):
-    """Review S4: the marker outlives the helper, and the running build is the verdict."""
+    """The marker outlives the helper, and the running build is the verdict."""
     made = {}
 
     def prepare(root):
@@ -1666,7 +1666,7 @@ def test_the_start_after_a_dead_helper_says_how_it_ended(to, frm, result, starti
 
 
 def test_a_followed_transaction_past_its_deadline_is_let_go(starting, factory):
-    """Review S5: the marker's deadline bounds the following even while `status.json` exists."""
+    """The marker's deadline bounds the following even while `status.json` exists."""
     made = {}
 
     def prepare(root):
@@ -1685,7 +1685,7 @@ def test_a_followed_transaction_past_its_deadline_is_let_go(starting, factory):
 
 def test_a_helper_that_finished_and_exited_between_two_reads_is_not_interrupted(
         box, factory, receiver, monkeypatch):
-    """Review S6: the status is read again once the helper is seen gone."""
+    """The status is read again once the helper is seen gone."""
     bridge = box()
     directory = accepted(bridge, factory)
     helper_process(bridge, directory)
@@ -1712,7 +1712,7 @@ def test_a_helper_that_finished_and_exited_between_two_reads_is_not_interrupted(
     b"/usr/bin/python3\0-c\0import helper.py\0",
 ])
 def test_only_this_transactions_helper_is_the_helper(command, box, factory):
-    """Review S7: the helper's exact path, as an argument - not a substring of the command."""
+    """The helper's exact path, as an argument - not a substring of the command."""
     bridge = box()
     directory = accepted(bridge, factory)
     helper_process(bridge, directory)
@@ -1722,7 +1722,7 @@ def test_only_this_transactions_helper_is_the_helper(command, box, factory):
 
 
 def test_the_documented_started_by_values_are_the_ones_the_plugin_produces():
-    """Review S8: an SSH install is not reported on `update`, so `ssh` is not in the contract."""
+    """An SSH install is not reported on `update`, so `ssh` is not in the contract."""
     topics = (Path(__file__).resolve().parents[1] / "docs" / "TOPICS.md").read_text(
         encoding="utf-8")
     row = next(line for line in topics.splitlines() if line.startswith("| `started_by` |"))
@@ -1732,7 +1732,7 @@ def test_the_documented_started_by_values_are_the_ones_the_plugin_produces():
 
 
 def test_a_launch_bound_behind_closed_doors_reopens_them(box, factory, mono):
-    """Review S10: every record gone after the doors closed - the launch bound reopens them."""
+    """Every record gone after the doors closed - the launch bound reopens them."""
     bridge = box()
     directory = accepted(bridge, factory)
     helper_says(directory, phase="restarting")
@@ -1750,11 +1750,11 @@ def test_a_launch_bound_behind_closed_doors_reopens_them(box, factory, mono):
     assert bridge.run_command("restart_gui", "PRESS", PAGE) != DOORS
 
 
-# ------------------------------------------------------ review S11: test gaps --
+# ---------------------------------- the end, the build and the doors, closely --
 
 
 def test_the_normal_end_with_the_pid_file_left_is_not_interrupted(box, factory, receiver):
-    """R3: `finished` written and the helper gone - its pid file stays - is the end it wrote."""
+    """`finished` written and the helper gone - its pid file stays - is the end it wrote."""
     bridge = box()
     directory = accepted(bridge, factory)
     helper_process(bridge, directory)
@@ -1772,7 +1772,7 @@ def test_the_normal_end_with_the_pid_file_left_is_not_interrupted(box, factory, 
 
 
 def test_a_new_plugin_confirms_while_the_marker_still_says_restarting(starting):
-    """R9: the helper writes `proving` only after it saw the new pid; `restarting` confirms too."""
+    """The helper writes `proving` only after it saw the new pid; `restarting` confirms too."""
     made = {}
     starting(prepare=lambda root: made.update(dir=marker(root, phase="restarting")))
     started = json.loads((made["dir"] / "started.json").read_text())
@@ -1780,14 +1780,14 @@ def test_a_new_plugin_confirms_while_the_marker_still_says_restarting(starting):
 
 
 @pytest.mark.parametrize("to, frm, result", [
-    # Spike S1's shape: the same number, another build.
+    # The same number, another build.
     (("0.3.0", "ab" * 20), ("0.3.0", COMMIT), "rolled_back"),
     (("0.3.0", COMMIT), ("0.3.0", "ab" * 20), "installed"),
     (("0.3.0", "ab" * 20), ("0.3.0", "ef" * 20), "interrupted"),
 ])
 def test_after_a_power_loss_a_same_number_build_is_judged_by_its_commit(to, frm, result,
                                                                         starting, factory):
-    """R16: the power-loss verdict compares the build commit, not only the version."""
+    """The power-loss verdict compares the build commit, not only the version."""
     def prepare(root):
         marker(root, boot=OTHER_BOOT, to=to, frm=frm)
         lock(root, "a1b2c3d4e5f6", boot=OTHER_BOOT)
@@ -1799,7 +1799,7 @@ def test_after_a_power_loss_a_same_number_build_is_judged_by_its_commit(to, frm,
 
 def test_a_retraction_publish_the_session_refuses_withdraws_the_downgrade(box, factory,
                                                                          receiver):
-    """R7: a publish refused outright (`rc` not 0) is a failed retraction."""
+    """A publish refused outright (`rc` not 0) is a failed retraction."""
     bridge = box()
     assert bridge.self_update.request(json.dumps({"version": "0.2.5"}), origin=SCREEN,
                                       downgrade=True) is None
@@ -1813,7 +1813,7 @@ def test_a_retraction_publish_the_session_refuses_withdraws_the_downgrade(box, f
 
 
 def test_the_plugin_menu_entry_behind_closed_doors_says_only_that(box, factory, monkeypatch):
-    """R22: `plugin.open_setup` - the menu entry - with the doors closed opens no setup screen."""
+    """`plugin.open_setup` - the menu entry - with the doors closed opens no setup screen."""
     from MQTTBridge import plugin as plugin_module
 
     bridge = box()
@@ -1825,7 +1825,7 @@ def test_the_plugin_menu_entry_behind_closed_doors_says_only_that(box, factory, 
 
 
 def test_a_status_of_another_transaction_is_not_followed(box, factory):
-    """R10: a status file that names another id says nothing about this transaction."""
+    """A status file that names another id says nothing about this transaction."""
     bridge = box()
     directory = accepted(bridge, factory)
     helper_says(directory, phase="installing", id="0123456789ab")
@@ -1835,14 +1835,14 @@ def test_a_status_of_another_transaction_is_not_followed(box, factory):
 
 
 def test_a_version_that_is_not_a_release_number_is_a_bad_request(box, factory):
-    """R20: `0.4` is not `latest` and not a release number: unreadable, not unknown."""
+    """`0.4` is not `latest` and not a release number: unreadable, not unknown."""
     box()
     send(factory, {"version": "0.4"})
     assert refusal(factory.client)[0] == "bad_request"
 
 
 def test_a_relayed_index_is_not_judged_behind_closed_doors(box, factory, monkeypatch):
-    """R21: nothing is written into the trust file while the doors are closed."""
+    """Nothing is written into the trust file while the doors are closed."""
     bridge = box()
     restarting(bridge, factory)
     calls = []
@@ -1852,7 +1852,7 @@ def test_a_relayed_index_is_not_judged_behind_closed_doors(box, factory, monkeyp
     assert calls == []
 
 
-# ------------------------------------------- the helper's review round (merged) --
+# -------------------------------- interruptions, the rate limit, the retraction --
 
 
 @pytest.mark.parametrize("boot", [OTHER_BOOT, BOOT])
@@ -1886,7 +1886,7 @@ def test_after_a_reboot_the_rate_limit_counts_this_boots_uptime(box, monkeypatch
 
 
 def test_after_the_retraction_nothing_stale_is_retracted_either(box, factory):
-    """R24: a stale-topic sweep while silent would publish behind the retraction."""
+    """A stale-topic sweep while silent would publish behind the retraction."""
     bridge = box()
     restarting(bridge, factory, {"version": "0.2.5"}, downgrade=True)
     factory.client.acknowledge()
@@ -1899,7 +1899,7 @@ def test_after_the_retraction_nothing_stale_is_retracted_either(box, factory):
 
 
 def test_a_connection_lost_during_the_retraction_withdraws_at_once(box, factory, receiver):
-    """R27: not after the fifteen-second bound - a session that is gone acknowledges nothing."""
+    """Not after the fifteen-second bound - a session that is gone acknowledges nothing."""
     bridge = box()
     directory = restarting(bridge, factory, {"version": "0.2.5"}, downgrade=True)
     factory.client.fire_disconnect(7)
@@ -1908,11 +1908,11 @@ def test_a_connection_lost_during_the_retraction_withdraws_at_once(box, factory,
     assert receiver.session.callbacks == []
 
 
-# ------------------------------------------------ the helper's delta review --
+# ------------------------ acceptance from the build alone, a failed restore --
 
 
 def test_acceptance_keys_and_origin_come_from_the_build_alone(box, factory):
-    """Delta review: the request's trust fields are the running build's, whatever anyone sends.
+    """The request's trust fields are the running build's, whatever anyone sends.
 
     The same field selects the drill hook, the key set and the index's lineage; nothing a
     broker client, the page or the integration's topic says may reach it.
@@ -1972,7 +1972,7 @@ def test_the_drill_from_installing_to_rolling_back_keeps_the_doors_closed(
 @pytest.mark.parametrize("phase", ["installing", "restarting"])
 def test_a_failed_restore_keeps_the_doors_closed_and_says_to_reinstall(phase, box, factory,
                                                                       receiver):
-    """Delta review D2: the old files could not be put back - a reload would import new code."""
+    """The old files could not be put back - a reload would import new code."""
     bridge = box()
     directory = accepted(bridge, factory)
     helper_process(bridge, directory)
@@ -2019,7 +2019,7 @@ def test_the_page_says_when_the_old_files_could_not_be_put_back(box, factory, mo
     assert "<form" not in body
 
 
-# ------------------------------------------------------------ review round 2 --
+# ----------------- a failed restore, a dead helper, the limit after a reboot --
 
 
 def assert_stuck(bridge, factory, clients, reason):
@@ -2039,7 +2039,7 @@ def assert_stuck(bridge, factory, clients, reason):
 
 
 def test_a_failed_restore_is_stuck_even_when_no_poll_saw_the_files_change(box, factory):
-    """DS1: from `downloading` to a failed restore within one poll - decided by the record."""
+    """From `downloading` to a failed restore within one poll - decided by the record."""
     bridge = box()
     directory = accepted(bridge, factory)
     helper_process(bridge, directory)
@@ -2137,7 +2137,7 @@ def test_a_followed_transactions_failed_restore_does_not_close_this_process(star
 @pytest.mark.parametrize("phase", ["installing", "restarting", "rolling_back"])
 def test_a_helper_that_died_after_the_package_manager_started_keeps_the_doors_closed(
         phase, box, factory, receiver):
-    """DS2: an orphaned opkg may still be writing; a reload would import what it wrote."""
+    """An orphaned opkg may still be writing; a reload would import what it wrote."""
     bridge = box()
     directory = accepted(bridge, factory)
     helper_process(bridge, directory)
@@ -2180,7 +2180,7 @@ def test_a_helper_that_died_at_installing_before_its_marker_reopens_the_doors(bo
 
 
 def test_a_helper_that_died_at_installing_unseen_still_closes_the_doors(box, factory):
-    """DS1 and DS2 together: the first look at `installing` finds the helper already gone."""
+    """The two above together: the first look at `installing` finds the helper already gone."""
     bridge = box()
     directory = accepted(bridge, factory)
     helper_process(bridge, directory)
@@ -2201,7 +2201,7 @@ def plausible_index(bridge, issued):
 
 
 def test_after_a_reboot_an_update_days_ago_is_not_rate_limited(box):
-    """DS3: with a clock that can be believed, days ago is not less than ten minutes ago."""
+    """With a clock that can be believed, days ago is not less than ten minutes ago."""
     bridge = box()
     plausible_index(bridge, issued=NOW - 86400)
     last = str(bridge.root / updatehelper.LAST)
@@ -2215,7 +2215,7 @@ def test_after_a_reboot_an_update_days_ago_is_not_rate_limited(box):
 @pytest.mark.parametrize("case", ["1970_now", "1970_then", "before_the_build",
                                   "before_the_index", "then_after_now", "nine_minutes"])
 def test_after_a_reboot_an_implausible_clock_keeps_the_limit(case, box, monkeypatch):
-    """DS3: the wall clock lifts the limit only when both ends of it can be believed."""
+    """The wall clock lifts the limit only when both ends of it can be believed."""
     bridge = box()
     now, finished, issued = NOW, NOW - 3 * 86400, NOW - 86400
     if case == "1970_now":
@@ -2251,7 +2251,7 @@ def test_within_a_boot_the_wall_clock_never_lifts_the_limit(box):
     assert bridge.self_update.request(json.dumps({"version": "0.4.0"})).reason == "rate_limited"
 
 
-# ------------------------------------------------------------ review round 3 --
+# ---------------------------- an interface R2 could not stop, and its repair --
 #
 # The helper's R2 now ends `failed` when no interface was seen starting on the old files
 # (TRANSACTION.md section 7): `not_stopped` - the process R2 could not stop runs on over the
@@ -2314,7 +2314,7 @@ def test_an_interface_r2_could_not_stop_keeps_the_doors_closed_and_says_to_resta
         previous = "0.3.0"
     clients = len(factory.clients)
     error = str(updatehelper.Fail("not_stopped", previous=previous))
-    # This process is among those R2 could not stop (review round 4).
+    # This process is among those R2 could not stop.
     record = dict(record, unstopped=[os.getpid()])
     helper_says(directory, phase="finished", result="failed", reason="not_stopped", error=error,
                 finished=NOW + 200, record=record)
@@ -2482,8 +2482,8 @@ def test_a_followed_failed_restore_under_a_process_r2_could_not_stop_is_stuck(st
                                                                               factory, receiver):
     """The restore reasons win over `not_stopped`, and this process is the one they changed under.
 
-    Before round 3 only the process that asked was held for a failed restore; a follower that
-    R2 could not stop is just as much under the changed files.
+    Not only the process that asked is held for a failed restore: a follower that R2 could
+    not stop is just as much under the changed files.
     """
     bridge, directory = following(starting, factory, receiver)
     clients = len(factory.clients)
@@ -2622,7 +2622,7 @@ def test_the_repair_path_alone(starting, factory, receiver, monkeypatch):
     assert len(restarts(receiver)) == 2
 
 
-# ------------------------------------------------------------ review round 4 --
+# --------------------------------------------- which process R2 left running --
 #
 # `not_stopped` alone cannot tell a reader whether it is the process R2 could not stop: the helper
 # now lists those pids as `record.unstopped`, from its last look at /proc that answered, and leaves
@@ -2792,7 +2792,7 @@ def following_from(starting, factory, receiver, frm):
 
 @pytest.mark.parametrize("frm, held", [
     (("0.3.0", COMMIT), False),
-    # A release built again under the same number is another build (spike S1).
+    # A release built again under the same number is another build.
     (("0.3.0", "ef" * 20), True),
     (("0.2.0", COMMIT), True),
     # A `from` without a commit is judged by its number, as after a power loss.
@@ -2831,7 +2831,7 @@ def test_with_no_list_and_no_from_of_this_transaction_the_process_is_held(case, 
     assert bridge.self_update.stuck
 
 
-# ------------------------------------------------------------ review round 5 --
+# ------------------------------- the build on disk against the running build --
 #
 # The pid list and the end's reason are the helper's account, and its look at /proc can be wrong.
 # Before a process that ran through a transaction opens its doors again - or reloads - it asks
@@ -2865,7 +2865,7 @@ def assert_held_for_a_restart(bridge, factory, clients):
 @pytest.mark.parametrize("where", ["marker", "status_only"])
 def test_a_same_number_from_without_a_commit_does_not_open_the_to_process(where, starting,
                                                                          factory, receiver):
-    """Review round 5 (PA, PA2): `from` is this very number, built without a commit.
+    """`from` is this very number, built without a commit.
 
     With no list, the number alone said "this process runs `from`", and it opened - but this
     process is `to`, exactly, and the rollback put `from`'s files back under it.
@@ -3051,7 +3051,7 @@ def test_a_fresh_start_on_another_build_is_not_held(starting, factory, receiver)
     assert_open(bridge, factory, "not_stopped", error)
 
 
-# The follower during `rolling_back` (review round 5, 3c): R2 is putting the previous version's
+# The follower during `rolling_back`: R2 is putting the previous version's
 # files back under it, for as long as three minutes when the interface does not stop.
 
 
@@ -3121,11 +3121,11 @@ def test_a_follower_past_its_deadline_while_r2_puts_the_files_back_is_held(start
     assert "deadline" in refusal(factory.client)[1]
 
 
-# Test gaps the review's surviving mutants showed (M5, M16, M9).
+# Test gaps that surviving mutants showed.
 
 
 def test_with_no_list_the_status_files_bare_from_alone_can_open(starting, factory, receiver):
-    """Marker gone, a request without `from`: the status file's number is what is left (M5)."""
+    """Marker gone, a request without `from`: the status file's number is what is left."""
     bridge, directory = following_from(starting, factory, receiver, ("0.2.0", "ef" * 20))
     os.remove(bridge.root / updatehelper.MARKER)
     error = str(updatehelper.Fail("not_stopped", previous="0.3.0"))
@@ -3136,7 +3136,7 @@ def test_with_no_list_the_status_files_bare_from_alone_can_open(starting, factor
 
 
 def test_a_request_of_another_transaction_says_nothing_about_from(starting, factory, receiver):
-    """Only this transaction's request is read; another's `from` is this very build (M16)."""
+    """Only this transaction's request is read; another's `from` is this very build."""
     bridge, directory = following_from(starting, factory, receiver, ("0.2.0", "ef" * 20))
     os.remove(bridge.root / updatehelper.MARKER)
     updatehelper.write_json(str(directory / "request.json"), {
@@ -3150,7 +3150,7 @@ def test_a_request_of_another_transaction_says_nothing_about_from(starting, fact
 
 def test_the_rendered_repair_form_posts_with_its_own_token(starting, factory, receiver,
                                                            monkeypatch):
-    """What the browser sends is what the page rendered: its token must be this session's (M9)."""
+    """What the browser sends is what the page rendered: its token must be this session's."""
     from test_webif import confirmation, get, new_session, post
 
     bridge, directory = following(starting, factory, receiver)
@@ -3239,7 +3239,7 @@ def test_a_followers_helper_dead_after_the_package_manager_under_another_build_s
     assert updater.doors_refusal() == selfupdate.STUCK_STOPPED and updater.repair() is None
 
 
-# ------------------------------------------------------------ review round 6 --
+# ------------------- followers from `rolling_back`, the other-build sentence --
 #
 # A hold by the build rule alone is not a rollback: after a failed launch, a withdrawn update or an
 # `installed` end nothing was undone, so it has its own sentence. A follower that began at
@@ -3399,7 +3399,7 @@ def assert_reopened(bridge, factory, clients):
 @pytest.mark.parametrize("how", ["killed", "deadline", "records_gone", "records_gone_deadline"])
 def test_a_follower_that_began_at_rolling_back_on_its_own_build_opens(how, starting, factory,
                                                                      receiver):
-    """R6, R7, R12: the helper stops, hangs past its deadline, or leaves nothing to read."""
+    """The helper stops, hangs past its deadline, or leaves nothing to read."""
     bridge, directory = began_at_rolling_back(starting, factory, receiver)
     clients = len(factory.clients)
     if how == "killed":

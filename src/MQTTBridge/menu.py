@@ -20,22 +20,22 @@ Three parts live here:
   groups and rows; OK on a group opens its rows, one level deep. A selector opens its options; a
   slider moves a local value with LEFT and RIGHT that is sent only on OK; an input field opens the
   image's keyboard. EXIT discards whatever was not applied, and goes back; so does leaving a
-  moved slider's row. OK on the value a row already has sends nothing (D70).
+  moved slider's row. OK on the value a row already has sends nothing (ADR-0020 decision 3).
 - **The publisher** (`MenuPublisher`): the capability `menu`, the subscriptions, Home
   Assistant's reachability, the pending marks, the hotkey and `info.menu`. It also owns the menu
   creator's receiver half (`menueditor.py`): the catalogue and the edits, subscribed with the
   menu and only while it is offered, and the capability `menu_editor`.
 
-**Greyed (D14).** With no broker connection, or with Home Assistant's own status topic saying
-`offline`, the menu stays on screen as it last was, greyed, with a notice, and nothing in it can be
-acted on. Home Assistant's status is forgotten whenever the broker connection changes, and a menu
-that arrives live counts as `online` (D71). A menu that never came, or an empty payload, is "no
-menu yet" - not greyed, and nothing to act on.
+**Greyed (ADR-0020 decision 5).** With no broker connection, or with Home Assistant's own status
+topic saying `offline`, the menu stays on screen as it last was, greyed, with a notice, and nothing
+in it can be acted on. Home Assistant's status is forgotten whenever the broker connection changes,
+and a menu that arrives live counts as `online`. A menu that never came, or an empty payload, is
+"no menu yet" - not greyed, and nothing to act on.
 
-**Pending (D54).** After OK on a toggle, a slider or a selector the row shows a pending mark until
-the menu topic carries a different value for it. Five seconds without one and the row shows its
-real value again, and the footer says Home Assistant changed nothing. The comparison is of the
-row's `value`, never of `rev`.
+**Pending (ADR-0020 decision 4).** After OK on a toggle, a slider or a selector the row shows a
+pending mark until the menu topic carries a different value for it. Five seconds without one and
+the row shows its real value again, and the footer says Home Assistant changed nothing. The
+comparison is of the row's `value`, never of `rev`.
 
 Everything here runs on enigma2's main loop and nothing raises into it: a failure is a line in the
 log and a menu that does less.
@@ -71,7 +71,7 @@ SUBSCRIBE_QOS = 1
 MENU_VERSION = 1
 DEFAULT_TITLE = "Home Assistant"
 
-# The contract's bounds (D24).
+# The contract's bounds (ADR-0020 decision 2).
 MAX_PAYLOAD_BYTES = 65536
 MAX_ITEMS = 24
 MAX_GROUPS = 8
@@ -101,7 +101,7 @@ INPUT = "input"
 ROW_TYPES = (BUTTON, TOGGLE, INDICATOR, SELECTOR, SLIDER, INPUT)
 # What OK sends for each type. An indicator, and a type this plugin does not know, send nothing.
 ACTIONS = {BUTTON: "press", TOGGLE: "toggle", SELECTOR: "set", SLIDER: "set", INPUT: "set"}
-# The rows whose OK leaves a pending mark (D54).
+# The rows whose OK leaves a pending mark.
 PENDING_TYPES = (TOGGLE, SELECTOR, SLIDER)
 
 GREEN = "green"
@@ -664,7 +664,7 @@ class MenuController:
     def _left_slider(self, selected):
         """A slider moved and not applied is discarded once the selection is on another row.
 
-        D23: only OK applies it. Moving away is not OK, and leaving it moved would make EXIT on
+        Only OK applies it. Moving away is not OK, and leaving it moved would make EXIT on
         the next row discard it instead of going back, and the legend speak of it there.
         Whether the slider was dropped.
         """
@@ -674,7 +674,7 @@ class MenuController:
         return True
 
     def _unchanged(self, row, value):
-        """D70: the value the row has already, and no other one asked for: nothing to send.
+        """The value the row has already, and no other one asked for: nothing to send.
 
         While a pending mark holds another value the viewer asked for, the row's value is not
         the last word - picking it again is a change back, and is sent.
@@ -827,7 +827,7 @@ class MenuController:
     def key_number(self, number):
         """1-9 move the selection to the row of that number on this level, and do nothing else.
 
-        OK acts (D66): a digit pressed by mistake must not switch a lamp.
+        OK acts (ADR-0020 decision 3): a digit pressed by mistake must not switch a lamp.
         """
         if self.closed:
             return None
@@ -1020,7 +1020,7 @@ class MenuPublisher(Publisher):
 
         A menu that arrives live - retain flag 0, which the broker sets on everything it
         forwards to a subscription that already exists - was published by the integration just
-        now, so Home Assistant is running (D71). A retained replay on subscribing proves nothing:
+        now, so Home Assistant is running. A retained replay on subscribing proves nothing:
         it can be days old.
         """
         try:
@@ -1049,7 +1049,7 @@ class MenuPublisher(Publisher):
         self._menu_changed()
 
     def _log_unknown_types(self, menu):
-        """One line per row type this plugin does not know, the first time it is seen (D72)."""
+        """One line per row type this plugin does not know, the first time it is seen."""
         for row in menu["rows"].values():
             if row["type"] in ROW_TYPES:
                 continue
@@ -1061,7 +1061,7 @@ class MenuPublisher(Publisher):
                         "shown and cannot be acted on", kind)
 
     def _heard_live(self, retain):
-        """A live menu is Home Assistant's own word that it is running (D71)."""
+        """A live menu is Home Assistant's own word that it is running."""
         if retain or self.ha_status == ONLINE:
             return
         LOG.info("a menu arrived live from Home Assistant: it is online")
@@ -1089,13 +1089,13 @@ class MenuPublisher(Publisher):
     def connection_changed(self):
         """The broker connection came or went: grey or ungrey, and drop what was not taken.
 
-        Home Assistant's status is forgotten either way (D71): its birth, `online`, is not
+        Home Assistant's status is forgotten either way: its birth, `online`, is not
         retained, so one published while this receiver was away is never heard, and an
         `offline` from before would grey the menu for good. Forgotten is "never heard", which
         does not grey; the next `offline`, `online` or live menu says where it stands.
 
         A `menu_action` the broker has not acknowledged when the connection goes is taken out of
-        the client's queue: sent after a reconnect it would be an OK from minutes ago (D64). The
+        the client's queue: sent after a reconnect it would be an OK from minutes ago. The
         client does the same on its network thread before paho sends anything again
         (`mqttclient.MqttClient.publish`, `transient`), which holds even when this runs late.
         """
@@ -1114,7 +1114,7 @@ class MenuPublisher(Publisher):
     # ---------------------------------------------------------- reachability --
 
     def greyed(self):
-        """Why the menu cannot be acted on now (D14), or None."""
+        """Why the menu cannot be acted on now, or None."""
         bridge = self.bridge
         if bridge is None or not bridge.connected:
             return GREY_BROKER
@@ -1198,7 +1198,7 @@ class MenuPublisher(Publisher):
         info = self.bridge.publish_event(ACTION_SUFFIX, payload, qos=ACTION_QOS)
         if info is None or getattr(info, "rc", 0):
             # The socket was already gone: the client keeps a QoS 1 message for the next
-            # connect, and an action must never arrive late (D64).
+            # connect, and an action must never arrive late.
             if info is not None:
                 self.bridge.withdraw_event(info)
             LOG.warning("menu_action for %s was not sent", current["id"])
@@ -1231,7 +1231,7 @@ class MenuPublisher(Publisher):
     def hotkey_pressed(self, session=None):
         """The hotkey: True when it opened the menu, so the key is consumed.
 
-        Only over live TV or a player (D67, `hotkey.py`): the info bar, the image's movie
+        Only over live TV or a player (ADR-0021, `hotkey.py`): the info bar, the image's movie
         player, or its media player is the executing dialog. Anywhere else the key goes on.
         """
         session = session or self.session

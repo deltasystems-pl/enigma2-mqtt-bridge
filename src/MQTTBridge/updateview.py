@@ -199,8 +199,8 @@ def row_label(row):
     """The row as the television's list shows it: one line, which never wraps.
 
     A version that cannot be installed says only that; why is `row_detail`, which the screen
-    shows when the row is chosen and the page lists in full (review round 2: the reasons ran
-    past the list's width in every language).
+    shows when the row is chosen and the page lists in full (the reasons ran past the
+    list's width in every language).
     """
     version, relation, reason = row
     if reason is not None:
