@@ -334,6 +334,83 @@ def test_the_oscam_login_restarts_the_oscam_publisher_only(live_bridge, factory,
             assert after.get(name) is publisher, name
 
 
+def test_a_new_oscam_password_is_scrubbed_from_the_log_at_once(live_bridge, plugin_log):
+    from MQTTBridge import log as log_module
+
+    secret = "a-new-oscam-secret-7f3e"
+    assert log_module.redact(secret) == secret
+    save_on_the_screen(live_bridge, oscam_password=secret)
+    assert log_module.redact("login " + secret) == "login " + log_module.REDACTED
+    # And so in the file: a line that happened to carry it is written without it.
+    log_module.get_logger("test").warning("the OSCam login was %s", secret)
+    assert secret not in plugin_log()
+
+
+def test_the_cec_workaround_binds_and_goes_without_a_reconnect(live_bridge, factory):
+    from conftest import HdmiCec
+
+    HdmiCec()
+    assert live_bridge.publisher("cec_workaround") is None
+    save_on_the_screen(live_bridge, cec_standby_workaround=True)
+    assert live_bridge.publisher("cec_workaround") is not None
+    assert "cec_workaround" in factory.client.last(INFO).json()["capabilities"]
+    assert factory.client.last(ROOT + "/cec").json()["count"] == 0
+
+    save_on_the_screen(live_bridge, cec_standby_workaround=False)
+    assert live_bridge.publisher("cec_workaround") is None
+    assert "cec_workaround" not in factory.client.last(INFO).json()["capabilities"]
+    assert factory.client.last(ROOT + "/cec").text == "", "the retained count is retracted"
+    assert len(factory.clients) == 1
+
+
+def test_ha_mode_saved_on_the_screen_republishes_update(live_bridge, factory):
+    """With an index held, which release is compatible depends on whether an integration is used.
+
+    The same index and the same change as `cmd/ha_mode`'s test in test_updatecheck.py.
+    """
+    from updatelab import TEST_KEYS, relay_payload, release, signed
+
+    updates = live_bridge.updates
+    updates.keys = TEST_KEYS
+    updates.acceptance = False
+    updates.clock = lambda: 1790600000
+    releases = [release("0.4.0", min_integration="0.4.0"), release("0.3.0", self_update=False)]
+    factory.client.fire_message("enigma2mqtt/release_index", relay_payload(*signed(1, releases)),
+                                retain=True)
+    assert factory.client.last(ROOT + "/update").json()["latest_compatible"] == "0.4.0"
+
+    save_on_the_screen(live_bridge, ha_mode="integration")
+
+    assert factory.client.last(ROOT + "/update").json()["latest_compatible"] == "0.3.0"
+    assert len(factory.clients) == 1
+
+
+def test_ha_mode_set_by_its_command_is_not_applied_again_by_a_save(live_bridge, factory,
+                                                                    plugin_log):
+    factory.client.fire_message(ROOT + "/cmd/ha_mode", "integration")
+    MainLoop.advance(0)
+    assert live_bridge.value("ha_mode") == "integration"
+    save_on_the_screen(live_bridge, menu_transparency=40)
+    assert "applying menu_transparency without a reconnect" in plugin_log()
+
+
+def test_a_new_bouquet_selection_republishes_service_as_a_fresh_session_would(live_bridge,
+                                                                             factory):
+    """`service.bouquet` is the channel's bouquet among the selected ones, read at publish."""
+    before = factory.client.last(ROOT + "/service").json()
+    assert before["bouquet"] == "Ulubione TV"
+
+    save_on_the_screen(live_bridge, bouquets_for_select="Sport (HD)")
+    live = factory.client.last(ROOT + "/service").json()
+    assert len(factory.clients) == 1
+
+    live_bridge.reload()
+    factory.client.fire_connect()
+    fresh = factory.client.last(ROOT + "/service").json()
+    assert live == fresh
+    assert live["bouquet"] is None, "the channel is in no selected bouquet now"
+
+
 def test_the_epg_grid_follows_its_count_down_to_zero_and_back(live_bridge, factory):
     from conftest import settle
 
@@ -341,9 +418,15 @@ def test_the_epg_grid_follows_its_count_down_to_zero_and_back(live_bridge, facto
     assert grid is not None and live_bridge.state.grid_slugs
     slugs = list(live_bridge.state.grid_slugs)
 
+    def counts():
+        return {slug: factory.client.last(ROOT + "/epg_grid/" + slug).json()["events_per_channel"]
+                for slug in slugs}
+
+    assert set(counts().values()) == {4}
     save_on_the_screen(live_bridge, epg_grid_events=2)
     assert live_bridge.publisher("epg_grid") is grid, "a new count rebuilds, it does not restart"
     settle(live_bridge)
+    assert set(counts().values()) == {2}, "every grid is built again to the new count"
 
     save_on_the_screen(live_bridge, epg_grid_events=0)
     assert live_bridge.publisher("epg_grid") is None

@@ -514,8 +514,8 @@ class Bridge:
         if "friendly_name" in changed:
             # An emptied name is derived again, as at a start.
             self._ensure_identity()
-        if "oscam_password" in changed:
-            register_secret(self.value("oscam_password"))
+        # A new `oscam_password` is registered for the log's filter by the OSCam publisher that
+        # replaces the old one below, as at a start (`OscamPublisher.start`).
         started = []
         if changed & set(CONFIGURABLE_PUBLISHER_SETTING_NAMES):
             self._replace_configurable_publishers()
@@ -534,6 +534,11 @@ class Bridge:
                 # Walks the selection again: the lists, the index and the slugs, and the EPG
                 # grid follows (`when_changed`). The select's options go with discovery below.
                 channels.refresh()
+            service = self.publisher("service")
+            if service is not None and self.connected:
+                # `service.bouquet` is looked up in the channel list when `service` is
+                # published, and nothing else republishes it before the next zap.
+                service.refresh()
         if "epg_grid_events" in changed:
             started += self._apply_grid_events()
         if "menu_allowed" in changed:
