@@ -327,7 +327,7 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
             # Kept, not applied, for the uninstall's reason below: a reload would open a
             # session under the update's closed doors, and a change applied live would publish
             # behind them. The update ends in a restart, which starts from them.
-            LOG.warning("settings saved during an update; not reloading the bridge")
+            LOG.warning("settings saved during an update; not applying them now")
             self._tell_and_close(household_doors(bridge.self_update))
             return
         if bridge is not None and _uninstalling(bridge):
@@ -338,7 +338,7 @@ class MQTTBridgeSetup(Screen, ConfigListScreen):
             # removal stops its own failure path reloads the bridge - with
             # them. So nothing is lost and nothing is applied twice; the
             # household is told why the change does not show yet.
-            LOG.warning("settings saved during an uninstall; not reloading the bridge")
+            LOG.warning("settings saved during an uninstall; not applying them now")
             self._tell_and_close(_(
                 "Settings saved. The plugin is being removed from this receiver, so they "
                 "are not applied now; they take effect if the removal stops or the plugin "

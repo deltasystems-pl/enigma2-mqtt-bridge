@@ -152,9 +152,10 @@ COMMAND_ID_CAPABILITY = "command_id"
 SHUTDOWN_FLUSH_SECONDS = 1.0
 
 # What a session is: where the broker is, who logs in, how, and under which
-# name. A reload after a save that changed one of these - or switched the plugin
-# off - says `offline` first; any other save reconnects silently. The last two
-# name the will's topic, which makes a change to them a rename (see `reload`).
+# name. A save that changed one of these, or switched the plugin off or on,
+# reloads; every other save is applied under the open session. The reload says
+# `offline` first, except on a rename: the last two name the will's topic, which
+# makes a change to them a rename (see `reload`).
 IDENTITY_CONNECTION_SETTING_NAMES = ("node_id", "base_topic")
 CONNECTION_SETTING_NAMES = (
     "host", "port", "tls", "ca_file", "username", "password",

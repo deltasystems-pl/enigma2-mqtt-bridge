@@ -801,7 +801,8 @@ its list was first found different from the walk before. A walk that finds the b
 keeps the stamp, and so does a reconnect, which sends every topic again with the stamp it had -
 unlike `channels`, whose `generated` is the time of the last walk. The stamps are kept in memory
 only. **A start of the plugin - a restart of the interface, a reboot - or a save of its settings
-begins them anew**: every bouquet is then stamped with the first walk of that run, and the connect
+that reconnects begins them anew** (a save that changes no connection setting keeps them): every
+bouquet is then stamped with the first walk of that run, and the connect
 that follows publishes that, whether or not anything was edited. So a `generated` that moves is
 not proof of an edit; one that stays is proof of none since it was set.
 
