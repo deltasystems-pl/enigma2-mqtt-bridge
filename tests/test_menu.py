@@ -289,6 +289,20 @@ def test_invisible_format_characters_are_dropped_from_every_text():
     assert menu_module.clean_text(letters, 60) == letters
 
 
+def test_a_lone_surrogate_is_dropped_from_every_text():
+    """JSON can spell half a surrogate pair, and no UTF-8 holds one: the renderer would be
+    handed it unchecked. Dropped like a format character; a title of nothing else is empty,
+    which the menu shows as its default title."""
+    menu = parse_menu(payload(_broken(
+        title=chr(0xDFFF),
+        items=[dict(TOGGLE, label="x" + chr(0xD800) + "y", state="o" + chr(0xDC00) + "n")],
+    )))
+    assert menu["title"] == "Home Assistant"
+    assert menu["rows"]["r_x"]["label"] == "xy"
+    assert menu["rows"]["r_x"]["state"] == "on"
+    assert menu_module.clean_text("x" + chr(0xD800) + "y", 60) == "xy"
+
+
 def test_what_the_plugin_does_not_know_is_neutral_or_ignored():
     menu = parse_menu(payload(_broken(
         title=None,

@@ -716,13 +716,19 @@ class ChoiceBoxAdapter:
 
 
 def open_fallback(session, controller):
-    """Open the image's own list for `controller`. None when it is open, otherwise why not."""
+    """Open the image's own list for `controller`. None when it is open, otherwise why not.
+
+    A `ChoiceBox` that raises inside `session.open` has taken the execution from the dialog
+    under it, as a styled screen that raises there has: it is given back the same way.
+    """
     adapter = ChoiceBoxAdapter(session, controller)
     controller.attach(adapter)
+    executing = getattr(session, "in_exec", None)
     try:
         adapter.open()
     except Exception as error:
         LOG.exception("the image's list could not be opened for the menu")
         controller.attach(None)
+        _restore_executing(session, executing)
         return f"{type(error).__name__}: {error}"
     return None

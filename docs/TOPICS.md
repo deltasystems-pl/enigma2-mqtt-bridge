@@ -164,7 +164,7 @@ not by the checker; their types are the tables below.
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
 | 0.3.0 -> 0.4.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3); the read-only setting `update_allowed`, the capability `self_update`, the command `update`, `update.transaction` and the subscription to `enigma2mqtt/integration/<node>` (§3); the event topic `relay_request` and the command `relay`, and `cmd/update`'s refusal `no_relay`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
-| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4); a command's id - the envelope every command takes on the broker, the `last_error` member `id` and the capability `command_id` (sections 1 and 2); the `service` members `video_codec`, `interlaced`, `frame_rate` and `audio_tracks` and the capability `service_codecs`; the topics `stream` and `stream_clients`, the event topic `stream_playable`, the commands `stream_stop` and `stream_playable` and the capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable`; the `volume` member `passthrough` and the capability `volume_passthrough`; the receiver menu - the subscriptions to `enigma2mqtt/menu/<node>` and `<ha_discovery_prefix>/status` (§3), the event topic `menu_action` with its member `seen` on a `toggle`, the `info` member `menu`, the read-only setting `menu_allowed`, the writable setting `menu_hotkey` and the capability `menu`; the writable setting `menu_transparency`, and `cmd/config` taking any part of its keys, every key left out keeping its value; the menu creator - the subscriptions to `enigma2mqtt/menu_catalogue/<node>` and `enigma2mqtt/menu_edit_result/<node>` (§3), the event topic `menu_edit` and the capability `menu_editor`. **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
+| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4); a command's id - the envelope every command takes on the broker, the `last_error` member `id` and the capability `command_id` (sections 1 and 2); the `service` members `video_codec`, `interlaced`, `frame_rate` and `audio_tracks` and the capability `service_codecs`; the topics `stream` and `stream_clients`, the event topic `stream_playable`, the commands `stream_stop` and `stream_playable` and the capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable`; the `volume` member `passthrough` and the capability `volume_passthrough`; the receiver menu - the subscriptions to `enigma2mqtt/menu/<node>` and `<ha_discovery_prefix>/status` (§3), the event topic `menu_action` with its member `seen` on a `toggle`, the `info` member `menu`, the read-only setting `menu_allowed`, the writable setting `menu_hotkey` and the capability `menu`; the writable setting `menu_transparency`, and `cmd/config` taking any part of its keys, every key left out keeping its value; the menu creator - the subscriptions to `enigma2mqtt/menu_catalogue/<node>` and `enigma2mqtt/menu_edit_result/<node>` (§3), the event topic `menu_edit` and the capability `menu_editor`; a list of choices - the command `list`, the event topic `list_answer`, the `info` member `list` and the capability `list`, and the `reason` `busy` on the doors' sentence for `cmd/list`. **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
 
 ---
 
@@ -216,9 +216,10 @@ announcement retained.
                "menu_transparency": 20},
   "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
                    "volume", "hdd", "process", "channels", "channel_topics", "bouquet_context",
-                   "epg_grid", "keys", "screenshot", "toast", "menu", "menu_editor", "message",
-                   "command_id"],
+                   "epg_grid", "keys", "screenshot", "toast", "menu", "menu_editor", "list",
+                   "message", "command_id"],
   "menu": {"screen": "styled", "hotkey": "help_long", "reason": null},
+  "list": {"screen": "styled"},
   "not_published": []
 }
 ```
@@ -239,6 +240,7 @@ announcement retained.
 | `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5-3600), `screenshot_delay` (post-zap settling seconds, 1-30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30-600), `menu_hotkey` (`help_long` \| `red_long` \| `f3` \| `f4` \| `off`; a long HELP by default; added after 0.4.0, unreleased), `menu_transparency` (integer percent, 0-80 in steps of ten, 20 by default: how see-through the receiver menu's background is; added after 0.4.0, unreleased). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`, `uninstall_allowed`, `update_check`, `update_allowed` and `menu_allowed` (bools, off by default but `menu_allowed`, which is on). See below. |
 | `capabilities` | list of strings | Which hooks this image actually gave the plugin |
 | `menu` | object or null | Which screen the receiver menu is drawn with on this image and which key opens it; `null` where there is no menu - `menu_allowed` off, or no screen could be built. Added after 0.4.0 (unreleased). See below |
+| `list` | object, optional | Which screen a list of choices (`cmd/list`, section 2) is shown with on this image. **Absent**, not `null`, where `list` is not a capability. Added after 0.4.0 (unreleased). See below |
 | `not_published` | list of objects | The topics whose payload was too big to send, so they are not on the broker. `[]` when everything fits, which is nearly always. Added after 0.4.0 (unreleased). See below |
 
 **Presence in `settings` is not permission to write it back.** Until 0.2.0 this object was „the
@@ -280,7 +282,7 @@ nothing else is ever in the list: `power`, `cec_workaround`, `service`, `epg`, `
 `toast`, `message`, `hdd`, `process`, `channels`, `channel_topics`, `bouquet_context`,
 `zap_history`, `history_clear`, `epg_import`, `uninstall`, `self_update`, `command_id`,
 `service_codecs`, `stream`, `stream_clients`, `stream_stop`, `stream_playable`,
-`volume_passthrough`, `menu`, `menu_editor`. A build that
+`volume_passthrough`, `menu`, `menu_editor`, `list`. A build that
 has bound no feature area publishes that last name alone - `[]` before it existed - because the
 connection, `info` and the commands are the plugin itself and are not capabilities. `uninstall`
 (since 0.3.0) was the first name with no feature area behind it: it
@@ -323,6 +325,13 @@ what the companion integration waits for before it publishes the catalogue and b
 `menu_edit` from this node ([§3](#the-menu-creator---added-after-040-unreleased-capability-menu_editor)).
 It goes with `menu`, and it comes late on a receiver whose OpenWebif mounts its pages after the
 plugin has connected: `info` is published again then.
+
+`list` (added after 0.4.0, unreleased) says the receiver can put a list of choices on the
+television - `cmd/list` (section 2), answered on `list_answer` (below): the plugin's own screen or,
+where that cannot be built, the image's own choice list. It is claimed once one of them has been
+built on this image, and taken back - with `info` published again - when a skin reload can build
+neither. It needs no setting and no permission, as a message needs none
+([ADR-0023](adr/0023-a-list-of-choices-is-answered-by-row-id-once.md)).
 
 A name is in the list because it **worked on this box**, not because this version of the plugin
 has the code for it. Three things can take one out: the image did not provide the hooks
@@ -458,6 +467,18 @@ receiver has no menu: `menu_allowed` off, no session, or neither screen could be
 | `screen` | string | `styled` - the plugin's own screen, with icons, states and colours - or `fallback` - the image's own list, with the same rows and no icon, state or number keys. Decided when the menu is opened: a styled screen that cannot be built then is replaced by the fallback for that opening and every later one, and `info` is published again |
 | `hotkey` | string or null | The `menu_hotkey` choice that is bound and opens the menu in live TV and in the image's movie player, or `null` when none does: switched `off`, an image that does not let a plugin bind a key, or a key the image's own user-assignable button setup gives a function of its own - which then runs first, by design; that setup is the same in live TV and in the movie player. The key opens the menu in the image's media player too, unless that player uses the key itself, which it then keeps: OpenATV's media player seeks back on a long RED. Over any other screen the key does nothing new |
 | `reason` | string or null | Why `hotkey` is `null`, in English for the person reading the topic; `null` when a key is bound. The Extensions entry "Home Assistant" opens the menu whatever this says |
+
+**`list` says how a list of choices is shown here.** Added after 0.4.0 (unreleased),
+[ADR-0023](adr/0023-a-list-of-choices-is-answered-by-row-id-once.md). **Absent** - not `null` -
+where `list` is not a capability: no session, or neither screen could be built. Otherwise:
+
+```json
+"list": {"screen": "styled"}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `screen` | string | `styled` - the plugin's own screen, with the icons, the countdown and the keys drawn as buttons - or `choicebox` - the image's own choice list, with the same rows, ids and keys, no icon, and the header line and the countdown in its window title where the image lets the title be set. Decided when the plugin starts and after every skin reload, and again for every list: a styled screen that cannot be built for a list is replaced by the image's list for that list and every later one, and `info` is published again |
 
 ### `<base>/<node>/power`
 
@@ -1643,6 +1664,36 @@ say is Home Assistant's to decide. **Never queued across a disconnect**, like `m
 published on the open session only, and one the broker had not acknowledged when the connection
 went is taken out of the client's queue. The page's save then says so at once.
 
+### `<base>/<node>/list_answer` - added after 0.4.0 (unreleased)
+
+**Not retained** - QoS 1. The answer to one `cmd/list` (section 2): how the list of choices on the
+television ended, and which row was picked. Present when `list` is a capability
+([ADR-0023](adr/0023-a-list-of-choices-is-answered-by-row-id-once.md)). **Every list the plugin
+accepted - shown, or waiting for the screen - has exactly one answer here, or, when it could not be
+put on the television after all, one late refusal on `last_error` instead** (`not_shown`, section
+2). A list refused when it arrived has neither: its refusal is on `last_error` at once.
+
+```json
+{"id": "a1b2c3d4e5f60718", "ending": "picked", "row": "open", "ts": 1792050000}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | string, optional | The id the command carried in its envelope (section 2), exactly as it was sent. **Absent**, not `null`, when it carried none or one the plugin could not use: such a list is shown and answered all the same |
+| `ending` | string | `picked` - OK on a row, or the row's own key; `timeout` - the list's `timeout` ran out; `dismissed` - EXIT; `replaced` - a newer `cmd/list` arrived while this one was on the screen or waiting for it; `closed` - the receiver went to standby, the plugin stopped (an interface restart, a shutdown, a settings save that reconnects, an update, the plugin being removed) or something else closed the screen. An open enumeration |
+| `row` | string or null | `picked`: the `id` of the row picked. `timeout`: the `id` of the list's `default` row, or `null` when it has none - so a timeout is never mistaken for a press. Every other ending: `null` |
+| `ts` | int | When the list ended, in epoch seconds by the receiver's clock |
+
+The receiver says which row id was picked and nothing else: it never learns what a row does and
+never calls a service. **Never queued across a disconnect**, like `menu_action`: published on the
+open session only, and one the broker had not acknowledged when the connection went is taken out
+of the client's queue - by the MQTT client itself as the broker accepts the new connection, before
+it sends anything again. A pick made while the broker cannot be reached is lost, and its sender's
+wait ends without an answer: a late "open the gate" is worse than none. `closed` is published only
+while the session is up at that moment; nothing is sent later. Anyone who can publish on the broker
+can publish here too, so a consumer never takes an answer as proof of who pressed what
+([SECURITY.md](../SECURITY.md)).
+
 ### `<base>/<node>/update` - since 0.4.0
 
 Retained. Which releases of the plugin this receiver could install, read from the signed release
@@ -1772,12 +1823,20 @@ command that succeeds.
 
 **`cmd/clear_error` clears it on request** - also added after 0.4.0 (unreleased), section 2.
 
+**One refusal is not retained.** While an update keeps the plugin silent - from a downgrade's
+retraction of the node's topics until the update ends - nothing is published, retained or not, with
+one exception: the doors' refusal of a `cmd/list` (`reason` `busy`, with the list's `id`), because
+its sender is waiting for an answer. It goes out once on this topic **not retained**, at QoS 1 and
+never queued across a disconnect, so it does not outlive the retraction: a consumer subscribed to
+`last_error` receives it, and one that subscribes later does not find it retained. Added after 0.4.0
+(unreleased).
+
 | Field | Type | Meaning |
 |---|---|---|
 | `cmd` | string | The command refused |
 | `error` | string | Why, in English, for the person reading the topic. This is the contract's human text |
 | `ts` | int | When, in epoch seconds |
-| `reason` | string, optional | Since 0.3.0. A stable code for the refusal, **only** from a command that defines codes - today `history_clear`, `update_check`'s `not_permitted`, `update`, `uninstall`'s `busy`, `stream_stop`'s `not_connected` and `not_stopped` (added after 0.4.0) (and `zap_history`'s `playback`); see §2. Absent, not `null`, otherwise, so every other refusal is exactly what it was. A consumer that knows the code can say the refusal in the household's language, and one that does not ignores the field |
+| `reason` | string, optional | Since 0.3.0. A stable code for the refusal, **only** from a command that defines codes - today `history_clear`, `update_check`'s `not_permitted`, `update`, `uninstall`'s `busy`, `stream_stop`'s `not_connected` and `not_stopped` (added after 0.4.0), `list`'s `invalid`, `standby`, `busy`, `no_capability` and `not_shown` (added after 0.4.0) (and `zap_history`'s `playback`); see §2. Absent, not `null`, otherwise, so every other refusal is exactly what it was. A consumer that knows the code can say the refusal in the household's language, and one that does not ignores the field |
 | `id` | string, optional | Added after 0.4.0 (unreleased), capability `command_id`. The id the refused command carried in its envelope (section 2), exactly as it was sent. It is the id of the command this refusal is about - also when the refusal is published after that command returned, or by the plugin process that starts after an update - and never the id of another command. Absent, not `null`, when the command carried none or one the plugin could not use, so a refusal without an id is exactly what it was |
 
 ```json
@@ -1798,9 +1857,9 @@ for the keyword payloads (`on`, `ON`, `On` all work).
 
 Every command is **verified by effect**: the plugin does the thing, observes the resulting
 enigma2 event, and publishes the new state on the matching state topic. A failure or a refusal
-goes to `last_error`. There is no acknowledgement topic - the state topic is the answer. (One
-command has no state to change and is answered on a topic of its own: `stream_playable`, a
-question, below.) A sender
+goes to `last_error`. There is no acknowledgement topic - the state topic is the answer. (Two
+commands have no state to change and are answered on a topic of their own: `stream_playable`, a
+question, and `list`, a question put to the viewer - below.) A sender
 that has to tell which of its commands a refusal belongs to gives the command an id - added after
 0.4.0, [below](#a-commands-id---added-after-040-unreleased-capability-command_id); a command that
 worked is still answered by its state topic and by nothing else.
@@ -1824,11 +1883,12 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `zap_history` - since 0.3.0, capability `zap_history` | `{"sref": "..."}`, exactly | Zaps to one channel of the receiver's zap history the way its own "History Zap" screen does: the entry moves to the front and plays. From standby the receiver is woken first, as for `zap`. Verified on `service` within 5 s | By reference only - the list reorders on every zap and names repeat - matched by service identity among the entries `zap_history` shows: "that channel is no longer in the receiver's zap history" otherwise - checked first, so a refused channel never wakes the receiver. Refused while a recording is played back ("a recording is being played back", `reason` `playback`). With another screen open over the info bar the channel is played directly and the history is left as it is - refused, as `zap` refuses it and with `zap`'s sentences, where there is nothing to play it with: "there is no session to zap with" without a navigation, "this image's navigation has no playService" without a player. **No permission, no recording guard and no timeshift guard**: the receiver's own screen has none, and leaves timeshift without asking |
 | `history_clear` - since 0.3.0, capability `history_clear` | any (`PRESS` by convention) | Clears the receiver's zap history **exactly as its 0 key does**: the image's own `keyNumberGlobal(0)`, which empties the list and **switches to channel 1** - the first channel of the first bouquet - closing picture-in-picture if it is open. Afterwards `zap_history.entries` holds that one channel and `service` names it | Refused, before anything happens, in this order, each with a `reason` on `last_error`: in standby - "the receiver is in standby, where 0 does not clear the history" (`standby`); with the image's panic-button setting off - "the receiver's panic-button setting is off, so 0 goes back one channel instead of clearing the history" (`panic_off`); with fewer than two entries - "the receiver's zap history holds at most one channel, and 0 does nothing then" (`too_short`); in timeshift, or with one waiting to be saved, or when the image's timeshift state cannot be read - "timeshift is active; 0 would ask on screen whether to leave it" (`timeshift`), whatever the image's "check timeshift" setting says; while the image holds zaps after timeshift - "the receiver is holding zaps for a moment after timeshift; try again" (`zap_blocked`); with picture-in-picture shown and the image's "0 key in PiP" setting not "standard" - "picture-in-picture is showing and 0 is set to act on it" (`pip`); while a recording is played back - "a recording is being played back" (`playback`); while any other screen is open over the info bar (the channel list, the EPG, a menu) - "a screen is open on the receiver, and 0 does not reach the zap history there" (`screen_open`). More than one entry left afterwards - "the receiver did not clear its zap history" (`not_cleared`). 🔴 **The payload is ignored**. No permission: `key KEY_0` does the same, unguarded |
 | `stream_stop` - added after 0.4.0 (unreleased), capability `stream_stop` | `{"host": "192.0.2.20", "sref": "1:0:19:283D:3FB:1:C00000:0:0:0:"}`, exactly | Ends one stream client's stream: the one `stream_clients` lists with that `host` and that service. The answer is `stream_clients` without it, read again two seconds later. See below | **No permission**, as `zap` and `power` have none. Both members and nothing else, each a non-empty string - an empty payload, one member alone or a third one is refused before anything happens, so nothing here ever stops "all of them". Refused when no such client is connected - "that stream client is not connected" (`reason` `not_connected`) - and when the image did not stop it - "the receiver did not stop that stream client" (`not_stopped`), or raised while trying - "the receiver could not stop that stream client: " and the kind of error, never its text, which can hold an address (`not_stopped`); without the capability, "stopping a stream client is not available on this image" |
-| `stream_playable` - added after 0.4.0 (unreleased), capability `stream_playable` | `<sref>` \| `{"sref": "..."}` | Asks the image whether that service could be played now, beside everything the receiver is doing, and publishes the answer on `stream_playable` (section 1) - **the one command answered on a topic of its own**. See below | Refused, with nothing published on `stream_playable`: without a reference - "no service reference given"; for text that is none; for a reference that is not one playable service - "cmd/stream_playable takes the reference of one playable service"; when the receiver has no information for the service; when the image raises, or gives no number or a negative one; without the capability, "this image cannot say whether a service can be played". **No permission**: it changes nothing on the receiver |
+| `stream_playable` - added after 0.4.0 (unreleased), capability `stream_playable` | `<sref>` \| `{"sref": "..."}` | Asks the image whether that service could be played now, beside everything the receiver is doing, and publishes the answer on `stream_playable` (section 1) - **one of the two commands answered on a topic of their own**, with `list`. See below | Refused, with nothing published on `stream_playable`: without a reference - "no service reference given"; for text that is none; for a reference that is not one playable service - "cmd/stream_playable takes the reference of one playable service"; when the receiver has no information for the service; when the image raises, or gives no number or a negative one; without the capability, "this image cannot say whether a service can be played". **No permission**: it changes nothing on the receiver |
 | `volume` | `0`-`100`, or `{"level": 42}` | Sets the volume, with the on-screen bar | Out-of-range values are clamped and noted in the log |
 | `mute` | `ON` \| `OFF` | Sets mute | Never a blind toggle: the state is read first, and read back afterwards. A receiver refuses to mute at volume 0, and that refusal is reported |
 | `key` | `KEY_OK` \| `{"key": "KEY_OK", "long": true}` | Injects a remote key | Unknown key names are refused with the name in `last_error`; at most 20 a second |
 | `message` | `{"text": "...", "type": "info", "timeout": 10}` - or a bare string; `"style": "toast"` since 0.3.0 | Shows an on-screen popup, or a discreet toast | `text` is required; since 0.3.0 **every backslash is removed** and nothing else, as for a toast, and what is left is truncated to 500 characters; `type` is `info`, `warning` or `error` (default `info`); `timeout` is seconds (default 10, `0` until dismissed). A new message replaces the previous one rather than queueing behind it. The toast's rules differ - see below |
+| `list` - added after 0.4.0 (unreleased), capability `list` | `{"title": "...", "text": "...", "rows": [{"id": "...", "label": "...", "key": "green", "icon": "gate"}], "timeout": 60, "default": "..."}`, in the envelope with an id (below) | Shows a list of choices on the television, over whatever is on screen, and answers once on `list_answer` (section 1) with the row the viewer picked or how the list ended - the other command answered on a topic of its own. A newer list replaces the one on screen. See below | Refused before anything is shown, each with a `reason` on `last_error`, in this order: while an update is being applied - the doors' sentence, here with `reason` `busy`, asked by the dispatcher before the command's own checks, and published even while the update keeps the plugin silent, then **not retained**; a payload that breaks a rule below - a sentence that names the member and the row's index, never the sender's text (`invalid`); without the capability - "lists cannot be shown on this receiver" (`no_capability`); in standby, or while the receiver's own "really shut down / restart?" question is on screen - the toast's "the receiver is in standby" (`standby`). A list that neither screen could put on the television - "the receiver could not show the list" (`not_shown`), also later, with the command's id, and then no answer. **No permission and no setting**, as a message has none |
 | `timer` | see below | Adds or deletes a recording timer | An add that overlaps an existing timer, or refers to an unknown event, is refused - and so is one the receiver quietly dropped as a duplicate of a timer it already had |
 | `record` | `start` \| `stop` | Starts or stops an instant recording of the current service | `start` records the current service for two hours; `stop` with nothing recording is a no-op with a note in `last_error` |
 | `screenshot` | any | Captures `screen` now, in standby as well | Rate-limited to one per five seconds |
@@ -1854,8 +1914,10 @@ A sender may give a command an id, and a refusal of that command says it back as
 It is there to tell refusals apart: two commands of one name sent close together, or a refusal
 that arrives after the next command has been sent, have the same `last_error.cmd`. **Refusals
 only.** A command that worked says its id nowhere, and its answer is its state topic, as before.
-The one answer that is not a state topic says it too: `stream_playable`, the answer to
-`cmd/stream_playable` (above), carries the id of the question it answers.
+The two answers that are not a state topic say it too: `stream_playable`, the answer to
+`cmd/stream_playable` (above), carries the id of the question it answers, and `list_answer`, the
+answer to `cmd/list` (below), the id of the list it answers - which is how a sender tells its list
+from another one.
 
 The id travels in an **envelope** around the command's own payload, the same for every command:
 
@@ -1916,6 +1978,7 @@ published later:
 | `screenshot` | `grab` failed, wrote nothing, or wrote a picture over the size limit |
 | `softcam_restart` | The sequence failed on a later turn - the cam could not be started |
 | `uninstall` | The removal stopped, and the fresh session says why |
+| `list` | The list waited for the screen - another one was closing - and could not be shown then (`not_shown`) |
 | `update` | However the update ended without `installed` - also when the plugin process that starts after the restart, or after the rollback, is the one that says it: the id is kept on the receiver with the update's own request |
 
 A later refusal keeps the id of its own command whatever has been sent since: one published while
@@ -1972,8 +2035,9 @@ the other. The image answers at once and the connection ends a moment later (mea
 the command. **A player that reconnects by itself is back by then**, as a new connection the
 topic cannot tell from the old one: stopping a client is not blocking it.
 
-**`cmd/stream_playable` is a question, and the one command with an answer of its own**
-([ADR-0017](adr/0017-whether-a-service-can-be-played-is-asked-with-an-empty-second-reference.md)).
+**`cmd/stream_playable` is a question, and has an answer of its own**
+([ADR-0017](adr/0017-whether-a-service-can-be-played-is-asked-with-an-empty-second-reference.md)),
+as `cmd/list` has - the other question, which is put to the viewer (below).
 Every other command changes something and is answered by the state topic that shows the change.
 This one changes nothing, so there is no state to show: its answer is one message on
 `stream_playable` (section 1), which carries the command's id when the command had one. A consumer
@@ -2416,6 +2480,108 @@ back - with `info` republished - if a skin reload cannot create it again. The se
 (default on, never writable over MQTT) is its kill-switch. An image where either fails keeps popups rather than
 gaining a style that silently does nothing.
 
+### `cmd/list` - a list of choices - added after 0.4.0 (unreleased), capability `list`
+
+Home Assistant puts a question on the television - "Doorbell: open the gate / ignore", "TV off in
+1 minute: +15 minutes / cancel" - as a list of labelled rows. The viewer picks one with the remote,
+and the receiver answers **once** on `list_answer` (section 1) with the `id` of the row picked, or
+how the list ended without one. It never learns what a row does and never calls a service. A
+yes/no question is a list of two rows
+([ADR-0023](adr/0023-a-list-of-choices-is-answered-by-row-id-once.md)).
+
+```json
+{"id": "a1b2c3d4e5f60718",
+ "payload": {"title": "Doorbell", "text": "Someone is at the gate.", "timeout": 60,
+             "default": "ignore",
+             "rows": [{"id": "open", "label": "Open the gate", "key": "green", "icon": "gate"},
+                      {"id": "ignore", "label": "Ignore", "key": "red"}]}}
+```
+
+The list's id is the command's id, from its envelope (above), and its answer says it back. A sender
+gives every list an id - a list sent without one is shown and answered all the same, and its answer
+has no `id`.
+
+| Member | Type | Rule |
+|---|---|---|
+| `title` | string | Required. Cleaned by the text rule below and cut at **60** characters; blank after that is refused. Shown whole, on two lines where it needs them |
+| `text` | string or `null` | Optional: lines under the title. Cleaned by the text rule, cut at **200**; absent, `null` or blank is no text. A line break stays one. Shown whole: the screen is as tall as the text needs |
+| `rows` | list | **1 to 24** row objects, shown in this order |
+| `rows[].id` | string | **1 to 32** characters out of `A`-`Z`, `a`-`z`, `0`-`9`, `.`, `_`, `:` and `-`; unique within the list - case matters, so `a` and `A` are two ids |
+| `rows[].label` | string | Required; cleaned by the text rule and cut at **60**; blank is refused |
+| `rows[].key` | string or `null` | Optional: a key that picks the row at once - `red`, `green`, `yellow`, `blue`, or one of `"1"` to `"9"` (a string, not a number); unique within the list |
+| `rows[].icon` | string or `null` | Optional: one of the icon names of the receiver menu (section 3). Any other name is drawn with `neutral` and is **not** refused; absent or `null` is no icon |
+| `timeout` | integer | Optional, seconds, **5 to 600**, **60** when absent. A JSON integer - not a boolean, not a fraction such as `60.0`, not a string, not `null`; anything outside the range is refused. **There is no list without a timeout** |
+| `default` | string or `null` | Optional: the `id` of one of the rows. The selection starts on it, and a timeout answers it. An id that is no row's is refused |
+
+Members of the payload or of a row that the plugin does not know are **ignored**, and its log says
+so once a run with their count, so a newer sender can add some. Everything the table names is held
+to its rule strictly: a refusal names the member and the row's index, counted from 0 as in JSON -
+"rows[1].key is the key of an earlier row" - and never the sender's text, which is not in the
+plugin's log either. The command's 4096-byte limit applies as for every command; 24 rows of 60
+characters fit.
+
+**The text rule.** `title`, `text` and every `rows[].label` are cleaned in this order, and only
+then judged blank - the companion integration applies the same rule before it sends, so a list it
+accepts is never refused here as blank, and the label it reports is the one on the screen:
+
+1. every backslash is removed (the toast's rule: enigma2's renderer reads what follows one as an
+   escape);
+2. `text` only: `\r\n` and `\r` become `\n`;
+3. every character of Unicode category **Cf** - bidirectional overrides and isolates, the zero-width
+   space and joiners, the soft hyphen, the byte order mark - and **Cs** - a lone surrogate, which
+   JSON can spell and no UTF-8 holds - is dropped;
+4. every character of category **Cc**, **Zl** or **Zp** becomes a space - except `\n` in `text`,
+   which stays a line break;
+5. it is cut at its limit: 60 for `title` and `label`, 200 for `text`;
+6. leading and trailing whitespace is stripped; what is empty then is blank - refused for `title`
+   and `label`, no text for `text`.
+
+**What the viewer sees and can do.** The list is shown **over whatever is on screen** - live
+television, a playing recording, the receiver menu, the image's keyboard, any other screen - which
+stays open underneath and gets the keys back when the list has gone. A header line says that the
+question comes from Home Assistant through this plugin, so a list cannot pose as the receiver's own
+dialog; under it the title, the text, the rows - each with its icon, its label and, on its right,
+its key: a filled rounded button in the key's colour, or the digit in a small box - the remaining
+time, counting down, and the keys' legend. With a `default` row the countdown names it - "Ignore in
+45 s" - so the viewer sees what waiting answers; without one it reads "Closes in 45 s". UP and DOWN,
+and the page keys, move the selection, which starts on the `default` row or else on the first. **OK
+picks** the selected row; a row's colour or number key picks that row at once; **EXIT** dismisses.
+Every other key does nothing - a colour or number that no row has as well - except the receiver's
+own global keys, such as the volume. The power key does on the list what it does on the screen under
+it: over live television it puts the receiver in standby, which closes the list. The plugin's own
+screen has the look of the receiver menu, see-through as `menu_transparency` says (section 1).
+
+**How it ends.** Exactly one answer for every list the plugin accepted - or, for one it could not
+put on the television after all, one late refusal (below):
+
+| `ending` | When | `row` |
+|---|---|---|
+| `picked` | OK on a row, or the row's own key | the row's `id` |
+| `timeout` | `timeout` seconds after it was shown | the `default` row's `id`, or `null` without one: a timeout is never mistaken for a press |
+| `dismissed` | EXIT | `null` |
+| `replaced` | A newer `cmd/list` arrived: the open list is answered first, and the new one is shown once the old screen has gone. A newer list that is refused leaves the open one alone | `null` |
+| `closed` | The receiver went to standby; the plugin stopped - an interface restart, a shutdown, a settings save that reconnects, an update closing its doors, the plugin being removed; or something else closed the screen. A save applied under the open session - every setting but the connection's and `enabled` - leaves the list on the screen. Published only while the session is up at that moment, and never later | `null` |
+
+The first way to end wins: a timeout and an OK in the same instant, an EXIT on a list that was just
+replaced, a pick on a list closed for standby - the later one finds the list answered and does
+nothing. While the session is between two screens - one is closing - the list waits for it, at most
+two seconds; a list that cannot be put on the television after all is refused on `last_error`
+(`not_shown`), with the command's id, and has no answer. A list arriving while another is waiting
+replaces that one too.
+
+**Which screen.** The plugin's own screen where it can be built, and otherwise the image's own
+choice list, with the same rows, ids and keys, and the header line, the title and the text as its
+question. Where the image puts the question's first line in the list's window title - OpenViX and
+OpenATV, from their sources - the window title reads "<header> - <countdown>", so the header stays;
+where it puts the whole question in its text - OpenPLi - the window title is the countdown. Where
+the image does not let the title be set, there is no countdown. `info.list.screen` (section 1) says
+which. A skin may define a screen called `MQTTBridgeChoices` and restyle the plugin's own; one that
+cannot be built with the plugin's widgets makes the image's list the one used.
+
+**No permission and no setting**, as a message has none. Anyone who can publish on the broker can
+put a list on the television, or publish an answer for one - so an automation never takes an answer
+as proof of who pressed what ([SECURITY.md](../SECURITY.md)).
+
 ### `cmd/timer` payload forms
 
 ```json
@@ -2703,9 +2869,10 @@ bound, a type that is wrong, an id that repeats, a `value` that is not one of th
 payload over 64 KiB or one that is not a JSON object - makes the whole payload invalid: it is
 ignored with one line in the log, and the menu shown is the one before it. So is a payload nested
 too deeply to parse, or a slider number too large for a float. Every text loses its backslashes
-and line breaks before it is shown, as a toast's does (section 2), and its invisible format
+and line breaks before it is shown, as a toast's does (section 2), its invisible format
 characters (Unicode category Cf - bidirectional overrides and isolates, zero-width characters, the
-soft hyphen); an option is still sent back exactly as listed.
+soft hyphen) and any lone surrogate (category Cs), which JSON can spell and no UTF-8 holds; an
+option is still sent back exactly as listed.
 
 **The icon names** are part of the contract; the integration offers exactly these: `neutral`,
 `lamp`, `ceiling-light`, `blinds`, `scene`, `script`, `power`, `fan`, `lock`, `radiator`,
@@ -2949,6 +3116,10 @@ topics. The new members of `service` and `volume.passthrough` are in no discover
 - the channel sensor's attributes are the five listed below, and the volume number and the mute
 switch read `level` and `muted`. A plugin-only install reads them from the broker.
 
+`list` (added after 0.4.0, unreleased) has **no discovery components** either: a list of choices
+is a question with rows, a timeout and an answer, which an automation or the companion
+integration's action asks and waits for - not a button or a sensor.
+
 ### The attributes the sensors carry
 
 Two of those components carry JSON attributes rather than only a state, because the state is a
@@ -3032,6 +3203,6 @@ moment.
 - **Nothing here is a request/response protocol.** If a command seems not to have worked, read
   its state topic and then `last_error`; there is no per-command reply to wait for. An id on a
   command (section 2) changes one thing: a refusal says which command it refuses. A command that
-  worked is still answered by its state topic alone. The one exception is a command that is a
+  worked is still answered by its state topic alone. The two exceptions are commands that are a
   question: `cmd/stream_playable` has no state to change, and its answer is a message on
-  `stream_playable`.
+  `stream_playable`; `cmd/list` asks the viewer, and its answer is a message on `list_answer`.

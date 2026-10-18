@@ -145,8 +145,23 @@ def test_the_info_members_are_build_infos(contract):
     ]
     assert len(builds) == 1
     returned = [node.value for node in ast.walk(builds[0]) if isinstance(node, ast.Return)]
-    assert len(returned) == 1 and isinstance(returned[0], ast.Dict)
-    keys = [key.value for key in returned[0].keys]
+    assert len(returned) == 1 and isinstance(returned[0], ast.Name)
+    name = returned[0].id
+    # The literal the returned name is built from, and the members added to it when they apply
+    # (`info["list"] = ...`, absent rather than null without its capability).
+    literals = [
+        node.value for node in ast.walk(builds[0])
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)
+        and [target.id for target in node.targets if isinstance(target, ast.Name)] == [name]
+    ]
+    assert len(literals) == 1
+    keys = [key.value for key in literals[0].keys]
+    keys += [
+        target.slice.value for node in ast.walk(builds[0]) if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
+        and target.value.id == name and isinstance(target.slice, ast.Constant)
+    ]
     assert sorted(keys) == sorted(contract["info_members"])
 
 

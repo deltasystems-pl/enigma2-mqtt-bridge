@@ -30,6 +30,9 @@ The receiver's device page in Home Assistant, with the companion integration.
   Home Assistant - opened from the
   Extensions menu or by holding HELP. The receiver only says which row was chosen; Home Assistant
   does the rest.
+- Questions from Home Assistant on the television - "Doorbell: open the gate / ignore" - answered
+  with the remote, with a countdown. The receiver says which answer was picked, once, and never
+  late.
 - Updates of the plugin itself, only to releases on a signed list: from the television, the
   OpenWebif page or over MQTT (off until you allow it on the box), keeping the channel you were
   watching and putting the previous version back when the new one does not start. A receiver

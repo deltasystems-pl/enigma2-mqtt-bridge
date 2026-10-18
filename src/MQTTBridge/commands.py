@@ -45,6 +45,7 @@ import json
 from .config import HA_MODES
 from .log import get_logger, redact
 from .origin import MQTT, PAGE, SCREEN, granted
+from .publisher import Refusal
 
 LOG = get_logger("commands")
 
@@ -63,6 +64,13 @@ COMMAND_ID_LIMIT = 64
 COMMAND_ID_CHARACTERS = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-"
 )
+
+# The reason code the doors' sentence carries for a command that defines codes for its
+# refusals; every other command gets the sentence alone, exactly as before.
+DOORS_REASONS = {"list": "busy"}
+# The commands whose refusal by the doors is published even while an update has made the
+# plugin silent: a list of choices always has a caller waiting for its answer or its refusal.
+SAID_WHILE_SILENT = frozenset(("list",))
 
 # The words a keyword payload may be spelled with. Case never matters.
 TRUE_WORDS = ("on", "true", "yes", "1", "press")
@@ -223,6 +231,7 @@ class CommandDispatcher:
             "mute": self.mute,
             "key": self.key,
             "message": self.message,
+            "list": self.choice_list,
             "timer": self.timer,
             "record": self.record,
             "screenshot": self.screenshot,
@@ -352,7 +361,14 @@ class CommandDispatcher:
         if doors:
             # The new release is on disk under this process (`selfupdate.py`): nothing runs -
             # but the one command that is the repair the closed doors name.
-            if self.bridge.self_update.silent:
+            if name in DOORS_REASONS:
+                # A command that defines codes says this refusal with one as well.
+                doors = Refusal(doors, DOORS_REASONS[name])
+            if self.bridge.self_update.silent and name in SAID_WHILE_SILENT:
+                # Someone waits on this command's answer: the refusal goes out all the same,
+                # not retained, so nothing comes back that the retraction took.
+                self.bridge.say_refusal_unretained(name, doors, command_id=command_id)
+            elif self.bridge.self_update.silent:
                 LOG.info("cmd/%s refused, not published: %s", name, doors)
             else:
                 self.bridge.publish_last_error(name, doors, command_id=command_id)
@@ -751,6 +767,24 @@ class CommandDispatcher:
         except (TypeError, ValueError):
             return "'" + _echo(timeout) + "' is not a number of seconds"
         return toast.request(self.bridge, payload.get("text"), kind, timeout)
+
+    def choice_list(self, text, origin=MQTT):
+        """A list of choices on the television; its answer is one `list_answer` (ADR-0023).
+
+        Validated whole first, so a payload is valid or invalid whatever the receiver is doing;
+        then refused without the capability and in standby. The list's id is this command's,
+        from its envelope, and the answer says it back. Every refusal has a reason code.
+        """
+        from . import choicelist
+
+        publisher = self.publisher(choicelist.CAPABILITY)
+        if publisher is None:
+            try:
+                choicelist.parse_list(text)
+            except choicelist.InvalidList as error:
+                return Refusal(str(error), choicelist.INVALID)
+            return Refusal(choicelist.NOT_AVAILABLE, choicelist.NOT_AVAILABLE_REASON)
+        return publisher.request(text, self.command_id)
 
     def timer(self, text, origin=MQTT):
         from . import recording
