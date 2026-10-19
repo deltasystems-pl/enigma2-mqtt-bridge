@@ -1160,6 +1160,8 @@ class ServicePublisher(NavPublisher):
         self._waiting_for = None
         # The id of the command whose zap is being verified, or None.
         self._waiting_id = None
+        # The command whose effect is being verified: `zap`, or `play_recording`.
+        self._waiting_command = "zap"
         self._verify = Ticker(self._zap_timed_out, "zap verify")
         self._audio = Ticker(self._check_audio, "audio track")
         # The index of the track that was playing when `service` was last
@@ -1269,15 +1271,17 @@ class ServicePublisher(NavPublisher):
 
     # ------------------------------------------------------- zap verification --
 
-    def expect(self, sref, command_id=None):
+    def expect(self, sref, command_id=None, command="zap"):
         """Watch for a zap to land, and say so on `last_error` when it does not.
 
         `command_id` is the id of the command that zapped. A newer zap
         replaces the one being watched and its id with it, so the refusal is
-        always about the zap it names.
+        always about the zap it names. `command` names it on `last_error`: a
+        recording handed to the movie player is verified the same way.
         """
         self._waiting_for = str(sref)
         self._waiting_id = command_id
+        self._waiting_command = command
         self._verify.start(ZAP_VERIFY_MILLISECONDS, True)
 
     def _check_zap(self, sref):
@@ -1286,6 +1290,7 @@ class ServicePublisher(NavPublisher):
         if same_service(self._waiting_for, sref):
             self._waiting_for = None
             self._waiting_id = None
+            self._waiting_command = "zap"
             self._verify.stop()
 
     def _zap_timed_out(self):
@@ -1294,7 +1299,16 @@ class ServicePublisher(NavPublisher):
         if wanted is None:
             return
         current = self.sref
+        command, self._waiting_command = self._waiting_command, "zap"
         if same_service(wanted, current):
+            return
+        if command == "play_recording":
+            self.report(
+                command,
+                "the receiver did not start playing the recording within "
+                + str(ZAP_VERIFY_MILLISECONDS // 1000) + " s",
+                command_id,
+            )
             return
         self.report(
             "zap",

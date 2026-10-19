@@ -916,6 +916,31 @@ class Bridge:
         )
         self.client.start()
 
+    def _retract_absent_pvr(self):
+        """At a connect: take back the library's and timeshift's topics where they are gone.
+
+        A library that is there retracts its own vanished folders when it publishes
+        (`LibraryPublisher.retract_stale`). One that is not - no movie locations on this
+        image now - leaves the earlier run's index and every folder topic to this.
+        """
+        from .library import FOLDER_PREFIX
+        from .library import INDEX as LIBRARY_INDEX
+        from .timeshift import TOPIC as TIMESHIFT_TOPIC
+
+        library = self.publisher(LIBRARY_INDEX)
+        if library is None:
+            prefix = self.topic(FOLDER_PREFIX)
+            index = self.topic(LIBRARY_INDEX)
+            for topic in self.state.retained_topics:
+                if topic == index or topic.startswith(prefix):
+                    self.retract(topic)
+        else:
+            library.retract_stale()
+        if self.publisher(TIMESHIFT_TOPIC) is None:
+            topic = self.topic(TIMESHIFT_TOPIC)
+            if self.state.knows(topic):
+                self.retract(topic)
+
     def _sync_menu_entry(self):
         try:
             from .plugin import sync_menu_entry
@@ -1295,6 +1320,9 @@ class Bridge:
             self.retract(self.topic(STREAM_TOPIC))
         if stream is None or not stream.lists_clients():
             self.retract(self.topic(STREAM_CLIENTS_TOPIC))
+        # The recording library and timeshift the same way: an earlier run's index, folders
+        # and timeshift state are not this run's, where this run has none of its own.
+        self._retract_absent_pvr()
         # And the refusal an earlier run left retained, here with the other
         # leftovers of an earlier process: before `online`, so that a consumer
         # which takes `online` for the start of this run never reads that
@@ -1800,6 +1828,10 @@ class Bridge:
             "capabilities": self.capabilities(),
             # Which screen the receiver menu uses and which key opens it; null without the menu.
             "menu": self._menu_info(),
+            # Whether the image's trash is on - what a delete of a recording moves into -
+            # or null where the image has none. Read at every publish: it is the image's
+            # own setting, changed in its own menu.
+            "recording_trash": self._recording_trash(),
             # Empty on nearly every receiver: the retained topics a payload was
             # too big for, which are therefore not on the broker (`_withhold`).
             "not_published": not_published,
@@ -1818,6 +1850,17 @@ class Bridge:
             return lists.info()
         except Exception:
             LOG.exception("info.list could not be read")
+            return None
+
+    def _recording_trash(self):
+        if self.session is None:
+            return None
+        try:
+            from .library import trash_state
+
+            return trash_state()
+        except Exception:
+            LOG.exception("info.recording_trash could not be read")
             return None
 
     def _menu_info(self):

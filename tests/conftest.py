@@ -18,6 +18,7 @@ is an assertion about what it recorded.
 """
 
 import json
+import re
 import sys
 import types
 from pathlib import Path
@@ -431,6 +432,43 @@ enigma.BT_KEEP_ASPECT_RATIO = 256
 # ------------------------------------------------------- services and references --
 
 
+_REFERENCE_HEAD = re.compile(r"-?\d+:-?\d+:(?:[0-9a-fA-F]+:){8}")
+
+
+def _url_decode(text):
+    """`urlDecode` of `lib/base/estring.cpp`: `%` and the two characters after it are one
+    byte - read by `strtoul(.., 16)`, so it stops at the first that is no hex digit, and a
+    zero is dropped."""
+    raw = text.encode("utf-8")
+    out = bytearray()
+    index = 0
+    while index < len(raw):
+        if raw[index] != 0x25:
+            out.append(raw[index])
+        else:
+            index += 2
+            if index >= len(raw):
+                break
+            value = 0
+            for character in raw[index - 1:index + 1].decode("latin-1"):
+                if character not in "0123456789abcdefABCDEF":
+                    break
+                value = value * 16 + int(character, 16)
+            if value:
+                out.append(value & 0xFF)
+        index += 1
+    return out.decode("utf-8", "replace")
+
+
+def _encode_path(path):
+    """`encode()` of `lib/service/service.cpp`: `:`, `%` and control characters escaped."""
+    return "".join(
+        "%" + format(ord(character), "02x") if character in ":%" or ord(character) < 32
+        else character
+        for character in path
+    )
+
+
 class eServiceReference:
     """The string form is the reference; everything else is derived from it.
 
@@ -452,8 +490,43 @@ class eServiceReference:
     isNumberedMarker = 256
     isInvisible = 512
 
-    def __init__(self, reference=""):
-        self.reference = str(reference)
+    def __init__(self, *arguments):
+        # The image's two constructors (`lib/service/iservice.h`, `service.cpp`):
+        # `(type, flags, path)` takes the path as it is; a string is read as the image
+        # reads one - ten numbers, then the path up to the next colon, `%` escapes undone,
+        # then a name. Either way `reference` is what `toString()` writes: the path with
+        # `:`, `%` and control characters escaped. A reference whose path has none of
+        # those is the string it was made from, letter for letter.
+        if len(arguments) == 3:
+            kind, flags, path = arguments
+            self._head = str(int(kind)) + ":" + str(int(flags)) + ":0:0:0:0:0:0:0:0"
+            self._path = str(path)
+            self._name = ""
+            self.reference = self._compose()
+            return
+        reference = str(arguments[0]) if arguments else ""
+        self._head = None
+        self._path = ""
+        self._name = ""
+        match = _REFERENCE_HEAD.match(reference)
+        if match is None or reference[:1].isalpha():
+            self.reference = reference
+            return
+        rest = reference[match.end():]
+        cut = rest.find(":")
+        self._head = match.group(0)[:-1]
+        self._path = _url_decode(rest if cut < 0 else rest[:cut])
+        self._name = "" if cut < 0 else rest[cut + 1:]
+        self.reference = self._compose()
+
+    def _compose(self):
+        text = self._head + ":" + _encode_path(self._path)
+        if self._name:
+            text += ":" + self._name
+        return text
+
+    def getPath(self):
+        return self._path
 
     @property
     def flags(self):

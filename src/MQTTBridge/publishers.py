@@ -4,7 +4,9 @@ The order is not cosmetic. `channels` is registered before `service` and
 `epg_grid` because both ask it questions - which bouquet a service came from,
 which bouquets to build a grid for - and a publisher that failed to start is
 removed from the registry, so „ask the channel list if there is one" is a
-lookup that has to happen after it either started or did not.
+lookup that has to happen after it either started or did not. The recording
+library comes after it for the same reason: every recording names the bouquet
+that holds its channel.
 
 It is also the order `info.capabilities` lists, which is the order `docs/TOPICS.md`
 describes the topics in. A reader who compares the two should not have to sort
@@ -19,6 +21,7 @@ from .choicelist import ListPublisher
 from .epggrid import EpgGridPublisher
 from .epgimport import EpgImportPublisher
 from .hdd import HddPublisher
+from .library import LibraryPublisher
 from .menu import MenuPublisher
 from .oscam import OscamPublisher
 from .power import PowerPublisher
@@ -29,6 +32,7 @@ from .screen import ScreenPublisher
 from .service import EpgPublisher, ServicePublisher, TunerPublisher
 from .softcam import SoftcamPublisher
 from .stream import StreamPublisher
+from .timeshift import TimeshiftPublisher
 from .toast import ToastPublisher
 from .volume import VolumePublisher
 from .zaphistory import ZapHistoryPublisher
@@ -53,6 +57,8 @@ PUBLISHER_CLASSES = (
     ZapHistoryPublisher,
     EpgGridPublisher,
     EpgImportPublisher,
+    LibraryPublisher,
+    TimeshiftPublisher,
     KeyPublisher,
     ScreenPublisher,
     ToastPublisher,

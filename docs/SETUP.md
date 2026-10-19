@@ -42,13 +42,14 @@ and settings survive a plugin upgrade.
 | `uninstall_allowed` | `off` | Gate for `cmd/uninstall`, which removes the plugin from the receiver. Off by default because it is a one-way door: afterwards only the receiver's own plugin menu or SSH can put the plugin back. See below |
 | `update_check` | `off` | Let the receiver ask the plugin's release origin on the internet which releases exist - once a day, and when `cmd/update_check` asks - and publish what it found on the `update` topic. Off by default because the receiver then makes no connection but the broker's. A receiver without internet learns of releases from Home Assistant instead, which needs no setting. It only checks; nothing is installed. See below |
 | `update_allowed` | `off` | Gate for `cmd/update`, which installs a signed release of the plugin over MQTT and restarts the interface to run it. Off by default because it replaces the code that takes the commands. The receiver's own screens and the OpenWebif page do not need it |
+| `recording_delete_allowed` | `off` | Gate for `cmd/delete_recording`, which moves one recording into the receiver's trash - never further, and not at all while the receiver's trash is switched off. Off by default because it takes a recording out of the movie list; see below |
 | `menu_allowed` | `on` | Offer the Home Assistant menu: the Extensions entry "Home Assistant", the hotkey, and the subscription to the menu the companion integration publishes. On by default because the menu can do only what you put into it in Home Assistant; see below |
 | `menu_hotkey` | `HELP, held` | The key that opens the Home Assistant menu in live TV and while a recording or a media file plays: HELP held, RED held, F3, F4, or off. A key the receiver itself uses keeps doing what it did; see below |
 | `menu_transparency` | `20 %` | How see-through the Home Assistant menu's background is: 0 % (opaque) to 80 %, in steps of 10. The text, the icons and the bar on the selected row stay solid. It applies the next time the menu is opened |
 | `log_level` | `info` | `error` / `warning` / `info` / `debug` |
 
-The setup screen shows the three menu settings last, under the heading **Home Assistant menu**; the OpenWebif page
-has them on its own [Menu page](#the-menu-page-and-the-menu-creator).
+The setup screen shows `recording_delete_allowed` under the heading **Recordings**, and the three menu settings last, under the heading **Home Assistant menu**; the OpenWebif page
+has the menu's on its own [Menu page](#the-menu-page-and-the-menu-creator).
 
 **Saving reconnects only for the connection.** A save on the setup screen or the OpenWebif page
 that changes `enabled`, `host`, `port`, `tls`, `ca_file`, `username`, `password`, `node_id` or
@@ -60,8 +61,8 @@ that changes nothing publishes nothing. With the broker unreachable at that mome
 applied on the receiver and published by the next connect.
 
 🔴 **`deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`,
-`uninstall_allowed`, `update_check`, `update_allowed` and `menu_allowed` are never writable over
-MQTT.** They are
+`uninstall_allowed`, `update_check`, `update_allowed`, `menu_allowed` and
+`recording_delete_allowed` are never writable over MQTT.** They are
 set on the receiver - here, in the provisioning file, or on the [OpenWebif page](#the-openwebif-page)
 - and published in `info.settings` so that a consumer can hide a control the box would always
 refuse, but `cmd/config` rejects them like any other key outside its allowlist - the whole command,
@@ -257,6 +258,49 @@ user-interface restart, because a restart mid-import loses the run - except once
 the import has failed, or the import has run past its 30-minute watchdog. The importer can go on
 saying „running" after a start that failed part-way, until its next scheduled run, and a receiver
 that cannot be restarted for a day because of it is the worse outcome.
+
+### What the recording library does
+
+The plugin publishes the receiver's recordings for Home Assistant - every recording in every movie
+location, with its subfolders, the trash left out - and lets Home Assistant play one on the
+receiver and, with `recording_delete_allowed` on, move one into the receiver's trash. The topics
+and commands are in [TOPICS.md](TOPICS.md#basenoderecordings---added-after-040-unreleased).
+
+- **Which locations.** The receiver's own: its default movie location first - also when it is
+  a folder of another location - then the movie list's locations ("Movie locations" in its
+  recording settings) in the receiver's order, then its timer and instant-recording locations
+  where no location before them holds them. A location on a network share is read like any
+  other.
+- **Which files.** Recordings - `.ts`, and `.stream` for an IPTV recording. Other media files the
+  movie list shows are not listed. Names starting with a dot, the trash `.Trash` among them, are
+  left out.
+- **When it is read.** Once when the plugin starts, then when a recording starts or ends, after a
+  delete, when a movie location is mounted - and when Home Assistant's *Refresh recordings* button
+  sends `cmd/recordings_refresh`. **Never on a timer**: reading the library reads the recording
+  disk's folders and the files beside each recording, and a disk read once an hour is a disk that
+  never sleeps. Free space and whether each location is mounted are read once a minute, without
+  touching a disk. A deletion, move or rename made on the receiver itself - in its movie list,
+  through OpenWebif, over FTP - raises no event, so Home Assistant sees it after the next of those
+  events or after the button.
+- **Playing.** A recording starts in the receiver's own movie player, exactly as if it had been
+  chosen in its movie list - with timeshift running, the receiver first asks on the television
+  whether to leave it, and a "no" there plays nothing. The receiver's own setting for resuming
+  applies - "Behaviour when a movie is started" in its movie-list settings: resume, ask, or start
+  from the beginning. When it
+  is set to ask, the question is on the television. A receiver in standby is woken first.
+- **Deleting.** Only with `recording_delete_allowed` on (off by default, never writable over MQTT),
+  and only ever **into the receiver's trash** - the receiver's own move, with the files beside the
+  recording - where the receiver's own trash settings decide when it is emptied. With the
+  receiver's trash switched off ("Use trash can in movie list") a delete is refused: nothing Home
+  Assistant asks for is deleted for good. A recording that is being recorded or played is not
+  deleted.
+- **Hidden bouquets are Home Assistant's.** The receiver lists every recording, with the channel's
+  service reference and bouquet, and the companion integration leaves out the ones of a bouquet
+  its options hide - as it does in its channel lists. The receiver publishes the whole library,
+  titles and descriptions included, to anybody on the broker.
+
+The timeshift state is published beside it: whether a buffer runs, whether the picture is paused,
+whether it is playing behind live, and since when.
 
 ### What removing the plugin remotely does
 
@@ -464,8 +508,8 @@ Installing a plugin version always asks first, and asks in its own words before 
 it is kept on the receiver with the confirmation step, never sent by the browser.
 *Clear last error* empties the `last_error` the page shows. The one
 difference from MQTT: a command from this page **does not need** `deep_standby_allowed`,
-`softcam_restart_allowed`, `epg_import_allowed`, `uninstall_allowed`, `update_check` or
-`update_allowed`. While the bridge is idle
+`softcam_restart_allowed`, `epg_import_allowed`, `uninstall_allowed`, `update_check`,
+`update_allowed` or `recording_delete_allowed`. While the bridge is idle
 the commands are shown disabled, with the reason.
 
 **Who can open it.** Exactly whoever OpenWebif lets in - the page has no login of its own and reads
@@ -572,7 +616,8 @@ For headless installs - and for the companion integration's guided installer - w
   "epg_import_allowed": false,
   "uninstall_allowed": false,
   "update_check": false,
-  "update_allowed": false
+  "update_allowed": false,
+  "recording_delete_allowed": false
 }
 ```
 

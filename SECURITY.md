@@ -76,6 +76,20 @@ everything else:
    over MQTT unless the receiver-only permission `epg_import_allowed` is on; off by default)
    starts the image's own EPG importer, which downloads from the sources selected in it.
 
+   The recording library ([docs/SETUP.md](docs/SETUP.md#what-the-recording-library-does)) is
+   published to the broker whole - every recording's title, description, channel and folder -
+   to whoever may read the node's topics; hidden bouquets are hidden in Home Assistant, not on
+   the broker. Its commands name a recording by an **id**, the first 16 hex digits of the
+   sha256 of its path, and never by a path: the plugin acts only on a recording its own
+   current library lists, so nothing from the broker names a file. `cmd/delete_recording` is
+   refused over MQTT unless the receiver-only permission `recording_delete_allowed` is on (off
+   by default), and **only ever moves a recording into the image's trash**, with the image's
+   own move: it is refused while the image's trash is switched off, and the image's own offer
+   to delete for good when a move fails is never taken. Whoever may publish on the node's
+   command topic with the permission on can therefore empty the movie list into the trash,
+   where the receiver's own trash settings decide how long it stays; nothing it does deletes a
+   recording for good.
+
    There is no telemetry and no cloud service. TLS to the broker is supported; client
    certificates are not in v1.
 

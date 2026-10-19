@@ -67,6 +67,7 @@ REMOTE_SETTING_NAMES = (
 READ_ONLY_SETTING_NAMES = (
     "deep_standby_allowed", "softcam_restart_allowed", "epg_import_allowed",
     "uninstall_allowed", "update_check", "update_allowed", "menu_allowed",
+    "recording_delete_allowed",
 )
 # A refusal names the keys it refused, and they are the sender's words: this many
 # of them, each cut to this length, so the sentence on `last_error` stays short.
@@ -95,8 +96,8 @@ DEFAULT_BASE_TOPIC = "enigma2"
 DEFAULT_DISCOVERY_PREFIX = "homeassistant"
 
 # The order is the order of the setup screen, so a reader of either sees the
-# same shape: identity, broker, topics, behaviour, diagnostics - and the receiver
-# menu last, under a heading of its own on the screen.
+# same shape: identity, broker, topics, behaviour, diagnostics - then the
+# recordings and the receiver menu, each under a heading of its own on the screen.
 SETTING_NAMES = (
     "enabled",
     "host",
@@ -133,6 +134,7 @@ SETTING_NAMES = (
     "update_allowed",
     "log_level",
     "epg_grid_events",
+    "recording_delete_allowed",
     "menu_allowed",
     "menu_hotkey",
     "menu_transparency",
@@ -180,6 +182,7 @@ SETTING_KINDS = {
     "menu_transparency": "int",
     "log_level": "choice",
     "epg_grid_events": "int",
+    "recording_delete_allowed": "bool",
 }
 
 CHOICES = {
@@ -337,6 +340,10 @@ def _build():
         default="info", choices=[(level, level) for level in LOG_LEVELS]
     )
     section.epg_grid_events = ConfigInteger(default=4, limits=(0, 20))
+    # Permissions default off. `cmd/delete_recording` moves a recording into the image's
+    # trash - never further, and not at all with the image's trash switched off - so it is
+    # granted on the receiver and never over MQTT (`library.py`).
+    section.recording_delete_allowed = ConfigYesNo(default=False)
 
     plugins.mqttbridge = section
     return section

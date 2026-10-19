@@ -36,6 +36,27 @@ version that has no section here.
   ([SECURITY.md](SECURITY.md),
   [ADR-0023](docs/adr/0023-a-list-of-choices-is-answered-by-row-id-once.md),
   [TOPICS.md](docs/TOPICS.md)). English, Polish and German.
+- The recording library: every recording in the receiver's movie locations, with its subfolders and
+  without the trash, on a retained index, `recordings` - each location's free space and folders -
+  and one retained topic for each folder, `recordings/<folder_slug>`, newest first. Read when the plugin
+  starts and then only on events - a recording starting or ending, a delete, a movie location
+  mounted - and on `cmd/recordings_refresh`, never on a timer, so the recording disk can sleep;
+  files are read in a thread of their own and the picture is never held up. A folder over the packet
+  bound is cut, oldest first, and the index says how many. Every recording is listed, with its
+  channel's service reference and bouquet: hidden bouquets are the consumer's to hide. A recording
+  is named by an id, never by a path. `cmd/play_recording` plays one in the receiver's own movie
+  player, with the receiver's own resume rule, waking it from standby first. `cmd/delete_recording`
+  moves one into the receiver's trash and never further, behind the new box-only permission
+  `recording_delete_allowed` (off by default; a **Recordings** section on the settings screen and the
+  OpenWebif page), and is refused while the receiver's trash is off - which `info.recording_trash`
+  says. New capabilities `recordings`, `recording_play` and `recording_delete`; the OpenWebif page
+  has the three commands. Applied without a reconnect when the permission is saved ([ADR-0024](docs/adr/0024-the-recording-library-is-read-on-events-and-addressed-by-id.md)).
+- `timeshift`: whether a timeshift buffer runs, whether the picture is paused or behind live, and
+  since when - from the image's events and the info bar's own calls, never polled. Capability
+  `timeshift`.
+- Each running recording in `recording.active` carries its channel's name, its description, its
+  movie location, its path there, the library's id for it, whether it was started by hand and the
+  bouquet of its channel. Capability `recording_details`. English, Polish and German.
 - The menu creator: the Home Assistant menu built from the receiver's OpenWebif, on a new Menu
   page (`/mqttbridge/menu`) - groups and rows, an entity picked by typing part of its name, entity
   id or area, its control, label and icon, moved and removed - as the companion integration's own

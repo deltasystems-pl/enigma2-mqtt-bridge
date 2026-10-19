@@ -33,8 +33,11 @@ def test_info_carries_every_documented_field(connected_bridge, factory):
     payload = factory.client.last(INFO).json()
     assert set(payload) == {
         "image", "enigma", "plugin", "build", "contract", "boxtype", "mac", "ip", "uptime",
-        "wol", "ha_mode", "settings", "capabilities", "menu", "not_published",
+        "wol", "ha_mode", "settings", "capabilities", "menu", "recording_trash",
+        "not_published",
     }
+    # No session, so no image whose trash could be asked about.
+    assert payload["recording_trash"] is None
     assert payload["not_published"] == []
     # No session, so no menu screen: the member says so rather than going missing.
     assert payload["menu"] is None
@@ -61,6 +64,7 @@ def test_info_carries_every_documented_field(connected_bridge, factory):
         "uninstall_allowed": False,
         "update_check": False,
         "update_allowed": False,
+        "recording_delete_allowed": False,
         "menu_allowed": True,
         "menu_hotkey": "help_long",
         "menu_transparency": 20,

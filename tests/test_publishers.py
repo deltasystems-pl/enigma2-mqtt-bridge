@@ -40,9 +40,12 @@ def test_capabilities_name_the_areas_that_bound(live_bridge, factory):
     # with it. `command_id` is no area: the dispatcher opens a command's envelope.
     # `service_codecs` is `service`'s second name, on an image that names the video
     # type. No `stream`: the fake image has no stream server unless a test adds one.
+    # `recording_details` is `recording`'s second name. No `recordings` and no
+    # `timeshift`: the fake image has no movie list and no info-bar timeshift unless a
+    # test adds them (`test_library.py`, `test_timeshift.py`).
     assert capabilities == [
-        "power", "service", "service_codecs", "epg", "tuner", "recording", "timers", "volume",
-        "hdd",
+        "power", "service", "service_codecs", "epg", "tuner", "recording", "recording_details",
+        "timers", "volume", "hdd",
         "process", "channels", "channel_topics", "epg_grid", "keys", "screenshot", "toast",
         "menu", "list", "message", "command_id",
     ]
@@ -194,8 +197,8 @@ def test_the_default_registry_is_the_documented_order():
         "power", "cec_workaround", "service", "epg", "tuner", "stream", "cam", "oscam",
         "softcam",
         "recording", "timers", "volume", "hdd", "process", "channels", "bouquet_context",
-        "zap_history", "epg_grid", "epg_import", "keys", "screenshot", "toast", "menu",
-        "list",
+        "zap_history", "epg_grid", "epg_import", "recordings", "timeshift", "keys",
+        "screenshot", "toast", "menu", "list",
     ]
 
 

@@ -82,8 +82,22 @@ class HddPublisher(Publisher):
         self._stopped = True
         self._ticker.stop()
 
+    def _library(self):
+        """The recording library, when this bridge has one."""
+        finder = getattr(self.bridge, "publisher", None) if self.bridge is not None else None
+        return finder("recordings") if callable(finder) else None
+
     def _poll(self):
         self._start_probe()
+        # The recording library's movie locations on the same minute - whether each is
+        # mounted, from `/proc/mounts`, and its free space - in a thread of the library's
+        # own, so that a share which hangs holds up neither this topic nor this timer.
+        library = self._library()
+        if library is not None:
+            try:
+                library.check_space()
+            except Exception:
+                LOG.exception("the movie locations could not be measured")
 
     def _start_probe(self):
         if self._stopped:
