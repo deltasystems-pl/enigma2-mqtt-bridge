@@ -46,6 +46,9 @@ and settings survive a plugin upgrade.
 | `menu_allowed` | `on` | Offer the Home Assistant menu: the Extensions entry "Home Assistant", the hotkey, and the subscription to the menu the companion integration publishes. On by default because the menu can do only what you put into it in Home Assistant; see below |
 | `menu_hotkey` | `HELP, held` | The key that opens the Home Assistant menu in live TV and while a recording or a media file plays: HELP held, RED held, F3, F4, or off. A key the receiver itself uses keeps doing what it did; see below |
 | `menu_transparency` | `20 %` | How see-through the Home Assistant menu's background is: 0 % (opaque) to 80 %, in steps of 10. The text, the icons and the bar on the selected row stay solid. It applies the next time the menu is opened |
+| `menu_combo_key` | `off` | The press combo: a key that opens the Home Assistant menu when you press it several times in quick succession in live TV or while a recording or a media file plays - for a television's own remote over HDMI-CEC, which has no HELP and cannot hold a key. PREVIOUS, EXIT, PLAY/PAUSE, STOP, or off. **While a key is set here, it does nothing else in live TV and the players**; see below |
+| `menu_combo_presses` | `3` | How many presses of that key open the menu, 2 to 5 |
+| `menu_combo_gap_ms` | `1.2 s` | The longest pause between two presses, 0.3 s to 3.0 s in steps of 0.1 s; a slower press starts counting again. Stored in milliseconds |
 | `log_level` | `info` | `error` / `warning` / `info` / `debug` |
 
 The setup screen shows `recording_delete_allowed` under the heading **Recordings**, and the three menu settings last, under the heading **Home Assistant menu**; the OpenWebif page
@@ -149,6 +152,17 @@ The receiver shows it on the television:
   the player uses - keeps doing that, and the menu does not open from it;
   `info.menu.hotkey` then says so. The Extensions entry always works, and you can put it on any key
   in the receiver's button setup.
+- **From the television's remote** (HDMI-CEC), which has no HELP and no long press, use the
+  **press combo**: choose a key in `menu_combo_key` and press it `menu_combo_presses` times
+  (3 by default), each press within `menu_combo_gap_ms` (1.2 s) of the one before. A
+  television's Back key usually arrives as `previous` or `exit`; to find out which, watch the
+  `key` topic (`enigma2/<node>/key`, with `publish_keys` on) while you press it in live TV - it
+  says `KEY_PREVIOUS` or `KEY_EXIT`. **While a combo key is set, that key does nothing else in
+  live TV and while a recording or a media file plays** - one or two presses do nothing at all -
+  so on OpenViX Back no longer zaps back to the previous channel there; in menus, lists and the
+  EPG it works as before. A function you assigned to that key in the receiver's button setup
+  does not run there either. `info.menu.combo.replaces` lists what the key no longer does
+  ([ADR-0025](adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md)). `off` gives the key back.
 - **Use it** with the arrows and OK; EXIT goes back. OK switches a light or a switch, runs a scene
   or a script, opens a list of choices, or opens the keyboard for text. On a number - a dimmer, a
   blind's position - LEFT and RIGHT change the value on the receiver and OK sends it; EXIT, or
@@ -560,8 +574,8 @@ the television's *Cancel* restores what the page saved, and its *Save* writes wh
 ### The Menu page and the menu creator
 
 `http://<receiver-address>/mqttbridge/menu`, linked from the main page. It has the Home Assistant
-menu's three settings - `menu_allowed`, `menu_hotkey` and `menu_transparency` - with the main
-page's rules, and a status line: whether the menu is on, the broker connection, whether Home
+menu's settings - `menu_allowed`, `menu_hotkey`, `menu_transparency` and the press combo's
+`menu_combo_key`, `menu_combo_presses` and `menu_combo_gap_ms` - with the main page's rules, and a status line: whether the menu is on, the broker connection, whether Home
 Assistant was heard from, and when the catalogue (below) arrived and how many entities Home
 Assistant left out of it.
 
