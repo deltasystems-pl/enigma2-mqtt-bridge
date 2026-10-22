@@ -1555,6 +1555,8 @@ def test_stopping_the_bridge_closes_the_menu_and_unbinds_the_key(world):
     controller = world.screen.controller
     world.bridge.stop()
     assert controller.closed
+    # The screen's close is handed out on the next turn, and PREVIOUS's mapping goes with it.
+    MainLoop.advance(0)
     assert [entry for entry in world.receiver.actions.bound if entry[0] == CONTEXT] == []
     assert world.receiver.actions.keys == []
 

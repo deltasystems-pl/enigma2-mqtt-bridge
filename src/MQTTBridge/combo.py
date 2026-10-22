@@ -95,16 +95,10 @@ DEFAULT_KEYMAP = "/usr/share/enigma2/keymap.xml"
 # The contexts of the image's user-assignable button setup: an action there is the name of a
 # setting in `config.misc.ButtonSetup` (OpenViX, OpenATV) or `config.misc.hotkey` (OpenPLi).
 BUTTON_SETUP_CONTEXTS = ("ButtonSetupActions", "HotkeyActions")
-# The button setup's names for each key, for when the keymap cannot be read.
-BUTTON_SETUP_NAMES = {
-    "previous": ("previous",),
-    "exit": (),
-    "playpause": ("playpause",),
-    "stop": ("stop", "shift_stop"),
-}
 
 SWITCHED_OFF = "the press combo is switched off in the plugin's settings"
 NOT_BINDABLE = "this image does not let a plugin bind a key"
+UNBOUND = "the press combo is not bound while the receiver menu is not running"
 
 # The milliseconds between two presses are compared at this resolution, so that a gap measured
 # as 1200.0000000002 ms is the 1200 ms it was.
@@ -159,7 +153,9 @@ def read_keymap(path, key_name, players=True):
     for mapping in root.iter("map"):
         context = mapping.get("context") or ""
         for key in mapping.iter("key"):
-            if key.get("id") not in ids or not key.get("mapto"):
+            raw = key.get("id") or ""
+            # A name as written; a code in decimal or in hex, `0x19c` or `0x19C`.
+            if (raw not in ids and raw.lower() not in ids) or not key.get("mapto"):
                 continue
             action = key.get("mapto")
             if context in BUTTON_SETUP_CONTEXTS:
@@ -260,13 +256,21 @@ class Combo:
             return None
         self._bound_action = True
         self.bound = choice
-        self._keymap = read_keymap(keymap_path(), name, choice in PLAYER_KEYS)
+        try:
+            self._keymap = read_keymap(keymap_path(), name, choice in PLAYER_KEYS)
+        except Exception:
+            # Best effort: the key is bound, and `replaces` says it could not tell.
+            LOG.exception("the keymap could not be read; what the combo replaces is not known")
+            self._keymap = None
         LOG.info("the menu's press combo is %s (%s) %d times within %d ms", choice, name,
                  presses, gap_ms)
         return choice
 
     def unbind(self):
         self.reset()
+        if self.refusal is None:
+            # `report` never answers (None, None): a combo let go of says so.
+            self.refusal = UNBOUND
         actions = _action_map()
         if actions is None:
             self._bound_action = False
@@ -297,9 +301,7 @@ class Combo:
         if self._keymap is None:
             return None
         functions, setup_names = self._keymap
-        return list(functions) + button_setup_assignments(
-            setup_names or BUTTON_SETUP_NAMES.get(self.bound, ())
-        )
+        return list(functions) + button_setup_assignments(setup_names)
 
     def report(self):
         """`(combo, combo_reason)` for `info.menu`."""

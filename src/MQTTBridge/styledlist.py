@@ -42,6 +42,7 @@ import importlib
 import os
 import re
 
+from . import backkey
 from .enigma2 import enigma_attribute
 from .i18n import _
 from .log import get_logger
@@ -589,6 +590,8 @@ def open_styled(session, controller, transparency=0):
         _restore_executing(session, executing)
         return f"{type(error).__name__}: {error}"
     controller.attach(screen)
+    # PREVIOUS is EXIT here too: a TV remote's Back (`backkey.py`).
+    backkey.attach(session, screen, screen.key_cancel)
     return None
 
 
@@ -675,8 +678,10 @@ class ChoiceBoxAdapter:
         ids = [choice[1] for choice in choices]
         selection = ids.index(initial) if initial in ids else 0
         self._open = True
-        self.session.openWithCallback(self._picked, ChoiceBox, title=title, list=choices,
-                                      keys=keys, selection=selection)
+        dialog = self.session.openWithCallback(self._picked, ChoiceBox, title=title,
+                                               list=choices, keys=keys, selection=selection)
+        # PREVIOUS is EXIT on the image's list too, in the menu's role (`backkey.py`).
+        backkey.attach(self.session, dialog, lambda: dialog.close(None))
 
     def _picked(self, choice):
         self._open = False

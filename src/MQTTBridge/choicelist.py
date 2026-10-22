@@ -53,7 +53,7 @@ import re
 import time
 import unicodedata
 
-from . import styledlist
+from . import backkey, styledlist
 from .enigma2 import Ticker, enigma_attribute, missing
 from .i18n import _
 from .log import get_logger
@@ -883,12 +883,14 @@ def open_styled(session, controller, transparency, callback):
         return f"{type(error).__name__}: {error}"
     executing = getattr(session, "in_exec", None)
     try:
-        session.openWithCallback(callback, cls, shape, controller)
+        screen = session.openWithCallback(callback, cls, shape, controller)
     except Exception as error:
         LOG.exception("the styled list screen could not be opened")
         controller.screen = None
         styledlist._restore_executing(session, executing)
         return f"{type(error).__name__}: {error}"
+    # PREVIOUS is EXIT here too: a TV remote's Back (`backkey.py`).
+    backkey.attach(session, screen, getattr(screen, "key_cancel", None))
     return None
 
 
@@ -934,6 +936,9 @@ class ChoiceBoxList:
             self._picked, ChoiceBox, title="\n".join(lines), list=choices, keys=keys,
             selection=selection,
         )
+        dialog = self.dialog
+        # PREVIOUS is EXIT on the image's list too, in the list's role (`backkey.py`).
+        backkey.attach(self.session, dialog, lambda: dialog.close(None))
         self._prefix = "" if self._header_in_text(view["header"]) else view["header"] + " - "
         self.countdown(view["countdown"])
 

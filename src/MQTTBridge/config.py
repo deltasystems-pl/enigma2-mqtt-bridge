@@ -436,8 +436,10 @@ def selection_integer(name, raw):
     """An integer setting held as a selection, as the int it is meant to be, whatever it holds.
 
     The element's keys are ints and enigma2's selection hands back the key it matched, so this
-    is the identity on every image measured. It is here for the one that would hand back the
-    text from its settings file: an int, one of the choices, or the default.
+    is the identity on every image measured. A stored value that is none of the choices is read
+    by enigma2's own `ConfigSelection.load()` as the FIRST choice, not the default, and arrives
+    here as that choice. The default answers only for an element that hands back something
+    else - the text from its settings file that is no choice, or anything that is no int.
     """
     choices, default = SELECTION_INTEGERS[name]
     if isinstance(raw, str) and raw.strip().isdigit():

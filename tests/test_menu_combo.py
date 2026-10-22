@@ -317,13 +317,15 @@ def test_nothing_of_the_key_is_consumed_over_another_screen(world):
     assert world.screen is None
 
 
-def test_the_key_goes_on_over_the_open_menu(world):
+def test_over_the_open_menu_the_key_is_exit_and_no_count(world):
+    """The combo does not count over its own menu; PREVIOUS there is EXIT (`backkey.py`)."""
     world.taps(3, 300)
-    screen = world.screen
-    assert screen is not None
+    assert world.screen is not None
     world.zaps.clear()
     assert world.press(PREVIOUS, MAKE, BREAK) == [1, 0]
-    assert world.zaps == ["historyBack"]
+    MainLoop.advance(0)
+    assert world.screen is None
+    assert world.zaps == []
     assert world.combo.count == 0
 
 
@@ -927,3 +929,115 @@ def test_live_tv_is_the_info_bar_itself(world, monkeypatch):
     assert menu_module.live_tv_screen(None) is False
     monkeypatch.setitem(sys.modules, "Screens.InfoBar", None)
     assert menu_module.live_tv_screen(player) is False
+
+
+# ------------------------------------------------------------ the review's round --
+
+
+def test_presses_sent_with_cmd_key_count_and_are_taken(make_bridge, factory, settings):
+    from MQTTBridge import remote
+
+    world = ComboWorld(make_bridge, factory, settings, menu_combo_key="exit")
+    taken = []
+    world.receiver.actions.bindKey("keymap.xml", "generic", EXIT, 1 << MAKE,
+                                   "InfobarShowHideActions", "hide")
+    world.receiver.actions.bindAction("InfobarShowHideActions", 0,
+                                      lambda context, action: taken.append(action) or 1)
+    for _ in range(3):
+        remote.forget_rate_limit()
+        world.client.fire_message("enigma2/" + NODE + "/cmd/key", b'{"key": "KEY_EXIT"}')
+        world.clock.advance(300)
+    assert taken == []
+    assert world.screen is not None
+
+
+@pytest.mark.parametrize("cause, setup", [
+    ("no menu screen can be built on this image", "screen"),
+    ("a menu is still open", "controllers"),
+    ("neither the styled screen nor the image's own list opened", "opens"),
+])
+def test_a_menu_that_cannot_open_still_takes_the_key_and_says_why_once(world, monkeypatch,
+                                                                       plugin_log, cause, setup):
+    publisher = world.publisher
+    if setup == "screen":
+        monkeypatch.setattr(publisher, "screen_kind", None)
+    elif setup == "controllers":
+        monkeypatch.setattr(publisher, "_controllers", [object()])
+    else:
+        monkeypatch.setattr(publisher, "open", lambda session=None: False)
+    world.taps(9, 300)
+    assert world.zaps == []
+    assert world.screen is None
+    line = "the press combo asked for the receiver menu and it could not open (" + cause + ")"
+    assert plugin_log().count(line) == 1
+
+
+def test_the_refusal_is_said_again_after_the_menu_opened_once(world, monkeypatch, plugin_log):
+    publisher = world.publisher
+    monkeypatch.setattr(publisher, "screen_kind", None)
+    world.taps(3, 300)
+    monkeypatch.undo()
+    world.clock.advance(5000)
+    world.taps(3, 300)
+    assert world.screen is not None
+    world.exit()
+    monkeypatch.setattr(publisher, "screen_kind", None)
+    world.clock.advance(5000)
+    world.taps(3, 300)
+    assert plugin_log().count("it could not open (no menu screen can be built") == 2
+
+
+def test_a_keymap_read_that_raises_leaves_replaces_null_and_the_key_bound(
+        make_bridge, factory, settings, monkeypatch):
+    def broken(*_arguments):
+        raise MemoryError("no memory")
+
+    monkeypatch.setattr(combo_module, "read_keymap", broken)
+    world = ComboWorld(make_bridge, factory, settings)
+    menu = world.info()["menu"]
+    assert menu["combo"]["key"] == "previous"
+    assert menu["combo"]["replaces"] is None
+    assert menu["combo_reason"] is None
+    world.taps(3, 300)
+    assert world.screen is not None
+
+
+def test_a_combo_let_go_of_always_says_why(world):
+    combo = world.combo
+    combo.unbind()
+    assert combo.report() == (None, combo_module.UNBOUND)
+    combo.bind("previous", 3, 1200)
+    assert combo.report()[1] is None
+    combo.bind("off", 3, 1200)
+    combo.unbind()
+    assert combo.report() == (None, SWITCHED_OFF)
+
+
+def test_the_reason_after_a_stop_is_never_none(world):
+    combo = world.combo
+    world.bridge.stop()
+    assert combo.report()[0] is None and combo.report()[1]
+
+
+@pytest.mark.parametrize("ident", ["0x19c", "0x19C", "412"])
+def test_a_code_in_hex_of_either_case_or_decimal_is_found(tmp_path, ident):
+    keymap = tmp_path / "keymap.xml"
+    keymap.write_text('<keymap><map context="InfobarActions">'
+                      '<key id="' + ident + '" mapto="numbered" flags="m" /></map></keymap>')
+    assert combo_module.read_keymap(str(keymap), "KEY_PREVIOUS") == (
+        ["InfobarActions.numbered"], [])
+
+
+def test_a_keymap_without_the_button_setup_names_no_assignment(make_bridge, factory, settings,
+                                                               monkeypatch, tmp_path):
+    from Components.config import ConfigSubsection, ConfigText, config
+
+    keymap = tmp_path / "keymap.xml"
+    keymap.write_text('<keymap><map context="InfobarActions">'
+                      '<key id="KEY_PREVIOUS" mapto="here" flags="m" /></map></keymap>')
+    monkeypatch.setattr(combo_module, "DEFAULT_KEYMAP", str(keymap))
+    assigned = ConfigSubsection()
+    assigned.previous = ConfigText(default="Infobar/openEPG")
+    monkeypatch.setattr(config.misc, "ButtonSetup", assigned, raising=False)
+    world = ComboWorld(make_bridge, factory, settings)
+    assert world.info()["menu"]["combo"]["replaces"] == ["InfobarActions.here"]

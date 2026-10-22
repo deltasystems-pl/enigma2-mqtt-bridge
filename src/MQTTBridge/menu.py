@@ -931,6 +931,7 @@ class MenuPublisher(Publisher):
         self._types_logged = set()
         self._hotkey = None
         self._combo = None
+        self._combo_refusals = set()
         # The `menu_action`s handed to the client and not acknowledged yet.
         self._unacknowledged = []
         # The topics the open session subscribed for the menu, so a save can take them back.
@@ -967,7 +968,7 @@ class MenuPublisher(Publisher):
         self._hotkey.bind(self.value("menu_hotkey"))
         from .combo import Combo
 
-        self._combo = Combo(self.combo_screen, self.hotkey_pressed, live_tv_screen)
+        self._combo = Combo(self.combo_screen, self.combo_open, live_tv_screen)
         self._combo.bind(*self._combo_settings())
         LOG.info("the receiver menu is ready (screen %s, hotkey %s, press combo %s)",
                  self.screen_kind, self._hotkey.bound or "-", self._combo.bound or "-")
@@ -1013,6 +1014,32 @@ class MenuPublisher(Publisher):
         """
         if self._combo is not None and self._combo.settings() != self._combo_settings():
             self._combo.bind(*self._combo_settings())
+
+    def combo_open(self):
+        """The press combo's N-th press: open the menu, or say once for each cause why not.
+
+        The key is taken whatever this answers - while the combo is set no press of it does the
+        image's work in live TV (`combo.py`) - so a menu that cannot open would leave that key
+        dead there without a word. The log says it, once for each reason, until the menu opens.
+        """
+        if self.hotkey_pressed():
+            self._combo_refusals = set()
+            return True
+        cause = self._open_refusal()
+        if cause not in self._combo_refusals:
+            self._combo_refusals.add(cause)
+            LOG.warning("the press combo asked for the receiver menu and it could not open (%s); "
+                        "the key is still taken in live TV while the combo is set", cause)
+        return False
+
+    def _open_refusal(self):
+        if self.session is None:
+            return "no session"
+        if self.screen_kind is None:
+            return "no menu screen can be built on this image"
+        if self._controllers:
+            return "a menu is still open"
+        return "neither the styled screen nor the image's own list opened"
 
     def combo_screen(self):
         """The executing dialog when the press combo counts over it - live TV or a player - else
