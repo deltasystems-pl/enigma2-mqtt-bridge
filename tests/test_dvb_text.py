@@ -174,3 +174,67 @@ def test_the_zap_history_name_from_the_image_is_clean(monkeypatch):
     monkeypatch.setattr(zaphistory, "service_name", lambda sref: "")
     name = zaphistory.ZapHistoryPublisher._name(Center(), object(), TVP1)
     assert name == "Polsat Sport"
+
+
+# ---------------------------------------------------------------- the EPG --
+
+TITLE = "\x86Fakty\x87 wieczorne"
+SHORT = "Serwis\x8a\x86informacyjny\x87"
+LONG = "Opis\x8adlugi \x86z wyroznieniem\x87"
+
+
+def test_now_and_next_on_epg_are_clean(receiver, make_bridge, factory, settings):
+    from conftest import Event
+
+    receiver.info.events = [Event(11, 1789459200, 1800, TITLE, SHORT, LONG),
+                            Event(12, 1789461000, 1800, "\x86Pogoda\x87", "", "")]
+    _live(make_bridge, factory, settings, receiver)
+    payload = factory.client.last(ROOT + "epg").json()
+    assert (payload["now"]["title"], payload["now"]["short"], payload["now"]["long"]) == (
+        "Fakty wieczorne", "Serwis informacyjny", "Opis dlugi z wyroznieniem")
+    assert payload["next"]["title"] == "Pogoda"
+
+
+def test_the_epg_grid_titles_are_clean(receiver, make_bridge, factory, settings):
+    from conftest import Event
+    from test_epggrid import ULUBIONE, generate
+
+    receiver.epg.events[TVP1] = [Event(21, 1789459200, 1800, TITLE),
+                                 Event(22, 1789461000, 1800, "Line\x8abreak")]
+    settings.epg_grid_events.value = 4
+    bridge = _live(make_bridge, factory, settings, receiver)
+    generate(bridge)
+    payload = factory.client.last(ULUBIONE).json()
+    channel = [one for one in payload["channels"] if one["sref"] == TVP1][0]
+    assert [event["title"] for event in channel["events"]][:2] == [
+        "Fakty wieczorne", "Line break"]
+    assert "\u0086" not in factory.client.last(ULUBIONE).text
+
+
+def test_a_grid_titles_floor_counts_the_clean_title():
+    from MQTTBridge import epggrid
+
+    _sref, event = epggrid._event((TVP1, 21, 1789459200, 1800, TITLE))
+    assert event["title"] == "Fakty wieczorne"
+
+
+def test_an_instant_recording_is_named_as_the_image_names_it(receiver, make_bridge, factory,
+                                                               settings):
+    """The name goes back into the image's timer list, so it keeps the image's text; what is
+    published about that timer is clean (`timers`, `recording`)."""
+    from conftest import Event
+
+    from MQTTBridge import recording
+
+    receiver.info.events = [Event(11, 1789459200, 1800, TITLE)]
+    _live(make_bridge, factory, settings, receiver)
+    assert recording._current_title(receiver.session) == TITLE
+
+
+@pytest.mark.parametrize("code", [0x80, 0x86, 0x87, 0x9F])
+def test_one_code_alone_in_a_name_is_found(code):
+    assert dvb_text("Caf\xe9" + chr(code) + " TV") == "Caf\xe9 TV"
+
+
+def test_the_neighbours_of_the_range_stay_beside_a_code():
+    assert dvb_text("\x86\x7f\xa0\xe9\x87") == "\x7f\xa0\xe9"

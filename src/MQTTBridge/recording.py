@@ -536,7 +536,8 @@ def _current_reference(session):
 def _current_title(session):
     from .service import read_epg
 
-    now = read_epg(session).get("now") or {}
+    # The name of a timer the image keeps: as the image's own instant recording names it.
+    now = read_epg(session, clean=False).get("now") or {}
     return str(now.get("title") or "")
 
 

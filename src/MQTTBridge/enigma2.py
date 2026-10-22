@@ -18,6 +18,8 @@ and `1:0:19:283D:3FB:1:C00000:0:0:0::Channel Name` out of a bouquet, and a naive
 string comparison of the two says they are different services.
 """
 
+import re
+
 from .log import get_logger
 
 LOG = get_logger("enigma2")
@@ -264,6 +266,7 @@ def same_service(one, other):
 # code goes.
 _DVB_CONTROLS = dict.fromkeys(range(0x80, 0xA0))
 _DVB_CONTROLS[0x8A] = " "
+_DVB_CODE = re.compile("[\x80-\x9f]")
 
 
 def dvb_text(text):
@@ -272,7 +275,9 @@ def dvb_text(text):
     Applied where a name or a description is read from the image, so every topic that carries
     it - and every comparison made against it - sees the one spelling.
     """
-    if not isinstance(text, str):
+    # Most names hold none: an ASCII name, or one the search finds nothing in, is handed back
+    # as it is - the EPG grid asks this once for every event of every channel.
+    if not isinstance(text, str) or text.isascii() or not _DVB_CODE.search(text):
         return text
     return text.translate(_DVB_CONTROLS)
 

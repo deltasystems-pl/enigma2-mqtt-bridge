@@ -305,9 +305,10 @@ version that has no section here.
 
 ### Fixed
 
-- Channel names, recording names and descriptions no longer carry DVB's control codes
-  U+0080 to U+009F, which broadcasters use to mark emphasis (`\u0086Sky \u0087Cinema` is now
-  `Sky Cinema`): on `channels` and `channels/<bouquet_slug>`, the channel names of the EPG grid,
+- Channel names, programme titles and descriptions, and recording names and descriptions no
+  longer carry DVB's control codes U+0080 to U+009F, which broadcasters use to mark emphasis (`\u0086Sky \u0087Cinema` is now
+  `Sky Cinema`): on `epg` (`title`, `short` and `long` of `now` and `next`), on the EPG grid
+  (event titles and channel names), on `channels` and `channels/<bouquet_slug>`,
   `service`, `zap_history`, `stream_clients`, `recording`, `timers` and the recording library's
   folder topics, and in the channel select's options. A line break code becomes a space.
   `cmd/zap` by name accepts the old spelling as well ([TOPICS.md](docs/TOPICS.md)).
