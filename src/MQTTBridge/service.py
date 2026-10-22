@@ -43,6 +43,7 @@ from .enigma2 import (
     constant,
     current_service,
     current_service_reference,
+    dvb_text,
     identity,
     missing,
     navigation,
@@ -313,7 +314,7 @@ def read_service(session, bouquet_lookup=None, decoder=True):
     name = service_name(sref)
     if not name and info is not None:
         try:
-            name = str(info.getName() or "")
+            name = dvb_text(str(info.getName() or ""))
         except Exception:
             name = ""
     bouquet = None

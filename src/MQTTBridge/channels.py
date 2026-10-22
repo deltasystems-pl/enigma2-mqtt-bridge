@@ -24,6 +24,7 @@ import unicodedata
 
 from .enigma2 import (
     Ticker,
+    dvb_text,
     enigma_attribute,
     identity,
     missing,
@@ -266,7 +267,7 @@ def read_bouquets(wanted=None):
         if selection and name.strip().lower() not in selection and slugify(name) not in slugs:
             continue
         channels = [
-            {"sref": service, "name": label or service_name(service)}
+            {"sref": service, "name": dvb_text(label) or service_name(service)}
             for service, label in _list_entries(handler, sref)
             if is_playable(service)
         ]
@@ -579,7 +580,9 @@ class ChannelsPublisher(Publisher):
         person reading `last_error` knows to be more specific rather than
         thinking the channel is missing.
         """
-        wanted = str(name or "").strip().lower()
+        # The names are published without DVB's control codes; a name sent with them, as an
+        # older plugin published it, is the same channel.
+        wanted = dvb_text(str(name or "")).strip().lower()
         if not wanted:
             return None, "no channel name given"
         matches = []

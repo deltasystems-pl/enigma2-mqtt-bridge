@@ -257,15 +257,35 @@ def same_service(one, other):
     return bool(left) and left == identity(other)
 
 
+# DVB's own control codes, U+0080 to U+009F (ETSI EN 300 468, annex A): emphasis on and off
+# (0x86, 0x87), a line break (0x8A) and the rest reserved. enigma2 hands them through in the
+# names of services and recordings - `\x86Sky \x87Cinema` - where a reader sees boxes or
+# nothing. The line break becomes a space, so two lines do not run into one word; every other
+# code goes.
+_DVB_CONTROLS = dict.fromkeys(range(0x80, 0xA0))
+_DVB_CONTROLS[0x8A] = " "
+
+
+def dvb_text(text):
+    """`text` without DVB's control codes, U+0080 to U+009F; anything but a string as it is.
+
+    Applied where a name or a description is read from the image, so every topic that carries
+    it - and every comparison made against it - sees the one spelling.
+    """
+    if not isinstance(text, str):
+        return text
+    return text.translate(_DVB_CONTROLS)
+
+
 def service_name(sref):
-    """The channel name for a reference, through enigma2's own resolver."""
+    """The channel name for a reference, through enigma2's own resolver, as `dvb_text`."""
     try:
         from ServiceReference import ServiceReference
     except Exception as error:
         missing("ServiceReference", error)
         return ""
     try:
-        return str(ServiceReference(str(sref)).getServiceName() or "")
+        return dvb_text(str(ServiceReference(str(sref)).getServiceName() or ""))
     except Exception:
         LOG.debug("could not resolve a name for %s", sref)
         return ""

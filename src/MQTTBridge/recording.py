@@ -22,6 +22,7 @@ import time
 
 from .enigma2 import (
     Ticker,
+    dvb_text,
     enigma_attribute,
     identity,
     missing,
@@ -138,7 +139,7 @@ def _timer_sref(timer):
 def _timer_payload(timer):
     try:
         return {
-            "name": str(getattr(timer, "name", "") or ""),
+            "name": dvb_text(str(getattr(timer, "name", "") or "")),
             "sref": _timer_sref(timer),
             "begin": int(getattr(timer, "begin", 0) or 0),
             "end": int(getattr(timer, "end", 0) or 0),
@@ -220,7 +221,7 @@ def _service_name(timer):
     if not callable(getter):
         return None
     try:
-        return str(getter() or "") or None
+        return dvb_text(str(getter() or "")) or None
     except Exception:
         return None
 
@@ -241,7 +242,7 @@ def _details(timer, locations, channels):
     from .library import locate
 
     description = getattr(timer, "description", None)
-    description = " ".join(str(description).split())[:200] if description else None
+    description = " ".join(dvb_text(str(description)).split())[:200] if description else None
     location = file = recording_id = None
     path = _file_path(timer)
     if path is not None:

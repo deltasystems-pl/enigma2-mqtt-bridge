@@ -305,6 +305,12 @@ version that has no section here.
 
 ### Fixed
 
+- Channel names, recording names and descriptions no longer carry DVB's control codes
+  U+0080 to U+009F, which broadcasters use to mark emphasis (`\u0086Sky \u0087Cinema` is now
+  `Sky Cinema`): on `channels` and `channels/<bouquet_slug>`, the channel names of the EPG grid,
+  `service`, `zap_history`, `stream_clients`, `recording`, `timers` and the recording library's
+  folder topics, and in the channel select's options. A line break code becomes a space.
+  `cmd/zap` by name accepts the old spelling as well ([TOPICS.md](docs/TOPICS.md)).
 - The picture size and scan on `service` are right after enigma2 restarts. The receiver keeps
   showing the same picture through the restart, no event says so, and the image's own service
   information then reported a picture that was not on the screen, a 720p channel as

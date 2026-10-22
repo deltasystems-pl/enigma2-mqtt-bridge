@@ -3425,6 +3425,18 @@ moment.
 
 ## 6. Worth knowing
 
+- **Names come without DVB's control codes.** Broadcasters mark parts of a service's or an
+  event's name with the DVB control codes U+0080 to U+009F - emphasis on (U+0086) and off
+  (U+0087), a line break (U+008A) - and enigma2 hands them through. The plugin takes them out
+  of every channel name, recording name and description it publishes: `channels`,
+  `channels/<bouquet_slug>`, the channel names of `epg_grid/<bouquet_slug>`, `service.name`,
+  the names in `zap_history` and `stream_clients`, `name`, `service_name` and `description`
+  in `recording`, `name` in `timers`, and `name`, `description` and `service_name` in
+  `recordings/<folder_slug>` - and so of the channel select's options in discovery. A line
+  break becomes a space, every other code goes. `cmd/zap` by name finds a channel by either
+  spelling. A recording's `file` keeps the bytes of its file name. Since after 0.4.0
+  (unreleased); an earlier plugin published `\u0086Sky \u0087Cinema` where this one
+  publishes `Sky Cinema`.
 - **A retained state topic is a snapshot, not a heartbeat.** `service` showing a channel means
   that is the last channel the box tuned - check `availability` before believing it is on.
 - **An ACL-denied publish looks exactly like a successful one.** Mosquitto drops it silently.

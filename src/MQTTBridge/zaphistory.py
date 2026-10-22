@@ -43,6 +43,7 @@ the household's language.
 from .enigma2 import (
     Ticker,
     current_service_reference,
+    dvb_text,
     enigma_attribute,
     identity,
     missing,
@@ -309,7 +310,7 @@ class ZapHistoryPublisher(Publisher):
         if not name and center is not None:
             try:
                 info = center.info(reference)
-                name = str(info.getName(reference) or "") if info else ""
+                name = dvb_text(str(info.getName(reference) or "")) if info else ""
             except Exception:
                 name = ""
         return name or None

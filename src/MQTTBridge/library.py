@@ -42,6 +42,7 @@ import time
 from .channels import slugify, topic_slugs
 from .enigma2 import (
     Ticker,
+    dvb_text,
     enigma_attribute,
     missing,
     reference_string,
@@ -171,7 +172,7 @@ def valid_id(value):
 
 
 def _cut(text):
-    text = " ".join(str(text).split()) if text is not None else ""
+    text = " ".join(dvb_text(str(text)).split()) if text is not None else ""
     return text[:TEXT_LIMIT] if text else None
 
 
