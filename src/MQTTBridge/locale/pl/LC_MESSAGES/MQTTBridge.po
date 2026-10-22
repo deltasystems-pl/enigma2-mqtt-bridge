@@ -1547,3 +1547,31 @@ msgstr "Nagranie trafia do kosza dekodera; kiedy kosz zostanie opróżniony, dec
 #: src/MQTTBridge/webif.py
 msgid "Read the recording library again"
 msgstr "Wczytaj ponownie listę nagrań"
+
+#: src/MQTTBridge/config.py
+msgid "PREVIOUS (Back on many TV remotes)"
+msgstr "PREVIOUS (Wstecz na wielu pilotach TV)"
+
+#: src/MQTTBridge/config.py
+msgid "PLAY/PAUSE"
+msgstr "PLAY/PAUSE"
+
+#: src/MQTTBridge/setup.py
+msgid "Key pressed several times to open the menu"
+msgstr "Klawisz naciskany kilka razy, by otworzyć menu"
+
+#: src/MQTTBridge/setup.py
+msgid "Presses that open the menu"
+msgstr "Liczba naciśnięć otwierająca menu"
+
+#: src/MQTTBridge/setup.py
+msgid "Longest pause between two presses"
+msgstr "Najdłuższa przerwa między naciśnięciami"
+
+#: src/MQTTBridge/webif.py
+msgid "Or %s pressed %s times, at most %s apart."
+msgstr "Albo %s naciśnięty %s razy, w odstępach do %s."
+
+#: src/MQTTBridge/webif.py
+msgid "While a key is chosen for the press combo, that key does nothing else in live TV and the players."
+msgstr "Gdy dla kombinacji naciśnięć wybrano klawisz, ten klawisz w telewizji na żywo i w odtwarzaczach nie robi nic innego."

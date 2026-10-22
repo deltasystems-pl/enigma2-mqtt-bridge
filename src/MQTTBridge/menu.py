@@ -921,6 +921,7 @@ class MenuPublisher(Publisher):
         self._versions_logged = set()
         self._types_logged = set()
         self._hotkey = None
+        self._combo = None
         # The `menu_action`s handed to the client and not acknowledged yet.
         self._unacknowledged = []
         # The topics the open session subscribed for the menu, so a save can take them back.
@@ -955,8 +956,12 @@ class MenuPublisher(Publisher):
 
         self._hotkey = Hotkey(self.hotkey_pressed)
         self._hotkey.bind(self.value("menu_hotkey"))
-        LOG.info("the receiver menu is ready (screen %s, hotkey %s)", self.screen_kind,
-                 self._hotkey.bound or "-")
+        from .combo import Combo
+
+        self._combo = Combo(self.combo_screen, self.hotkey_pressed)
+        self._combo.bind(*self._combo_settings())
+        LOG.info("the receiver menu is ready (screen %s, hotkey %s, press combo %s)",
+                 self.screen_kind, self._hotkey.bound or "-", self._combo.bound or "-")
         return True
 
     def claimed(self):
@@ -975,6 +980,8 @@ class MenuPublisher(Publisher):
             self._ticker.stop()
             if self._hotkey is not None:
                 self._hotkey.unbind()
+            if self._combo is not None:
+                self._combo.unbind()
             for controller in list(self._controllers):
                 controller._close()
         except Exception:
@@ -985,14 +992,40 @@ class MenuPublisher(Publisher):
         if self._hotkey is not None:
             self._hotkey.bind(self.value("menu_hotkey"))
 
+    def _combo_settings(self):
+        return (self.value("menu_combo_key"), self.value("menu_combo_presses"),
+                self.value("menu_combo_gap_ms"))
+
+    def rebind_combo(self):
+        """A press combo setting changed: bind the new combo, let go of the old.
+
+        Nothing is done when the three settings are what is bound already, so a `cmd/config`
+        that changes something else neither reads the keymap again nor drops a count.
+        """
+        if self._combo is not None and self._combo.settings() != self._combo_settings():
+            self._combo.bind(*self._combo_settings())
+
+    def combo_screen(self):
+        """The executing dialog when the press combo counts over it - live TV or a player - else
+        None (`combo.py`). The hotkey's screens: one rule for both."""
+        session = self.session
+        dialog = getattr(session, "current_dialog", None) if session is not None else None
+        if dialog is None or not hotkey_screen(dialog):
+            return None
+        return dialog
+
     # ---------------------------------------------------------------- `info` --
 
     def info(self):
-        """`info.menu`: which screen this image builds, and which key opens it."""
+        """`info.menu`: which screen this image builds, and which keys open it."""
         hotkey, reason = (None, None)
         if self._hotkey is not None:
             hotkey, reason = self._hotkey.report()
-        return {"screen": self.screen_kind, "hotkey": hotkey, "reason": reason}
+        combo, combo_reason = (None, None)
+        if self._combo is not None:
+            combo, combo_reason = self._combo.report()
+        return {"screen": self.screen_kind, "hotkey": hotkey, "reason": reason,
+                "combo": combo, "combo_reason": combo_reason}
 
     # ---------------------------------------------------------------- topics --
 
@@ -1308,6 +1341,9 @@ class MenuPublisher(Publisher):
                 LOG.warning("the menu could not be opened: %s", refusal)
                 return False
         self._controllers.append(controller)
+        if self._combo is not None:
+            # However it opened, presses before it count toward nothing.
+            self._combo.reset()
         if (self.screen_kind, self.screen_reason) != before and self.bridge is not None:
             self.bridge.announce_capabilities()
         return True

@@ -90,6 +90,9 @@ def setting_labels():
         ("menu_allowed", _("Allow the Home Assistant menu")),
         ("menu_hotkey", _("Key that opens the Home Assistant menu")),
         ("menu_transparency", _("Menu background transparency")),
+        ("menu_combo_key", _("Key pressed several times to open the menu")),
+        ("menu_combo_presses", _("Presses that open the menu")),
+        ("menu_combo_gap_ms", _("Longest pause between two presses")),
     )
 
 

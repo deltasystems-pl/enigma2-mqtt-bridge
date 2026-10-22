@@ -1548,3 +1548,31 @@ msgstr "Die Aufnahme wird in den Papierkorb des Receivers verschoben; wann er ge
 #: src/MQTTBridge/webif.py
 msgid "Read the recording library again"
 msgstr "Aufnahmeliste neu einlesen"
+
+#: src/MQTTBridge/config.py
+msgid "PREVIOUS (Back on many TV remotes)"
+msgstr "PREVIOUS (Zurück auf vielen TV-Fernbedienungen)"
+
+#: src/MQTTBridge/config.py
+msgid "PLAY/PAUSE"
+msgstr "PLAY/PAUSE"
+
+#: src/MQTTBridge/setup.py
+msgid "Key pressed several times to open the menu"
+msgstr "Mehrmals gedrückte Taste, die das Menü öffnet"
+
+#: src/MQTTBridge/setup.py
+msgid "Presses that open the menu"
+msgstr "Anzahl der Tastendrücke zum Öffnen des Menüs"
+
+#: src/MQTTBridge/setup.py
+msgid "Longest pause between two presses"
+msgstr "Längste Pause zwischen zwei Tastendrücken"
+
+#: src/MQTTBridge/webif.py
+msgid "Or %s pressed %s times, at most %s apart."
+msgstr "Oder %s, %s-mal gedrückt, mit höchstens %s Abstand."
+
+#: src/MQTTBridge/webif.py
+msgid "While a key is chosen for the press combo, that key does nothing else in live TV and the players."
+msgstr "Solange für die Tastenfolge eine Taste gewählt ist, hat diese Taste im Live-TV und in den Playern keine andere Funktion."

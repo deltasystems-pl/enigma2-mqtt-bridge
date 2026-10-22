@@ -470,7 +470,10 @@ def test_the_status_topic_follows_the_discovery_prefix(make_bridge, factory, set
 def test_the_capability_and_info_say_the_menu_is_there(world):
     info = world.info()
     assert "menu" in info["capabilities"]
-    assert info["menu"] == {"screen": "styled", "hotkey": "help_long", "reason": None}
+    assert info["menu"] == {
+        "screen": "styled", "hotkey": "help_long", "reason": None,
+        "combo": None,
+        "combo_reason": "the press combo is switched off in the plugin's settings"}
     assert info["settings"]["menu_allowed"] is True
     assert info["settings"]["menu_hotkey"] == "help_long"
 
@@ -1612,7 +1615,9 @@ def test_hotkey_off_binds_nothing_and_says_why(make_bridge, factory, settings):
     assert world.receiver.actions.keys == []
     assert world.info()["menu"] == {
         "screen": "styled", "hotkey": None,
-        "reason": "the hotkey is switched off in the plugin's settings"}
+        "reason": "the hotkey is switched off in the plugin's settings",
+        "combo": None,
+        "combo_reason": "the press combo is switched off in the plugin's settings"}
     assert "menu" in world.info()["capabilities"]
 
 
@@ -1650,7 +1655,9 @@ def test_a_key_the_image_assigns_is_reported_as_not_bound(world, monkeypatch, se
     world.bridge.publish_info()
     assert world.info()["menu"] == {
         "screen": "styled", "hotkey": None,
-        "reason": "the receiver's own button setup gives this key a function"}
+        "reason": "the receiver's own button setup gives this key a function",
+        "combo": None,
+        "combo_reason": "the press combo is switched off in the plugin's settings"}
 
 
 def test_an_image_that_cannot_bind_a_key_still_has_the_menu(make_bridge, factory, settings,
@@ -1661,7 +1668,9 @@ def test_an_image_that_cannot_bind_a_key_still_has_the_menu(make_bridge, factory
     world = World(make_bridge, factory, settings)
     assert world.info()["menu"] == {
         "screen": "styled", "hotkey": None,
-        "reason": "this image does not let a plugin bind a key"}
+        "reason": "this image does not let a plugin bind a key",
+        "combo": None,
+        "combo_reason": "the press combo is switched off in the plugin's settings"}
     assert "menu" in world.info()["capabilities"]
 
 

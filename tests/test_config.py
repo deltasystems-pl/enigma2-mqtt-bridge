@@ -46,6 +46,9 @@ EXPECTED_DEFAULTS = {
     "menu_allowed": True,
     "menu_hotkey": "help_long",
     "menu_transparency": 20,
+    "menu_combo_key": "off",
+    "menu_combo_presses": 3,
+    "menu_combo_gap_ms": 1200,
     "log_level": "info",
     "epg_grid_events": 4,
 }
@@ -115,6 +118,9 @@ def test_remote_settings_are_exact_and_strictly_typed():
         "softcam_autoheal_seconds": 90,
         "menu_hotkey": "help_long",
         "menu_transparency": 20,
+        "menu_combo_key": "off",
+        "menu_combo_presses": 3,
+        "menu_combo_gap_ms": 1200,
     }
 
 

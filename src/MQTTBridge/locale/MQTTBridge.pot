@@ -1547,3 +1547,31 @@ msgstr ""
 #: src/MQTTBridge/webif.py
 msgid "Read the recording library again"
 msgstr ""
+
+#: src/MQTTBridge/config.py
+msgid "PREVIOUS (Back on many TV remotes)"
+msgstr ""
+
+#: src/MQTTBridge/config.py
+msgid "PLAY/PAUSE"
+msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "Key pressed several times to open the menu"
+msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "Presses that open the menu"
+msgstr ""
+
+#: src/MQTTBridge/setup.py
+msgid "Longest pause between two presses"
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "Or %s pressed %s times, at most %s apart."
+msgstr ""
+
+#: src/MQTTBridge/webif.py
+msgid "While a key is chosen for the press combo, that key does nothing else in live TV and the players."
+msgstr ""

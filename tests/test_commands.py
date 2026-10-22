@@ -149,6 +149,9 @@ def test_config_persists_all_values_rebinds_hooks_and_publishes_info(
         "menu_allowed": True,
         "menu_hotkey": "help_long",
         "menu_transparency": 20,
+        "menu_combo_key": "off",
+        "menu_combo_presses": 3,
+        "menu_combo_gap_ms": 1200,
     }
 
 

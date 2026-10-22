@@ -243,7 +243,13 @@
   "info_menu_members": {
     "screen": "string",
     "hotkey": "string or null",
-    "reason": "string or null"
+    "reason": "string or null",
+    "combo": "object or null",
+    "combo.key": "string",
+    "combo.presses": "integer",
+    "combo.gap_ms": "integer",
+    "combo.replaces": "array of strings or null",
+    "combo_reason": "string or null"
   },
   "info_list_members": {
     "screen": "string"
@@ -286,6 +292,18 @@
       "writable": true
     },
     "menu_transparency": {
+      "type": "int",
+      "writable": true
+    },
+    "menu_combo_key": {
+      "type": "enum(off|previous|exit|playpause|stop)",
+      "writable": true
+    },
+    "menu_combo_presses": {
+      "type": "int",
+      "writable": true
+    },
+    "menu_combo_gap_ms": {
       "type": "int",
       "writable": true
     },

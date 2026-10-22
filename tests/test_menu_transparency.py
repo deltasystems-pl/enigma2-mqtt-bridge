@@ -33,7 +33,8 @@ def test_it_is_remote_published_and_in_the_menu_settings():
     assert "menu_transparency" in settings_module.REMOTE_SETTING_NAMES
     assert "menu_transparency" not in settings_module.READ_ONLY_SETTING_NAMES
     assert settings_module.MENU_SETTING_NAMES == ("menu_allowed", "menu_hotkey",
-                                                  "menu_transparency")
+                                                  "menu_transparency", "menu_combo_key",
+                                                  "menu_combo_presses", "menu_combo_gap_ms")
     assert settings_module.SETTING_KINDS["menu_transparency"] == "int"
 
 
@@ -158,6 +159,7 @@ def test_the_menu_section_is_last_under_its_heading(settings):
     heading = entries.index(("Home Assistant menu",))
     assert [entry[1] for entry in entries[heading + 1:]] == [
         settings.menu_allowed, settings.menu_hotkey, settings.menu_transparency,
+        settings.menu_combo_key, settings.menu_combo_presses, settings.menu_combo_gap_ms,
     ]
     # The one other heading above it is the recordings', over their one setting.
     recordings = entries.index(("Recordings",))
@@ -170,7 +172,9 @@ def test_the_menu_section_is_last_under_its_heading(settings):
 
 def test_the_screen_order_still_pins_the_configuration_order():
     names = [name for name, _label in setup_screen.setting_labels()]
-    assert names[-3:] == list(settings_module.MENU_SETTING_NAMES)
+    assert names[-len(settings_module.MENU_SETTING_NAMES):] == list(
+        settings_module.MENU_SETTING_NAMES
+    )
 
 
 class _Session:

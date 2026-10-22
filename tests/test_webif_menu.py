@@ -260,7 +260,10 @@ def menu_settings(section, **overrides):
               "rendered": webif._rendered_values(section, settings_module.MENU_SETTING_NAMES),
               "menu_allowed": ["false", "true"] if section.menu_allowed.value else ["false"],
               "menu_hotkey": section.menu_hotkey.value,
-              "menu_transparency": str(settings_module.value("menu_transparency", section))}
+              "menu_transparency": str(settings_module.value("menu_transparency", section)),
+              "menu_combo_key": section.menu_combo_key.value,
+              "menu_combo_presses": str(settings_module.value("menu_combo_presses", section)),
+              "menu_combo_gap_ms": str(settings_module.value("menu_combo_gap_ms", section))}
     for name, value in overrides.items():
         if isinstance(value, bool):
             value = ["false", "true"] if value else ["false"]
