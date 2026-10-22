@@ -160,8 +160,12 @@ The receiver shows it on the television:
   says `KEY_PREVIOUS` or `KEY_EXIT`. **While a combo key is set, that key does nothing else in
   live TV** - one or two presses do nothing at all - so on OpenViX Back no longer zaps back to
   the previous channel there. `previous` counts while a recording or a media file plays too;
-  EXIT, STOP and PLAY/PAUSE do not, so in a player they still leave, stop and pause it. In menus,
-  lists and the EPG every key works as before. A function you assigned to that key in the receiver's button setup
+  EXIT, STOP and PLAY/PAUSE do not, so in a player they still leave, stop and pause it - but in
+  live TV, with `exit` EXIT no longer hides the info bar, with `stop` STOP no longer stops
+  timeshift and with `playpause` PLAY/PAUSE no longer pauses it. In menus, lists and the EPG
+  every key works as before. A press sent from Home Assistant's remote (`cmd/key`) counts and
+  is taken like the remote's own. On the Home Assistant menu and the list of choices PREVIOUS
+  always works as EXIT, whatever the combo is set to, so a television's Back leaves them. A function you assigned to that key in the receiver's button setup
   does not run there either. `info.menu.combo.replaces` lists what the key no longer does
   ([ADR-0025](adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md)). `off` gives the key back.
 - **Use it** with the arrows and OK; EXIT goes back. OK switches a light or a switch, runs a scene

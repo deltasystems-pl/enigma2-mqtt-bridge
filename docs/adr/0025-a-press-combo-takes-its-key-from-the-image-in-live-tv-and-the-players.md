@@ -95,3 +95,29 @@ so it would never even see this key in live TV.
   longer stops timeshift there; with `playpause`, PLAY/PAUSE no longer starts or pauses
   timeshift there. In the players all three keep working, which is why they count in live TV
   alone. The setting is off by default and the household chooses which key to give up.
+- A press sent with `cmd/key` is a press like the remote's: it counts toward the combo and is
+  taken where the remote's would be. A remote card in Home Assistant that sends Back three times
+  opens the menu as the television's remote does.
+- When the menu cannot open - no menu screen can be built, a menu is still listed as open, both
+  screens refused - the key is still taken, by the rule above: no press of it does the image's
+  work while the combo is set. The log says why, once for each cause, so a dead key in live TV
+  has a line that explains it.
+
+## Amendment 2026-10-22 - PREVIOUS on the plugin's own screens
+
+On OpenViX `KEY_PREVIOUS` is no cancel: `OkCancelActions` maps only EXIT, and `DirectionActions`
+maps `KEY_PREVIOUS` to `shiftUp`. A television's remote whose Back arrives as `KEY_PREVIOUS` could
+open the receiver menu with the combo and then not leave it.
+
+1. **On the screens the plugin opens - the receiver menu and the list of choices, the plugin's own
+   styled screens and the image's `ChoiceBox` in their place - `KEY_PREVIOUS` does what EXIT does
+   there**: back one level, or close. Whatever `menu_combo_key` is, `off` included. The image's own
+   screens are unchanged, among them the keyboard a menu row opens.
+2. **Bound per screen, from its opening to its close** (`backkey.py`): the key is mapped at run
+   time, on its make only, into a context of the plugin's own while any such screen is open, and
+   each screen binds it at `-sys.maxsize + 1` - after the combo, before the image - answering only
+   while it is the executing dialog.
+3. **The press that opened a screen is never its EXIT.** Its binding is made while that press is
+   handed out, and enigma2's dispatcher hands a press's repeats and break only to a binding that
+   saw its make; only the make is mapped anyway. The menu the third Back of a combo opened stays
+   open, and the next Back leaves it.

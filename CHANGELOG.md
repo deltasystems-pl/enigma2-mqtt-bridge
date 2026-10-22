@@ -13,22 +13,28 @@ version that has no section here.
 
 - A second way to open the receiver menu, for a television's own remote over HDMI-CEC - which
   has no HELP, no colour keys and no long press: the **press combo**, a key pressed several times
-  in quick succession in live TV - `previous` also while a recording or a media file plays. Three
-  settings,
-  writable through `cmd/config` and on the setup screen's and the OpenWebif Menu page's menu
-  section: `menu_combo_key` (`off` by default, `previous`, `exit`, `playpause` or `stop` - a
-  television's Back usually arrives as `previous` or `exit`), `menu_combo_presses` (2 to 5, 3 by
-  default) and `menu_combo_gap_ms` (the longest pause between two presses, 300 to 3000 ms in
-  steps of 100, 1200 by default). A change applies at once, without a reconnect. The hotkey keeps
-  working beside it. **While a combo key is set, that key does nothing else in live TV** - and,
-  for `previous`, in the players; EXIT, STOP and PLAY/PAUSE keep working in a player - one or two
-  presses do nothing at all, and on OpenViX Back no longer zaps back in
-  the history there, nor runs a function the receiver's button setup gives it; in every other
-  screen it works as before. New `info.menu` members `combo` - the key, the count, the gap and
-  `replaces`, what the key no longer does there, read from the image's keymap and button
-  setup - and `combo_reason`
+  in quick succession in live TV, and for `previous` also while a recording or a media file
+  plays. Three settings, writable through `cmd/config` and on the setup screen's and the
+  OpenWebif Menu page's menu section: `menu_combo_key` (`off` by default, `previous`, `exit`,
+  `playpause` or `stop` - a television's Back usually arrives as `previous` or `exit`),
+  `menu_combo_presses` (2 to 5, 3 by default) and `menu_combo_gap_ms` (the longest pause between
+  two presses, 300 to 3000 ms in steps of 100, 1200 by default). A change applies at once,
+  without a reconnect. The hotkey keeps working beside it. **While a combo key is set, that key
+  does nothing else in live TV**, and for `previous` in the players: one or two presses do
+  nothing at all, so on OpenViX Back no longer zaps back in the history there, nor runs a
+  function the receiver's button setup gives it. With `exit`, `stop` or `playpause` the info
+  bar's hide, the timeshift stop or the timeshift pause are gone in live TV; in a player those
+  three keys keep working. Presses sent with `cmd/key` count and are taken like the remote's. In
+  every other screen the key works as before. New `info.menu` members `combo` - the key, the
+  count, the gap and `replaces`, what the key no longer does there, read from the image's keymap
+  and button setup - and `combo_reason`
   ([ADR-0025](docs/adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md), [TOPICS.md](docs/TOPICS.md), [SETUP.md](docs/SETUP.md)).
   English, Polish and German.
+- PREVIOUS works as EXIT on the plugin's own screens - the receiver menu and the list of
+  choices, styled or the image's own list in their place - whatever `menu_combo_key` is: back
+  one level, or close. On OpenViX that key is no cancel, so a television's remote whose Back
+  arrives as `KEY_PREVIOUS` could open the menu and not leave it. The image's own screens, the
+  keyboard a menu row opens among them, are unchanged ([ADR-0025](docs/adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md)).
 - A list of choices on the television, opened by Home Assistant: the new command `cmd/list` puts a
   question - a title, a text and 1 to 24 labelled rows, each with an optional colour or number key
   and icon - over whatever is on screen, and the receiver answers once on the new event topic
@@ -310,7 +316,9 @@ version that has no section here.
   `Sky Cinema`): on `epg` (`title`, `short` and `long` of `now` and `next`), on the EPG grid
   (event titles and channel names), on `channels` and `channels/<bouquet_slug>`,
   `service`, `zap_history`, `stream_clients`, `recording`, `timers` and the recording library's
-  folder topics, and in the channel select's options. A line break code becomes a space.
+  folder topics, and in the channel select's options. A line break code becomes a space. The
+  OpenPLi family's form of the same codes, U+E080 to U+E09F, goes too, and so do the codes in
+  `service.provider`.
   `cmd/zap` by name accepts the old spelling as well ([TOPICS.md](docs/TOPICS.md)).
 - The picture size and scan on `service` are right after enigma2 restarts. The receiver keeps
   showing the same picture through the restart, no event says so, and the image's own service

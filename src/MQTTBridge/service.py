@@ -335,7 +335,7 @@ def read_service(session, bouquet_lookup=None, decoder=True):
         "sref": sref,
         "name": name or None,
         "bouquet": bouquet,
-        "provider": _text(info, "sProvider"),
+        "provider": dvb_text(_text(info, "sProvider")),
         "width": shown["width"],
         "height": shown["height"],
         "video_codec": video_codec(info),

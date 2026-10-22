@@ -3042,7 +3042,14 @@ The hotkey takes nothing from the image; the press combo does: while `menu_combo
 press of that key in live TV counts toward the menu and does nothing else there - and so it does
 in the players for `previous`; `exit`, `stop` and `playpause` reach a player untouched -
 the image's own function on it and an assignment in its button setup are switched off, and
-`info.menu.combo.replaces` (§1) names them - while in every other screen the key works as before
+`info.menu.combo.replaces` (§1) names them - while in every other screen the key works as before.
+A press sent with `cmd/key` (§2) is a press like the remote's: it counts toward the combo and is
+taken where the remote's would be. **PREVIOUS is EXIT on the plugin's own screens** - this menu
+and the list of choices, styled or the image's own list in their place - whatever
+`menu_combo_key` is: back one level, or close; on OpenViX that key is no cancel, and a remote
+whose Back arrives as `KEY_PREVIOUS` could otherwise not leave the menu. The press that opened
+a screen is never taken as its EXIT. The image's own screens are unchanged, the keyboard a row
+opens among them
 ([ADR-0025](adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md)).
 
 The menu is published by the companion integration, retained, at QoS 1, on
@@ -3427,14 +3434,15 @@ moment.
 
 - **Names come without DVB's control codes.** Broadcasters mark parts of a service's or an
   event's name with the DVB control codes U+0080 to U+009F - emphasis on (U+0086) and off
-  (U+0087), a line break (U+008A) - and enigma2 hands them through. The plugin takes them out
+  (U+0087), a line break (U+008A) - and enigma2 hands them through; the OpenPLi family's
+  decoder hands them over as U+E080 to U+E09F instead. The plugin takes both forms out
   of every channel name, programme title and description, and recording name and description
   it publishes: `title`, `short` and `long` of `epg`'s `now` and `next`; the event titles and
   channel names of `epg_grid/<bouquet_slug>`; `channels` and `channels/<bouquet_slug>`;
-  `service.name`; the names in `zap_history` and `stream_clients`; `name`, `service_name` and
+  `service.name` and `service.provider`; the names in `zap_history` and `stream_clients`; `name`, `service_name` and
   `description` in `recording`; `name` in `timers`; `name`, `description` and `service_name` in
   `recordings/<folder_slug>` - and so the channel select's options in discovery. A line break
-  becomes a space, every other code goes. `cmd/zap` by name finds a channel by either spelling.
+  (U+008A, U+E08A) becomes a space, every other code goes. `cmd/zap` by name finds a channel by either spelling.
   A recording started with `cmd/record` is named in the receiver's own timer list as the image
   would name it; what `timers` and `recording` publish about it is clean. A recording's `file`
   keeps the bytes of its file name. Since after 0.4.0 (unreleased); an earlier plugin published

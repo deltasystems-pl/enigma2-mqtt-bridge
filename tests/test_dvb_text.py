@@ -238,3 +238,47 @@ def test_one_code_alone_in_a_name_is_found(code):
 
 def test_the_neighbours_of_the_range_stay_beside_a_code():
     assert dvb_text("\x86\x7f\xa0\xe9\x87") == "\x7f\xa0\xe9"
+
+
+# ------------------------------------------------- the private use form (OpenPLi) --
+
+
+def test_the_private_use_form_goes_too():
+    assert dvb_text("\ue086Sky \ue087Cinema") == "Sky Cinema"
+    assert dvb_text("Serwis\ue08ainformacyjny") == "Serwis informacyjny"
+
+
+@pytest.mark.parametrize("code", [0xE080, 0xE086, 0xE087, 0xE09F])
+def test_one_private_use_code_alone_in_a_name_is_found(code):
+    assert dvb_text("Caf\xe9" + chr(code) + " TV") == "Caf\xe9 TV"
+
+
+def test_every_private_use_code_goes_and_nothing_either_side_of_it():
+    assert dvb_text("".join(chr(code) for code in range(0xE080, 0xE0A0))) == " "
+    assert dvb_text("\ue086\ue07f\ue0a0x\ue087") == "\ue07f\ue0a0x"
+    kept = "\ue07f\ue0a0 a"
+    assert dvb_text(kept) == kept
+
+
+def test_both_forms_in_one_name():
+    assert dvb_text("\x86A\x87 \ue086B\ue087\x8aC\ue08aD") == "A B C D"
+
+
+def test_an_epg_title_in_the_private_use_form_is_clean(receiver, make_bridge, factory,
+                                                       settings):
+    from conftest import Event
+
+    receiver.info.events = [Event(11, 1789459200, 1800, "\ue086Fakty\ue087", "a\ue08ab", "")]
+    _live(make_bridge, factory, settings, receiver)
+    now = factory.client.last(ROOT + "epg").json()["now"]
+    assert (now["title"], now["short"]) == ("Fakty", "a b")
+
+
+def test_the_provider_is_clean(receiver, make_bridge, factory, settings, monkeypatch):
+    from MQTTBridge import service as service_module
+
+    real = service_module._text
+    monkeypatch.setattr(service_module, "_text", lambda info, name: (
+        "\x86Cyfrowy\x87 Polsat" if name == "sProvider" else real(info, name)))
+    _live(make_bridge, factory, settings, receiver)
+    assert factory.client.last(ROOT + "service").json()["provider"] == "Cyfrowy Polsat"

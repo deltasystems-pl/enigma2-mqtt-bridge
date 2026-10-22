@@ -119,8 +119,18 @@ interface remains responsive; only a slow-batch or event-loop warning indicates 
   The presses must be the key the receiver receives: watch the `key` topic while you press it
   (a television's Back arrives as `KEY_PREVIOUS` or `KEY_EXIT`), and press faster than
   `menu_combo_gap_ms` between presses. It counts in live TV - and, for `previous`, while a
-  recording or a media file plays - not over another screen. A held key counts once from the receiver's remote; over HDMI-CEC
-  a held key may arrive as several presses, and those count.
+  recording or a media file plays - not over another screen. A held key counts once from the
+  receiver's remote; over HDMI-CEC a held key may arrive as several presses, and those count.
+  So do presses sent with `cmd/key`, from a remote card in Home Assistant.
+- **Back does nothing in live TV and the menu never opens**: the press combo takes its key in
+  live TV whether or not the menu can open, so no press of it zaps. When the menu cannot open -
+  no menu screen can be built on this image, a menu is still open, or neither the styled screen
+  nor the image's own list opened - the log says `the press combo asked for the receiver menu
+  and it could not open` with the reason, once for each reason. Read `info.menu` and the lines
+  before it; set `menu_combo_key` to `off` to give the key back meanwhile.
+- **Back does not leave the menu**: on the Home Assistant menu and the list of choices PREVIOUS
+  is EXIT, whatever the combo is set to. A television whose Back arrives as another key that the
+  receiver does not read as EXIT cannot leave them with it; the `key` topic says which key it is.
 
 ## A key stopped working in live TV
 

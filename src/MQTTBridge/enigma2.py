@@ -262,15 +262,18 @@ def same_service(one, other):
 # DVB's own control codes, U+0080 to U+009F (ETSI EN 300 468, annex A): emphasis on and off
 # (0x86, 0x87), a line break (0x8A) and the rest reserved. enigma2 hands them through in the
 # names of services and recordings - `\x86Sky \x87Cinema` - where a reader sees boxes or
-# nothing. The line break becomes a space, so two lines do not run into one word; every other
-# code goes.
-_DVB_CONTROLS = dict.fromkeys(range(0x80, 0xA0))
+# nothing. The OpenPLi family's decoder hands the same codes over in the private use area
+# instead, U+E080 to U+E09F. The line break becomes a space in either form, so two lines do
+# not run into one word; every other code goes.
+_DVB_CONTROLS = dict.fromkeys(list(range(0x80, 0xA0)) + list(range(0xE080, 0xE0A0)))
 _DVB_CONTROLS[0x8A] = " "
-_DVB_CODE = re.compile("[\x80-\x9f]")
+_DVB_CONTROLS[0xE08A] = " "
+_DVB_CODE = re.compile("[\x80-\x9f\ue080-\ue09f]")
 
 
 def dvb_text(text):
-    """`text` without DVB's control codes, U+0080 to U+009F; anything but a string as it is.
+    """`text` without DVB's control codes - U+0080 to U+009F, or U+E080 to U+E09F; anything but
+    a string as it is.
 
     Applied where a name or a description is read from the image, so every topic that carries
     it - and every comparison made against it - sees the one spelling.
