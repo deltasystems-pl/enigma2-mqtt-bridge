@@ -862,6 +862,15 @@ class MenuController:
 # ----------------------------------------------------------------- the publisher --
 
 
+def live_tv_screen(dialog):
+    """Whether `dialog` is the info bar itself: live TV, and no player."""
+    try:
+        from Screens.InfoBar import InfoBar
+    except Exception:
+        return False
+    return dialog is not None and dialog is getattr(InfoBar, "instance", None)
+
+
 def hotkey_screen(dialog):
     """Whether the hotkey may open the menu over `dialog`: live TV or a player.
 
@@ -958,7 +967,7 @@ class MenuPublisher(Publisher):
         self._hotkey.bind(self.value("menu_hotkey"))
         from .combo import Combo
 
-        self._combo = Combo(self.combo_screen, self.hotkey_pressed)
+        self._combo = Combo(self.combo_screen, self.hotkey_pressed, live_tv_screen)
         self._combo.bind(*self._combo_settings())
         LOG.info("the receiver menu is ready (screen %s, hotkey %s, press combo %s)",
                  self.screen_kind, self._hotkey.bound or "-", self._combo.bound or "-")

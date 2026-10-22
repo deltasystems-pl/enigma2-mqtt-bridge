@@ -118,15 +118,15 @@ interface remains responsive; only a slow-batch or event-loop warning indicates 
 - **The press combo does nothing**: read `info.menu.combo` - `null` with `combo_reason` says why.
   The presses must be the key the receiver receives: watch the `key` topic while you press it
   (a television's Back arrives as `KEY_PREVIOUS` or `KEY_EXIT`), and press faster than
-  `menu_combo_gap_ms` between presses. It counts in live TV and while a recording or a media file
-  plays, not over another screen. A held key counts once from the receiver's remote; over HDMI-CEC
+  `menu_combo_gap_ms` between presses. It counts in live TV - and, for `previous`, while a
+  recording or a media file plays - not over another screen. A held key counts once from the receiver's remote; over HDMI-CEC
   a held key may arrive as several presses, and those count.
 
 ## A key stopped working in live TV
 
-- **Back (or EXIT, PLAY/PAUSE, STOP) does nothing in live TV or in a player, but works in the
-  menus**: it is the press combo's key (`menu_combo_key`). While a key is set there it only counts
-  toward the Home Assistant menu in live TV and the players, and its own function there - on
+- **Back (or EXIT, PLAY/PAUSE, STOP) does nothing in live TV, but works in the menus**: it is the
+  press combo's key (`menu_combo_key`). While a key is set there it only counts toward the Home
+  Assistant menu in live TV - PREVIOUS in the players too - and its own function there - on
   OpenViX, Back zapping to the previous channel - and anything assigned to it in the receiver's
   button setup do not run. `info.menu.combo.replaces` lists them. Set `menu_combo_key` to `off`
   (or to another key) to give it back; the change applies at once.

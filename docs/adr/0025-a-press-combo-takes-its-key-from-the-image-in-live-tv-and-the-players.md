@@ -36,16 +36,19 @@ so it would never even see this key in live TV.
    (`menu_combo_gap_ms`, 300 to 3000 ms in steps of 100, 1200 by default) - are on the television's
    setup screen, the OpenWebif page's Menu subpage and writable through `cmd/config`, like the
    hotkey. No arrow, OK or number key is offered: live TV needs them.
-2. **While a combo key is set, that key only counts toward the menu in live TV and the players.**
-   These are exactly the screens the hotkey opens the menu over (`menu.hotkey_screen`): the info
-   bar, the image's movie player and the players built on it, and the image's media player. The
-   image's own function on the key there - on OpenViX the history zap - is switched off, so no
+2. **While a combo key is set, that key only counts toward the menu where it counts.**
+   `previous` counts in live TV and the players - exactly the screens the hotkey opens the menu
+   over (`menu.hotkey_screen`): the info bar, the image's movie player and the players built on
+   it, and the image's media player. `exit`, `stop` and `playpause` count **over the info bar
+   alone**, live TV: in a player they are how the viewer leaves, stops and pauses it, so there
+   they reach the player untouched - not consumed, not counted. The image's own function on the
+   key where it counts - on OpenViX the history zap - is switched off, so no
    press of the combo key does anything else: not the first N-1, not a lone press. **In every other
    screen** - menus, lists, the EPG, this plugin's own menu and list - the key reaches the image as
    before. This departs from ADR-0021 ("take nothing from the image") for the combo's key only:
    a key that only opened the menu on the N-th press would zap twice on the way, and open the menu
    over another channel.
-3. **Everything of the key is consumed on those screens**: the make, the break, the repeats and
+3. **Everything of the key is consumed where it counts**: the make, the break, the repeats and
    the long press. Consuming the makes alone would let a break or a long press reach an image
    binding that acts on it.
 4. **How it is bound.** At run time, into a context of the plugin's own
@@ -65,12 +68,13 @@ so it would never even see this key in live TV.
    that is given up did nothing.
 6. **The image's button setup is overridden, not yielded to.** A function the household put on
    the combo key in the image's user-assignable button setup (`config.misc.ButtonSetup`,
-   `config.misc.hotkey`) does not run in live TV and the players while the combo is set - the
+   `config.misc.hotkey`) does not run where the key counts while the combo is set - the
    difference from the hotkey, which yields to it.
-7. **`info.menu.combo.replaces` says what the key no longer reaches** in live TV and the players:
+7. **`info.menu.combo.replaces` says what the key no longer reaches** where it counts:
    `"<context>.<action>"` for every mapping of the key in the image's keymap (`config.usage.keymap`,
-   else `/usr/share/enigma2/keymap.xml`) in a context the info bar or a player binds - recognised by
-   name: one that carries `Infobar` in any case, or begins with `MoviePlayer` or `MediaPlayer` -
+   else `/usr/share/enigma2/keymap.xml`) in a context the info bar binds - and, for `previous`, a
+   player - recognised by name: one that carries `Infobar` in any case, or, for `previous`, begins
+   with `MoviePlayer` or `MediaPlayer` -
    read once when the key is bound; and `"ButtonSetup.<name>"` for each assignment in the button
    setup, read whenever `info` is built. `[]` when it found none, `null` when the keymap could not
    be read. Best effort: it never stops the key from being bound.
@@ -87,6 +91,7 @@ so it would never even see this key in live TV.
 - A count abandoned over another screen and resumed in live TV within the gap is caught only when
   a press of the combo key lands on the other screen or on another live-TV screen; leaving and
   returning without one is not seen.
-- With the combo set to `exit`, EXIT no longer hides the info bar or leaves the movie player in
-  those screens; with `stop`, STOP no longer stops timeshift or leaves the player. The setting is
-  off by default and the household chooses which key to give up.
+- With the combo set to `exit`, EXIT no longer hides the info bar in live TV; with `stop`, STOP no
+  longer stops timeshift there; with `playpause`, PLAY/PAUSE no longer starts or pauses
+  timeshift there. In the players all three keep working, which is why they count in live TV
+  alone. The setting is off by default and the household chooses which key to give up.

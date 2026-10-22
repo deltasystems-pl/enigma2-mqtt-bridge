@@ -10,11 +10,18 @@ each press within `menu_combo_gap_ms` of the one before (ADR-0025).
 **It takes its key from the image, where the hotkey takes nothing.** A key that only opened the
 menu on the N-th press would still do the image's work on the first N-1: on OpenViX a `KEY_PREVIOUS`
 in live TV zaps back in the history, so three presses would zap twice and then open the menu over
-another channel. So while a key is set here, that key **only counts toward the menu in live TV
-and the players** - the screens the hotkey opens the menu over (`menu.hotkey_screen`) - and every
-event of it there is consumed: the make, the break, the repeats and the long press. Consuming
-the makes alone would let a break or a long press reach an image binding that acts on it. In
-every other screen - a menu, a list, the EPG, this plugin's own menu - the key goes on to the
+another channel. So while a key is set here, that key **only counts toward the menu where it
+counts** and every event of it there is consumed: the make, the break, the repeats and the long
+press. Consuming the makes alone would let a break or a long press reach an image binding that
+acts on it. Where it counts depends on the key:
+
+- `previous` counts in live TV and the players - the screens the hotkey opens the menu over
+  (`menu.hotkey_screen`).
+- `exit`, `stop` and `playpause` count **over the info bar alone**, live TV: in a player they are
+  how the viewer pauses, stops and leaves it, so there they go to the image untouched
+  (`PLAYER_KEYS`).
+
+In every other screen - a menu, a list, the EPG, this plugin's own menu - the key goes on to the
 image as before.
 
 How that is done:
@@ -31,13 +38,14 @@ How that is done:
 - **The window is measured make to make** on a monotonic clock. A make within the gap of the one
   before counts on; a later one starts a new count at one. On the N-th the menu opens - the
   hotkey's own open path - and the count starts again. The count also starts again when the key
-  arrives over any other screen, when it arrives over a different live-TV or player screen than
-  the press before, when the menu opens any other way, and on every rebind. No timer: a count
-  that is given up simply did nothing.
+  arrives over a screen where it does not count, when it arrives over a different live-TV or
+  player screen than the press before, when the menu opens any other way, and on every rebind.
+  No timer: a count that is given up simply did nothing.
 
-`replaces` (`info.menu.combo.replaces`) names what the key no longer reaches in live TV and the
-players. It is read when the key is bound, from the image's keymap - the mappings of the key in
-every context the info bar and the players bind, recognised by name (`live_context`) - and, when
+`replaces` (`info.menu.combo.replaces`) names what the key no longer reaches where it counts. It
+is read when the key is bound, from the image's keymap - the mappings of the key in every context
+the info bar binds and, for a key that counts in the players too, the players' own, recognised by
+name (`live_context`) - and, when
 `info` is built, from the image's button setup (`config.misc.ButtonSetup`, `config.misc.hotkey`),
 which a person may change at any time. Best effort, and never a reason not to bind: `None` when
 the keymap cannot be read.
@@ -76,6 +84,9 @@ KEYS = {
     "stop": "KEY_STOP",
 }
 CHOICES = (OFF,) + tuple(KEYS)
+# The keys that count in the players as well as in live TV. The others count over the info bar
+# alone: in a player EXIT leaves it, STOP stops it and PLAY/PAUSE pauses it.
+PLAYER_KEYS = ("previous",)
 # The Linux input codes, for an image whose key table does not name them.
 FALLBACK_CODES = {"KEY_PREVIOUS": 412, "KEY_EXIT": 174, "KEY_PLAYPAUSE": 164, "KEY_STOP": 128}
 
@@ -100,13 +111,16 @@ NOT_BINDABLE = "this image does not let a plugin bind a key"
 _MS = 1000.0
 
 
-def live_context(name):
-    """Whether a keymap context is one the info bar or a player binds, by its name.
+def live_context(name, players=True):
+    """Whether a keymap context is one the info bar - or, with `players`, a player - binds.
 
-    The info bar's contexts carry its name (`InfobarChannelSelection`, `InfobarSeekActions`,
-    `2ndInfobarActions`, ...); the movie player's and the media player's carry theirs.
+    By its name: the info bar's contexts carry its name (`InfobarChannelSelection`,
+    `InfobarSeekActions`, `2ndInfobarActions`, ...); the movie player's and the media player's
+    carry theirs.
     """
-    return "infobar" in name.lower() or name.startswith(("MoviePlayer", "MediaPlayer"))
+    if "infobar" in name.lower():
+        return True
+    return bool(players) and name.startswith(("MoviePlayer", "MediaPlayer"))
 
 
 def keymap_path():
@@ -123,7 +137,7 @@ def keymap_path():
     return DEFAULT_KEYMAP
 
 
-def read_keymap(path, key_name):
+def read_keymap(path, key_name, players=True):
     """What the keymap at `path` maps `key_name` to: `(functions, button_setup_names)`.
 
     `functions` are `"<context>.<action>"` in every context `live_context` accepts, in the
@@ -151,7 +165,7 @@ def read_keymap(path, key_name):
             if context in BUTTON_SETUP_CONTEXTS:
                 if action not in setup_names:
                     setup_names.append(action)
-            elif live_context(context):
+            elif live_context(context, players):
                 function = context + "." + action
                 if function not in functions:
                     functions.append(function)
@@ -190,12 +204,14 @@ class Combo:
     """One binding of one key, counting its presses toward the menu.
 
     `screen()` answers the executing dialog when it is live TV or a player and the menu could
-    open over it, else None; `open()` opens the menu and says whether it did.
+    open over it, else None; `live(dialog)` whether that dialog is the info bar itself, live TV;
+    `open()` opens the menu and says whether it did.
     """
 
-    def __init__(self, screen, open_menu):
+    def __init__(self, screen, open_menu, live):
         self._screen = screen
         self._open = open_menu
+        self._live = live
         # One object for the life of the binding: the action map compares by identity when
         # unbinding (see `remote.py`).
         self._handler = self._action
@@ -244,7 +260,7 @@ class Combo:
             return None
         self._bound_action = True
         self.bound = choice
-        self._keymap = read_keymap(keymap_path(), name)
+        self._keymap = read_keymap(keymap_path(), name, choice in PLAYER_KEYS)
         LOG.info("the menu's press combo is %s (%s) %d times within %d ms", choice, name,
                  presses, gap_ms)
         return choice
@@ -277,7 +293,7 @@ class Combo:
     # ------------------------------------------------------------- `info` --
 
     def replaces(self):
-        """The image functions the key no longer reaches in live TV and the players, or None."""
+        """The image functions the key no longer reaches where it counts, or None."""
         if self._keymap is None:
             return None
         functions, setup_names = self._keymap
@@ -323,7 +339,7 @@ class Combo:
         return False
 
     def _action(self, context, action):
-        """The dispatcher's call: 1 for every event of the key over live TV or a player.
+        """The dispatcher's call: 1 for every event of the key where it counts.
 
         Never raises: on an exception the key goes on to the image (0), logged once.
         """
@@ -331,7 +347,7 @@ class Combo:
             if context != CONTEXT or self.bound is None or action not in ACTIONS:
                 return 0
             dialog = self._screen()
-            if dialog is None:
+            if dialog is None or (self.bound not in PLAYER_KEYS and not self._live(dialog)):
                 # Another screen has the key, and a count that left live TV ends here.
                 self.reset()
                 return 0

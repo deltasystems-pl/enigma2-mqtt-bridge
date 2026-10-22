@@ -46,7 +46,7 @@ and settings survive a plugin upgrade.
 | `menu_allowed` | `on` | Offer the Home Assistant menu: the Extensions entry "Home Assistant", the hotkey, and the subscription to the menu the companion integration publishes. On by default because the menu can do only what you put into it in Home Assistant; see below |
 | `menu_hotkey` | `HELP, held` | The key that opens the Home Assistant menu in live TV and while a recording or a media file plays: HELP held, RED held, F3, F4, or off. A key the receiver itself uses keeps doing what it did; see below |
 | `menu_transparency` | `20 %` | How see-through the Home Assistant menu's background is: 0 % (opaque) to 80 %, in steps of 10. The text, the icons and the bar on the selected row stay solid. It applies the next time the menu is opened |
-| `menu_combo_key` | `off` | The press combo: a key that opens the Home Assistant menu when you press it several times in quick succession in live TV or while a recording or a media file plays - for a television's own remote over HDMI-CEC, which has no HELP and cannot hold a key. PREVIOUS, EXIT, PLAY/PAUSE, STOP, or off. **While a key is set here, it does nothing else in live TV and the players**; see below |
+| `menu_combo_key` | `off` | The press combo: a key that opens the Home Assistant menu when you press it several times in quick succession in live TV - PREVIOUS also while a recording or a media file plays - for a television's own remote over HDMI-CEC, which has no HELP and cannot hold a key. PREVIOUS, EXIT, PLAY/PAUSE, STOP, or off. **While a key is set here, it does nothing else there**; see below |
 | `menu_combo_presses` | `3` | How many presses of that key open the menu, 2 to 5 |
 | `menu_combo_gap_ms` | `1.2 s` | The longest pause between two presses, 0.3 s to 3.0 s in steps of 0.1 s; a slower press starts counting again. Stored in milliseconds |
 | `log_level` | `info` | `error` / `warning` / `info` / `debug` |
@@ -158,9 +158,10 @@ The receiver shows it on the television:
   television's Back key usually arrives as `previous` or `exit`; to find out which, watch the
   `key` topic (`enigma2/<node>/key`, with `publish_keys` on) while you press it in live TV - it
   says `KEY_PREVIOUS` or `KEY_EXIT`. **While a combo key is set, that key does nothing else in
-  live TV and while a recording or a media file plays** - one or two presses do nothing at all -
-  so on OpenViX Back no longer zaps back to the previous channel there; in menus, lists and the
-  EPG it works as before. A function you assigned to that key in the receiver's button setup
+  live TV** - one or two presses do nothing at all - so on OpenViX Back no longer zaps back to
+  the previous channel there. `previous` counts while a recording or a media file plays too;
+  EXIT, STOP and PLAY/PAUSE do not, so in a player they still leave, stop and pause it. In menus,
+  lists and the EPG every key works as before. A function you assigned to that key in the receiver's button setup
   does not run there either. `info.menu.combo.replaces` lists what the key no longer does
   ([ADR-0025](adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md)). `off` gives the key back.
 - **Use it** with the arrows and OK; EXIT goes back. OK switches a light or a switch, runs a scene

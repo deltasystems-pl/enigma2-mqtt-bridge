@@ -741,7 +741,7 @@ def test_the_subpage_offers_the_three_as_lists(page_world):
     assert "<option value='3' selected>3</option>" in text
     assert "<option value='1200' selected>1.2 s</option>" in text
     assert "<option value='3000'>3.0 s</option>" in text
-    assert "that key does nothing else in live TV and the players" in text
+    assert "that key does nothing else in live TV; PREVIOUS also in the players" in text
 
 
 def test_the_main_page_line_names_the_combo_when_one_is_set(page_world, settings):
@@ -816,3 +816,114 @@ def test_the_gap_is_compared_to_the_millisecond(world, gap, opens):
 def test_the_handler_answers_only_for_its_own_context(world):
     assert world.combo._action("InfobarChannelSelection", "make") == 0
     assert world.combo.count == 0
+
+
+# ------------------------------------------- keys that count over the info bar alone --
+
+
+LIVE_ONLY = [("exit", 174, "leavePlayerOnExit"), ("stop", 128, "leavePlayer"),
+             ("playpause", 164, "pause")]
+
+
+def _players():
+    from conftest import ModelScreen, MoviePlayer
+
+    media_player = type("MediaPlayer", (ModelScreen,),
+                        {"__module__": "Plugins.Extensions.MediaPlayer.plugin"})
+    return [MoviePlayer, media_player]
+
+
+@pytest.mark.parametrize("player", [0, 1], ids=["movie-player", "media-player"])
+@pytest.mark.parametrize("choice, code, action", LIVE_ONLY)
+def test_a_live_tv_key_goes_to_the_player_untouched(make_bridge, factory, settings, choice,
+                                                    code, action, player):
+    world = ComboWorld(make_bridge, factory, settings, menu_combo_key=choice)
+    taken = []
+    world.receiver.actions.bindKey("keymap.xml", "generic", code, 1 << MAKE, "PlayerActions",
+                                   action)
+    world.receiver.actions.bindAction("PlayerActions", 0,
+                                      lambda context, name: taken.append(name) or 1)
+    world.session.open(_players()[player])
+    assert world.press(code, MAKE, REPEAT, BREAK) == [1, 0, 0]
+    assert world.press(code, MAKE, LONG, BREAK) == [1, 0, 0]
+    assert taken == [action, action]
+    world.taps(3, 300, code)
+    assert world.screen is None
+    assert taken == [action] * 5
+    assert world.combo.count == 0
+
+
+@pytest.mark.parametrize("choice, code, _action", LIVE_ONLY)
+def test_a_live_tv_key_counts_over_the_info_bar(make_bridge, factory, settings, choice, code,
+                                                _action):
+    world = ComboWorld(make_bridge, factory, settings, menu_combo_key=choice)
+    assert world.press(code, MAKE, REPEAT, BREAK) == [1, 1, 1]
+    world.clock.advance(2000)
+    world.taps(3, 300, code)
+    assert world.screen is not None
+
+
+def test_a_count_begun_in_live_tv_ends_in_a_player(make_bridge, factory, settings):
+    from conftest import MoviePlayer
+
+    world = ComboWorld(make_bridge, factory, settings, menu_combo_key="exit")
+    world.taps(2, 300, EXIT)
+    assert world.combo.count == 2
+    world.session.open(MoviePlayer)
+    world.tap(EXIT, after=300)
+    assert world.combo.count == 0
+
+
+def test_previous_still_counts_in_the_players(world):
+    for player in _players():
+        world.session.open(player)
+        world.clock.advance(2000)
+        world.taps(3, 300)
+        assert world.screen is not None
+        world.exit()
+
+
+@pytest.mark.parametrize("choice, expected", [
+    ("exit", ["InfobarShowHideActions.hide", "InfobarSubserviceQuickzapActions.exit"]),
+    ("stop", ["InfobarTimeshiftActions.timeshiftStop", "ButtonSetup.stop"]),
+    ("playpause", ["InfobarSeekActions.playpauseService",
+                   "InfobarSeekActionsPTS.playpauseService",
+                   "InfobarTimeshiftActions.timeshiftStart",
+                   "InfobarTimeshiftActivateActions.timeshiftActivateEndAndPause",
+                   "InfobarTimeshiftSeekPointerActions.SeekPointerPlay"]),
+])
+def test_replaces_names_only_live_tv_for_a_live_tv_key(make_bridge, factory, settings,
+                                                        monkeypatch, choice, expected):
+    from Components.config import ConfigSubsection, ConfigText, config
+
+    assigned = ConfigSubsection()
+    assigned.stop = ConfigText(default="Infobar/openEPG")
+    monkeypatch.setattr(config.misc, "ButtonSetup", assigned, raising=False)
+    world = ComboWorld(make_bridge, factory, settings, menu_combo_key=choice)
+    assert world.info()["menu"]["combo"]["replaces"] == expected
+
+
+def test_the_keymap_read_for_live_tv_leaves_the_players_contexts_out():
+    functions, setup = combo_module.read_keymap(str(FIXTURE), "KEY_STOP", players=False)
+    assert functions == ["InfobarTimeshiftActions.timeshiftStop"]
+    assert setup == ["stop"]
+    assert combo_module.live_context("MoviePlayerActions", players=False) is False
+    assert combo_module.live_context("MediaPlayerSeekActions", players=False) is False
+    assert combo_module.live_context("InfobarSeekActions", players=False) is True
+
+
+def test_only_previous_counts_in_the_players():
+    assert combo_module.PLAYER_KEYS == ("previous",)
+
+
+def test_live_tv_is_the_info_bar_itself(world, monkeypatch):
+    from conftest import InfoBar, MoviePlayer
+
+    assert menu_module.live_tv_screen(world.session.current_dialog) is True
+    player = world.session.open(MoviePlayer)
+    assert menu_module.live_tv_screen(player) is False
+    assert menu_module.live_tv_screen(None) is False
+    monkeypatch.setattr(InfoBar, "instance", None)
+    assert menu_module.live_tv_screen(None) is False
+    monkeypatch.setitem(sys.modules, "Screens.InfoBar", None)
+    assert menu_module.live_tv_screen(player) is False

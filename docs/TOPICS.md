@@ -491,11 +491,11 @@ receiver has no menu: `menu_allowed` off, no session, or neither screen could be
 | `screen` | string | `styled` - the plugin's own screen, with icons, states and colours - or `fallback` - the image's own list, with the same rows and no icon, state or number keys. Decided when the menu is opened: a styled screen that cannot be built then is replaced by the fallback for that opening and every later one, and `info` is published again |
 | `hotkey` | string or null | The `menu_hotkey` choice that is bound and opens the menu in live TV and in the image's movie player, or `null` when none does: switched `off`, an image that does not let a plugin bind a key, or a key the image's own user-assignable button setup gives a function of its own - which then runs first, by design; that setup is the same in live TV and in the movie player. The key opens the menu in the image's media player too, unless that player uses the key itself, which it then keeps: OpenATV's media player seeks back on a long RED. Over any other screen the key does nothing new |
 | `reason` | string or null | Why `hotkey` is `null`, in English for the person reading the topic; `null` when a key is bound. The Extensions entry "Home Assistant" opens the menu whatever this says |
-| `combo` | object or null | The bound press combo - a key pressed `presses` times, each press within `gap_ms` of the one before, opens the menu in live TV and the players - or `null` when none is bound: switched `off`, or an image that does not let a plugin bind a key. Added after 0.4.0 (unreleased), [ADR-0025](adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md) |
+| `combo` | object or null | The bound press combo - a key pressed `presses` times, each press within `gap_ms` of the one before, opens the menu in live TV - and, for `previous`, in the players - or `null` when none is bound: switched `off`, or an image that does not let a plugin bind a key. Added after 0.4.0 (unreleased), [ADR-0025](adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md) |
 | `combo.key` | string | The `menu_combo_key` choice |
 | `combo.presses` | integer | `menu_combo_presses` |
 | `combo.gap_ms` | integer | `menu_combo_gap_ms` |
-| `combo.replaces` | array of strings or null | The image functions the key no longer reaches in live TV and the players, as `"<context>.<action>"` - a mapping of the key in the image's keymap, in a context the info bar or a player binds - or `"ButtonSetup.<name>"` - an assignment in the image's user-assignable button setup, which the combo overrides there. `[]` when it found none; `null` when it could not tell. Best effort: the keymap is read when the key is bound, the button setup whenever `info` is published, and neither ever stops the key from being bound |
+| `combo.replaces` | array of strings or null | The image functions the key no longer reaches where it counts, as `"<context>.<action>"` - a mapping of the key in the image's keymap, in a context the info bar binds or, for `previous`, a player - or `"ButtonSetup.<name>"` - an assignment in the image's user-assignable button setup, which the combo overrides there. `[]` when it found none; `null` when it could not tell. Best effort: the keymap is read when the key is bound, the button setup whenever `info` is published, and neither ever stops the key from being bound |
 | `combo_reason` | string or null | Why `combo` is `null`, in English for the person reading the topic; `null` when a combo is bound |
 
 **`list` says how a list of choices is shown here.** Added after 0.4.0 (unreleased),
@@ -3039,7 +3039,8 @@ sends a service call**: it sends a row's id and a value on `menu_action` (§1), 
 performs the action and publishes the menu again
 ([ADR-0020](adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md)).
 The hotkey takes nothing from the image; the press combo does: while `menu_combo_key` is set, every
-press of that key in live TV and the players counts toward the menu and does nothing else there -
+press of that key in live TV counts toward the menu and does nothing else there - and so it does
+in the players for `previous`; `exit`, `stop` and `playpause` reach a player untouched -
 the image's own function on it and an assignment in its button setup are switched off, and
 `info.menu.combo.replaces` (§1) names them - while in every other screen the key works as before
 ([ADR-0025](adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md)).

@@ -1574,5 +1574,5 @@ msgid "Or %s pressed %s times, at most %s apart."
 msgstr "Oder %s, %s-mal gedrückt, mit höchstens %s Abstand."
 
 #: src/MQTTBridge/webif.py
-msgid "While a key is chosen for the press combo, that key does nothing else in live TV and the players."
-msgstr "Solange für die Tastenfolge eine Taste gewählt ist, hat diese Taste im Live-TV und in den Playern keine andere Funktion."
+msgid "While a key is chosen for the press combo, that key does nothing else in live TV; PREVIOUS also in the players."
+msgstr "Solange für die Tastenfolge eine Taste gewählt ist, hat diese Taste im Live-TV keine andere Funktion; PREVIOUS auch in den Playern."

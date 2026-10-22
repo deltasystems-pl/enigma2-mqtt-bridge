@@ -1845,7 +1845,7 @@ def _menu_settings_section(section, token):
     )
     hint = _("The background transparency applies the next time the menu is opened.")
     combo_hint = _("While a key is chosen for the press combo, that key does nothing else in "
-                   "live TV and the players.")
+                   "live TV; PREVIOUS also in the players.")
     return (
         f"<section><h2>{_e(_('Menu settings'))}</h2><p>{_e(hint)}</p><p>{_e(combo_hint)}</p>"
         "<form method='post' class='settings'>"

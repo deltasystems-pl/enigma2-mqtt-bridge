@@ -13,14 +13,16 @@ version that has no section here.
 
 - A second way to open the receiver menu, for a television's own remote over HDMI-CEC - which
   has no HELP, no colour keys and no long press: the **press combo**, a key pressed several times
-  in quick succession in live TV or while a recording or a media file plays. Three settings,
+  in quick succession in live TV - `previous` also while a recording or a media file plays. Three
+  settings,
   writable through `cmd/config` and on the setup screen's and the OpenWebif Menu page's menu
   section: `menu_combo_key` (`off` by default, `previous`, `exit`, `playpause` or `stop` - a
   television's Back usually arrives as `previous` or `exit`), `menu_combo_presses` (2 to 5, 3 by
   default) and `menu_combo_gap_ms` (the longest pause between two presses, 300 to 3000 ms in
   steps of 100, 1200 by default). A change applies at once, without a reconnect. The hotkey keeps
-  working beside it. **While a combo key is set, that key does nothing else in live TV and the
-  players** - one or two presses do nothing at all, and on OpenViX Back no longer zaps back in
+  working beside it. **While a combo key is set, that key does nothing else in live TV** - and,
+  for `previous`, in the players; EXIT, STOP and PLAY/PAUSE keep working in a player - one or two
+  presses do nothing at all, and on OpenViX Back no longer zaps back in
   the history there, nor runs a function the receiver's button setup gives it; in every other
   screen it works as before. New `info.menu` members `combo` - the key, the count, the gap and
   `replaces`, what the key no longer does there, read from the image's keymap and button

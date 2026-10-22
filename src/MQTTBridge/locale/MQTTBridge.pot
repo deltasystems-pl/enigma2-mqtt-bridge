@@ -1573,5 +1573,5 @@ msgid "Or %s pressed %s times, at most %s apart."
 msgstr ""
 
 #: src/MQTTBridge/webif.py
-msgid "While a key is chosen for the press combo, that key does nothing else in live TV and the players."
+msgid "While a key is chosen for the press combo, that key does nothing else in live TV; PREVIOUS also in the players."
 msgstr ""

@@ -1573,5 +1573,5 @@ msgid "Or %s pressed %s times, at most %s apart."
 msgstr "Albo %s naciśnięty %s razy, w odstępach do %s."
 
 #: src/MQTTBridge/webif.py
-msgid "While a key is chosen for the press combo, that key does nothing else in live TV and the players."
-msgstr "Gdy dla kombinacji naciśnięć wybrano klawisz, ten klawisz w telewizji na żywo i w odtwarzaczach nie robi nic innego."
+msgid "While a key is chosen for the press combo, that key does nothing else in live TV; PREVIOUS also in the players."
+msgstr "Gdy dla kombinacji naciśnięć wybrano klawisz, ten klawisz w telewizji na żywo nie robi nic innego; PREVIOUS również w odtwarzaczach."
