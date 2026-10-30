@@ -4,8 +4,8 @@
 
 | Version | Supported |
 |---|---|
-| 0.4.x | yes - the current development line |
-| < 0.4.0 | no |
+| 0.5.x | yes - the current development line |
+| < 0.5.0 | no |
 
 Security fixes are released on the newest minor line. There are no long-term support branches
 before v1.0.
@@ -90,6 +90,11 @@ everything else:
    where the receiver's own trash settings decide how long it stays; nothing it does deletes a
    recording for good.
 
+   `cmd/stream_stop` ([ADR-0018](docs/adr/0018-stopping-a-stream-client-needs-no-permission.md),
+   since 0.5.0) needs no permission, as a zap needs none: whoever may publish on the node's command
+   topic can end any stream client's stream. Stopping is not blocking - a client that reconnects is
+   served again.
+
    There is no telemetry and no cloud service. TLS to the broker is supported; client
    certificates are not in v1.
 
@@ -159,7 +164,12 @@ web interface can use it. Its checks keep **other web sites** out (the `Host` al
 same-origin requests, a session token), not people on the LAN.
 
 The receiver menu ([ADR-0020](docs/adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md))
-is on by default. **Editing it from the receiver**, with the menu creator
+is on by default. The receiver never learns what a row does: it answers an OK with a
+`menu_action` naming the row, and Home Assistant acts only on a row its own configuration holds.
+So **anyone who can publish on the broker can operate the menu's rows** - exactly what the menu
+offers and nothing else - by publishing that `menu_action`; the broker's ACL is no protection
+where the broker does not enforce one (the Mosquitto add-on, above). **Editing it from the
+receiver**, with the menu creator
 ([ADR-0022](docs/adr/0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md)),
 **is off by default**, and switched on in Home Assistant, in the companion integration's receiver
 menu options ("Allow editing from the receiver"). While it is off, Home Assistant publishes no
