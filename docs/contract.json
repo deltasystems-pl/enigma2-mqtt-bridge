@@ -35,11 +35,13 @@
     },
     "bouquets": {
       "payload": "json",
-      "retained": true
+      "retained": true,
+      "since": "0.5.0"
     },
     "channels/<bouquet_slug>": {
       "payload": "json",
-      "retained": true
+      "retained": true,
+      "since": "0.5.0"
     },
     "bouquet": {
       "payload": "json",
@@ -66,15 +68,18 @@
     },
     "stream": {
       "payload": "json",
-      "retained": true
+      "retained": true,
+      "since": "0.5.0"
     },
     "stream_clients": {
       "payload": "json",
-      "retained": true
+      "retained": true,
+      "since": "0.5.0"
     },
     "stream_playable": {
       "payload": "json",
-      "retained": false
+      "retained": false,
+      "since": "0.5.0"
     },
     "recording": {
       "payload": "json",
@@ -86,15 +91,18 @@
     },
     "timeshift": {
       "payload": "json",
-      "retained": true
+      "retained": true,
+      "since": "0.5.0"
     },
     "recordings": {
       "payload": "json",
-      "retained": true
+      "retained": true,
+      "since": "0.5.0"
     },
     "recordings/<folder_slug>": {
       "payload": "json",
-      "retained": true
+      "retained": true,
+      "since": "0.5.0"
     },
     "volume": {
       "payload": "json",
@@ -132,15 +140,18 @@
     },
     "menu_action": {
       "payload": "json",
-      "retained": false
+      "retained": false,
+      "since": "0.5.0"
     },
     "menu_edit": {
       "payload": "json",
-      "retained": false
+      "retained": false,
+      "since": "0.5.0"
     },
     "list_answer": {
       "payload": "json",
-      "retained": false
+      "retained": false,
+      "since": "0.5.0"
     },
     "update": {
       "payload": "json",
@@ -170,18 +181,30 @@
     "history_clear": {
       "since": "0.3.0"
     },
-    "stream_stop": {},
-    "stream_playable": {},
+    "stream_stop": {
+      "since": "0.5.0"
+    },
+    "stream_playable": {
+      "since": "0.5.0"
+    },
     "volume": {},
     "mute": {},
     "key": {},
     "message": {},
-    "list": {},
+    "list": {
+      "since": "0.5.0"
+    },
     "timer": {},
     "record": {},
-    "play_recording": {},
-    "delete_recording": {},
-    "recordings_refresh": {},
+    "play_recording": {
+      "since": "0.5.0"
+    },
+    "delete_recording": {
+      "since": "0.5.0"
+    },
+    "recordings_refresh": {
+      "since": "0.5.0"
+    },
     "screenshot": {},
     "softcam_restart": {
       "since": "0.3.0"
@@ -194,7 +217,9 @@
     "discovery": {},
     "ha_mode": {},
     "reset": {},
-    "clear_error": {},
+    "clear_error": {
+      "since": "0.5.0"
+    },
     "uninstall": {
       "since": "0.3.0"
     },
@@ -339,11 +364,13 @@
     },
     "menu_allowed": {
       "type": "bool",
-      "writable": false
+      "writable": false,
+      "since": "0.5.0"
     },
     "recording_delete_allowed": {
       "type": "bool",
-      "writable": false
+      "writable": false,
+      "since": "0.5.0"
     }
   },
   "capabilities": [
@@ -419,11 +446,11 @@
     },
     {
       "name": "oversize-payload-withheld",
-      "release": "unreleased"
+      "release": "0.5.0"
     },
     {
       "name": "last-error-cleared-at-start",
-      "release": "unreleased"
+      "release": "0.5.0"
     }
   ],
   "planned": []
