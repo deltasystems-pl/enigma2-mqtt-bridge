@@ -505,7 +505,9 @@ GPL-2.0-or-later ([NOTICE](https://github.com/deltasystems-pl/enigma2-mqtt-bridg
   OE-Alliance third-party feed or an image recipe: the plugin is distributed through its own
   opkg feed, its releases and Home Assistant. SECURITY.md's supported versions are 0.5.x, and
   its threat model says that anyone who may publish on the broker can operate the rows of the
-  receiver menu and end a stream client's stream.
+  receiver menu and end a stream client's stream, that a box taken over can operate its menu too
+  - and choose new rows while editing from the receiver is on - and that the recording commands
+  can make an automounted network share mount.
 
 ## [0.4.0] - 2026-09-29
 

@@ -72,9 +72,14 @@ everything else:
      the certificate. That is enough because what it serves is checked against the signed index
      (below) before anything is installed.
 
-   One command makes the image connect, not the plugin: `cmd/epg_import` (since 0.3.0, refused
+   Some commands make the image connect, not the plugin. `cmd/epg_import` (since 0.3.0, refused
    over MQTT unless the receiver-only permission `epg_import_allowed` is on; off by default)
-   starts the image's own EPG importer, which downloads from the sources selected in it.
+   starts the image's own EPG importer, which downloads from the sources selected in it. The
+   recording library's commands (since 0.5.0) touch the movie locations, and where a location is
+   a network share the image's automounter has unmounted, touching it mounts it again - a
+   connection to that file server: `cmd/recordings_refresh`, which needs no permission, reads
+   every movie location, one that is not mounted included; `cmd/play_recording`, which needs none
+   either, and `cmd/delete_recording` look for the recording's file before they act.
 
    The recording library ([docs/SETUP.md](docs/SETUP.md#what-the-recording-library-does)) is
    published to the broker whole - every recording's title, description, channel and folder -
@@ -120,7 +125,12 @@ everything else:
    leaked is in [docs/RELEASE-INDEX.md](docs/RELEASE-INDEX.md#when-the-main-key-is-lost-or-leaked).
 3. **The broker credential must be scoped.** A box compromise must not become a Home Assistant
    compromise. The documented setup is a **dedicated broker login per box** with an ACL that
-   limits it to that node's own topics:
+   limits it to that node's own topics. Since 0.5.0 those topics include the receiver menu's
+   `menu_action` and `menu_edit`, so a box taken over can operate every row of its menu and,
+   while editing from the receiver is switched on in Home Assistant, choose new ones; Home
+   Assistant acts only on rows its own configuration holds and checks every edit with its own
+   rules, and editing is off until it is switched on there
+   ([The OpenWebif page and the receiver menu](#the-openwebif-page-and-the-receiver-menu)):
 
    ```
    user enigma2box
