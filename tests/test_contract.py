@@ -674,18 +674,24 @@ def test_cli_an_unknown_option_exits_two(repo):
 
 
 # The first release carrying the file is 0.4.0. Its record's own exceptions - "unreleased" before
-# its release pull request, "0.4.0" from then on - are given as `as_` here, so the history below
-# can be rebuilt from either state of the repository.
+# its release pull request, "0.4.0" from then on - are given as `as_` here. The exceptions of the
+# releases after it - dated later, or still "unreleased" on main - did not exist when it shipped
+# and are left out, so the history below is rebuilt from the record as 0.4.0 carried it.
 FIRST_CARRYING = "0.4.0"
 
 
+def _release_key(release):
+    return tuple(int(part) for part in release.split("."))
+
+
 def _real_record(topics_text, contract, as_):
-    ours = ("unreleased", FIRST_CARRYING)
     rows = [
-        (row["name"], as_ if row["release"] in ours else row["release"])
+        (row["name"], as_ if row["release"] == FIRST_CARRYING else row["release"])
         for row in contract["exceptions"]
+        if row["release"] != "unreleased"
+        and _release_key(row["release"]) <= _release_key(FIRST_CARRYING)
     ]
-    assert any(row["release"] in ours for row in contract["exceptions"])
+    assert any(row["release"] == FIRST_CARRYING for row in contract["exceptions"])
     return _with_exceptions(topics_text, contract, rows)
 
 
