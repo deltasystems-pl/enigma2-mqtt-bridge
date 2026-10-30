@@ -9,6 +9,46 @@ version that has no section here.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.5.0] - 2026-10-31
+
+The release in which Home Assistant reaches the television, decided in
+[ADR-0020](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md),
+and in which the receiver publishes its recordings, decided in
+[ADR-0024](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/adr/0024-the-recording-library-is-read-on-events-and-addressed-by-id.md).
+
+0.4.0 let the plugin update itself. This one puts a "Home Assistant" menu on the receiver: rows
+for lights, covers, scenes and scripts that Home Assistant keeps current and decides, opened from
+the Extensions menu, by holding HELP, or - for a television's own remote over HDMI-CEC - by a key
+pressed several times. The menu can also be built on a new Menu page among the plugin's OpenWebif
+pages, once that is allowed in Home Assistant. Home Assistant can put a question on the television
+as a list of choices, answered with the remote, once. The receiver now publishes its recording
+library, with commands to play a recording and to move one into the image's trash, its
+timeshift, what each running recording is, where its stream server is and who is being streamed
+to, the codecs and audio tracks on the decoder, and whether the volume acts on the audio at all.
+Each bouquet's channel list has a topic of its own. The parts Home Assistant drives - the menu,
+its creator, the lists and browsing the recordings - need the companion integration's 0.5.0,
+which follows this release.
+
+**A receiver with a very large channel list no longer knocks itself off the broker** (named
+in-major exception `oversize-payload-withheld`): no payload goes out in a packet over 1,000,000
+bytes. An EPG grid is cut and the discovery payload drops the channel select before anything is
+withheld; what is withheld is retracted and named in `info.not_published`, and the lists of a
+withheld `channels` are on `channels/<bouquet_slug>`.
+
+**`last_error` is cleared when the plugin starts again** (named in-major exception
+`last-error-cleared-at-start`): a consumer that wants the last refusal across a restart of the
+receiver keeps it itself. `cmd/clear_error` clears it on request, and a command sent with an id
+gets that id back on its refusal.
+
+Where the broker enforces an ACL, the box's login needs four new `read` lines for the menu
+([docs/SETUP.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/SETUP.md#broker-access)).
+A save on the setup screen or the OpenWebif page reconnects to the broker only when it changed the
+connection. The package is now distributed
+under the GPL version 3 or later, because the menu's icons are Apache-2.0; the source stays
+GPL-2.0-or-later ([NOTICE](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/NOTICE)).
+
 ### Added
 
 - A second way to open the receiver menu, for a television's own remote over HDMI-CEC - which
@@ -28,13 +68,13 @@ version that has no section here.
   every other screen the key works as before. New `info.menu` members `combo` - the key, the
   count, the gap and `replaces`, what the key no longer does there, read from the image's keymap
   and button setup - and `combo_reason`
-  ([ADR-0025](docs/adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md), [TOPICS.md](docs/TOPICS.md), [SETUP.md](docs/SETUP.md)).
+  ([ADR-0025](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md), [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md), [SETUP.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/SETUP.md)).
   English, Polish and German.
 - PREVIOUS works as EXIT on the plugin's own screens - the receiver menu and the list of
   choices, styled or the image's own list in their place - whatever `menu_combo_key` is: back
   one level, or close. On OpenViX that key is no cancel, so a television's remote whose Back
   arrives as `KEY_PREVIOUS` could open the menu and not leave it. The image's own screens, the
-  keyboard a menu row opens among them, are unchanged ([ADR-0025](docs/adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md)).
+  keyboard a menu row opens among them, are unchanged ([ADR-0025](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md)).
 - A list of choices on the television, opened by Home Assistant: the new command `cmd/list` puts a
   question - a title, a text and 1 to 24 labelled rows, each with an optional colour or number key
   and icon - over whatever is on screen, and the receiver answers once on the new event topic
@@ -57,9 +97,9 @@ version that has no section here.
   be built, keeping the header line in its window title. New: the capability `list` and the `info`
   member `list` (`{"screen": "styled" | "choicebox"}`, absent without the capability). No permission
   and no setting; anyone on the broker can show a list or forge an answer
-  ([SECURITY.md](SECURITY.md),
-  [ADR-0023](docs/adr/0023-a-list-of-choices-is-answered-by-row-id-once.md),
-  [TOPICS.md](docs/TOPICS.md)). English, Polish and German.
+  ([SECURITY.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/SECURITY.md),
+  [ADR-0023](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/adr/0023-a-list-of-choices-is-answered-by-row-id-once.md),
+  [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md)). English, Polish and German.
 - The recording library: every recording in the receiver's movie locations, with its subfolders and
   without the trash, on a retained index, `recordings` - each location's free space and folders -
   and one retained topic for each folder, `recordings/<folder_slug>`, newest first. Read when the plugin
@@ -74,7 +114,7 @@ version that has no section here.
   `recording_delete_allowed` (off by default; a **Recordings** section on the settings screen and the
   OpenWebif page), and is refused while the receiver's trash is off - which `info.recording_trash`
   says. New capabilities `recordings`, `recording_play` and `recording_delete`; the OpenWebif page
-  has the three commands. Applied without a reconnect when the permission is saved ([ADR-0024](docs/adr/0024-the-recording-library-is-read-on-events-and-addressed-by-id.md)).
+  has the three commands. Applied without a reconnect when the permission is saved ([ADR-0024](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/adr/0024-the-recording-library-is-read-on-events-and-addressed-by-id.md)).
 - `timeshift`: whether a timeshift buffer runs, whether the picture is paused or behind live, and
   since when - from the image's events and the info bar's own calls, never polled. Capability
   `timeshift`.
@@ -96,12 +136,12 @@ version that has no section here.
   receiver menu options: while it is off the catalogue says only that, and the page shows no editor.
   Switched on, anyone who can reach the receiver's web interface or publish on the broker can choose
   which entities the television controls and then operate them, and the catalogue shows every
-  entity's name and area to anyone on the broker ([SECURITY.md](SECURITY.md)). The page is
+  entity's name and area to anyone on the broker ([SECURITY.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/SECURITY.md)). The page is
   the only one with a script - a static file, `creator.js`, under a policy of its own; the main
   page keeps its policy and stays script-free
-  ([ADR-0022](docs/adr/0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md)).
+  ([ADR-0022](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/adr/0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md)).
   New: the capability `menu_editor`, the event topic `menu_edit` and the two subscriptions
-  ([TOPICS.md](docs/TOPICS.md)). English, Polish and German.
+  ([TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md)). English, Polish and German.
 - The setting `menu_transparency`: how see-through the menu's background is, 0 % to 80 % in steps of
   10, 20 % by default - the screen's background and the list's panel; the bar on the selected row,
   the text and the icons stay solid. It applies the next time the menu opens, is writable through
@@ -135,19 +175,19 @@ version that has no section here.
   Extensions entry "Home Assistant" and, in live TV and the players, by a hotkey, a long HELP by
   default, which is offered every key press only after the image and takes it only when it
   opened the menu
-  ([ADR-0020](docs/adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md),
-  [ADR-0021](docs/adr/0021-the-menu-hotkey-is-offered-the-key-after-the-image.md)). The keys
+  ([ADR-0020](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md),
+  [ADR-0021](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/adr/0021-the-menu-hotkey-is-offered-the-key-after-the-image.md)). The keys
   1-9 only move the selection; OK acts. Where the plugin's own screen cannot be built, the
   image's own list is used with the same rows. New: the box-only permission `menu_allowed` (on
   by default), the setting `menu_hotkey`
   (`help_long`, `red_long`, `f3`, `f4`, `off`; writable through `cmd/config`), the capability
   `menu`, `info.menu` (which screen and which key), the event topic `menu_action`, and the
   subscriptions to `enigma2mqtt/menu/<node>` and Home Assistant's status topic
-  ([TOPICS.md](docs/TOPICS.md)). English, Polish and German.
+  ([TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md)). English, Polish and German.
 - Twenty-five icons for the menu, from Material Design Icons under Apache-2.0, rendered into the
   package by `tools/render-icons.py`. Because GPLv2 cannot take Apache-2.0, the package is now
   distributed under the terms of GPLv3 or later; the source stays GPL-2.0-or-later
-  ([NOTICE](NOTICE)). The package carries `LICENSE`, `LICENSE-GPL-3.0.txt` and `NOTICE` in the
+  ([NOTICE](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/NOTICE)). The package carries `LICENSE`, `LICENSE-GPL-3.0.txt` and `NOTICE` in the
   plugin's directory, beside the icons' own Apache-2.0 text and notice.
 - What only the receiver knows about streaming its channels, without the plugin carrying any
   video. A new retained topic, `stream`, says where the image's stream server is and what it
@@ -166,15 +206,15 @@ version that has no section here.
   `cmd/stream_stop` ends one client's stream, the one named by the `host` and `sref` the list
   shows; it needs no permission, as a zap needs none, never stops "all", and refuses a client
   that is not connected with the reason `not_connected`
-  ([ADR-0018](docs/adr/0018-stopping-a-stream-client-needs-no-permission.md)).
+  ([ADR-0018](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/adr/0018-stopping-a-stream-client-needs-no-permission.md)).
   `cmd/stream_playable` asks the image whether one service could be played now beside everything
   the receiver is doing - the television, a recording, another stream - and is the one command
   answered on a topic of its own: one message on `stream_playable`, not retained, with the
   command's id when it carried one; a reference that is not one playable service is refused
-  ([ADR-0017](docs/adr/0017-whether-a-service-can-be-played-is-asked-with-an-empty-second-reference.md)).
+  ([ADR-0017](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/adr/0017-whether-a-service-can-be-played-is-asked-with-an-empty-second-reference.md)).
   The capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable` say which of
   these the image offers. The OpenWebif page gains both commands, in English, Polish and German.
-  Discovery mode announces nothing for them ([TOPICS.md](docs/TOPICS.md)).
+  Discovery mode announces nothing for them ([TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md)).
 - `service` says what is on the decoder: `video_codec` (`h264`, `hevc`, `mpeg2`, ...),
   `interlaced`, `frame_rate`, and `audio_tracks` - each track's description, language, PID, a
   codec name that is the same on every image (`mp2`, `ac3`, `eac3`, `aac`, ...) and which one is
@@ -182,7 +222,7 @@ version that has no section here.
   `null`, never a guess. The topic is also published on the decoder's own events, and when
   another audio track is picked on the remote - which no event announces, so the active track is
   asked for every five seconds. The capability `service_codecs` says the image can fill the
-  members in ([TOPICS.md](docs/TOPICS.md)).
+  members in ([TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md)).
 - `volume` gains `passthrough`: whether the audio track being played is handed to the television
   undecoded, in which case the receiver's volume changes nothing anybody can hear. `true`,
   `false`, or `null` when it cannot be told - an unknown codec, an image without the setting, or
@@ -190,7 +230,7 @@ version that has no section here.
   transcode switch on. It follows the track and the image's
   audio settings within five seconds. The capability `volume_passthrough` says the image has the
   settings it is read from
-  ([ADR-0019](docs/adr/0019-passthrough-is-true-false-or-unknown.md)).
+  ([ADR-0019](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/adr/0019-passthrough-is-true-false-or-unknown.md)).
 - Each bouquet's channel list is on a retained topic of its own, `channels/<bouquet_slug>`, with
   the bouquet's name, its reference, when the list last changed and the services; and a new small
   topic, `bouquets`, is their index: every bouquet in the receiver's order with the slug of its
@@ -204,7 +244,7 @@ version that has no section here.
   with everything else. The capability `channel_topics` says both are published. A walk encodes
   each bouquet's list once and a connect encodes none of them again; while `channels` is too big,
   a connect does not encode it either to find that out
-  ([TOPICS.md](docs/TOPICS.md)).
+  ([TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md)).
 - `epg_grid/<bouquet_slug>` gains `events_per_channel`: how many events a channel may carry in
   that payload. It is `epg_grid_events` unless the grid was cut to fit one packet (Changed, below).
 - `cmd/clear_error` clears the retained `last_error` on request. Until now the only way to empty
@@ -215,7 +255,7 @@ version that has no section here.
   oversized, and answered with the doors' sentence while an update is being applied. In
   discovery mode the device gains a "Clear last error" button, a configuration entity that is
   always announced, and the OpenWebif page gains the same action, in English, Polish and German
-  ([TOPICS.md](docs/TOPICS.md#2-commands)).
+  ([TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md#2-commands)).
 - A command may carry an id, and its refusal says it back. A broker client that puts a command's
   payload in the envelope `{"id": "...", "payload": ...}` - the payload as a string, or as the
   JSON object the command takes - gets that id as `last_error.id` when
@@ -231,7 +271,7 @@ version that has no section here.
   restart says it - carries the id of its own command, never that of whichever command is being
   handled then. The capability `command_id` says the plugin opens the envelope: an older plugin
   takes it for the command's payload, so a consumer reads `info.capabilities` first
-  ([TOPICS.md](docs/TOPICS.md#2-commands), ADR-0016).
+  ([TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md#2-commands), ADR-0016).
 - A refusal whose sentence echoes text UTF-8 cannot carry is published instead of lost. A JSON
   payload can spell half a surrogate pair (`{"key": "\ud83d"}`); the handler's refusal echoed
   it, the publish raised, and nothing reached `last_error`. The sentence now carries the escape
@@ -250,7 +290,7 @@ version that has no section here.
   and the discovery payloads are published again; what is no longer published is retracted as at
   a connect. A save that changes nothing publishes nothing. The page says "Settings saved." for
   such a save and that the bridge is reconnecting only when it is
-  ([SETUP.md](docs/SETUP.md#settings)).
+  ([SETUP.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/SETUP.md#settings)).
 - An EPG grid too big for one packet is cut instead of withheld. When the packet of an
   `epg_grid/<bouquet_slug>` would be over the bound, the plugin publishes that bouquet's grid
   with the largest number of events per channel that fits, from `epg_grid_events` down to 1,
@@ -267,7 +307,7 @@ version that has no section here.
   with names that fit - a connect, a settings save, `cmd/discovery`. Home Assistant deletes the
   entity and later creates a new one, so a customisation of it is lost. The log says once that it
   was left out. A payload too big even without the select is withheld as before
-  ([TOPICS.md](docs/TOPICS.md#4-home-assistant-discovery)).
+  ([TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md#4-home-assistant-discovery)).
 - A `last_error` left by an earlier run of the plugin is cleared when the plugin starts again.
   The topic is retained, so after an interface restart, a reboot, a reinstall or an update the
   broker went on showing the last refusal of the run before - until some command succeeded, which
@@ -287,7 +327,7 @@ version that has no section here.
   counts only when the client took the message: with the socket gone, nothing is forgotten and
   the next connect, or the next clearing, sends it again - after a command that succeeds too.
   **Behaviour change, named in-major exception `last-error-cleared-at-start`**
-  ([TOPICS.md, Contract version](docs/TOPICS.md#contract-version)): a consumer that wants the
+  ([TOPICS.md, Contract version](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md#contract-version)): a consumer that wants the
   last refusal across a restart of the receiver keeps it itself when it arrives, as it already
   had to across the next command that succeeds. The companion integration does.
 - `cmd/config`'s refusal of a key outside its list names the key. The sentence on `last_error`
@@ -298,7 +338,7 @@ version that has no section here.
   A character that cannot be printed, and an apostrophe, is shown as `?`, so a name cannot pass
   for two names or for the count; a broker or OSCam password sent as a name, or inside one, is
   shown as `***`, whole, before the name is cut. No reason code is added or changed
-  ([TOPICS.md](docs/TOPICS.md#cmdconfig-semantics)).
+  ([TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md#cmdconfig-semantics)).
 - The log counts the capabilities again when one binds late. The start line's `capabilities=<n>`
   is the number bound at the start, and after an interface restart `bouquet_context`,
   `zap_history` and `history_clear` bind a few seconds later, so the line said 22 on a receiver
@@ -307,7 +347,7 @@ version that has no section here.
   each count that is not the one last logged since that start, and also before the session to
   the broker is up, when the connect's `info` is what carries the list. The last of those lines
   is the count `info` holds. The start line is unchanged
-  ([TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#the-log)).
+  ([TROUBLESHOOTING.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TROUBLESHOOTING.md#the-log)).
 
 ### Fixed
 
@@ -319,7 +359,7 @@ version that has no section here.
   folder topics, and in the channel select's options. A line break code becomes a space. The
   OpenPLi family's form of the same codes, U+E080 to U+E09F, goes too, and so do the codes in
   `service.provider`.
-  `cmd/zap` by name accepts the old spelling as well ([TOPICS.md](docs/TOPICS.md)).
+  `cmd/zap` by name accepts the old spelling as well ([TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md)).
 - The picture size and scan on `service` are right after enigma2 restarts. The receiver keeps
   showing the same picture through the restart, no event says so, and the image's own service
   information then reported a picture that was not on the screen, a 720p channel as
@@ -330,7 +370,7 @@ version that has no section here.
   give is the image's only when the image agrees on the size, `null` otherwise. `service` is
   also read again three and eight seconds after the plugin starts and after every zap, which is
   when the decoder has settled. Right after a zap the members are `null`, or briefly the
-  previous channel's, as before ([TOPICS.md](docs/TOPICS.md)).
+  previous channel's, as before ([TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md)).
 - The outcome of an update, or the reason a removal stopped, is no longer lost to a connect that
   could not send it. An error carried to the next session was dropped at the first connect
   whether or not its publish left the receiver; when the socket was gone again before the
@@ -350,7 +390,7 @@ version that has no section here.
   name whose executable cannot be read or is called something else; a helper binary named
   `oscam_...` counts as the cam, as any process named `oscam-...` always did. The name is all
   the rule has
-  ([TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#oscam-runs-but-oscamsoftware_running-is-false)).
+  ([TROUBLESHOOTING.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TROUBLESHOOTING.md#oscam-runs-but-oscamsoftware_running-is-false)).
 - `tools/deploy-to-box.sh` no longer removes backups it did not make. It kept "the three newest"
   of everything named `MQTTBridge.bak-*` in the receiver's backup directory, ordered by name -
   and a backup made by hand, `MQTTBridge.bak-pre-<reason>-<date>`, sorts ahead of every dated
@@ -377,12 +417,12 @@ version that has no section here.
   Assistant - so the entities stay and the channel select keeps the options it had. Everything
   else is published as before. To get the topic back, limit `bouquets_for_select` to the
   bouquets in use, or lower `epg_grid_events` - 0 switches the grid off
-  ([TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back),
-  [TOPICS.md](docs/TOPICS.md)). A grid and the discovery payload now give something up before they
+  ([TROUBLESHOOTING.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back),
+  [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md)). A grid and the discovery payload now give something up before they
   are withheld - events, the channel select (Changed, above) - and the lists of a withheld
   `channels` are on `channels/<bouquet_slug>` (Added, above).
   **Behaviour change, named in-major exception `oversize-payload-withheld`**
-  ([TOPICS.md, Contract version](docs/TOPICS.md#contract-version)): `channels` and
+  ([TOPICS.md, Contract version](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md#contract-version)): `channels` and
   `epg_grid/<bouquet_slug>` used to be published whatever their size; over the bound they are
   now absent - retracted - while their capability stays claimed. A consumer treats the empty
   retained payload as a retraction and reads `info.not_published` for the reason. The bound is not
@@ -395,7 +435,7 @@ version that has no section here.
   first, and a topic that joined the list and left it within that time is not announced. The
   first `info` of a connection is not delayed, and a change still waiting when the plugin stops
   or its settings are saved is published before the session ends
-  ([TOPICS.md](docs/TOPICS.md#basenodeinfo)).
+  ([TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md#basenodeinfo)).
 - A copy of a withheld topic could stay on the broker with nothing left that knew of it. When the
   connection had just dropped and the plugin had not yet been told, the retraction of the smaller
   copy was refused by the MQTT client and the topic was forgotten all the same. It is now
@@ -420,7 +460,7 @@ version that has no section here.
   zap, so the time grows only while no new ECM appears, whether the file is old or missing. A
   softcam that has stopped is restarted as before. A step of the receiver's clock - set from the
   transponder or by NTP after boot - is no longer counted as time without an ECM either
-  ([ADR-0005](docs/adr/0005-softcam-restart.md#amendment-2026-10-14---counted-from-the-newest-ecm-seen)).
+  ([ADR-0005](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/adr/0005-softcam-restart.md#amendment-2026-10-14---counted-from-the-newest-ecm-seen)).
 - `cam` no longer flickers to `active: null` while the channel is still being decoded. A poll
   that landed in the few seconds the softcam's ECM file is gone - for instance when a
   descrambled stream to a stream client ends - published `active`, `system` and `ecm_ms` as
@@ -428,7 +468,7 @@ version that has no section here.
   again until 30 seconds have passed since that ECM was written - one gap was measured longer
   than 15 - and `null` after that, as before; a zap, a free-to-air service or a file that is
   there but older than 15 seconds or unreadable ends it at once. Only the parsed `system` and `ecm_ms` are kept between polls, never the file's text.
-  [TOPICS.md](docs/TOPICS.md) now also says that while the receiver descrambles another
+  [TOPICS.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/docs/TOPICS.md) now also says that while the receiver descrambles another
   encrypted channel as well, `system` and `ecm_ms` can describe that channel rather than the one
   on the television.
 
@@ -460,6 +500,12 @@ version that has no section here.
 - More comments that cited the unpublished plan - a quotation in TOPICS.md, three tags in the
   code and five headings in the tests - name the ADR or the TRANSACTION.md section, or say it in
   plain words.
+- TOPICS.md, contract.json, TRANSACTION.md, SETUP.md and TROUBLESHOOTING.md date what this
+  release adds as 0.5.0. ROADMAP.md and INSTALL.md no longer promise a submission to the
+  OE-Alliance third-party feed or an image recipe: the plugin is distributed through its own
+  opkg feed, its releases and Home Assistant. SECURITY.md's supported versions are 0.5.x, and
+  its threat model says that anyone who may publish on the broker can operate the rows of the
+  receiver menu and end a stream client's stream.
 
 ## [0.4.0] - 2026-09-29
 
@@ -1742,7 +1788,8 @@ tested on 3.9, 3.12 and 3.14.
 - Examples throughout the documentation use the documentation MAC `00:00:5e:00:53:01` and the
   node id derived from it.
 
-[Unreleased]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/deltasystems-pl/enigma2-mqtt-bridge/compare/v0.1.0...v0.2.0
