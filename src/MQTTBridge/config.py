@@ -54,6 +54,10 @@ REMOTE_SETTING_NAMES = (
     "menu_hotkey",
     # Nor this: how see-through the menu's background is.
     "menu_transparency",
+    # Nor these: a second way to open the same menu (`combo.py`).
+    "menu_combo_key",
+    "menu_combo_presses",
+    "menu_combo_gap_ms",
 )
 # Published in `info.settings` and refused by `cmd/config`, like any other key
 # that is not in the allowlist above. A setting that *enables* a command is
@@ -88,9 +92,27 @@ MENU_TRANSPARENCY_DEFAULT = 20
 MENU_TRANSPARENCY_CHOICES = tuple(
     range(MENU_TRANSPARENCY_LIMITS[0], MENU_TRANSPARENCY_LIMITS[1] + 1, MENU_TRANSPARENCY_STEP)
 )
+# The press combo (`combo.py`): a key pressed a number of times, each press within a gap of the
+# one before, opens the receiver menu. The keys a television's remote sends over HDMI-CEC for its
+# Back and play keys, and `off`. Never an arrow, OK or a number: live TV needs those.
+MENU_COMBO_KEYS = ("off", "previous", "exit", "playpause", "stop")
+MENU_COMBO_PRESSES_LIMITS = (2, 5)
+MENU_COMBO_PRESSES_STEP = 1
+MENU_COMBO_PRESSES_DEFAULT = 3
+MENU_COMBO_PRESSES_CHOICES = tuple(
+    range(MENU_COMBO_PRESSES_LIMITS[0], MENU_COMBO_PRESSES_LIMITS[1] + 1, MENU_COMBO_PRESSES_STEP)
+)
+# The longest pause between two presses, in milliseconds, in steps of a tenth of a second.
+MENU_COMBO_GAP_LIMITS = (300, 3000)
+MENU_COMBO_GAP_STEP = 100
+MENU_COMBO_GAP_DEFAULT = 1200
+MENU_COMBO_GAP_CHOICES = tuple(
+    range(MENU_COMBO_GAP_LIMITS[0], MENU_COMBO_GAP_LIMITS[1] + 1, MENU_COMBO_GAP_STEP)
+)
+MENU_COMBO_SETTING_NAMES = ("menu_combo_key", "menu_combo_presses", "menu_combo_gap_ms")
 # The settings that belong to the receiver menu: the television's "Menu" section and the
 # OpenWebif page's Menu subpage show these, and only these.
-MENU_SETTING_NAMES = ("menu_allowed", "menu_hotkey", "menu_transparency")
+MENU_SETTING_NAMES = ("menu_allowed", "menu_hotkey", "menu_transparency") + MENU_COMBO_SETTING_NAMES
 
 DEFAULT_BASE_TOPIC = "enigma2"
 DEFAULT_DISCOVERY_PREFIX = "homeassistant"
@@ -138,6 +160,9 @@ SETTING_NAMES = (
     "menu_allowed",
     "menu_hotkey",
     "menu_transparency",
+    "menu_combo_key",
+    "menu_combo_presses",
+    "menu_combo_gap_ms",
 )
 
 # How a provisioning file's JSON is coerced onto each setting. Keyed explicitly
@@ -180,6 +205,9 @@ SETTING_KINDS = {
     "menu_allowed": "bool",
     "menu_hotkey": "choice",
     "menu_transparency": "int",
+    "menu_combo_key": "choice",
+    "menu_combo_presses": "int",
+    "menu_combo_gap_ms": "int",
     "log_level": "choice",
     "epg_grid_events": "int",
     "recording_delete_allowed": "bool",
@@ -189,6 +217,7 @@ CHOICES = {
     "ha_mode": HA_MODES,
     "screenshot": SCREENSHOT_MODES,
     "menu_hotkey": MENU_HOTKEYS,
+    "menu_combo_key": MENU_COMBO_KEYS,
     "log_level": LOG_LEVELS,
 }
 
@@ -206,10 +235,24 @@ INTEGER_LIMITS = {
     "softcam_autoheal_seconds": SOFTCAM_AUTOHEAL_LIMITS,
     "epg_grid_events": (0, 20),
     "menu_transparency": MENU_TRANSPARENCY_LIMITS,
+    "menu_combo_presses": MENU_COMBO_PRESSES_LIMITS,
+    "menu_combo_gap_ms": MENU_COMBO_GAP_LIMITS,
 }
 # Integer settings that take only every n-th value of their range. A value between two steps is
 # refused with a sentence that says so, never rounded: a rounded value is not the one sent.
-INTEGER_STEPS = {"menu_transparency": MENU_TRANSPARENCY_STEP}
+# Each of these is a selection of its steps on the receiver, not a ConfigInteger.
+INTEGER_STEPS = {
+    "menu_transparency": MENU_TRANSPARENCY_STEP,
+    "menu_combo_presses": MENU_COMBO_PRESSES_STEP,
+    "menu_combo_gap_ms": MENU_COMBO_GAP_STEP,
+}
+# The integer settings held as a selection of their steps: the steps, and the default a value
+# that is none of them reads as.
+SELECTION_INTEGERS = {
+    "menu_transparency": (MENU_TRANSPARENCY_CHOICES, MENU_TRANSPARENCY_DEFAULT),
+    "menu_combo_presses": (MENU_COMBO_PRESSES_CHOICES, MENU_COMBO_PRESSES_DEFAULT),
+    "menu_combo_gap_ms": (MENU_COMBO_GAP_CHOICES, MENU_COMBO_GAP_DEFAULT),
+}
 
 # Characters, not bytes. A path and a bouquet filter are allowed to be long.
 TEXT_LIMIT = 128
@@ -224,6 +267,11 @@ _NODE_ID = re.compile(r"[a-z0-9_]*")
 
 _TRUE = ("1", "on", "true", "yes")
 _FALSE = ("0", "off", "false", "no")
+
+
+def seconds_text(milliseconds):
+    """A whole number of tenths of a second as the screens show it: `1.2 s`."""
+    return f"{milliseconds // 1000}.{milliseconds % 1000 // 100} s"
 
 
 def _build():
@@ -336,6 +384,27 @@ def _build():
         default=MENU_TRANSPARENCY_DEFAULT,
         choices=[(percent, f"{percent} %") for percent in MENU_TRANSPARENCY_CHOICES],
     )
+    # Off by default: while a key is set here it no longer does what the image gives it in live
+    # TV and the players (`combo.py`). The two below are selections for the same reason as the
+    # transparency: LEFT and RIGHT step through the values the contract allows.
+    section.menu_combo_key = ConfigSelection(
+        default="off",
+        choices=[
+            ("off", _("off")),
+            ("previous", _("PREVIOUS (Back on many TV remotes)")),
+            ("exit", "EXIT"),
+            ("playpause", _("PLAY/PAUSE")),
+            ("stop", "STOP"),
+        ],
+    )
+    section.menu_combo_presses = ConfigSelection(
+        default=MENU_COMBO_PRESSES_DEFAULT,
+        choices=[(count, str(count)) for count in MENU_COMBO_PRESSES_CHOICES],
+    )
+    section.menu_combo_gap_ms = ConfigSelection(
+        default=MENU_COMBO_GAP_DEFAULT,
+        choices=[(gap, seconds_text(gap)) for gap in MENU_COMBO_GAP_CHOICES],
+    )
     section.log_level = ConfigSelection(
         default="info", choices=[(level, level) for level in LOG_LEVELS]
     )
@@ -358,23 +427,31 @@ def element(name, section=None):
 
 def value(name, section=None):
     found = element(name, section)
-    if name == "menu_transparency":
-        return transparency(None if found is None else found.value)
+    if name in SELECTION_INTEGERS:
+        return selection_integer(name, None if found is None else found.value)
     return None if found is None else found.value
 
 
-def transparency(raw):
-    """`menu_transparency` as the int it is meant to be, whatever the element holds.
+def selection_integer(name, raw):
+    """An integer setting held as a selection, as the int it is meant to be, whatever it holds.
 
     The element's keys are ints and enigma2's selection hands back the key it matched, so this
-    is the identity on every image measured. It is here for the one that would hand back the
-    text from its settings file: an int, one of the choices, or the default.
+    is the identity on every image measured. A stored value that is none of the choices is read
+    by enigma2's own `ConfigSelection.load()` as the FIRST choice, not the default, and arrives
+    here as that choice. The default answers only for an element that hands back something
+    else - the text from its settings file that is no choice, or anything that is no int.
     """
+    choices, default = SELECTION_INTEGERS[name]
     if isinstance(raw, str) and raw.strip().isdigit():
         raw = int(raw.strip())
     if isinstance(raw, bool) or not isinstance(raw, int):
-        return MENU_TRANSPARENCY_DEFAULT
-    return raw if raw in MENU_TRANSPARENCY_CHOICES else MENU_TRANSPARENCY_DEFAULT
+        return default
+    return raw if raw in choices else default
+
+
+def transparency(raw):
+    """`menu_transparency` as the int it is meant to be (`selection_integer`)."""
+    return selection_integer("menu_transparency", raw)
 
 
 def save(section=None):
@@ -672,7 +749,12 @@ def import_provisioning(path=None, section=None):
             LOG.warning("%s: no such setting %s", target_path, key)
             continue
         try:
-            found.value = coerce(key, raw[key])
+            if key in MENU_COMBO_SETTING_NAMES:
+                # A selection stores what it is given: a count or a gap off its steps would be
+                # stored and then read as the default. Refused here, with the reason logged.
+                found.value = validate_setting(key, raw[key])
+            else:
+                found.value = coerce(key, raw[key])
         except ValueError as error:
             LOG.warning("%s: skipping %s (%s)", target_path, key, error)
             continue

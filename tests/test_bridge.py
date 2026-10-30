@@ -68,6 +68,9 @@ def test_info_carries_every_documented_field(connected_bridge, factory):
         "menu_allowed": True,
         "menu_hotkey": "help_long",
         "menu_transparency": 20,
+        "menu_combo_key": "off",
+        "menu_combo_presses": 3,
+        "menu_combo_gap_ms": 1200,
     }
 
 

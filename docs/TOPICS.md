@@ -164,7 +164,7 @@ not by the checker; their types are the tables below.
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
 | 0.3.0 -> 0.4.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3); the read-only setting `update_allowed`, the capability `self_update`, the command `update`, `update.transaction` and the subscription to `enigma2mqtt/integration/<node>` (§3); the event topic `relay_request` and the command `relay`, and `cmd/update`'s refusal `no_relay`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
-| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4); a command's id - the envelope every command takes on the broker, the `last_error` member `id` and the capability `command_id` (sections 1 and 2); the `service` members `video_codec`, `interlaced`, `frame_rate` and `audio_tracks` and the capability `service_codecs`; the topics `stream` and `stream_clients`, the event topic `stream_playable`, the commands `stream_stop` and `stream_playable` and the capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable`; the `volume` member `passthrough` and the capability `volume_passthrough`; the receiver menu - the subscriptions to `enigma2mqtt/menu/<node>` and `<ha_discovery_prefix>/status` (§3), the event topic `menu_action` with its member `seen` on a `toggle`, the `info` member `menu`, the read-only setting `menu_allowed`, the writable setting `menu_hotkey` and the capability `menu`; the writable setting `menu_transparency`, and `cmd/config` taking any part of its keys, every key left out keeping its value; the menu creator - the subscriptions to `enigma2mqtt/menu_catalogue/<node>` and `enigma2mqtt/menu_edit_result/<node>` (§3), the event topic `menu_edit` and the capability `menu_editor`; a list of choices - the command `list`, the event topic `list_answer`, the `info` member `list` and the capability `list`, and the `reason` `busy` on the doors' sentence for `cmd/list`; the recording library - the topics `recordings` and `recordings/<folder_slug>`, the commands `play_recording`, `delete_recording` and `recordings_refresh`, the read-only setting `recording_delete_allowed`, the `info` member `recording_trash` and the capabilities `recordings`, `recording_play` and `recording_delete`; the members `service_name`, `description`, `location`, `file`, `id`, `instant` and `bouquet` of each running recording in `recording.active` and the capability `recording_details`; the topic `timeshift` and the capability `timeshift`. **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
+| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4); a command's id - the envelope every command takes on the broker, the `last_error` member `id` and the capability `command_id` (sections 1 and 2); the `service` members `video_codec`, `interlaced`, `frame_rate` and `audio_tracks` and the capability `service_codecs`; the topics `stream` and `stream_clients`, the event topic `stream_playable`, the commands `stream_stop` and `stream_playable` and the capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable`; the `volume` member `passthrough` and the capability `volume_passthrough`; the receiver menu - the subscriptions to `enigma2mqtt/menu/<node>` and `<ha_discovery_prefix>/status` (§3), the event topic `menu_action` with its member `seen` on a `toggle`, the `info` member `menu`, the read-only setting `menu_allowed`, the writable setting `menu_hotkey` and the capability `menu`; the writable setting `menu_transparency`, and `cmd/config` taking any part of its keys, every key left out keeping its value; the menu creator - the subscriptions to `enigma2mqtt/menu_catalogue/<node>` and `enigma2mqtt/menu_edit_result/<node>` (§3), the event topic `menu_edit` and the capability `menu_editor`; a list of choices - the command `list`, the event topic `list_answer`, the `info` member `list` and the capability `list`, and the `reason` `busy` on the doors' sentence for `cmd/list`; the recording library - the topics `recordings` and `recordings/<folder_slug>`, the commands `play_recording`, `delete_recording` and `recordings_refresh`, the read-only setting `recording_delete_allowed`, the `info` member `recording_trash` and the capabilities `recordings`, `recording_play` and `recording_delete`; the members `service_name`, `description`, `location`, `file`, `id`, `instant` and `bouquet` of each running recording in `recording.active` and the capability `recording_details`; the topic `timeshift` and the capability `timeshift`; the press combo - the writable settings `menu_combo_key`, `menu_combo_presses` and `menu_combo_gap_ms` and the `info.menu` members `combo` and `combo_reason`. **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
 
 ---
 
@@ -213,12 +213,17 @@ announcement retained.
                "epg_import_allowed": false, "uninstall_allowed": false,
                "update_check": false, "update_allowed": false,
                "menu_allowed": true, "menu_hotkey": "help_long",
-               "menu_transparency": 20, "recording_delete_allowed": false},
+               "menu_transparency": 20, "menu_combo_key": "previous",
+               "menu_combo_presses": 3, "menu_combo_gap_ms": 1200,
+               "recording_delete_allowed": false},
   "capabilities": ["power", "service", "epg", "tuner", "softcam", "recording", "timers",
                    "volume", "hdd", "process", "channels", "channel_topics", "bouquet_context",
                    "epg_grid", "keys", "screenshot", "toast", "menu", "menu_editor", "list",
                    "message", "command_id"],
-  "menu": {"screen": "styled", "hotkey": "help_long", "reason": null},
+  "menu": {"screen": "styled", "hotkey": "help_long", "reason": null,
+           "combo": {"key": "previous", "presses": 3, "gap_ms": 1200,
+                     "replaces": ["InfobarChannelSelection.historyBack"]},
+           "combo_reason": null},
   "list": {"screen": "styled"},
   "recording_trash": true,
   "not_published": []
@@ -238,7 +243,7 @@ announcement retained.
 | `uptime` | int | Seconds since boot |
 | `wol` | object | Since 0.3.0. What the **image** says about Wake-on-LAN - whether it has a switch for it and whether that is on. See below |
 | `ha_mode` | string | `discovery` \| `integration` \| `off` - the acknowledgement of `cmd/ha_mode` |
-| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5-3600), `screenshot_delay` (post-zap settling seconds, 1-30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30-600), `menu_hotkey` (`help_long` \| `red_long` \| `f3` \| `f4` \| `off`; a long HELP by default; added after 0.4.0, unreleased), `menu_transparency` (integer percent, 0-80 in steps of ten, 20 by default: how see-through the receiver menu's background is; added after 0.4.0, unreleased). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`, `uninstall_allowed`, `update_check`, `update_allowed`, `menu_allowed` and `recording_delete_allowed` (bools, off by default but `menu_allowed`, which is on). See below. |
+| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5-3600), `screenshot_delay` (post-zap settling seconds, 1-30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30-600), `menu_hotkey` (`help_long` \| `red_long` \| `f3` \| `f4` \| `off`; a long HELP by default; added after 0.4.0, unreleased), `menu_transparency` (integer percent, 0-80 in steps of ten, 20 by default: how see-through the receiver menu's background is; added after 0.4.0, unreleased), `menu_combo_key` (`off` \| `previous` \| `exit` \| `playpause` \| `stop`; off by default: the key of the press combo, which opens the receiver menu when pressed several times in quick succession; added after 0.4.0, unreleased), `menu_combo_presses` (integer, 2-5, 3 by default: how many presses open the menu; added after 0.4.0, unreleased), `menu_combo_gap_ms` (integer milliseconds, 300-3000 in steps of 100, 1200 by default: the longest pause between two presses; added after 0.4.0, unreleased). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`, `uninstall_allowed`, `update_check`, `update_allowed`, `menu_allowed` and `recording_delete_allowed` (bools, off by default but `menu_allowed`, which is on). See below. |
 | `capabilities` | list of strings | Which hooks this image actually gave the plugin |
 | `menu` | object or null | Which screen the receiver menu is drawn with on this image and which key opens it; `null` where there is no menu - `menu_allowed` off, or no screen could be built. Added after 0.4.0 (unreleased). See below |
 | `list` | object, optional | Which screen a list of choices (`cmd/list`, section 2) is shown with on this image. **Absent**, not `null`, where `list` is not a capability. Added after 0.4.0 (unreleased). See below |
@@ -475,7 +480,10 @@ and [ADR-0021](adr/0021-the-menu-hotkey-is-offered-the-key-after-the-image.md). 
 receiver has no menu: `menu_allowed` off, no session, or neither screen could be built. Otherwise:
 
 ```json
-"menu": {"screen": "styled", "hotkey": "help_long", "reason": null}
+"menu": {"screen": "styled", "hotkey": "help_long", "reason": null,
+         "combo": {"key": "previous", "presses": 3, "gap_ms": 1200,
+                   "replaces": ["InfobarChannelSelection.historyBack"]},
+         "combo_reason": null}
 ```
 
 | Field | Type | Meaning |
@@ -483,6 +491,12 @@ receiver has no menu: `menu_allowed` off, no session, or neither screen could be
 | `screen` | string | `styled` - the plugin's own screen, with icons, states and colours - or `fallback` - the image's own list, with the same rows and no icon, state or number keys. Decided when the menu is opened: a styled screen that cannot be built then is replaced by the fallback for that opening and every later one, and `info` is published again |
 | `hotkey` | string or null | The `menu_hotkey` choice that is bound and opens the menu in live TV and in the image's movie player, or `null` when none does: switched `off`, an image that does not let a plugin bind a key, or a key the image's own user-assignable button setup gives a function of its own - which then runs first, by design; that setup is the same in live TV and in the movie player. The key opens the menu in the image's media player too, unless that player uses the key itself, which it then keeps: OpenATV's media player seeks back on a long RED. Over any other screen the key does nothing new |
 | `reason` | string or null | Why `hotkey` is `null`, in English for the person reading the topic; `null` when a key is bound. The Extensions entry "Home Assistant" opens the menu whatever this says |
+| `combo` | object or null | The bound press combo - a key pressed `presses` times, each press within `gap_ms` of the one before, opens the menu in live TV - and, for `previous`, in the players - or `null` when none is bound: switched `off`, or an image that does not let a plugin bind a key. Added after 0.4.0 (unreleased), [ADR-0025](adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md) |
+| `combo.key` | string | The `menu_combo_key` choice |
+| `combo.presses` | integer | `menu_combo_presses` |
+| `combo.gap_ms` | integer | `menu_combo_gap_ms` |
+| `combo.replaces` | array of strings or null | The image functions the key no longer reaches where it counts, as `"<context>.<action>"` - a mapping of the key in the image's keymap, in a context the info bar binds or, for `previous`, a player - or `"ButtonSetup.<name>"` - an assignment in the image's user-assignable button setup, which the combo overrides there. `[]` when it found none; `null` when it could not tell. Best effort: the keymap is read when the key is bound, the button setup whenever `info` is published, and neither ever stops the key from being bound |
+| `combo_reason` | string or null | Why `combo` is `null`, in English for the person reading the topic; `null` when a combo is bound |
 
 **`list` says how a list of choices is shown here.** Added after 0.4.0 (unreleased),
 [ADR-0023](adr/0023-a-list-of-choices-is-answered-by-row-id-once.md). **Absent** - not `null` -
@@ -2068,7 +2082,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `softcam_restart` - since 0.3.0 | any (`PRESS` by convention) | Stops **every** running instance of the cam the image selected, then starts exactly one, with the image's own command line | Refused unless `softcam_restart_allowed` is on; refused by the same recording guard as `deep_standby` - while recording, with a timer due within 10 minutes, and when the image will not say; refused for the first 60 seconds after the plugin starts, because the image's own check runs a moment after that and restarting inside that window races a copy already on its way; at most one manual restart a minute; refused while one is already running. 🔴 **The binary is resolved on the box and no part of the command line comes from the payload** |
 | `epg_grid` | any | Rebuilds and republishes **every** `epg_grid/<bouquet_slug>` topic | Refused with a note in `last_error` when `epg_grid_events` is `0` |
 | `epg_import` - since 0.3.0 | any (`PRESS` by convention) | Starts the image's EPG importer, the way its own „Manual" button does, and reports on `epg_import`; the grid is rebuilt afterwards and each bouquet is published only if it changed | Refused, in this order: unless `epg_import_allowed` is on; when the importer is not available (no capability); while an import is already running, whoever started it; by the same recording guard as `deep_standby`; within 10 minutes of the importer's own scheduled run, which the image starts without checking whether one is running, and when that time cannot be read; when the importer has no sources selected. A start that fails is `failed` on `epg_import` **and** the same sentence on `last_error`. 🔴 **The payload is ignored**: nothing from the broker reaches the importer |
-| `config` | `{"publish_keys": false, "screenshot": "interval", "screenshot_interval": 90, "screenshot_delay": 4, "cam_telemetry": false, "oscam_telemetry": false, "softcam_autoheal": false, "softcam_autoheal_seconds": 90, "menu_hotkey": "help_long", "menu_transparency": 20}` | Atomically replaces the remotely writable settings it names and publishes fresh `info`/discovery | Every key is optional and one left out keeps its current value - also the original three, which were required up to 0.4.0; an empty object is valid and changes nothing. Unknown keys and coercion are refused, and a persistence failure applies none of them |
+| `config` | `{"publish_keys": false, "screenshot": "interval", "screenshot_interval": 90, "screenshot_delay": 4, "cam_telemetry": false, "oscam_telemetry": false, "softcam_autoheal": false, "softcam_autoheal_seconds": 90, "menu_hotkey": "help_long", "menu_transparency": 20, "menu_combo_key": "off", "menu_combo_presses": 3, "menu_combo_gap_ms": 1200}` | Atomically replaces the remotely writable settings it names and publishes fresh `info`/discovery | Every key is optional and one left out keeps its current value - also the original three, which were required up to 0.4.0; an empty object is valid and changes nothing. Unknown keys and coercion are refused, and a persistence failure applies none of them |
 | `discovery` | any | Republishes the announcement, the channel list, and the discovery payloads in discovery mode | - |
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
 | `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
@@ -2818,8 +2832,8 @@ screen, the provisioning file or the OpenWebif page - and never over MQTT, and r
 writing it are two different permissions. Home Assistant mode has its dedicated command, and active TV bouquet
 context has `cmd/bouquet`; neither broadens this settings API. The command accepts `publish_keys`,
 `screenshot`, `screenshot_interval`, `screenshot_delay`, `cam_telemetry`, `oscam_telemetry`,
-`softcam_autoheal`, `softcam_autoheal_seconds` and - added after 0.4.0 (unreleased) - `menu_hotkey`
-and `menu_transparency`, with their JSON types unchanged. **Keys left out keep their value**: every
+`softcam_autoheal`, `softcam_autoheal_seconds` and - added after 0.4.0 (unreleased) - `menu_hotkey`,
+`menu_transparency`, `menu_combo_key`, `menu_combo_presses` and `menu_combo_gap_ms`, with their JSON types unchanged. **Keys left out keep their value**: every
 key is optional, so a consumer sends only what it changes. Up to 0.4.0 the first three were required
 in every object; added after 0.4.0 (unreleased), they are optional like the rest, and an empty
 object is valid, changes nothing and still publishes `info` again. A consumer that writes one key
@@ -2829,7 +2843,11 @@ partial object - and a consumer that also serves older plugins goes on sending t
 decides whether it does, is refused here like every permission, and with it off the key opens
 nothing. A new key is bound at once, without a reconnect. `menu_transparency` is an integer from 0
 to 80, a multiple of 10 - anything between two steps is refused, never rounded - and the menu takes
-it the next time it is opened; a menu on screen keeps its look. An object holding any other key is refused whole, with
+it the next time it is opened; a menu on screen keeps its look. The three press combo keys are, like
+`menu_hotkey`, a choice of how to open a menu the receiver already offers: `menu_combo_key` is one of
+`off`, `previous`, `exit`, `playpause` and `stop`, `menu_combo_presses` an integer from 2 to 5 and
+`menu_combo_gap_ms` an integer from 300 to 3000, a multiple of 100 - anything else is refused, never
+rounded. A change binds the new combo at once, without a reconnect, and starts the count again. An object holding any other key is refused whole, with
 `last_error` "the config object contains unknown settings: " and the keys it refused, as in
 `the config object contains unknown settings: 'host', 'update_allowed'`. Their names only, never
 a value: each in single quotes, sorted, separated by a comma and a space; the first five, and
@@ -3013,11 +3031,26 @@ four more while `menu_allowed` is on.
 A "Home Assistant" menu on the receiver that Home Assistant keeps up to date: one level of groups,
 each a list of rows, and rows at the top as well. Every row is a control bound to something in
 Home Assistant - a light, a scene, a cover, a script. The viewer opens it with the remote - the
-Extensions menu entry "Home Assistant", and a hotkey (`menu_hotkey`, a long HELP by default) in
-live TV and the players - moves with the arrows and acts with OK. **The receiver never learns what a row does and never
+Extensions menu entry "Home Assistant", a hotkey (`menu_hotkey`, a long HELP by default) in
+live TV and the players, and - for a television's own remote over HDMI-CEC, which has neither HELP
+nor a long press - a press combo (`menu_combo_key`, off by default: a key pressed `menu_combo_presses`
+times, each within `menu_combo_gap_ms` of the one before) - moves with the arrows and acts with OK. **The receiver never learns what a row does and never
 sends a service call**: it sends a row's id and a value on `menu_action` (§1), and Home Assistant
 performs the action and publishes the menu again
 ([ADR-0020](adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md)).
+The hotkey takes nothing from the image; the press combo does: while `menu_combo_key` is set, every
+press of that key in live TV counts toward the menu and does nothing else there - and so it does
+in the players for `previous`; `exit`, `stop` and `playpause` reach a player untouched -
+the image's own function on it and an assignment in its button setup are switched off, and
+`info.menu.combo.replaces` (§1) names them - while in every other screen the key works as before.
+A press sent with `cmd/key` (§2) is a press like the remote's: it counts toward the combo and is
+taken where the remote's would be. **PREVIOUS is EXIT on the plugin's own screens** - this menu
+and the list of choices, styled or the image's own list in their place - whatever
+`menu_combo_key` is: back one level, or close; on OpenViX that key is no cancel, and a remote
+whose Back arrives as `KEY_PREVIOUS` could otherwise not leave the menu. The press that opened
+a screen is never taken as its EXIT. The image's own screens are unchanged, the keyboard a row
+opens among them
+([ADR-0025](adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md)).
 
 The menu is published by the companion integration, retained, at QoS 1, on
 `enigma2mqtt/menu/<node>` - outside `<base>`, like `enigma2mqtt/integration/<node>`, because the
@@ -3399,6 +3432,21 @@ moment.
 
 ## 6. Worth knowing
 
+- **Names come without DVB's control codes.** Broadcasters mark parts of a service's or an
+  event's name with the DVB control codes U+0080 to U+009F - emphasis on (U+0086) and off
+  (U+0087), a line break (U+008A) - and enigma2 hands them through; the OpenPLi family's
+  decoder hands them over as U+E080 to U+E09F instead. The plugin takes both forms out
+  of every channel name, programme title and description, and recording name and description
+  it publishes: `title`, `short` and `long` of `epg`'s `now` and `next`; the event titles and
+  channel names of `epg_grid/<bouquet_slug>`; `channels` and `channels/<bouquet_slug>`;
+  `service.name` and `service.provider`; the names in `zap_history` and `stream_clients`; `name`, `service_name` and
+  `description` in `recording`; `name` in `timers`; `name`, `description` and `service_name` in
+  `recordings/<folder_slug>` - and so the channel select's options in discovery. A line break
+  (U+008A, U+E08A) becomes a space, every other code goes. `cmd/zap` by name finds a channel by either spelling.
+  A recording started with `cmd/record` is named in the receiver's own timer list as the image
+  would name it; what `timers` and `recording` publish about it is clean. A recording's `file`
+  keeps the bytes of its file name. Since after 0.4.0 (unreleased); an earlier plugin published
+  `\u0086Sky \u0087Cinema` where this one publishes `Sky Cinema`.
 - **A retained state topic is a snapshot, not a heartbeat.** `service` showing a channel means
   that is the last channel the box tuned - check `availability` before believing it is on.
 - **An ACL-denied publish looks exactly like a successful one.** Mosquitto drops it silently.

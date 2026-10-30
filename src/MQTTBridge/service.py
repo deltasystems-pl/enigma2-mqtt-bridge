@@ -43,6 +43,7 @@ from .enigma2 import (
     constant,
     current_service,
     current_service_reference,
+    dvb_text,
     identity,
     missing,
     navigation,
@@ -313,7 +314,7 @@ def read_service(session, bouquet_lookup=None, decoder=True):
     name = service_name(sref)
     if not name and info is not None:
         try:
-            name = str(info.getName() or "")
+            name = dvb_text(str(info.getName() or ""))
         except Exception:
             name = ""
     bouquet = None
@@ -334,7 +335,7 @@ def read_service(session, bouquet_lookup=None, decoder=True):
         "sref": sref,
         "name": name or None,
         "bouquet": bouquet,
-        "provider": _text(info, "sProvider"),
+        "provider": dvb_text(_text(info, "sProvider")),
         "width": shown["width"],
         "height": shown["height"],
         "video_codec": video_codec(info),
@@ -344,28 +345,32 @@ def read_service(session, bouquet_lookup=None, decoder=True):
     }
 
 
-def _event_payload(event):
-    """One `eServiceEvent` as the contract spells it."""
+def _event_payload(event, clean=True):
+    """One `eServiceEvent` as the contract spells it, without DVB's control codes (`dvb_text`).
+
+    `clean` False keeps the texts as the image has them, for a name handed back to the image.
+    """
     if event is None:
         return None
+    text = dvb_text if clean else (lambda value: value)
     try:
         begin = int(event.getBeginTime() or 0)
         duration = int(event.getDuration() or 0)
         return {
-            "title": str(event.getEventName() or ""),
+            "title": text(str(event.getEventName() or "")),
             "begin": begin,
             "end": begin + duration,
             "event_id": int(event.getEventId() or 0),
-            "short": str(event.getShortDescription() or ""),
-            "long": str(event.getExtendedDescription() or ""),
+            "short": text(str(event.getShortDescription() or "")),
+            "long": text(str(event.getExtendedDescription() or "")),
         }
     except Exception:
         LOG.debug("an EPG event could not be read")
         return None
 
 
-def read_epg(session):
-    """The `epg` payload - `now` and `next`, either of which may be null."""
+def read_epg(session, clean=True):
+    """The `epg` payload - `now` and `next`, either of which may be null (`_event_payload`)."""
     info = _service_info(session)
     if info is None:
         return {"now": None, "next": None}
@@ -375,7 +380,7 @@ def read_epg(session):
             event = info.getEvent(index)
         except Exception:
             event = None
-        payload[key] = _event_payload(event)
+        payload[key] = _event_payload(event, clean)
     return payload
 
 

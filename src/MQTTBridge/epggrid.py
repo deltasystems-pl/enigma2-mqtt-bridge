@@ -27,7 +27,7 @@ largest payload here and nothing would ever stop it being rewritten.
 import time
 
 from .channels import slugify
-from .enigma2 import Ticker, enigma_attribute, identity
+from .enigma2 import Ticker, dvb_text, enigma_attribute, identity
 from .log import get_logger
 from .publisher import Publisher
 
@@ -104,7 +104,7 @@ def _event(row):
         begin = int(row[2] or 0)
         duration = int(row[3] or 0)
         return sref, {
-            "title": str(row[4] or ""),
+            "title": dvb_text(str(row[4] or "")),
             "begin": begin,
             "end": begin + duration,
             "event_id": int(row[1] or 0),

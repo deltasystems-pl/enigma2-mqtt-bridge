@@ -256,6 +256,13 @@ MENU_HOTKEY_LABELS = {
     "f4": "F4",
     "off": "off",
 }
+MENU_COMBO_KEY_LABELS = {
+    "off": "off",
+    "previous": "PREVIOUS (Back on many TV remotes)",
+    "exit": "EXIT",
+    "playpause": "PLAY/PAUSE",
+    "stop": "STOP",
+}
 _ASSIGNMENT_SECRET = re.compile(
     r"""(?ix)
     (?P<prefix>["']?(?:password|passwd|token|secret|username|user|broker|host)["']?
@@ -1364,6 +1371,9 @@ def _setting_control(name, current):
             options = [(choice, _(SCREENSHOT_LABELS.get(choice, choice))) for choice in choices]
         elif name == "menu_hotkey":
             options = [(choice, _(MENU_HOTKEY_LABELS.get(choice, choice))) for choice in choices]
+        elif name == "menu_combo_key":
+            options = [(choice, _(MENU_COMBO_KEY_LABELS.get(choice, choice)))
+                       for choice in choices]
         else:
             options = [(choice, choice) for choice in choices]
         return _select(name, options, current)
@@ -1372,6 +1382,16 @@ def _setting_control(name, current):
         options = [
             (str(percent), f"{percent} %")
             for percent in settings_module.MENU_TRANSPARENCY_CHOICES
+        ]
+        return _select(name, options, str(current))
+    if name == "menu_combo_presses":
+        options = [(str(count), str(count)) for count in settings_module.MENU_COMBO_PRESSES_CHOICES]
+        return _select(name, options, str(current))
+    if name == "menu_combo_gap_ms":
+        # Stored in milliseconds, shown in seconds, as on the television.
+        options = [
+            (str(gap), settings_module.seconds_text(gap))
+            for gap in settings_module.MENU_COMBO_GAP_CHOICES
         ]
         return _select(name, options, str(current))
     if kind == "int":
@@ -1397,11 +1417,19 @@ def _menu_summary(section):
     """The receiver menu's three settings in one sentence, as the main page shows them."""
     allowed = settings_module.value("menu_allowed", section)
     hotkey = settings_module.value("menu_hotkey", section)
-    return _("Home Assistant menu: %s. Key: %s. Background transparency: %s %%.") % (
+    summary = _("Home Assistant menu: %s. Key: %s. Background transparency: %s %%.") % (
         _("On") if allowed else _("Off"),
         _(MENU_HOTKEY_LABELS.get(hotkey, str(hotkey))),
         settings_module.value("menu_transparency", section),
     )
+    combo = settings_module.value("menu_combo_key", section)
+    if combo in MENU_COMBO_KEY_LABELS and combo != "off":
+        summary += " " + _("Or %s pressed %s times, at most %s apart.") % (
+            _(MENU_COMBO_KEY_LABELS[combo]),
+            settings_module.value("menu_combo_presses", section),
+            settings_module.seconds_text(settings_module.value("menu_combo_gap_ms", section)),
+        )
+    return summary
 
 
 def _menu_line(section, mount):
@@ -1816,8 +1844,10 @@ def _menu_settings_section(section, token):
         for name in MENU_SETTING_NAMES
     )
     hint = _("The background transparency applies the next time the menu is opened.")
+    combo_hint = _("While a key is chosen for the press combo, that key does nothing else in "
+                   "live TV; PREVIOUS also in the players.")
     return (
-        f"<section><h2>{_e(_('Menu settings'))}</h2><p>{_e(hint)}</p>"
+        f"<section><h2>{_e(_('Menu settings'))}</h2><p>{_e(hint)}</p><p>{_e(combo_hint)}</p>"
         "<form method='post' class='settings'>"
         + _hidden("form", MENU_SETTINGS_FORM)
         + _hidden("csrf", token)

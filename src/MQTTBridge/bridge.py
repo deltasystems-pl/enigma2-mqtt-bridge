@@ -376,11 +376,13 @@ class Bridge:
 
         self._mark_applied(settings_module.REMOTE_SETTING_NAMES)
         self._replace_configurable_publishers()
-        # The menu's hotkey is rebound in place rather than by replacing the publisher: the
-        # menu it holds, and a screen that may be open on it, belong to this session.
+        # The menu's hotkey and press combo are rebound in place rather than by replacing the
+        # publisher: the menu it holds, and a screen that may be open on it, belong to this
+        # session.
         menu = self.publisher("menu")
         if menu is not None:
             menu.rebind_hotkey()
+            menu.rebind_combo()
         # No reconnect follows this path, so nothing else would retract what the
         # new settings stopped publishing: `publish_keys` switched off here takes
         # the `keys` capability, and with it the eight device triggers, which
@@ -485,7 +487,7 @@ class Bridge:
 
         Each setting is applied the way the code that reads it needs: a
         `cmd/config` setting as `apply_remote_settings` applies it - the four
-        publishers it configures replaced, the hotkey rebound; a kill-switch
+        publishers it configures replaced, the hotkey and the press combo rebound; a kill-switch
         or a box-only choice by replacing the publisher that reads it when it
         starts (the toast, the CEC workaround, the EPG grid, the receiver menu
         with its subscriptions and Extensions entry), or by asking the publisher
@@ -549,6 +551,8 @@ class Bridge:
             if menu is not None:
                 if "menu_hotkey" in changed:
                     menu.rebind_hotkey()
+                if changed & set(settings_module.MENU_COMBO_SETTING_NAMES):
+                    menu.rebind_combo()
                 if "ha_discovery_prefix" in changed and self.connected:
                     menu.resubscribe(self.client)
         self._applied_settings = self._settings_now()

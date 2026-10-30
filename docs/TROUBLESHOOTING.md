@@ -115,6 +115,31 @@ interface remains responsive; only a slow-batch or event-loop warning indicates 
   recording or a media file plays, not over another screen, and not on a key the player uses
   itself (OpenATV's media player seeks back on a long RED). The Extensions entry opens the menu in
   any case.
+- **The press combo does nothing**: read `info.menu.combo` - `null` with `combo_reason` says why.
+  The presses must be the key the receiver receives: watch the `key` topic while you press it
+  (a television's Back arrives as `KEY_PREVIOUS` or `KEY_EXIT`), and press faster than
+  `menu_combo_gap_ms` between presses. It counts in live TV - and, for `previous`, while a
+  recording or a media file plays - not over another screen. A held key counts once from the
+  receiver's remote; over HDMI-CEC a held key may arrive as several presses, and those count.
+  So do presses sent with `cmd/key`, from a remote card in Home Assistant.
+- **Back does nothing in live TV and the menu never opens**: the press combo takes its key in
+  live TV whether or not the menu can open, so no press of it zaps. When the menu cannot open -
+  no menu screen can be built on this image, a menu is still open, or neither the styled screen
+  nor the image's own list opened - the log says `the press combo asked for the receiver menu
+  and it could not open` with the reason, once for each reason. Read `info.menu` and the lines
+  before it; set `menu_combo_key` to `off` to give the key back meanwhile.
+- **Back does not leave the menu**: on the Home Assistant menu and the list of choices PREVIOUS
+  is EXIT, whatever the combo is set to. A television whose Back arrives as another key that the
+  receiver does not read as EXIT cannot leave them with it; the `key` topic says which key it is.
+
+## A key stopped working in live TV
+
+- **Back (or EXIT, PLAY/PAUSE, STOP) does nothing in live TV, but works in the menus**: it is the
+  press combo's key (`menu_combo_key`). While a key is set there it only counts toward the Home
+  Assistant menu in live TV - PREVIOUS in the players too - and its own function there - on
+  OpenViX, Back zapping to the previous channel - and anything assigned to it in the receiver's
+  button setup do not run. `info.menu.combo.replaces` lists them. Set `menu_combo_key` to `off`
+  (or to another key) to give it back; the change applies at once.
 - **"There is no menu from Home Assistant yet."**: nothing is retained on
   `enigma2mqtt/menu/<node>`, or it was emptied - the integration's options define no menu, or its
   entry was removed. A payload the receiver refused leaves the menu before it and one line in the
