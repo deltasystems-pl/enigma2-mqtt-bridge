@@ -283,7 +283,7 @@ that cannot be restarted for a day because of it is the worse outcome.
 The plugin publishes the receiver's recordings for Home Assistant - every recording in every movie
 location, with its subfolders, the trash left out - and lets Home Assistant play one on the
 receiver and, with `recording_delete_allowed` on, move one into the receiver's trash. The topics
-and commands are in [TOPICS.md](TOPICS.md#basenoderecordings---added-after-040-unreleased).
+and commands are in [TOPICS.md](TOPICS.md#basenoderecordings---since-050).
 
 - **Which locations.** The receiver's own: its default movie location first - also when it is
   a folder of another location - then the movie list's locations ("Movie locations" in its
@@ -679,8 +679,8 @@ topic read homeassistant/status
 
 The first two `read` lines (since 0.4.0) let the receiver hear the release index and the version of
 the companion integration that Home Assistant publishes; without them it learns of releases only
-from the internet, and cannot ask Home Assistant for a package. The other four are the Home
-Assistant menu's: the menu itself, the menu creator's catalogue and Home Assistant's answers to a
+from the internet, and cannot ask Home Assistant for a package. The other four (since 0.5.0) are
+the Home Assistant menu's: the menu itself, the menu creator's catalogue and Home Assistant's answers to a
 save, and Home Assistant's own status under your discovery prefix (`homeassistant` by default).
 
 Then **verify it by effect**. Subscribe as a privileged user to a topic the box has no business
@@ -861,7 +861,7 @@ What else to know, and the settings that control it:
   read so far), from every bouquet, retained on the broker - just as `channels` names every
   channel there is. A consumer that hides a bouquet hides it from its own list, not from the
   broker.
-- **`stream_clients`** (added after 0.4.0) names every device that is being sent a stream by the
+- **`stream_clients`** (since 0.5.0) names every device that is being sent a stream by the
   receiver - its address on your network and the channel it is watching, from every bouquet -
   retained on the broker while it watches. There is no setting for it: it is published wherever
   the image has a stream server. Any broker client that can publish this receiver's commands can

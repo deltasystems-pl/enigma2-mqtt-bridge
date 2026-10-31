@@ -25,7 +25,7 @@ Conventions that hold everywhere:
 | Timestamps | `begin`, `end`, `generated`, `ts` are **Unix epoch seconds, UTC, integer**. Never a formatted string, never local time. |
 | Absent values | `null` for a field that has no value right now (no next event, no recording). A key is not silently dropped. |
 | Retraction | An empty payload published retained. That is how `last_error` is cleared and how `cmd/reset` and discovery retraction work. |
-| Packet size | No state topic, announcement or discovery payload is published in a packet over **1,000,000 bytes** - the fixed header, the topic and the payload together. (The retractions and the few fixed messages the plugin sends outside that path are small by construction.) That is under Mosquitto 2.1's default `max_packet_size` of 2,000,000 and under the 1 MiB default of other common brokers; a broker closes the connection on a bigger packet, and MQTT 3.1.1 gives a client no way to learn its limit. A payload that would need more is **not published**, and its topic is named in `info.not_published` (§1). A topic under `<base>/<node>/` is also retracted when an earlier, smaller payload was retained there; a topic outside the node's tree - a discovery payload - is left as it was. An event that is not retained and would be too big is dropped, with a line in the log. Three payloads grow with the channel list. Two of them give something up before it comes to that: an `epg_grid/<bouquet_slug>` is cut to fewer events per channel, and in discovery mode the device's discovery payload leaves the channel select out (§1, §4). `channels` has nothing to give up - it is every bouquet with its list - so on a receiver whose bouquets do not fit one packet together it is not published, and the lists are read from `channels/<bouquet_slug>`, one topic for each bouquet, which `bouquets` indexes (§1). Beyond that, what is not published in practice is the list or the grid of a single bouquet that is too big on its own. A folder of the recording library, `recordings/<folder_slug>`, gives something up as well: its oldest recordings are left out until it fits, and the index `recordings` says how many (§1). Added after 0.4.0 (unreleased). |
+| Packet size | No state topic, announcement or discovery payload is published in a packet over **1,000,000 bytes** - the fixed header, the topic and the payload together. (The retractions and the few fixed messages the plugin sends outside that path are small by construction.) That is under Mosquitto 2.1's default `max_packet_size` of 2,000,000 and under the 1 MiB default of other common brokers; a broker closes the connection on a bigger packet, and MQTT 3.1.1 gives a client no way to learn its limit. A payload that would need more is **not published**, and its topic is named in `info.not_published` (§1). A topic under `<base>/<node>/` is also retracted when an earlier, smaller payload was retained there; a topic outside the node's tree - a discovery payload - is left as it was. An event that is not retained and would be too big is dropped, with a line in the log. Three payloads grow with the channel list. Two of them give something up before it comes to that: an `epg_grid/<bouquet_slug>` is cut to fewer events per channel, and in discovery mode the device's discovery payload leaves the channel select out (§1, §4). `channels` has nothing to give up - it is every bouquet with its list - so on a receiver whose bouquets do not fit one packet together it is not published, and the lists are read from `channels/<bouquet_slug>`, one topic for each bouquet, which `bouquets` indexes (§1). Beyond that, what is not published in practice is the list or the grid of a single bouquet that is too big on its own. A folder of the recording library, `recordings/<folder_slug>`, gives something up as well: its oldest recordings are left out until it fits, and the index `recordings` says how many (§1). Since 0.5.0. |
 
 Everything the plugin publishes it also publishes again on every `on_connect` - the full state
 snapshot, the announcement and, in discovery mode, the discovery payloads. A broker that lost its
@@ -40,7 +40,7 @@ The contract has a major number, and the current contract major is **1**.
 | Contract | Plugin releases |
 |---|---|
 | 0 | 0.1.0 |
-| 1 | 0.2.0, 0.3.0, 0.4.0, and every later release until a release declares contract 2 |
+| 1 | 0.2.0, 0.3.0, 0.4.0, 0.5.0, and every later release until a release declares contract 2 |
 
 A plugin publishes its major as `info.contract` from 0.4.0 on (§1,
 [ADR-0015](adr/0015-signed-self-update.md)). A plugin that does not publish it is contract 0 when
@@ -129,8 +129,8 @@ hold:
 | `epg-grid-generated-means-changed` | 0.3.0 | `epg_grid/<bouquet_slug>`'s `generated` means when the grid last changed, not when it was last built | The integration reads `generated` only into its diagnostics (`diagnostics.py` l.144). Recorded after the fact, as above |
 | `timers-lists-finished` | 0.4.0 | `timers` lists the timers the receiver has finished with - ended, failed and disabled - and not only the pending ones; `state` gains `disabled`, `failed` and `unknown`, and a state number with no word is `unknown` where it used to read `waiting`. A consumer that treated every entry as pending filters on `state` (`waiting`, `prepared`, `running`) | The integration keeps the `timers` payload for its diagnostics only (`box.py` l.1299, `diagnostics.py` l.119) and builds no entity from it; its recording guard reads OpenWebif, not this topic (`installer.py` l.516-532). Decided by the maintainer on 2026-09-26 |
 | `zap-under-popup-recorded` | 0.4.0 | With only an information popup open directly over the info bar, `cmd/zap`, `cmd/zap_history` and the zap `cmd/bouquet` makes go through the channel list: the zap is recorded in the zap history, and a zap outside the bouquet being browsed moves the channel list. 0.3.0 played them directly, as with any screen open | As for `zap-moves-channel-list`: the integration follows `bouquet` and `zap_history` as the receiver reports them (`box.py` l.1291 for `zap_history`) |
-| `oversize-payload-withheld` | unreleased | A retained topic of the node's tree whose packet would be over 1,000,000 bytes is not published, and a smaller payload retained there earlier is retracted, while its capability stays in `info.capabilities`; `info.not_published` names the topic. `channels` and an `epg_grid/<bouquet_slug>` are the topics known to get that big, and the rule is not theirs alone: every retained topic of the tree is held to it the same way, `screen` - a JPEG, not JSON - and `channels/<slug>` included. Until now it was published whatever its size. A consumer treats the empty retained payload as any other retraction, and reads `info.not_published` to tell "too big to send" from "none". Where `channel_topics` is a capability, the lists a withheld `channels` would have carried are on `channels/<slug>`, one topic for each bouquet, with the slugs in `bouquets` | The integration (0.4.0) reads an empty retained `channels` as no channel list: an empty payload parses to nothing (`box.py` l.289, l.293-305), the dispatcher stores that (`box.py` l.1338-1339) and the bouquet readers answer with an empty list (`box.py` l.925-935), so its channel selects lose their options rather than keep stale ones; an empty `epg_grid/<bouquet_slug>` drops that bouquet's grid (`box.py` l.2135-2142). It does not read `info.not_published`, so it shows the empty list without saying why, and it reads neither `bouquets` nor `channels/<slug>`: its dispatcher stores a topic by its exact name and ignores a suffix it does not know (`box.py` l.1302-1311, l.1338-1340). One reader does not go through those: the installer's restart rule reads the retained `channels` itself and takes a payload that is no document, or a bouquet without a list, for a bouquet that does not hold the service (`restart_rule.py` l.242-259, the list test at l.252-254), so after an update on such a receiver it does not restore the bouquet context. The plugin's own discovery payloads read neither topic - the channel select's options are written into the payload (`discovery.py` l.371-382) |
-| `last-error-cleared-at-start` | unreleased | A retained `last_error` left by an earlier run of the plugin is cleared - an empty retained payload - at the first connect of a new plugin process: after an interface restart, a reboot, a reinstall or an update. Until now it stayed until the next command that succeeded, however many restarts later, and then described a command of a run that was over. A reconnect within one run clears nothing, nor does the new session a settings save opens; and a refusal the starting plugin has to report itself - how an update ended (section 2) - is published at that connect instead and replaces the older one. Nor is it cleared while the record of the last update ends in a restore that did not complete (`update.transaction.reason` `restore_failed` or `restore_incomplete`): the sentence left there says to install the plugin again, and restarting the interface has not done that; it stays, as before, until a command succeeds or `cmd/clear_error` is sent - also after the reinstall, since that record only changes with the next update. The sentence of an update whose helper stopped part-way is cleared by a start that has no verdict to give ([TRANSACTION.md](TRANSACTION.md), section 7). The plugin knows of the earlier error from its state file (section 4), which is not written at every refusal - a connect and a clean stop write it - so an error published shortly before the interface was killed can be missed and stays as before; `cmd/clear_error` (section 2) clears that one. The empty payload is sent only when the plugin knows of an error, before `availability` says `online` - which includes one empty message to a topic the broker holds nothing on, when the state file knows of an error the broker has lost, or when the only refusal was made before this run had a session. A consumer that wants the last refusal across a restart keeps it itself when it arrives, as it already has to across the next command that succeeds | The integration (0.4.0) keeps its own record: its last-error sensor ignores an empty payload (`sensor.py` l.931-935) and restores what it showed, so the clearing changes nothing it shows. Its update card drops the complaint it kept when the topic is cleared (`update.py` l.664-666), as after any command that succeeds, and says how an update ended from `update.transaction` and from the end's repeat on `last_error`, which is the report that is not cleared. Its command, update and uninstall waits take only a message that is not retained (`box.py` l.2125, `mqtt_update.py` l.598, `uninstall.py` l.722-723), and an empty payload fails or completes no command (the same test, `box.py` l.2125: retained or empty, it only replaces the stored state). The plugin's own discovery payloads announce no entity for `last_error` (`discovery.py`) |
+| `oversize-payload-withheld` | 0.5.0 | A retained topic of the node's tree whose packet would be over 1,000,000 bytes is not published, and a smaller payload retained there earlier is retracted, while its capability stays in `info.capabilities`; `info.not_published` names the topic. `channels` and an `epg_grid/<bouquet_slug>` are the topics known to get that big, and the rule is not theirs alone: every retained topic of the tree is held to it the same way, `screen` - a JPEG, not JSON - and `channels/<slug>` included. Until now it was published whatever its size. A consumer treats the empty retained payload as any other retraction, and reads `info.not_published` to tell "too big to send" from "none". Where `channel_topics` is a capability, the lists a withheld `channels` would have carried are on `channels/<slug>`, one topic for each bouquet, with the slugs in `bouquets` | The integration (0.4.0) reads an empty retained `channels` as no channel list: an empty payload parses to nothing (`box.py` l.289, l.293-305), the dispatcher stores that (`box.py` l.1338-1339) and the bouquet readers answer with an empty list (`box.py` l.925-935), so its channel selects lose their options rather than keep stale ones; an empty `epg_grid/<bouquet_slug>` drops that bouquet's grid (`box.py` l.2135-2142). It does not read `info.not_published`, so it shows the empty list without saying why, and it reads neither `bouquets` nor `channels/<slug>`: its dispatcher stores a topic by its exact name and ignores a suffix it does not know (`box.py` l.1302-1311, l.1338-1340). One reader does not go through those: the installer's restart rule reads the retained `channels` itself and takes a payload that is no document, or a bouquet without a list, for a bouquet that does not hold the service (`restart_rule.py` l.242-259, the list test at l.252-254), so after an update on such a receiver it does not restore the bouquet context. The plugin's own discovery payloads read neither topic - the channel select's options are written into the payload (`discovery.py` l.371-382) |
+| `last-error-cleared-at-start` | 0.5.0 | A retained `last_error` left by an earlier run of the plugin is cleared - an empty retained payload - at the first connect of a new plugin process: after an interface restart, a reboot, a reinstall or an update. Until now it stayed until the next command that succeeded, however many restarts later, and then described a command of a run that was over. A reconnect within one run clears nothing, nor does the new session a settings save opens; and a refusal the starting plugin has to report itself - how an update ended (section 2) - is published at that connect instead and replaces the older one. Nor is it cleared while the record of the last update ends in a restore that did not complete (`update.transaction.reason` `restore_failed` or `restore_incomplete`): the sentence left there says to install the plugin again, and restarting the interface has not done that; it stays, as before, until a command succeeds or `cmd/clear_error` is sent - also after the reinstall, since that record only changes with the next update. The sentence of an update whose helper stopped part-way is cleared by a start that has no verdict to give ([TRANSACTION.md](TRANSACTION.md), section 7). The plugin knows of the earlier error from its state file (section 4), which is not written at every refusal - a connect and a clean stop write it - so an error published shortly before the interface was killed can be missed and stays as before; `cmd/clear_error` (section 2) clears that one. The empty payload is sent only when the plugin knows of an error, before `availability` says `online` - which includes one empty message to a topic the broker holds nothing on, when the state file knows of an error the broker has lost, or when the only refusal was made before this run had a session. A consumer that wants the last refusal across a restart keeps it itself when it arrives, as it already has to across the next command that succeeds | The integration (0.4.0) keeps its own record: its last-error sensor ignores an empty payload (`sensor.py` l.931-935) and restores what it showed, so the clearing changes nothing it shows. Its update card drops the complaint it kept when the topic is cleared (`update.py` l.664-666), as after any command that succeeds, and says how an update ended from `update.transaction` and from the end's repeat on `last_error`, which is the report that is not cleared. Its command, update and uninstall waits take only a message that is not retained (`box.py` l.2125, `mqtt_update.py` l.598, `uninstall.py` l.722-723), and an empty payload fails or completes no command (the same test, `box.py` l.2125: retained or empty, it only replaces the stored state). The plugin's own discovery payloads announce no entity for `last_error` (`discovery.py`) |
 
 The rule was written down after 0.3.0, so the history below classifies the releases before it by
 what they did.
@@ -164,7 +164,7 @@ not by the checker; their types are the tables below.
 | 0.1.0 -> 0.2.0 | a new major: **0.1.0 is contract 0** | 0.1.0 implemented the session only: `availability`, `info` with an empty `capabilities` list and no `settings` member, the announcement, `last_error`, and `cmd/ha_mode`, `cmd/discovery` and `cmd/reset`. Its copy of this file described the other topics before they were built, and 0.2.0 built several of them differently - `service.bouquet` became the first configured bouquet that holds the service rather than the bouquet it was tuned from, and `service.name` may be `null`. A consumer of contract 1 reads the permissions from `info.settings` and the features from `capabilities`, and 0.1.0 publishes neither. This is also why no update path in this project offers anything below 0.2.0 |
 | 0.2.0 -> 0.3.0 | contract 1: additions and two named exceptions | **Added**: the topics `cec`, `zap_history`, `epg_import`, `softcam` and `process`; the commands `zap_history`, `history_clear`, `softcam_restart`, `epg_import` and `uninstall`; `info.wol`; `last_error.reason`; `cmd/message`'s `style`; the writable settings `softcam_autoheal` and `softcam_autoheal_seconds`; the read-only `softcam_restart_allowed`, `epg_import_allowed` and `uninstall_allowed`; the capability names `cec_workaround`, `softcam`, `toast`, `process`, `zap_history`, `history_clear`, `epg_import` and `uninstall`. **New refusals**: `deep_standby`, `reboot` and `restart_gui` while an EPG import runs, and `cmd/bouquet` during timeshift. **Free text tightened**: `cmd/message` removes every backslash from a popup's text, as from a toast's; a sender that used a literal `\n` for a line break sends a newline instead. **Exceptions**: `zap-moves-channel-list`, `epg-grid-generated-means-changed` |
 | 0.3.0 -> 0.4.0 | contract 1: additions, fixes and two named exceptions | **Added**: `cmd/timer` `delete` accepts a finished, failed or disabled timer; the `info` members `build` and `contract`; the read-only setting `update_check`, the `update` topic, the command `update_check` and the subscription to `enigma2mqtt/release_index` (§3); the read-only setting `update_allowed`, the capability `self_update`, the command `update`, `update.transaction` and the subscription to `enigma2mqtt/integration/<node>` (§3); the event topic `relay_request` and the command `relay`, and `cmd/update`'s refusal `no_relay`. **Exceptions**: `timers-lists-finished` (#42), `zap-under-popup-recorded` (#45, #46). **Fixes** (the plugin now does what this file said): `cmd/zap_history`'s refusal without a navigation or a player (#41), and the refusal of a `cmd/timer` `add` whose window has passed |
-| unreleased, on `main` after 0.4.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4); a command's id - the envelope every command takes on the broker, the `last_error` member `id` and the capability `command_id` (sections 1 and 2); the `service` members `video_codec`, `interlaced`, `frame_rate` and `audio_tracks` and the capability `service_codecs`; the topics `stream` and `stream_clients`, the event topic `stream_playable`, the commands `stream_stop` and `stream_playable` and the capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable`; the `volume` member `passthrough` and the capability `volume_passthrough`; the receiver menu - the subscriptions to `enigma2mqtt/menu/<node>` and `<ha_discovery_prefix>/status` (§3), the event topic `menu_action` with its member `seen` on a `toggle`, the `info` member `menu`, the read-only setting `menu_allowed`, the writable setting `menu_hotkey` and the capability `menu`; the writable setting `menu_transparency`, and `cmd/config` taking any part of its keys, every key left out keeping its value; the menu creator - the subscriptions to `enigma2mqtt/menu_catalogue/<node>` and `enigma2mqtt/menu_edit_result/<node>` (§3), the event topic `menu_edit` and the capability `menu_editor`; a list of choices - the command `list`, the event topic `list_answer`, the `info` member `list` and the capability `list`, and the `reason` `busy` on the doors' sentence for `cmd/list`; the recording library - the topics `recordings` and `recordings/<folder_slug>`, the commands `play_recording`, `delete_recording` and `recordings_refresh`, the read-only setting `recording_delete_allowed`, the `info` member `recording_trash` and the capabilities `recordings`, `recording_play` and `recording_delete`; the members `service_name`, `description`, `location`, `file`, `id`, `instant` and `bouquet` of each running recording in `recording.active` and the capability `recording_details`; the topic `timeshift` and the capability `timeshift`; the press combo - the writable settings `menu_combo_key`, `menu_combo_presses` and `menu_combo_gap_ms` and the `info.menu` members `combo` and `combo_reason`. **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
+| 0.4.0 -> 0.5.0 | contract 1: additions and two named exceptions | **Added**: the `info` member `not_published`; a discovery payload over the packet bound is not published, and `cmd/reset` leaves the one already retained (§2); the topics `bouquets` and `channels/<bouquet_slug>` and the capability `channel_topics`; `epg_grid/<bouquet_slug>`'s member `events_per_channel`, and a grid over the packet bound is cut to fewer events per channel before it is withheld; a discovery payload over the packet bound is published without the channel select (§4); the command `clear_error` and its discovery button (sections 2 and 4); a command's id - the envelope every command takes on the broker, the `last_error` member `id` and the capability `command_id` (sections 1 and 2); the `service` members `video_codec`, `interlaced`, `frame_rate` and `audio_tracks` and the capability `service_codecs`; the topics `stream` and `stream_clients`, the event topic `stream_playable`, the commands `stream_stop` and `stream_playable` and the capabilities `stream`, `stream_clients`, `stream_stop` and `stream_playable`; the `volume` member `passthrough` and the capability `volume_passthrough`; the receiver menu - the subscriptions to `enigma2mqtt/menu/<node>` and `<ha_discovery_prefix>/status` (§3), the event topic `menu_action` with its member `seen` on a `toggle`, the `info` member `menu`, the read-only setting `menu_allowed`, the writable setting `menu_hotkey` and the capability `menu`; the writable setting `menu_transparency`, and `cmd/config` taking any part of its keys, every key left out keeping its value; the menu creator - the subscriptions to `enigma2mqtt/menu_catalogue/<node>` and `enigma2mqtt/menu_edit_result/<node>` (§3), the event topic `menu_edit` and the capability `menu_editor`; a list of choices - the command `list`, the event topic `list_answer`, the `info` member `list` and the capability `list`, and the `reason` `busy` on the doors' sentence for `cmd/list`; the recording library - the topics `recordings` and `recordings/<folder_slug>`, the commands `play_recording`, `delete_recording` and `recordings_refresh`, the read-only setting `recording_delete_allowed`, the `info` member `recording_trash` and the capabilities `recordings`, `recording_play` and `recording_delete`; the members `service_name`, `description`, `location`, `file`, `id`, `instant` and `bouquet` of each running recording in `recording.active` and the capability `recording_details`; the topic `timeshift` and the capability `timeshift`; the press combo - the writable settings `menu_combo_key`, `menu_combo_presses` and `menu_combo_gap_ms` and the `info.menu` members `combo` and `combo_reason`. **Exceptions**: `oversize-payload-withheld`, `last-error-cleared-at-start` |
 
 ---
 
@@ -195,7 +195,7 @@ announcement retained.
 {
   "image": "OpenViX 6.6.007",
   "enigma": "2024-09-11-Release",
-  "plugin": "0.4.0",
+  "plugin": "0.5.0",
   "build": {"commit": "3f6c0a2d9e41b7c85a0f2e6d1c9b8a7f6e5d4c3b", "time": 1790000000,
             "dirty": false, "flavour": "release", "on_disk": null},
   "contract": 1,
@@ -243,12 +243,12 @@ announcement retained.
 | `uptime` | int | Seconds since boot |
 | `wol` | object | Since 0.3.0. What the **image** says about Wake-on-LAN - whether it has a switch for it and whether that is on. See below |
 | `ha_mode` | string | `discovery` \| `integration` \| `off` - the acknowledgement of `cmd/ha_mode` |
-| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5-3600), `screenshot_delay` (post-zap settling seconds, 1-30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30-600), `menu_hotkey` (`help_long` \| `red_long` \| `f3` \| `f4` \| `off`; a long HELP by default; added after 0.4.0, unreleased), `menu_transparency` (integer percent, 0-80 in steps of ten, 20 by default: how see-through the receiver menu's background is; added after 0.4.0, unreleased), `menu_combo_key` (`off` \| `previous` \| `exit` \| `playpause` \| `stop`; off by default: the key of the press combo, which opens the receiver menu when pressed several times in quick succession; added after 0.4.0, unreleased), `menu_combo_presses` (integer, 2-5, 3 by default: how many presses open the menu; added after 0.4.0, unreleased), `menu_combo_gap_ms` (integer milliseconds, 300-3000 in steps of 100, 1200 by default: the longest pause between two presses; added after 0.4.0, unreleased). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`, `uninstall_allowed`, `update_check`, `update_allowed`, `menu_allowed` and `recording_delete_allowed` (bools, off by default but `menu_allowed`, which is on). See below. |
+| `settings` | object | The complete non-secret settings a consumer may **read**. Writable through `cmd/config`: `publish_keys` (bool), `screenshot` (`off` \| `on_zap` \| `interval`), `screenshot_interval` (integer seconds, 5-3600), `screenshot_delay` (post-zap settling seconds, 1-30), `cam_telemetry` (bool, off by default), `oscam_telemetry` (bool, off by default), `softcam_autoheal` (bool, off by default), `softcam_autoheal_seconds` (integer seconds, 30-600), `menu_hotkey` (`help_long` \| `red_long` \| `f3` \| `f4` \| `off`; a long HELP by default; since 0.5.0), `menu_transparency` (integer percent, 0-80 in steps of ten, 20 by default: how see-through the receiver menu's background is; since 0.5.0), `menu_combo_key` (`off` \| `previous` \| `exit` \| `playpause` \| `stop`; off by default: the key of the press combo, which opens the receiver menu when pressed several times in quick succession; since 0.5.0), `menu_combo_presses` (integer, 2-5, 3 by default: how many presses open the menu; since 0.5.0), `menu_combo_gap_ms` (integer milliseconds, 300-3000 in steps of 100, 1200 by default: the longest pause between two presses; since 0.5.0). **Read-only**: `deep_standby_allowed`, `softcam_restart_allowed`, `epg_import_allowed`, `uninstall_allowed`, `update_check`, `update_allowed`, `menu_allowed` and `recording_delete_allowed` (bools, off by default but `menu_allowed`, which is on). See below. |
 | `capabilities` | list of strings | Which hooks this image actually gave the plugin |
-| `menu` | object or null | Which screen the receiver menu is drawn with on this image and which key opens it; `null` where there is no menu - `menu_allowed` off, or no screen could be built. Added after 0.4.0 (unreleased). See below |
-| `list` | object, optional | Which screen a list of choices (`cmd/list`, section 2) is shown with on this image. **Absent**, not `null`, where `list` is not a capability. Added after 0.4.0 (unreleased). See below |
-| `recording_trash` | bool or null | Whether the image's trash for recordings is switched on - its own setting, *Use trash can in movie list* (`config.usage.movielist_trashcan`) - which is what `cmd/delete_recording` moves a recording into: `false` means a delete is refused. `null` where the image has no trash function, or the plugin has no session. Read from the image at every `info` publish, since it is changed in the image's own menu. Added after 0.4.0 (unreleased) |
-| `not_published` | list of objects | The topics whose payload was too big to send, so they are not on the broker. `[]` when everything fits, which is nearly always. Added after 0.4.0 (unreleased). See below |
+| `menu` | object or null | Which screen the receiver menu is drawn with on this image and which key opens it; `null` where there is no menu - `menu_allowed` off, or no screen could be built. Since 0.5.0. See below |
+| `list` | object, optional | Which screen a list of choices (`cmd/list`, section 2) is shown with on this image. **Absent**, not `null`, where `list` is not a capability. Since 0.5.0. See below |
+| `recording_trash` | bool or null | Whether the image's trash for recordings is switched on - its own setting, *Use trash can in movie list* (`config.usage.movielist_trashcan`) - which is what `cmd/delete_recording` moves a recording into: `false` means a delete is refused. `null` where the image has no trash function, or the plugin has no session. Read from the image at every `info` publish, since it is changed in the image's own menu. Since 0.5.0 |
+| `not_published` | list of objects | The topics whose payload was too big to send, so they are not on the broker. `[]` when everything fits, which is nearly always. Since 0.5.0. See below |
 
 **Presence in `settings` is not permission to write it back.** Until 0.2.0 this object was „the
 complete remotely writable subset" and the two things were the same; they are not any more. The
@@ -264,8 +264,8 @@ settings it did mean to change as well.
 | `uninstall_allowed` | 0.3.0 | Whether `cmd/uninstall` is permitted over MQTT. Always present, whichever way it is set. A consumer offers the removal only on a **stated** `true` together with the `uninstall` capability: for a one-way door, silence means no | The same places, and never over MQTT |
 | `update_check` | 0.4.0 | Whether the receiver asks the plugin's release origin, on the internet, which releases there are: once a day, and when `cmd/update_check` asks over MQTT. Not a permission for anything on the receiver, but the one switch that lets it make a connection other than the broker's, so it sits on this side of the line for the same reason. Always present, whichever way it is set | The same places, and never over MQTT |
 | `update_allowed` | 0.4.0 | Whether `cmd/update` is permitted over MQTT - an install of a signed release, which ends in a restart of the interface. Always present, whichever way it is set. A consumer offers an install over MQTT only on a stated `true` together with the `self_update` capability | The same places, and never over MQTT |
-| `menu_allowed` |  | Added after 0.4.0 (unreleased). Whether the receiver offers the Home Assistant menu ([§3](#the-receiver-menu---added-after-040-unreleased-capability-menu)): **on by default**. Off, there is no menu - no Extensions entry, no hotkey, no subscription to `enigma2mqtt/menu/<node>`, no `menu_action`, and no `menu` capability. Always present, whichever way it is set | The same places, and never over MQTT |
-| `recording_delete_allowed` |  | Added after 0.4.0 (unreleased). Whether `cmd/delete_recording` is permitted over MQTT - a move of one recording into the image's trash, never further. **Off by default.** Always present, whichever way it is set. The `recording_delete` capability needs it on and the image's trash on as well (`recording_trash`) | The same places, and never over MQTT |
+| `menu_allowed` | 0.5.0 | Whether the receiver offers the Home Assistant menu ([§3](#the-receiver-menu---since-050-capability-menu)): **on by default**. Off, there is no menu - no Extensions entry, no hotkey, no subscription to `enigma2mqtt/menu/<node>`, no `menu_action`, and no `menu` capability. Always present, whichever way it is set | The same places, and never over MQTT |
+| `recording_delete_allowed` | 0.5.0 | Whether `cmd/delete_recording` is permitted over MQTT - a move of one recording into the image's trash, never further. **Off by default.** Always present, whichever way it is set. The `recording_delete` capability needs it on and the image's trash on as well (`recording_trash`) | The same places, and never over MQTT |
 
 The rule behind which side of the line a setting falls on: one that **enables a command** is never
 writable over MQTT - it is set on the receiver (the setup screen, the provisioning file, or the
@@ -300,15 +300,15 @@ the running `plugin.py`. A copy unpacked by hand or carried in a firmware image 
 `self_update` (since 0.4.0) has no feature area behind it either: it is `uninstall`'s condition, and
 the receiver can run the update helper outside enigma2 - `/sbin/start-stop-daemon` and
 `/usr/bin/python3` are executable and the helper and the four modules it imports are in the plugin's
-directory - so `cmd/update` can work. `channel_topics` (added after 0.4.0, unreleased) is not a
+directory - so `cmd/update` can work. `channel_topics` (since 0.5.0) is not a
 feature area of its own either: it is claimed with `channels`, and says that the index `bouquets`
 and each bouquet's list on `channels/<bouquet_slug>` are published - which is where a consumer
-finds the lists when `channels` is too big to be. `command_id` (added after 0.4.0, unreleased) is
+finds the lists when `channels` is too big to be. `command_id` (since 0.5.0) is
 not a feature area at all, and no hook is behind it: every plugin that opens the envelope a
 command's id comes in (section 2) claims it, always. It is how a consumer knows the envelope is
 safe to send - a plugin without the name takes an envelope for the command's own payload.
 
-Six names were added after 0.4.0 (unreleased) for what the receiver knows about streaming
+Six names were added in 0.5.0 for what the receiver knows about streaming
 and about its audio. `service_codecs` is claimed with `service` on an image that can name
 the video type (`iServiceInformation.sVideoType`): the codec members of `service` are then
 filled in, where an older plugin has no such members and an image without the name has
@@ -322,19 +322,19 @@ server lists clients and cannot stop one claims the first and not the second.
 settings `volume.passthrough` is read from; without it the member is still published, and
 is `null` for every track the receiver might hand on undecoded.
 
-`menu` (added after 0.4.0, unreleased) says the receiver offers the Home Assistant menu: the
+`menu` (since 0.5.0) says the receiver offers the Home Assistant menu: the
 permission `menu_allowed` is on and the image can open a menu screen - the plugin's own, or the
 image's list as the fallback. It is what the companion integration waits for before it acts on a
-`menu_action` from this node ([§3](#the-receiver-menu---added-after-040-unreleased-capability-menu)).
+`menu_action` from this node ([§3](#the-receiver-menu---since-050-capability-menu)).
 
-`menu_editor` (added after 0.4.0, unreleased) says the receiver offers the menu creator: `menu` is
+`menu_editor` (since 0.5.0) says the receiver offers the menu creator: `menu` is
 claimed and OpenWebif has mounted the plugin's page, whose Menu subpage the creator is on. It is
 what the companion integration waits for before it publishes the catalogue and before it reads a
-`menu_edit` from this node ([§3](#the-menu-creator---added-after-040-unreleased-capability-menu_editor)).
+`menu_edit` from this node ([§3](#the-menu-creator---since-050-capability-menu_editor)).
 It goes with `menu`, and it comes late on a receiver whose OpenWebif mounts its pages after the
 plugin has connected: `info` is published again then.
 
-Five names were added after 0.4.0 (unreleased) for the receiver's recordings. `recording_details` is
+Five names were added in 0.5.0 for the receiver's recordings. `recording_details` is
 claimed with `recording`: each running recording in `recording.active` carries its details.
 `recordings` says the image has movie locations and the library has been read: the index
 `recordings` and the folders `recordings/<folder_slug>` are published, and
@@ -347,7 +347,7 @@ reads `info` to say which of the two is missing. `timeshift` says the image's in
 timeshift and the plugin found it: the `timeshift` topic is published. It arrives late on an
 image that builds its info bar after the plugin has started, as `bouquet_context` does.
 
-`list` (added after 0.4.0, unreleased) says the receiver can put a list of choices on the
+`list` (since 0.5.0) says the receiver can put a list of choices on the
 television - `cmd/list` (section 2), answered on `list_answer` (below): the plugin's own screen or,
 where that cannot be built, the image's own choice list. It is claimed once one of them has been
 built on this image, and taken back - with `info` published again - when a skin reload can build
@@ -423,7 +423,7 @@ means two other things in this contract: where a command came from, and whether 
 could be reached (`update.origin`). The release workflow reads every release package
 back and refuses one that carries either.
 
-**`not_published` names the topics that are missing on purpose.** Added after 0.4.0 (unreleased).
+**`not_published` names the topics that are missing on purpose.** Since 0.5.0.
 A payload whose packet would be over the plugin's bound of 1,000,000 bytes (the conventions at the
 top of this file) is not sent, because a broker answers an oversize packet by closing the
 connection, and the plugin would send it again on every reconnect. Always present; `[]` when
@@ -474,7 +474,7 @@ such a bouquet out, or the bouquet is split into smaller ones. A lower `epg_grid
 nothing for a grid that is in the list; `0` switches the grids off
 ([TROUBLESHOOTING.md](TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back)).
 
-**`menu` says how the receiver menu is shown here.** Added after 0.4.0 (unreleased),
+**`menu` says how the receiver menu is shown here.** Since 0.5.0,
 [ADR-0020](adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md)
 and [ADR-0021](adr/0021-the-menu-hotkey-is-offered-the-key-after-the-image.md). `null` when the
 receiver has no menu: `menu_allowed` off, no session, or neither screen could be built. Otherwise:
@@ -491,14 +491,14 @@ receiver has no menu: `menu_allowed` off, no session, or neither screen could be
 | `screen` | string | `styled` - the plugin's own screen, with icons, states and colours - or `fallback` - the image's own list, with the same rows and no icon, state or number keys. Decided when the menu is opened: a styled screen that cannot be built then is replaced by the fallback for that opening and every later one, and `info` is published again |
 | `hotkey` | string or null | The `menu_hotkey` choice that is bound and opens the menu in live TV and in the image's movie player, or `null` when none does: switched `off`, an image that does not let a plugin bind a key, or a key the image's own user-assignable button setup gives a function of its own - which then runs first, by design; that setup is the same in live TV and in the movie player. The key opens the menu in the image's media player too, unless that player uses the key itself, which it then keeps: OpenATV's media player seeks back on a long RED. Over any other screen the key does nothing new |
 | `reason` | string or null | Why `hotkey` is `null`, in English for the person reading the topic; `null` when a key is bound. The Extensions entry "Home Assistant" opens the menu whatever this says |
-| `combo` | object or null | The bound press combo - a key pressed `presses` times, each press within `gap_ms` of the one before, opens the menu in live TV - and, for `previous`, in the players - or `null` when none is bound: switched `off`, or an image that does not let a plugin bind a key. Added after 0.4.0 (unreleased), [ADR-0025](adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md) |
+| `combo` | object or null | The bound press combo - a key pressed `presses` times, each press within `gap_ms` of the one before, opens the menu in live TV - and, for `previous`, in the players - or `null` when none is bound: switched `off`, or an image that does not let a plugin bind a key. Since 0.5.0, [ADR-0025](adr/0025-a-press-combo-takes-its-key-from-the-image-in-live-tv-and-the-players.md) |
 | `combo.key` | string | The `menu_combo_key` choice |
 | `combo.presses` | integer | `menu_combo_presses` |
 | `combo.gap_ms` | integer | `menu_combo_gap_ms` |
 | `combo.replaces` | array of strings or null | The image functions the key no longer reaches where it counts, as `"<context>.<action>"` - a mapping of the key in the image's keymap, in a context the info bar binds or, for `previous`, a player - or `"ButtonSetup.<name>"` - an assignment in the image's user-assignable button setup, which the combo overrides there. `[]` when it found none; `null` when it could not tell. Best effort: the keymap is read when the key is bound, the button setup whenever `info` is published, and neither ever stops the key from being bound |
 | `combo_reason` | string or null | Why `combo` is `null`, in English for the person reading the topic; `null` when a combo is bound |
 
-**`list` says how a list of choices is shown here.** Added after 0.4.0 (unreleased),
+**`list` says how a list of choices is shown here.** Since 0.5.0,
 [ADR-0023](adr/0023-a-list-of-choices-is-answered-by-row-id-once.md). **Absent** - not `null` -
 where `list` is not a capability: no session, or neither screen could be built. Otherwise:
 
@@ -614,11 +614,11 @@ standby the household asks for during those seconds is still told apart from the
 | `name` | string \| null | Channel name as the bouquet spells it |
 | `bouquet` | string \| null | The first of the **configured** bouquets (`bouquets_for_select`) that contains the service - `null` when it is in none of them, which is not the same as „no bouquet" |
 | `provider` | string \| null | |
-| `width`, `height` | int \| null | Video resolution; `null` before the first frame is decoded. From after 0.4.0 (unreleased) read from the video decoder (`/proc/stb/vmpeg/0`) where the image has it, else from the image's service information - see below |
-| `video_codec` | string \| null | Added after 0.4.0 (unreleased). The video codec on the decoder, as a stable lower-case name: `mpeg2`, `h264`, `hevc`, `mpeg1`, `mpeg4` (MPEG-4 Part 2), `vc1`, `vc1_sm`, `avs`, `avs2`. `null` when the image gives a value that is none of these, or none at all. An open enumeration |
-| `interlaced` | bool \| null | Added after 0.4.0 (unreleased). `true` for an interlaced picture, `false` for a progressive one; `null` before the decoder knows. From the video decoder where the image has it, as `width` |
-| `frame_rate` | number \| null | Added after 0.4.0 (unreleased). Frames a second - `25.0`, `50.0`, `23.976` - to three decimal places; `null` before the decoder knows. For an interlaced picture it is the frame rate, not the field rate. It is the decoder's number (or the image's) divided by a thousand and is held to no upper bound: a value no broadcast has is published as it was given. From the video decoder where the image has it, as `width` |
-| `audio_tracks` | list \| null | Added after 0.4.0 (unreleased). The audio tracks of the service, in the image's order, at most 32. `[]` for a service without audio; `null` when nothing is playing or the image will not say. See below |
+| `width`, `height` | int \| null | Video resolution; `null` before the first frame is decoded. From 0.5.0 read from the video decoder (`/proc/stb/vmpeg/0`) where the image has it, else from the image's service information - see below |
+| `video_codec` | string \| null | Since 0.5.0. The video codec on the decoder, as a stable lower-case name: `mpeg2`, `h264`, `hevc`, `mpeg1`, `mpeg4` (MPEG-4 Part 2), `vc1`, `vc1_sm`, `avs`, `avs2`. `null` when the image gives a value that is none of these, or none at all. An open enumeration |
+| `interlaced` | bool \| null | Since 0.5.0. `true` for an interlaced picture, `false` for a progressive one; `null` before the decoder knows. From the video decoder where the image has it, as `width` |
+| `frame_rate` | number \| null | Since 0.5.0. Frames a second - `25.0`, `50.0`, `23.976` - to three decimal places; `null` before the decoder knows. For an interlaced picture it is the frame rate, not the field rate. It is the decoder's number (or the image's) divided by a thousand and is held to no upper bound: a value no broadcast has is published as it was given. From the video decoder where the image has it, as `width` |
+| `audio_tracks` | list \| null | Since 0.5.0. The audio tracks of the service, in the image's order, at most 32. `[]` for a service without audio; `null` when nothing is playing or the image will not say. See below |
 
 Published on `evStart`, `evTunedIn`, `evUpdatedInfo`, `evNewProgramInfo` and `evEnd`, so it
 settles within a second of a zap and is published again when the resolution becomes known - a box
@@ -634,7 +634,7 @@ sent again.
 
 With nothing playing every field is `null`; the keys are still all there.
 
-**The picture is the decoder's word** (after 0.4.0, unreleased). `width`, `height`, `interlaced`
+**The picture is the decoder's word** (since 0.5.0). `width`, `height`, `interlaced`
 and `frame_rate` are read from the first video decoder's own files, `/proc/stb/vmpeg/0/xres`,
 `yres`, `progressive` and `framerate`, where the image has them - Broadcom receivers do, most
 others too - and only while the image's service information itself reports a picture size: a
@@ -751,8 +751,8 @@ Rebuilt when `bouquets.tv` or any `userbouquet.*` file changes - there is no eve
 their modification times are compared once a minute - and on `cmd/discovery`. The list on a real
 box went from 36 entries to 11 within half an hour once, so nothing may key on position.
 
-**The same lists are published a second way, one bouquet a topic.** Added after 0.4.0
-(unreleased). This payload is every bouquet with its list, so it grows with the sum of all of
+**The same lists are published a second way, one bouquet a topic.** Since 0.5.0. This payload
+is every bouquet with its list, so it grows with the sum of all of
 them, and on a receiver with a very large channel list its packet would be over the bound of
 1,000,000 bytes (the conventions at the top of this file). It is then **not published** - withheld,
 named in `info.not_published`, and a smaller copy retained earlier retracted - and its shape never
@@ -762,7 +762,7 @@ list; both are published on every receiver that claims `channel_topics`, whether
 fits, so a consumer that reads them never has to care. `cmd/zap` by name resolves against the
 complete list either way - what is too big is the packet, not what the receiver knows.
 
-### `<base>/<node>/bouquets` - added after 0.4.0 (unreleased)
+### `<base>/<node>/bouquets` - since 0.5.0
 
 The index of the per-bouquet channel topics: every configured bouquet, in the receiver's order,
 with the slug of its `channels/<bouquet_slug>` topic and how many services it holds. Retained, and
@@ -801,7 +801,7 @@ connect.
 `epg_grid/<bouquet_slug>` uses, but not for all - see the next section - and only this topic says
 which it is.
 
-### `<base>/<node>/channels/<bouquet_slug>` - added after 0.4.0 (unreleased)
+### `<base>/<node>/channels/<bouquet_slug>` - since 0.5.0
 
 The services of one bouquet, **one retained topic per configured bouquet**, and present when
 `channel_topics` is a capability - which it is whenever `channels` is. The same lists `channels`
@@ -964,7 +964,7 @@ original**, and the payload is what a user should be shown.
 |---|---|---|
 | `bouquet` | string | The bouquet's name as enigma2 spells it - not the slug |
 | `generated` | int | Epoch seconds, when this bouquet's grid last **changed** - see below; it is not the time of the last build |
-| `events_per_channel` | int | The most events a channel carries in this payload: `epg_grid_events`, or fewer when the grid was cut to fit one packet - see below. Added after 0.4.0 (unreleased) |
+| `events_per_channel` | int | The most events a channel carries in this payload: `epg_grid_events`, or fewer when the grid was cut to fit one packet - see below. Since 0.5.0 |
 | `channels[].sref` | string | |
 | `channels[].name` | string | |
 | `channels[].events[]` | list | Up to `events_per_channel` entries per channel, chronological |
@@ -980,7 +980,7 @@ A channel can carry fewer than `epg_grid_events` events: the plugin asks the EPG
 bounded window of time rather than for a number of events, because that is the question the cache
 takes, and a channel showing a three-hour film has one event in it.
 
-**A grid that does not fit one packet is cut, not dropped.** Added after 0.4.0 (unreleased). When
+**A grid that does not fit one packet is cut, not dropped.** Since 0.5.0. When
 the packet of a bouquet's grid would be over the bound of 1,000,000 bytes (the conventions at the
 top of this file), the plugin publishes that bouquet's grid with **the largest number of events
 per channel that fits**, from `epg_grid_events` down to 1. Each channel
@@ -1120,7 +1120,7 @@ Published on `evTunedIn` and `evTuneFailed`, and re-read every 60 seconds while 
 playing, because signal quality drifts with the weather rather than with events. A service that
 does not come off a tuner - IPTV, a recording being played back - has every field `null`.
 
-### `<base>/<node>/stream` - added after 0.4.0 (unreleased)
+### `<base>/<node>/stream` - since 0.5.0
 
 Where the image's stream server is and what it wants. Every enigma2 image serves a service's
 transport stream to a client that asks for it over HTTP; this topic carries the facts a consumer
@@ -1155,7 +1155,7 @@ Published on every connect, and again when a value changed: the two settings beh
 `stream_clients` takes, and the topic is sent only when it differs. The plugin does not test
 that anything answers on the port.
 
-### `<base>/<node>/stream_clients` - added after 0.4.0 (unreleased)
+### `<base>/<node>/stream_clients` - since 0.5.0
 
 Who the stream server is serving right now, from the image's own list. Retained, and present
 when `stream_clients` is a capability - the image's stream server lists its clients
@@ -1214,7 +1214,7 @@ On OpenATV the list also holds the clients of its RTSP server (read from its sou
 measured), which `cmd/stream_stop` cannot end: the image does not look for them there, and the
 command is refused with `not_stopped`.
 
-### `<base>/<node>/stream_playable` - added after 0.4.0 (unreleased)
+### `<base>/<node>/stream_playable` - since 0.5.0
 
 **Not retained** - QoS 0. The answer to one `cmd/stream_playable` (section 2): whether the service
 asked about could be played now, beside everything the receiver is already doing. Present when
@@ -1260,7 +1260,7 @@ A timer that only tunes the box - enigma2 calls it `justplay` - is not a recordi
 neither field, though it is in `timers`. A disabled, finished or failed timer is in neither
 either.
 
-**Each entry of `active` carries its details** - added after 0.4.0 (unreleased), capability
+**Each entry of `active` carries its details** - since 0.5.0, capability
 `recording_details`, claimed with `recording`. `next` keeps the four members above.
 
 ```json
@@ -1350,7 +1350,7 @@ Known gap: switching a timer off or back on in the receiver's own timer list doe
 file on OpenViX 6.6, so that change reaches `timers` only with the next write for any other reason.
 Until then the topic shows the timer's previous state.
 
-### `<base>/<node>/timeshift` - added after 0.4.0 (unreleased)
+### `<base>/<node>/timeshift` - since 0.5.0
 
 ```json
 {"active": true, "paused": false, "behind": true, "since": 1792050000}
@@ -1381,7 +1381,7 @@ is read again, from memory. A buffer the service starts in some other way is see
 those events. The only repeating timer looks for the info bar, on an image that builds it after
 the plugin has started, and stops when it has found it.
 
-### `<base>/<node>/recordings` - added after 0.4.0 (unreleased)
+### `<base>/<node>/recordings` - since 0.5.0
 
 ```json
 {"read": 1792050000, "reason": "start",
@@ -1451,7 +1451,7 @@ carries `sref` and `bouquet` for that, as the zap history's entries do. The rece
 whole library, titles and descriptions included, to anybody on the broker, as it publishes the
 channel lists and the zap history.
 
-### `<base>/<node>/recordings/<folder_slug>` - added after 0.4.0 (unreleased)
+### `<base>/<node>/recordings/<folder_slug>` - since 0.5.0
 
 ```json
 {"recordings": [{"id": "3f9c2e4a1b7d5c60", "file": "20261017 2015 - Channel - Title.ts",
@@ -1494,7 +1494,7 @@ recording, a folder holds about three thousand before that happens.
 - the remote, OpenWebif, the plugin itself - and reconciled on a short timer, because enigma2 has
 no single choke point every volume change passes through.
 
-**`passthrough` says whether the volume changes anything.** Added after 0.4.0 (unreleased),
+**`passthrough` says whether the volume changes anything.** Since 0.5.0,
 [ADR-0019](adr/0019-passthrough-is-true-false-or-unknown.md). A receiver can hand AC-3, AAC and
 other encoded audio to the television undecoded - "passthrough" in its audio settings - and then
 its own volume moves a bar on the screen and nothing anybody can hear. The member is about the
@@ -1565,8 +1565,8 @@ when a descrambled stream to a client ends. While the file is absent, the last f
 ECM was written, and `null` after that, as before. A file that is there counts for 15 seconds
 after its ECM, as before. A zap ends it at once, and so does a poll that
 finds the service free-to-air or cannot tell whether it is encrypted, or finds the file there but
-stale, unreadable or replaced by a link. Changed after 0.4.0
-(unreleased): until then an absent file was `null` at once.
+stale, unreadable or replaced by a link. Changed in 0.5.0: until then an absent file was `null`
+at once.
 
 ### `<base>/<node>/oscam`
 
@@ -1754,10 +1754,10 @@ every reconnect. The plugin observes keys and **never consumes them** - the rece
 exactly as it would with the plugin absent - and publishing is capped so that holding a button
 cannot flood the broker. `publish_keys` turns the topic off.
 
-### `<base>/<node>/menu_action` - added after 0.4.0 (unreleased)
+### `<base>/<node>/menu_action` - since 0.5.0
 
 **Not retained** - QoS 1. One message for each OK on a row of the receiver menu that can be acted
-on ([§3](#the-receiver-menu---added-after-040-unreleased-capability-menu)), published while
+on ([§3](#the-receiver-menu---since-050-capability-menu)), published while
 `menu` is a capability. It says which row and what was done to it, and nothing about what that
 means: the companion integration looks the row up in its own configuration and performs the
 action ([ADR-0020](adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md)).
@@ -1815,10 +1815,10 @@ untrusted input and acts only on a row its own current configuration holds, with
 has and a value it validates. Whoever can publish here can do exactly what the menu offers, and
 nothing else.
 
-### `<base>/<node>/menu_edit` - added after 0.4.0 (unreleased)
+### `<base>/<node>/menu_edit` - since 0.5.0
 
 **Not retained** - QoS 1. One message for each save on the menu creator, the OpenWebif page that
-builds the receiver menu ([§3](#the-menu-creator---added-after-040-unreleased-capability-menu_editor)),
+builds the receiver menu ([§3](#the-menu-creator---since-050-capability-menu_editor)),
 published while `menu_editor` is a capability: the whole menu as the page left it, and the catalogue
 revision it started from. The companion integration validates it with the rules of its own menu
 options, stores it or refuses it, and answers on `enigma2mqtt/menu_edit_result/<node>`.
@@ -1848,7 +1848,7 @@ say is Home Assistant's to decide. **Never queued across a disconnect**, like `m
 published on the open session only, and one the broker had not acknowledged when the connection
 went is taken out of the client's queue. The page's save then says so at once.
 
-### `<base>/<node>/list_answer` - added after 0.4.0 (unreleased)
+### `<base>/<node>/list_answer` - since 0.5.0
 
 **Not retained** - QoS 1. The answer to one `cmd/list` (section 2): how the list of choices on the
 television ended, and which row was picked. Present when `list` is a capability
@@ -1976,10 +1976,10 @@ payload - when any command later succeeds, not only the same one: a successful z
 refusal `history_clear` left there. A check that runs after a command has returned, such as the
 5 s verification of a zap on `service`, can publish a new refusal. A consumer that raises an error
 to the user reads this topic, not the absence of a state change. A refusal names its command in
-`cmd`, and - added after 0.4.0 (unreleased) - says back the id that command carried, in `id`, when
+`cmd`, and - since 0.5.0 - says back the id that command carried, in `id`, when
 it carried one (section 2).
 
-**It is the last refusal of this run of the plugin.** Added after 0.4.0 (unreleased), the named
+**It is the last refusal of this run of the plugin.** Since 0.5.0, the named
 exception `last-error-cleared-at-start` (Contract version, above). The topic is retained, so it
 outlives the process that published it; the first connect of a new plugin process - after an
 interface restart, a reboot, a reinstall or an update - clears what an earlier run left there. It
@@ -2005,23 +2005,22 @@ client took the message: at a connect whose socket was gone again nothing is for
 next connect clears instead. The same holds for `cmd/clear_error` and for the clearing after a
 command that succeeds.
 
-**`cmd/clear_error` clears it on request** - also added after 0.4.0 (unreleased), section 2.
+**`cmd/clear_error` clears it on request** - also since 0.5.0, section 2.
 
 **One refusal is not retained.** While an update keeps the plugin silent - from a downgrade's
 retraction of the node's topics until the update ends - nothing is published, retained or not, with
 one exception: the doors' refusal of a `cmd/list` (`reason` `busy`, with the list's `id`), because
 its sender is waiting for an answer. It goes out once on this topic **not retained**, at QoS 1 and
 never queued across a disconnect, so it does not outlive the retraction: a consumer subscribed to
-`last_error` receives it, and one that subscribes later does not find it retained. Added after 0.4.0
-(unreleased).
+`last_error` receives it, and one that subscribes later does not find it retained. Since 0.5.0.
 
 | Field | Type | Meaning |
 |---|---|---|
 | `cmd` | string | The command refused |
 | `error` | string | Why, in English, for the person reading the topic. This is the contract's human text |
 | `ts` | int | When, in epoch seconds |
-| `reason` | string, optional | Since 0.3.0. A stable code for the refusal, **only** from a command that defines codes - today `history_clear`, `update_check`'s `not_permitted`, `update`, `uninstall`'s `busy`, `stream_stop`'s `not_connected` and `not_stopped` (added after 0.4.0), `list`'s `invalid`, `standby`, `busy`, `no_capability` and `not_shown` (added after 0.4.0) (and `zap_history`'s `playback`); see §2. Absent, not `null`, otherwise, so every other refusal is exactly what it was. A consumer that knows the code can say the refusal in the household's language, and one that does not ignores the field |
-| `id` | string, optional | Added after 0.4.0 (unreleased), capability `command_id`. The id the refused command carried in its envelope (section 2), exactly as it was sent. It is the id of the command this refusal is about - also when the refusal is published after that command returned, or by the plugin process that starts after an update - and never the id of another command. Absent, not `null`, when the command carried none or one the plugin could not use, so a refusal without an id is exactly what it was |
+| `reason` | string, optional | Since 0.3.0. A stable code for the refusal, **only** from a command that defines codes - today `history_clear`, `update_check`'s `not_permitted`, `update`, `uninstall`'s `busy`, `stream_stop`'s `not_connected` and `not_stopped` (since 0.5.0), `list`'s `invalid`, `standby`, `busy`, `no_capability` and `not_shown` (since 0.5.0) (and `zap_history`'s `playback`); see §2. Absent, not `null`, otherwise, so every other refusal is exactly what it was. A consumer that knows the code can say the refusal in the household's language, and one that does not ignores the field |
+| `id` | string, optional | Since 0.5.0, capability `command_id`. The id the refused command carried in its envelope (section 2), exactly as it was sent. It is the id of the command this refusal is about - also when the refusal is published after that command returned, or by the plugin process that starts after an update - and never the id of another command. Absent, not `null`, when the command carried none or one the plugin could not use, so a refusal without an id is exactly what it was |
 
 ```json
 {"cmd": "history_clear", "error": "the receiver's zap history holds at most one channel, and 0 does nothing then", "reason": "too_short", "ts": 1789459213}
@@ -2044,8 +2043,8 @@ enigma2 event, and publishes the new state on the matching state topic. A failur
 goes to `last_error`. There is no acknowledgement topic - the state topic is the answer. (Two
 commands have no state to change and are answered on a topic of their own: `stream_playable`, a
 question, and `list`, a question put to the viewer - below.) A sender
-that has to tell which of its commands a refusal belongs to gives the command an id - added after
-0.4.0, [below](#a-commands-id---added-after-040-unreleased-capability-command_id); a command that
+that has to tell which of its commands a refusal belongs to gives the command an id - since
+0.5.0, [below](#a-commands-id---since-050-capability-command_id); a command that
 worked is still answered by its state topic and by nothing else.
 
 🔴 **A command that arrives with the retain flag set is logged and discarded, never executed.**
@@ -2066,18 +2065,18 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `bouquet` | `{"sref": "..."}` | Makes one published TV bouquet the active channel-list context | Exact allowlist match only. The current channel is preserved when it belongs to the bouquet; otherwise the first playable channel is tuned. Empty/marker-only bouquets and unavailable service-list APIs are refused without changing context. Since 0.3.0 refused during timeshift, before anything changes: "timeshift is active; the receiver would ask on screen whether to leave it" |
 | `zap_history` - since 0.3.0, capability `zap_history` | `{"sref": "..."}`, exactly | Zaps to one channel of the receiver's zap history the way its own "History Zap" screen does: the entry moves to the front and plays. From standby the receiver is woken first, as for `zap`. Verified on `service` within 5 s | By reference only - the list reorders on every zap and names repeat - matched by service identity among the entries `zap_history` shows: "that channel is no longer in the receiver's zap history" otherwise - checked first, so a refused channel never wakes the receiver. Refused while a recording is played back ("a recording is being played back", `reason` `playback`). With another screen open over the info bar the channel is played directly and the history is left as it is - refused, as `zap` refuses it and with `zap`'s sentences, where there is nothing to play it with: "there is no session to zap with" without a navigation, "this image's navigation has no playService" without a player. **No permission, no recording guard and no timeshift guard**: the receiver's own screen has none, and leaves timeshift without asking |
 | `history_clear` - since 0.3.0, capability `history_clear` | any (`PRESS` by convention) | Clears the receiver's zap history **exactly as its 0 key does**: the image's own `keyNumberGlobal(0)`, which empties the list and **switches to channel 1** - the first channel of the first bouquet - closing picture-in-picture if it is open. Afterwards `zap_history.entries` holds that one channel and `service` names it | Refused, before anything happens, in this order, each with a `reason` on `last_error`: in standby - "the receiver is in standby, where 0 does not clear the history" (`standby`); with the image's panic-button setting off - "the receiver's panic-button setting is off, so 0 goes back one channel instead of clearing the history" (`panic_off`); with fewer than two entries - "the receiver's zap history holds at most one channel, and 0 does nothing then" (`too_short`); in timeshift, or with one waiting to be saved, or when the image's timeshift state cannot be read - "timeshift is active; 0 would ask on screen whether to leave it" (`timeshift`), whatever the image's "check timeshift" setting says; while the image holds zaps after timeshift - "the receiver is holding zaps for a moment after timeshift; try again" (`zap_blocked`); with picture-in-picture shown and the image's "0 key in PiP" setting not "standard" - "picture-in-picture is showing and 0 is set to act on it" (`pip`); while a recording is played back - "a recording is being played back" (`playback`); while any other screen is open over the info bar (the channel list, the EPG, a menu) - "a screen is open on the receiver, and 0 does not reach the zap history there" (`screen_open`). More than one entry left afterwards - "the receiver did not clear its zap history" (`not_cleared`). 🔴 **The payload is ignored**. No permission: `key KEY_0` does the same, unguarded |
-| `stream_stop` - added after 0.4.0 (unreleased), capability `stream_stop` | `{"host": "192.0.2.20", "sref": "1:0:19:283D:3FB:1:C00000:0:0:0:"}`, exactly | Ends one stream client's stream: the one `stream_clients` lists with that `host` and that service. The answer is `stream_clients` without it, read again two seconds later. See below | **No permission**, as `zap` and `power` have none. Both members and nothing else, each a non-empty string - an empty payload, one member alone or a third one is refused before anything happens, so nothing here ever stops "all of them". Refused when no such client is connected - "that stream client is not connected" (`reason` `not_connected`) - and when the image did not stop it - "the receiver did not stop that stream client" (`not_stopped`), or raised while trying - "the receiver could not stop that stream client: " and the kind of error, never its text, which can hold an address (`not_stopped`); without the capability, "stopping a stream client is not available on this image" |
-| `stream_playable` - added after 0.4.0 (unreleased), capability `stream_playable` | `<sref>` \| `{"sref": "..."}` | Asks the image whether that service could be played now, beside everything the receiver is doing, and publishes the answer on `stream_playable` (section 1) - **one of the two commands answered on a topic of their own**, with `list`. See below | Refused, with nothing published on `stream_playable`: without a reference - "no service reference given"; for text that is none; for a reference that is not one playable service - "cmd/stream_playable takes the reference of one playable service"; when the receiver has no information for the service; when the image raises, or gives no number or a negative one; without the capability, "this image cannot say whether a service can be played". **No permission**: it changes nothing on the receiver |
+| `stream_stop` - since 0.5.0, capability `stream_stop` | `{"host": "192.0.2.20", "sref": "1:0:19:283D:3FB:1:C00000:0:0:0:"}`, exactly | Ends one stream client's stream: the one `stream_clients` lists with that `host` and that service. The answer is `stream_clients` without it, read again two seconds later. See below | **No permission**, as `zap` and `power` have none. Both members and nothing else, each a non-empty string - an empty payload, one member alone or a third one is refused before anything happens, so nothing here ever stops "all of them". Refused when no such client is connected - "that stream client is not connected" (`reason` `not_connected`) - and when the image did not stop it - "the receiver did not stop that stream client" (`not_stopped`), or raised while trying - "the receiver could not stop that stream client: " and the kind of error, never its text, which can hold an address (`not_stopped`); without the capability, "stopping a stream client is not available on this image" |
+| `stream_playable` - since 0.5.0, capability `stream_playable` | `<sref>` \| `{"sref": "..."}` | Asks the image whether that service could be played now, beside everything the receiver is doing, and publishes the answer on `stream_playable` (section 1) - **one of the two commands answered on a topic of their own**, with `list`. See below | Refused, with nothing published on `stream_playable`: without a reference - "no service reference given"; for text that is none; for a reference that is not one playable service - "cmd/stream_playable takes the reference of one playable service"; when the receiver has no information for the service; when the image raises, or gives no number or a negative one; without the capability, "this image cannot say whether a service can be played". **No permission**: it changes nothing on the receiver |
 | `volume` | `0`-`100`, or `{"level": 42}` | Sets the volume, with the on-screen bar | Out-of-range values are clamped and noted in the log |
 | `mute` | `ON` \| `OFF` | Sets mute | Never a blind toggle: the state is read first, and read back afterwards. A receiver refuses to mute at volume 0, and that refusal is reported |
 | `key` | `KEY_OK` \| `{"key": "KEY_OK", "long": true}` | Injects a remote key | Unknown key names are refused with the name in `last_error`; at most 20 a second |
 | `message` | `{"text": "...", "type": "info", "timeout": 10}` - or a bare string; `"style": "toast"` since 0.3.0 | Shows an on-screen popup, or a discreet toast | `text` is required; since 0.3.0 **every backslash is removed** and nothing else, as for a toast, and what is left is truncated to 500 characters; `type` is `info`, `warning` or `error` (default `info`); `timeout` is seconds (default 10, `0` until dismissed). A new message replaces the previous one rather than queueing behind it. The toast's rules differ - see below |
-| `list` - added after 0.4.0 (unreleased), capability `list` | `{"title": "...", "text": "...", "rows": [{"id": "...", "label": "...", "key": "green", "icon": "gate"}], "timeout": 60, "default": "..."}`, in the envelope with an id (below) | Shows a list of choices on the television, over whatever is on screen, and answers once on `list_answer` (section 1) with the row the viewer picked or how the list ended - the other command answered on a topic of its own. A newer list replaces the one on screen. See below | Refused before anything is shown, each with a `reason` on `last_error`, in this order: while an update is being applied - the doors' sentence, here with `reason` `busy`, asked by the dispatcher before the command's own checks, and published even while the update keeps the plugin silent, then **not retained**; a payload that breaks a rule below - a sentence that names the member and the row's index, never the sender's text (`invalid`); without the capability - "lists cannot be shown on this receiver" (`no_capability`); in standby, or while the receiver's own "really shut down / restart?" question is on screen - the toast's "the receiver is in standby" (`standby`). A list that neither screen could put on the television - "the receiver could not show the list" (`not_shown`), also later, with the command's id, and then no answer. **No permission and no setting**, as a message has none |
+| `list` - since 0.5.0, capability `list` | `{"title": "...", "text": "...", "rows": [{"id": "...", "label": "...", "key": "green", "icon": "gate"}], "timeout": 60, "default": "..."}`, in the envelope with an id (below) | Shows a list of choices on the television, over whatever is on screen, and answers once on `list_answer` (section 1) with the row the viewer picked or how the list ended - the other command answered on a topic of its own. A newer list replaces the one on screen. See below | Refused before anything is shown, each with a `reason` on `last_error`, in this order: while an update is being applied - the doors' sentence, here with `reason` `busy`, asked by the dispatcher before the command's own checks, and published even while the update keeps the plugin silent, then **not retained**; a payload that breaks a rule below - a sentence that names the member and the row's index, never the sender's text (`invalid`); without the capability - "lists cannot be shown on this receiver" (`no_capability`); in standby, or while the receiver's own "really shut down / restart?" question is on screen - the toast's "the receiver is in standby" (`standby`). A list that neither screen could put on the television - "the receiver could not show the list" (`not_shown`), also later, with the command's id, and then no answer. **No permission and no setting**, as a message has none |
 | `timer` | see below | Adds or deletes a recording timer | An add that overlaps an existing timer, or refers to an unknown event, is refused - and so is one the receiver quietly dropped as a duplicate of a timer it already had |
 | `record` | `start` \| `stop` | Starts or stops an instant recording of the current service | `start` records the current service for two hours; `stop` with nothing recording is a no-op with a note in `last_error` |
-| `play_recording` - added after 0.4.0 (unreleased), capability `recording_play` | `{"id": "<16 hex digits>"}`, exactly | Plays one recording of the library in the image's own movie player, as if it had been chosen in the image's movie list: when a timeshift buffer runs, the image's own question whether to leave timeshift is asked first, on the television; then the image's own rule for resuming applies, so the television may ask whether to resume. Wakes the receiver from standby first, as `zap` does. A recording playing already is replaced in the same player. Verified on `service` within 5 s, whose `sref` then carries the reference as the image writes it - the path with `:` as `%3a` and `%` as `%25` | Refused, in this order, each with its `reason` where it has one: while an update is being applied - the doors' sentence (`busy`), asked by the dispatcher first; without the capability; for a payload that is not exactly one id - "the command takes the id of one recording: ..."; for an id the current library does not list - "that recording is not in the receiver's library" (`not_in_library`), checked before a sleeping receiver is woken; without an info bar to open the player from, with no code. Then, on `last_error` once found - the file is looked for off the main loop, and the command has returned by then - "that recording's file is gone from the receiver" (`file_gone`); "the viewer kept timeshift on the receiver; the recording was not played" (`timeshift_kept`) when the viewer answers the timeshift question with no; and "the receiver did not start playing the recording within 5 s" when `service` does not show it. Parental control: on OpenViX a protected recording asks for the PIN and is not verified; on OpenATV and OpenPLi the player asks for it itself, and while the PIN waits the command is reported as not started after 5 s - the recording still starts once the PIN is entered. **No permission**, as `zap` has none. The codes are `busy`, `not_in_library`, `file_gone` and `timeshift_kept`; every other refusal is a sentence without one |
-| `delete_recording` - added after 0.4.0 (unreleased), capability `recording_delete` | `{"id": "<16 hex digits>"}`, exactly | Moves one recording of the library, and the files the image moves with it (`.eit`, `.ap`, `.cuts`, `.meta`, `.sc`), into the image's trash, with the image's own move as its own movie list makes it; the image's trash settings decide when it is emptied. The answer is `recordings` read again (`reason` `delete`) once the file is gone. 🔴 **Never a delete for good** | Refused, in this order, each with its `reason` where it has one: while an update is being applied - the doors' sentence (`busy`), asked by the dispatcher first; unless `recording_delete_allowed` is on - "deleting recordings is switched off in the plugin's settings" (`not_permitted`); without the library; for a payload that is not exactly one id; on an image with no trash for recordings, with no code; with the image's trash switched off - "the receiver's trash is switched off; nothing is deleted for good" (`trash_off`); for an id the library does not list (`not_in_library`); while the recording is being recorded or played (`in_use`) - the file played compared by its decoded path; while another delete still waits for its move - "another recording is being moved to the trash; try again" (`in_progress`). Then, on `last_error` once found - the file is looked for off the main loop - when the file is gone (`file_gone`); when the image cannot make its trash folder or refuses the move - "the receiver could not move that recording to its trash", with no code, the image's own offer to delete it for good instead never being taken; and when the move has not taken the file away within 60 s - "the receiver did not move that recording to its trash", with no code. The codes are `busy`, `not_permitted`, `trash_off`, `not_in_library`, `in_use`, `in_progress` and `file_gone` |
-| `recordings_refresh` - added after 0.4.0 (unreleased), capability `recordings` | any (`PRESS` by convention) | Reads the library again now (`reason` `refresh`) - the one read that may wake a disk, and that reads a movie location which is not mounted, which mounts an automounted share | At most one read at a time: a refresh during a read is answered by that read. **The payload is ignored**. No permission. Refused only while an update is being applied (the doors' sentence, `busy`) |
+| `play_recording` - since 0.5.0, capability `recording_play` | `{"id": "<16 hex digits>"}`, exactly | Plays one recording of the library in the image's own movie player, as if it had been chosen in the image's movie list: when a timeshift buffer runs, the image's own question whether to leave timeshift is asked first, on the television; then the image's own rule for resuming applies, so the television may ask whether to resume. Wakes the receiver from standby first, as `zap` does. A recording playing already is replaced in the same player. Verified on `service` within 5 s, whose `sref` then carries the reference as the image writes it - the path with `:` as `%3a` and `%` as `%25` | Refused, in this order, each with its `reason` where it has one: while an update is being applied - the doors' sentence (`busy`), asked by the dispatcher first; without the capability; for a payload that is not exactly one id - "the command takes the id of one recording: ..."; for an id the current library does not list - "that recording is not in the receiver's library" (`not_in_library`), checked before a sleeping receiver is woken; without an info bar to open the player from, with no code. Then, on `last_error` once found - the file is looked for off the main loop, and the command has returned by then - "that recording's file is gone from the receiver" (`file_gone`); "the viewer kept timeshift on the receiver; the recording was not played" (`timeshift_kept`) when the viewer answers the timeshift question with no; and "the receiver did not start playing the recording within 5 s" when `service` does not show it. Parental control: on OpenViX a protected recording asks for the PIN and is not verified; on OpenATV and OpenPLi the player asks for it itself, and while the PIN waits the command is reported as not started after 5 s - the recording still starts once the PIN is entered. **No permission**, as `zap` has none. The codes are `busy`, `not_in_library`, `file_gone` and `timeshift_kept`; every other refusal is a sentence without one |
+| `delete_recording` - since 0.5.0, capability `recording_delete` | `{"id": "<16 hex digits>"}`, exactly | Moves one recording of the library, and the files the image moves with it (`.eit`, `.ap`, `.cuts`, `.meta`, `.sc`), into the image's trash, with the image's own move as its own movie list makes it; the image's trash settings decide when it is emptied. The answer is `recordings` read again (`reason` `delete`) once the file is gone. 🔴 **Never a delete for good** | Refused, in this order, each with its `reason` where it has one: while an update is being applied - the doors' sentence (`busy`), asked by the dispatcher first; unless `recording_delete_allowed` is on - "deleting recordings is switched off in the plugin's settings" (`not_permitted`); without the library; for a payload that is not exactly one id; on an image with no trash for recordings, with no code; with the image's trash switched off - "the receiver's trash is switched off; nothing is deleted for good" (`trash_off`); for an id the library does not list (`not_in_library`); while the recording is being recorded or played (`in_use`) - the file played compared by its decoded path; while another delete still waits for its move - "another recording is being moved to the trash; try again" (`in_progress`). Then, on `last_error` once found - the file is looked for off the main loop - when the file is gone (`file_gone`); when the image cannot make its trash folder or refuses the move - "the receiver could not move that recording to its trash", with no code, the image's own offer to delete it for good instead never being taken; and when the move has not taken the file away within 60 s - "the receiver did not move that recording to its trash", with no code. The codes are `busy`, `not_permitted`, `trash_off`, `not_in_library`, `in_use`, `in_progress` and `file_gone` |
+| `recordings_refresh` - since 0.5.0, capability `recordings` | any (`PRESS` by convention) | Reads the library again now (`reason` `refresh`) - the one read that may wake a disk, and that reads a movie location which is not mounted, which mounts an automounted share | At most one read at a time: a refresh during a read is answered by that read. **The payload is ignored**. No permission. Refused only while an update is being applied (the doors' sentence, `busy`) |
 | `screenshot` | any | Captures `screen` now, in standby as well | Rate-limited to one per five seconds |
 | `softcam_restart` - since 0.3.0 | any (`PRESS` by convention) | Stops **every** running instance of the cam the image selected, then starts exactly one, with the image's own command line | Refused unless `softcam_restart_allowed` is on; refused by the same recording guard as `deep_standby` - while recording, with a timer due within 10 minutes, and when the image will not say; refused for the first 60 seconds after the plugin starts, because the image's own check runs a moment after that and restarting inside that window races a copy already on its way; at most one manual restart a minute; refused while one is already running. 🔴 **The binary is resolved on the box and no part of the command line comes from the payload** |
 | `epg_grid` | any | Rebuilds and republishes **every** `epg_grid/<bouquet_slug>` topic | Refused with a note in `last_error` when `epg_grid_events` is `0` |
@@ -2086,7 +2085,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 | `discovery` | any | Republishes the announcement, the channel list, and the discovery payloads in discovery mode | - |
 | `ha_mode` | `discovery` \| `integration` \| `off` | Switches the Home Assistant mode | See below |
 | `reset` | any | Retracts every retained topic this node owns, then republishes | See below |
-| `clear_error` - added after 0.4.0 (unreleased) | any (`PRESS` by convention) | Clears `last_error` (section 1): publishes the empty retained payload to it. It succeeds whether or not an error is retained, and sends the payload either way - also for an error this run of the plugin does not know of - so one press costs one empty message and nothing else changes. Sent while the socket to the broker is gone, it clears nothing and forgets nothing, and still answers nothing on `last_error` | No permission and no capability: it changes nothing on the receiver. **The payload is ignored.** It is refused only as every command is - discarded when retained or oversized, and answered with the doors' sentence on `last_error` while an update is being applied |
+| `clear_error` - since 0.5.0 | any (`PRESS` by convention) | Clears `last_error` (section 1): publishes the empty retained payload to it. It succeeds whether or not an error is retained, and sends the payload either way - also for an error this run of the plugin does not know of - so one press costs one empty message and nothing else changes. Sent while the socket to the broker is gone, it clears nothing and forgets nothing, and still answers nothing on `last_error` | No permission and no capability: it changes nothing on the receiver. **The payload is ignored.** It is refused only as every command is - discarded when retained or oversized, and answered with the doors' sentence on `last_error` while an update is being applied |
 | `uninstall` - since 0.3.0 | this receiver's node id, exactly (surrounding whitespace is stripped; case matters) | Removes the plugin from the receiver: stops publishing, retracts every retained topic this node owns at QoS 1, publishes `offline` last, removes the package and restarts the interface. 🔴 **A one-way door** | Refused, before anything changes, in this order: unless `uninstall_allowed` is on - „uninstall is switched off in the plugin's settings"; unless the payload is this node's id - „the payload must be this receiver's node id"; while an update runs, or an update or an SSH install holds the transaction lock - `cmd/update`'s `busy` sentence, with `reason` `busy`, because both end in the package manager and a restart; without the `uninstall` capability - „this plugin was not installed by the package manager, so it cannot remove itself"; while an EPG import runs - „an EPG import is running", exactly as `restart_gui` refuses it and with the same lapse, because the removal ends in the same restart; by the same recording guard as `deep_standby`; where the image has no way to restart the interface; while a removal is already running - „an uninstall is already running". See below |
 | `update` - since 0.4.0, capability `self_update` | `{"version": "0.4.1" \| "latest", "sha256": "<64 hex>", "relay": {"url": "...", "expires": <epoch>}}`; `sha256` and `relay` optional | Installs one signed release of the plugin and restarts the interface to run it, keeping the channel being watched; rolls back by itself when the new release does not start. **Upgrades and repairs only** - never a downgrade over MQTT. The answer is `update.transaction` moving (§1). See below | Refused before anything changes, in the order below, each with a `reason` on `last_error` |
 | `update_check` - since 0.4.0 | any (`PRESS` by convention) | Asks the plugin's release origin for the signed release index, judges what comes back, and says what it found on `update` (§1) | Refused unless `update_check` is on: "checking for updates is switched off in the plugin's settings" (`reason` `not_permitted`). At most one request per ten minutes, shared with the OpenWebif page: inside that the command succeeds, nothing is fetched and `update` stands as the last check left it. The answer is `update` changing once the check has run, as for every command. **The payload is ignored**: nothing from the broker names where to look |
@@ -2094,7 +2093,7 @@ retained payload to that topic; until you do, the broker keeps handing it out.
 
 Every one of them is refused when it arrives retained, as above.
 
-### A command's id - added after 0.4.0 (unreleased), capability `command_id`
+### A command's id - since 0.5.0, capability `command_id`
 
 A sender may give a command an id, and a refusal of that command says it back as `last_error.id`
 (section 1, [ADR-0016](adr/0016-a-commands-id-comes-in-an-envelope-and-only-a-refusal-says-it-back.md)).
@@ -2182,7 +2181,7 @@ sends the envelope to a plugin that claims `command_id` and the bare payload to 
 consumer that sends no id sees one difference, the new name in `info.capabilities`: no payload it
 receives has a new member.
 
-### `cmd/stream_stop` and `cmd/stream_playable` - added after 0.4.0 (unreleased)
+### `cmd/stream_stop` and `cmd/stream_playable` - since 0.5.0
 
 **`cmd/stream_stop` ends one client's stream and is always allowed**
 ([ADR-0018](adr/0018-stopping-a-stream-client-needs-no-permission.md)). There is no setting that
@@ -2493,7 +2492,7 @@ information popup included, to `cmd/zap_history` (played directly, the history l
 to the zap `cmd/bouquet` makes after changing the context. `cmd/history_clear` still refuses under
 a popup (`screen_open`): it is the 0 key, and with a popup on the screen the key goes to the popup.
 
-### The recording library's commands - added after 0.4.0 (unreleased)
+### The recording library's commands - since 0.5.0
 
 A recording is named by its **id** and never by a path: the plugin acts only on a recording its
 own current library lists, so nothing that arrives from the broker names a file. An id the
@@ -2693,7 +2692,7 @@ back - with `info` republished - if a skin reload cannot create it again. The se
 (default on, never writable over MQTT) is its kill-switch. An image where either fails keeps popups rather than
 gaining a style that silently does nothing.
 
-### `cmd/list` - a list of choices - added after 0.4.0 (unreleased), capability `list`
+### `cmd/list` - a list of choices - since 0.5.0, capability `list`
 
 Home Assistant puts a question on the television - "Doorbell: open the gate / ignore", "TV off in
 1 minute: +15 minutes / cancel" - as a list of labelled rows. The viewer picks one with the remote,
@@ -2832,10 +2831,10 @@ screen, the provisioning file or the OpenWebif page - and never over MQTT, and r
 writing it are two different permissions. Home Assistant mode has its dedicated command, and active TV bouquet
 context has `cmd/bouquet`; neither broadens this settings API. The command accepts `publish_keys`,
 `screenshot`, `screenshot_interval`, `screenshot_delay`, `cam_telemetry`, `oscam_telemetry`,
-`softcam_autoheal`, `softcam_autoheal_seconds` and - added after 0.4.0 (unreleased) - `menu_hotkey`,
+`softcam_autoheal`, `softcam_autoheal_seconds` and - since 0.5.0 - `menu_hotkey`,
 `menu_transparency`, `menu_combo_key`, `menu_combo_presses` and `menu_combo_gap_ms`, with their JSON types unchanged. **Keys left out keep their value**: every
 key is optional, so a consumer sends only what it changes. Up to 0.4.0 the first three were required
-in every object; added after 0.4.0 (unreleased), they are optional like the rest, and an empty
+in every object; since 0.5.0, they are optional like the rest, and an empty
 object is valid, changes nothing and still publishes `info` again. A consumer that writes one key
 alone checks first that `info.settings` carries that key - a plugin that publishes it accepts a
 partial object - and a consumer that also serves older plugins goes on sending the three.
@@ -2898,7 +2897,7 @@ Two halves, in this order, on the one session that is already open:
 1. **Retract.** An empty retained payload to every retained topic this node owns - all the state
    topics, every `channels/<bouquet_slug>` and `epg_grid/<bouquet_slug>`, the announcement, and every Home Assistant discovery
    payload named in the state file - and then the plugin forgets what it had announced. One
-   payload is left alone (added after 0.4.0, unreleased): a discovery payload whose replacement
+   payload is left alone (since 0.5.0): a discovery payload whose replacement
    would be over the packet bound (the conventions at the top of this file). Step 2 could not put
    it back, and emptying it deletes the device and its entities in Home Assistant.
 2. **Republish, immediately.** `availability: online`, the full state snapshot, the announcement
@@ -2993,7 +2992,7 @@ configuration; `docs/SETUP.md` lists what stays and why.
   "base_topic": "enigma2",
   "image": "OpenViX 6.6.007",
   "enigma": "2024-09-11-Release",
-  "plugin": "0.4.0",
+  "plugin": "0.5.0",
   "boxtype": "vuuno4kse",
   "mac": "00:00:5e:00:53:01",
   "ip": "192.0.2.12",
@@ -3021,12 +3020,12 @@ four more while `menu_allowed` is on.
 |---|---|---|
 | `enigma2mqtt/release_index` - since 0.4.0 | The companion integration, retained, after it verified a newer index: `{"index": "<base64 of the exact signed bytes>", "sig": "<base64 of the signature file>"}` | Judges it by the rule for accepting an index ([RELEASE-INDEX.md](RELEASE-INDEX.md)), exactly as an index it fetched itself, and keeps it when the rule accepts it - `update.index.source` is then `relay`. A refusal is a line in the plugin's log, never `last_error`. A payload over 88 KiB is dropped unread. It needs no setting and causes no connection, so a receiver without internet learns of releases this way. The plugin never publishes to it and never retracts it |
 | `enigma2mqtt/integration/<node>` - since 0.4.0 | The companion integration, retained, QoS 1: `{"integration": "0.4.0", "contract": 1, "plugin_min": "0.2.0"}`; retracted when its entry is removed | Keeps it in memory and judges `update.available` and `cmd/update` by it: a release of another contract major than the integration's, or one whose `min_integration` is above `integration`, is `incompatible`, and `plugin_min` raises the floor. An empty payload forgets it, and an unreadable one is ignored. A forged one can only narrow or widen the choice among signed, non-withdrawn releases of one major. The plugin never publishes to it and never retracts it |
-| `enigma2mqtt/menu/<node>` - added after 0.4.0 (unreleased), capability `menu` | The companion integration, retained, QoS 1: the receiver menu (below); an empty payload when there is no menu | Validates it whole and shows it; an invalid payload is ignored with one line in the log and the menu before it stays. Subscribed only while `menu_allowed` is on. The plugin never publishes to it and never retracts it |
-| `<ha_discovery_prefix>/status` - added after 0.4.0 (unreleased), capability `menu` | Home Assistant's own birth and last will, `online` or `offline`, under the `ha_discovery_prefix` setting (`homeassistant/status` by default) | `offline` greys the receiver menu; `online`, or nothing heard since the broker connection last changed, does not. Subscribed only while `menu_allowed` is on, and read for nothing else |
-| `enigma2mqtt/menu_catalogue/<node>` - added after 0.4.0 (unreleased), capability `menu_editor` | The companion integration, retained, QoS 1, while this receiver claims `menu_editor`: what the menu creator chooses from (below), or only that editing from the receiver is switched off in Home Assistant; an empty payload when there is none | Checks the envelope and keeps the exact bytes for the menu creator's page; an invalid one is ignored with one line in the log and the one before it stays. At most 1 MiB. Subscribed only while `menu_allowed` is on. The plugin never publishes to it and never retracts it |
-| `enigma2mqtt/menu_edit_result/<node>` - added after 0.4.0 (unreleased), capability `menu_editor` | The companion integration, not retained, QoS 1: its answer to one `menu_edit` (below) | Hands it to the save waiting for that `id`; an answer for an id nothing waits for, a retained one and an unreadable one are ignored. Subscribed only while `menu_allowed` is on |
+| `enigma2mqtt/menu/<node>` - since 0.5.0, capability `menu` | The companion integration, retained, QoS 1: the receiver menu (below); an empty payload when there is no menu | Validates it whole and shows it; an invalid payload is ignored with one line in the log and the menu before it stays. Subscribed only while `menu_allowed` is on. The plugin never publishes to it and never retracts it |
+| `<ha_discovery_prefix>/status` - since 0.5.0, capability `menu` | Home Assistant's own birth and last will, `online` or `offline`, under the `ha_discovery_prefix` setting (`homeassistant/status` by default) | `offline` greys the receiver menu; `online`, or nothing heard since the broker connection last changed, does not. Subscribed only while `menu_allowed` is on, and read for nothing else |
+| `enigma2mqtt/menu_catalogue/<node>` - since 0.5.0, capability `menu_editor` | The companion integration, retained, QoS 1, while this receiver claims `menu_editor`: what the menu creator chooses from (below), or only that editing from the receiver is switched off in Home Assistant; an empty payload when there is none | Checks the envelope and keeps the exact bytes for the menu creator's page; an invalid one is ignored with one line in the log and the one before it stays. At most 1 MiB. Subscribed only while `menu_allowed` is on. The plugin never publishes to it and never retracts it |
+| `enigma2mqtt/menu_edit_result/<node>` - since 0.5.0, capability `menu_editor` | The companion integration, not retained, QoS 1: its answer to one `menu_edit` (below) | Hands it to the save waiting for that `id`; an answer for an id nothing waits for, a retained one and an unreadable one are ignored. Subscribed only while `menu_allowed` is on |
 
-### The receiver menu - added after 0.4.0 (unreleased), capability `menu`
+### The receiver menu - since 0.5.0, capability `menu`
 
 A "Home Assistant" menu on the receiver that Home Assistant keeps up to date: one level of groups,
 each a list of rows, and rows at the top as well. Every row is a control bound to something in
@@ -3114,7 +3113,7 @@ under Apache-2.0 ([NOTICE](../NOTICE)).
 
 **What the viewer can do.** OK on a group opens its rows, and EXIT goes back; EXIT on the top
 list closes the menu. OK on a `button` sends `press`, on a `toggle` `toggle` with the state the row
-showed (`seen`, [section 1](#basenodemenu_action---added-after-040-unreleased)). OK on a `selector`
+showed (`seen`, [section 1](#basenodemenu_action---since-050)). OK on a `selector`
 lists its options: OK sends the one chosen as `set`, EXIT discards. On a `slider`, LEFT and RIGHT
 move a value on the receiver by `step` within `min` and `max`, shown and not sent; OK sends it as
 `set`, EXIT discards it. OK on an `input` opens the image's keyboard with `value` in it: OK sends
@@ -3151,7 +3150,7 @@ see-through with `menu_transparency` (§1) - 20 % by default, 0 is opaque, at mo
 icons and the bar on the selected row stay opaque. The image's own list, the fallback, is drawn as
 the image draws it.
 
-### The menu creator - added after 0.4.0 (unreleased), capability `menu_editor`
+### The menu creator - since 0.5.0, capability `menu_editor`
 
 A page in the receiver's OpenWebif - the Menu subpage of the plugin's page,
 [ADR-0022](adr/0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md) -
@@ -3278,7 +3277,7 @@ gets no volume entity, rather than one that never moves. The unique id of each i
 | `history_clear` | button | - | Since 0.3.0, when `history_clear` is a capability. Publishes `cmd/history_clear`: the receiver switches to channel 1 and empties its zap history |
 | `screen` | image | `screen` | `image/jpeg` |
 | `screenshot`, `restart_gui`, `refresh_discovery` | button | - | And `deep_standby` and `reboot` **only** when `deep_standby_allowed` is on |
-| `clear_error` | button | - | Added after 0.4.0 (unreleased). Publishes `cmd/clear_error`. A configuration entity, always announced: it needs no capability and no permission |
+| `clear_error` | button | - | Since 0.5.0. Publishes `cmd/clear_error`. A configuration entity, always announced: it needs no capability and no permission |
 | `snr`, `agc`, `ber` | sensor | `tuner` | Diagnostic, disabled by default |
 | `recording_disk` | binary_sensor | `hdd` | Diagnostic |
 | `softcam` | sensor | `softcam` | Since 0.3.0. Diagnostic. State is `selected`; the counts and the last restart are JSON attributes |
@@ -3294,8 +3293,8 @@ gets no volume entity, rather than one that never moves. The unique id of each i
 The channel names in `channel_select` are **deduplicated**: `cmd/zap` by name refuses a name that
 is not unique, so offering the same „Sport" twice would be offering an option that can only fail.
 
-**The channel select is left out when the payload does not fit with it.** Added after 0.4.0
-(unreleased). Its options are every channel name, which makes it the one component that grows with
+**The channel select is left out when the payload does not fit with it.** Since 0.5.0. Its
+options are every channel name, which makes it the one component that grows with
 the receiver. When the device payload with the select would be over the packet bound of 1,000,000
 bytes (the conventions at the top of this file), the payload is published **without the select**,
 and every other entity is announced as usual - where a payload that is not published at all would
@@ -3341,19 +3340,19 @@ core MQTT select carries its options inside this discovery payload, so a list th
 zap would mean republishing discovery on every zap. The companion integration builds that select
 from the topic; discovery mode offers the clear button only.
 
-`recordings`, `recordings/<folder_slug>` and `timeshift` (added after 0.4.0, unreleased) have **no
+`recordings`, `recordings/<folder_slug>` and `timeshift` (since 0.5.0) have **no
 discovery components** either, nor have their three commands: a library of folders, a media
 browser and a delete behind a confirmation are the companion integration's to build from the
 topics. A plugin-only install reads them from the broker.
 
-`stream`, `stream_clients` and `stream_playable` (added after 0.4.0, unreleased) have **no
+`stream`, `stream_clients` and `stream_playable` (since 0.5.0) have **no
 discovery components**: a list of clients that changes shape, a command that needs the row it is
 about, and a question whose answer is an event are the companion integration's to build from the
 topics. The new members of `service` and `volume.passthrough` are in no discovery payload either
 - the channel sensor's attributes are the five listed below, and the volume number and the mute
 switch read `level` and `muted`. A plugin-only install reads them from the broker.
 
-`list` (added after 0.4.0, unreleased) has **no discovery components** either: a list of choices
+`list` (since 0.5.0) has **no discovery components** either: a list of choices
 is a question with rows, a timeout and an answer, which an automation or the companion
 integration's action asks and waits for - not a button or a sensor.
 
@@ -3366,7 +3365,7 @@ is promised here.
 
 | Component | State | JSON attributes |
 |---|---|---|
-| Channel sensor | the channel name | `sref`, `bouquet`, `provider`, `width`, `height` - five members of the `service` payload, and not the codec members added after 0.4.0 |
+| Channel sensor | the channel name | `sref`, `bouquet`, `provider`, `width`, `height` - five members of the `service` payload, and not the codec members added in 0.5.0 |
 | Programme sensor | the title of `now` | `begin`, `end`, `event_id`, `short`, `long`, and `next_title`, `next_begin`, `next_end` for the following programme |
 
 The types are the ones the `service` and `epg` topics define; an attribute whose source field is
@@ -3445,7 +3444,7 @@ moment.
   (U+008A, U+E08A) becomes a space, every other code goes. `cmd/zap` by name finds a channel by either spelling.
   A recording started with `cmd/record` is named in the receiver's own timer list as the image
   would name it; what `timers` and `recording` publish about it is clean. A recording's `file`
-  keeps the bytes of its file name. Since after 0.4.0 (unreleased); an earlier plugin published
+  keeps the bytes of its file name. Since 0.5.0; an earlier plugin published
   `\u0086Sky \u0087Cinema` where this one publishes `Sky Cinema`.
 - **A retained state topic is a snapshot, not a heartbeat.** `service` showing a channel means
   that is the last channel the box tuned - check `availability` before believing it is on.

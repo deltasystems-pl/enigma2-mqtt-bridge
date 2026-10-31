@@ -4,8 +4,8 @@
 
 | Version | Supported |
 |---|---|
-| 0.4.x | yes - the current development line |
-| < 0.4.0 | no |
+| 0.5.x | yes - the current development line |
+| < 0.5.0 | no |
 
 Security fixes are released on the newest minor line. There are no long-term support branches
 before v1.0.
@@ -72,9 +72,14 @@ everything else:
      the certificate. That is enough because what it serves is checked against the signed index
      (below) before anything is installed.
 
-   One command makes the image connect, not the plugin: `cmd/epg_import` (since 0.3.0, refused
+   Some commands make the image connect, not the plugin. `cmd/epg_import` (since 0.3.0, refused
    over MQTT unless the receiver-only permission `epg_import_allowed` is on; off by default)
-   starts the image's own EPG importer, which downloads from the sources selected in it.
+   starts the image's own EPG importer, which downloads from the sources selected in it. The
+   recording library's commands (since 0.5.0) touch the movie locations, and where a location is
+   a network share the image's automounter has unmounted, touching it mounts it again - a
+   connection to that file server: `cmd/recordings_refresh`, which needs no permission, reads
+   every movie location, one that is not mounted included; `cmd/play_recording`, which needs none
+   either, and `cmd/delete_recording` look for the recording's file before they act.
 
    The recording library ([docs/SETUP.md](docs/SETUP.md#what-the-recording-library-does)) is
    published to the broker whole - every recording's title, description, channel and folder -
@@ -89,6 +94,11 @@ everything else:
    command topic with the permission on can therefore empty the movie list into the trash,
    where the receiver's own trash settings decide how long it stays; nothing it does deletes a
    recording for good.
+
+   `cmd/stream_stop` ([ADR-0018](docs/adr/0018-stopping-a-stream-client-needs-no-permission.md),
+   since 0.5.0) needs no permission, as a zap needs none: whoever may publish on the node's command
+   topic can end any stream client's stream. Stopping is not blocking - a client that reconnects is
+   served again.
 
    There is no telemetry and no cloud service. TLS to the broker is supported; client
    certificates are not in v1.
@@ -115,7 +125,12 @@ everything else:
    leaked is in [docs/RELEASE-INDEX.md](docs/RELEASE-INDEX.md#when-the-main-key-is-lost-or-leaked).
 3. **The broker credential must be scoped.** A box compromise must not become a Home Assistant
    compromise. The documented setup is a **dedicated broker login per box** with an ACL that
-   limits it to that node's own topics:
+   limits it to that node's own topics. Since 0.5.0 those topics include the receiver menu's
+   `menu_action` and `menu_edit`, so a box taken over can operate every row of its menu and,
+   while editing from the receiver is switched on in Home Assistant, choose new ones; Home
+   Assistant acts only on rows its own configuration holds and checks every edit with its own
+   rules, and editing is off until it is switched on there
+   ([The OpenWebif page and the receiver menu](#the-openwebif-page-and-the-receiver-menu)):
 
    ```
    user enigma2box
@@ -159,7 +174,12 @@ web interface can use it. Its checks keep **other web sites** out (the `Host` al
 same-origin requests, a session token), not people on the LAN.
 
 The receiver menu ([ADR-0020](docs/adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md))
-is on by default. **Editing it from the receiver**, with the menu creator
+is on by default. The receiver never learns what a row does: it answers an OK with a
+`menu_action` naming the row, and Home Assistant acts only on a row its own configuration holds.
+So **anyone who can publish on the broker can operate the menu's rows** - exactly what the menu
+offers and nothing else - by publishing that `menu_action`; the broker's ACL is no protection
+where the broker does not enforce one (the Mosquitto add-on, above). **Editing it from the
+receiver**, with the menu creator
 ([ADR-0022](docs/adr/0022-the-menu-creator-page-runs-a-script-every-other-page-stays-script-free.md)),
 **is off by default**, and switched on in Home Assistant, in the companion integration's receiver
 menu options ("Allow editing from the receiver"). While it is off, Home Assistant publishes no

@@ -92,7 +92,8 @@ OpenPLi or OpenBH, a test report in an issue helps;
 
 | Plugin | Integration |
 |---|---|
-| 0.4.0 (current) | 0.3.1; its 0.4.0, to follow, adds installs through Home Assistant |
+| 0.5.0 (current) | 0.4.0; its 0.5.0, to follow, adds the receiver menu, lists of choices and the recordings |
+| 0.4.0 | 0.4.0, or 0.3.1 without installs through Home Assistant |
 | 0.3.0 | 0.3.0 |
 | 0.2.0 | 0.2.0 |
 | 0.1.0 | 0.1.0 |

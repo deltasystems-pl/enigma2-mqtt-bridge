@@ -25,14 +25,14 @@ Every release carries the IPK and its SHA-256 on the
 One line on the box, nothing to download to your PC first:
 
 ```sh
-opkg install https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/download/v0.4.0/enigma2-plugin-extensions-mqttbridge_0.4.0_all.ipk
+opkg install https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/download/v0.5.0/enigma2-plugin-extensions-mqttbridge_0.5.0_all.ipk
 ```
 
 Every release carries the IPK's SHA-256 next to it. To check it:
 
 ```sh
 opkg download ... # or wget the IPK, then:
-sha256sum enigma2-plugin-extensions-mqttbridge_0.4.0_all.ipk
+sha256sum enigma2-plugin-extensions-mqttbridge_0.5.0_all.ipk
 ```
 
 and compare with the `.sha256` file from the same release page. The build is reproducible, so
@@ -53,22 +53,22 @@ opkg install enigma2-plugin-extensions-mqttbridge
 From then on `opkg upgrade`, and the image's own *Software management* screens, see new versions
 as they are released.
 
-From v1.0 the plugin is also submitted to the OE-Alliance third-party feed, which OpenViX,
-OpenATV and their siblings already have configured - at that point it appears in the built-in
-plugin browser with no feed to add at all.
+This feed, the releases page and the companion Home Assistant integration are the only places the
+plugin is distributed from: it is not in the OE-Alliance third-party feed or in any image's own
+feed, and will not be.
 
 `opkg install` and `opkg upgrade` download and install in one step, with no moment to check the
 package, and the image's opkg checks no signature on this feed. To check a package first - the
 manual fallback the Home Assistant integration's documentation points to when it cannot install or
-repair the plugin itself - download it as its own step, here version `0.4.0` into `/tmp`:
+repair the plugin itself - download it as its own step, here version `0.5.0` into `/tmp`:
 
 ```sh
 cd /tmp
-wget -O enigma2-plugin-extensions-mqttbridge_0.4.0_all.ipk \
-    https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/enigma2-plugin-extensions-mqttbridge_0.4.0_all.ipk
+wget -O enigma2-plugin-extensions-mqttbridge_0.5.0_all.ipk \
+    https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/enigma2-plugin-extensions-mqttbridge_0.5.0_all.ipk
 wget -O releases.json https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/releases.json
-sha256sum enigma2-plugin-extensions-mqttbridge_0.4.0_all.ipk
-grep '"version": "0.4.0"' releases.json
+sha256sum enigma2-plugin-extensions-mqttbridge_0.5.0_all.ipk
+grep '"version": "0.5.0"' releases.json
 ```
 
 `releases.json` is the plugin's signed list of releases ([RELEASE-INDEX.md](RELEASE-INDEX.md)), one
@@ -76,7 +76,7 @@ line per version. The checksum `sha256sum` prints must be the `sha256` on that v
 they differ, stop and delete the file. Then install exactly that file:
 
 ```sh
-opkg install ./enigma2-plugin-extensions-mqttbridge_0.4.0_all.ipk
+opkg install ./enigma2-plugin-extensions-mqttbridge_0.5.0_all.ipk
 ```
 
 Add `--force-reinstall` when that version is already installed, and `--force-downgrade` for an older
@@ -94,8 +94,8 @@ For a box with no route to the internet, or to install a build you made yourself
 
 ```sh
 tools/build-ipk.sh --allow-unreleased          # or download the release IPK
-scp -O dist/enigma2-plugin-extensions-mqttbridge_0.4.0_all.ipk root@<box-ip>:/tmp/
-ssh root@<box-ip> 'opkg install /tmp/enigma2-plugin-extensions-mqttbridge_0.4.0_all.ipk'
+scp -O dist/enigma2-plugin-extensions-mqttbridge_0.5.0_all.ipk root@<box-ip>:/tmp/
+ssh root@<box-ip> 'opkg install /tmp/enigma2-plugin-extensions-mqttbridge_0.5.0_all.ipk'
 ```
 
 **`scp -O` is not optional.** Receivers run dropbear, which has no SFTP subsystem; OpenSSH 9 and

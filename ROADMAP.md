@@ -6,15 +6,24 @@ Where the plugin stands and what comes next. What each release changed is in
 
 ## Where it stands
 
-Plugin v0.4.0 is released: the releases page and the opkg feed serve it. The companion integration
-[hass-enigma2-mqtt](https://github.com/deltasystems-pl/hass-enigma2-mqtt) is at v0.3.1 through
-HACS; its 0.4.0, which installs plugin releases through Home Assistant, follows this one.
+Plugin v0.5.0 is released: the releases page and the opkg feed serve it. The companion integration
+[hass-enigma2-mqtt](https://github.com/deltasystems-pl/hass-enigma2-mqtt) is at v0.4.0 through
+HACS; its 0.5.0, which brings the receiver menu, lists of choices and the recordings to Home
+Assistant, follows this one.
 
 0.2.0 fixed what two days of household use turned up, and 0.3.0 added what the household asked
 for. The plan for both is in
 [ADR-0003](docs/adr/0003-control-feedback-and-household-features.md). 0.4.0 lets the plugin update
 itself, only to releases on a signed list, as decided in
-[ADR-0015](docs/adr/0015-signed-self-update.md).
+[ADR-0015](docs/adr/0015-signed-self-update.md). 0.5.0 puts a Home Assistant menu and Home
+Assistant's questions on the television
+([ADR-0020](docs/adr/0020-the-receiver-menu-is-drawn-on-the-receiver-and-decided-in-home-assistant.md),
+[ADR-0023](docs/adr/0023-a-list-of-choices-is-answered-by-row-id-once.md)) and publishes the
+receiver's recordings ([ADR-0024](docs/adr/0024-the-recording-library-is-read-on-events-and-addressed-by-id.md)).
+
+The plugin is distributed through its own opkg feed, its releases page and Home Assistant - the
+companion integration installs and updates it - and through nothing else: it will not be submitted
+to the OE-Alliance third-party feed, and there will be no recipe for an image's build.
 
 ## Milestones
 
@@ -38,10 +47,10 @@ itself, only to releases on a signed list, as decided in
       receiver at default settings was refused as "different") are fixed, and the integration's
       v0.2.0 carries the fixes.
 - [ ] **M5** - public beta `v0.x`: releases, opkg feed, HACS custom repository, testers per image.
-- [ ] **M6** - `v1.0.0`: submission to the OE-Alliance third-party feed, so the plugin appears in
-      the plugin browser of OpenViX, OpenATV and related images with no feed to add, and the HACS
-      default pull request.
-- [ ] **M7** - OE-Alliance recipe, OpenPLi, broker-login auto-provisioning.
+- [ ] **M6** - `v1.0.0` and the HACS default pull request. The submission to the OE-Alliance
+      third-party feed once planned here is dropped (above).
+- [ ] **M7** - broker-login auto-provisioning. The OE-Alliance and OpenPLi image recipes once
+      planned here are dropped (above).
 
 A telnet transport for the guided installer, for images that ship with SSH switched off, is
 planned for v1.1.

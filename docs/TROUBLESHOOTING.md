@@ -252,7 +252,7 @@ bouquet with every service while `bouquets_for_select` is empty, each `epg_grid/
 carries a bouquet's programme guide, and in `discovery` mode the device's discovery payload
 carries every channel name.
 
-A plugin after 0.4.0 does not send such a payload. It holds every packet to 1,000,000 bytes,
+A plugin from 0.5.0 on does not send such a payload. It holds every packet to 1,000,000 bytes,
 says in its log which topic was too big - `not publishing epg_grid/astra: 1204611 bytes is over
 the 1000000 byte packet limit` - and lists it in `info.not_published`
 ([TOPICS.md](TOPICS.md#basenodeinfo)), so the connection stays up and everything else works. The
@@ -470,7 +470,7 @@ There is no acknowledgement topic. A command's answer is the state topic changin
 
 1. Subscribe to `enigma2/<node_id>/last_error` - a guard that refused the command says so there,
    with the reason. It is retained, so look at its `ts`: it stays until a command succeeds, until
-   the plugin starts again (after 0.4.0) or until `cmd/clear_error` empties it (after 0.4.0;
+   the plugin starts again (since 0.5.0) or until `cmd/clear_error` empties it (since 0.5.0;
    *Clear last error* on the OpenWebif page and, in discovery mode, in Home Assistant).
 2. Check the payload form in [TOPICS.md](TOPICS.md#2-commands). `cmd/zap` by name is refused
    unless exactly one service matches within the configured bouquets; `cmd/key` is refused for an
