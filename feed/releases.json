@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "package": "enigma2-plugin-extensions-mqttbridge",
-  "serial": 2,
-  "issued": 1790712567,
+  "serial": 3,
+  "issued": 1793428904,
   "key_id": "5de3b24c97e88660",
   "floor": "0.2.0",
   "releases": [
